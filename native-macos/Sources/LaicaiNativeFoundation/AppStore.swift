@@ -136,6 +136,7 @@ public struct AppState: Equatable {
     public var isGenerating: Bool
     public var liveActivity: String  // Human-readable description of current AI activity
     public var pendingFollowUp: String?  // Queued follow-up instruction when task is running
+    public var userCreatedNewThread: Bool = false  // Set when user explicitly creates new thread; prevents auto-merge
     public var settings: AppSettings
     public var notice: AppNotice?
 
@@ -942,6 +943,8 @@ public final class AppStore: ObservableObject {
 
         restoreRecentTaskSelectionForTinyFollowUp(effectiveMessage)
         reconcileSelectedRunningTaskIfIdle()
+        // Clear flag after routing decisions — it only protects the first message
+        state.userCreatedNewThread = false
         if answerSelectedTaskStatusQuestion(effectiveMessage) {
             return
         }
@@ -1180,7 +1183,9 @@ public final class AppStore: ObservableObject {
     ) {
         // Fallback: if nothing is selected but a recent completed thread exists,
         // and the message looks like a follow-up, restore it so context is preserved.
+        // NEVER do this when user explicitly created a new thread.
         if state.selectedThreadID == nil,
+           !state.userCreatedNewThread,
            let recentThread = state.threads
                .filter({ $0.status == .completed || $0.status == .failed || $0.status == .cancelled })
                .sorted(by: { $0.updatedAt > $1.updatedAt })
@@ -2633,6 +2638,7 @@ public final class AppStore: ObservableObject {
     public func selectThread(_ record: ThreadRecord?) {
         state.selectThread(id: record?.id)
         if let record {
+            state.userCreatedNewThread = false
             switch record.source {
             case .session:
                 state.modeLabel = "聊天"
@@ -2640,6 +2646,8 @@ public final class AppStore: ObservableObject {
                 state.modeLabel = record.task?.workflowName == nil ? "任务" : "工作流"
             }
         } else {
+            // User explicitly created a new thread — prevent auto-merge
+            state.userCreatedNewThread = true
             state.modeLabel = "聊天"
         }
     }
@@ -3198,6 +3206,8 @@ public final class AppStore: ObservableObject {
 
     private func restoreRecentTaskSelectionForTinyFollowUp(_ message: String) {
         guard state.executionMode != .ask else { return }
+        // User explicitly created a new thread — never auto-merge back into old threads
+        guard !state.userCreatedNewThread else { return }
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         let explicitTaskContinuation = Self.isContinuationCommand(normalized)
             && (normalized.contains("任务") || normalized.contains("刚才") || normalized.contains("上个") || normalized.contains("上一"))
