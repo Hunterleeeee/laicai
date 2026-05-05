@@ -330,6 +330,22 @@ public struct RoutingSuggestion: Sendable {
 private struct IntentSignals {
     let input: String
 
+    /// Strip negated phrases so "不用说建议" doesn't match "建议"
+    private var effectiveInput: String {
+        var s = input
+        let negationPrefixes = ["不用说", "不用给", "不要说", "不要给", "不需要", "别给我", "别说", "不用", "不要", "别"]
+        for prefix in negationPrefixes {
+            // Remove "不用说建议" → removes the whole negated phrase
+            if let range = s.range(of: prefix) {
+                let after = s[range.upperBound...]
+                // Remove up to 4 chars after the negation prefix (the negated keyword)
+                let charsToRemove = min(4, after.count)
+                s.removeSubrange(range.lowerBound..<s.index(range.upperBound, offsetBy: charsToRemove))
+            }
+        }
+        return s
+    }
+
     var isQuestion: Bool {
         let prefixes = ["什么", "为什么", "怎么", "如何", "是否", "哪里", "哪个", "多少", "能介绍", "请问"]
         let suffixes = ["吗", "么", "呢", "？", "?"]
@@ -375,7 +391,12 @@ private struct IntentSignals {
     }
 
     private var requestsMarketSurvey: Bool {
-        ["市面上", "市场上", "有什么好用", "有什么有用", "有哪些好的", "有哪些有用", "都有什么", "都有哪些"].contains { input.contains($0) }
+        let strongMarkers = ["市面上", "市场上"]
+        if strongMarkers.contains(where: { input.contains($0) }) { return true }
+        let weakMarkers = ["有什么好用", "有什么有用", "有哪些好的", "有哪些有用", "都有什么", "都有哪些"]
+        let topicMarkers = ["工具", "框架", "库", "方案", "产品", "服务", "平台", "模型", "插件", "sdk", "api", "app"]
+        return weakMarkers.contains(where: { input.contains($0) })
+            && topicMarkers.contains(where: { input.contains($0) })
     }
 
     private var requestsRecommendation: Bool {
@@ -449,8 +470,8 @@ private struct IntentSignals {
 
     private var requestsLocalIO: Bool {
         ["读取", "读一下", "打开文件", "看这个文件", "这个路径", "这些路径", "搜索项目", "搜索代码", "查找文件", "当前项目", "工作区",
-         "看看", "看下", "看一下", "查看", "检查", "分析项目", "分析代码", "找到", "找一下", "定位",
-         "skill", "tool", "plugin", "插件", "技能", "工具"].contains {
+         "看看项目", "看下项目", "看一下项目", "看看代码", "看下代码", "查看项目", "查看代码",
+         "检查项目", "检查代码", "分析项目", "分析代码", "找到", "找一下", "定位"].contains {
             input.contains($0)
         }
     }
@@ -462,8 +483,8 @@ private struct IntentSignals {
     }
 
     private var requestsAdvice: Bool {
-        ["建议", "优化建议", "怎么优化", "如何优化", "怎么改进", "如何改进", "应该怎么", "方案", "思路", "看法"].contains {
-            input.contains($0)
+        ["优化建议", "怎么优化", "如何优化", "怎么改进", "如何改进", "应该怎么", "给建议", "出方案", "给思路", "看法"].contains {
+            effectiveInput.contains($0)
         }
     }
 
