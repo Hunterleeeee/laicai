@@ -275,7 +275,7 @@ struct ActivityPanel: View {
                         Image(systemName: "info.circle")
                             .font(.system(size: 10))
                             .foregroundStyle(TextGrade.muted)
-                        Text("线程详情")
+                        Text("会话详情")
                             .font(AppFont.captionMedium)
                             .foregroundStyle(TextGrade.secondary)
                     }
@@ -350,7 +350,7 @@ struct ActivityPanel: View {
                 Image(systemName: thread.status?.icon ?? (thread.isPinned ? "pin.fill" : "text.bubble"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(thread.status?.color ?? Brand.primary)
-                Text("当前线程")
+                Text("当前会话")
                     .font(AppFont.captionMedium)
                     .foregroundStyle(TextGrade.secondary)
                 Spacer()
@@ -2058,7 +2058,7 @@ struct WikiPanel: View {
 
     private var suggestedTopic: String {
         let latest = store.state.selectedThread?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return latest.isEmpty || latest == "新线程" ? "" : latest
+        return latest.isEmpty || latest == "新会话" ? "" : latest
     }
 
     private var emptyWikiState: some View {

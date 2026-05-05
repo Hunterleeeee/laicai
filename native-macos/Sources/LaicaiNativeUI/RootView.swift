@@ -165,7 +165,7 @@ struct StatusBarView: View {
 
                 // Right: thread count + keyboard hint
                 HStack(spacing: AppSpace.md) {
-                    Text("\(store.state.threads.count) 线程")
+                    Text("\(store.state.threads.count) 会话")
                     Text("⌘K")
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)

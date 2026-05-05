@@ -239,7 +239,7 @@ struct WelcomeView: View {
             CapabilityCard(
                 icon: "text.bubble.fill",
                 iconColor: Brand.purple,
-                title: "连续线程",
+                title: "连续会话",
                 description: "讨论、工具、审查在同一条时间线"
             )
 
@@ -258,7 +258,7 @@ struct WelcomeView: View {
         HStack(spacing: AppSpace.xl) {
             KeyHint(keys: "↵", desc: "发送")
             KeyHint(keys: "⇧↵", desc: "换行")
-            KeyHint(keys: "⌘N", desc: "新线程")
+            KeyHint(keys: "⌘N", desc: "新会话")
             KeyHint(keys: "⌘K", desc: "命令面板")
         }
     }

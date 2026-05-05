@@ -928,7 +928,7 @@ struct ChatDetailView: View {
         if let task = store.state.selectedTask {
             return task.status == .running ? "执行中" : task.status.label
         }
-        return store.state.selectedSession == nil ? "新线程" : "线程"
+        return store.state.selectedSession == nil ? "新会话" : "会话"
     }
 
 }
@@ -1271,7 +1271,7 @@ private struct ThreadSummaryCard: View {
                         .font(AppFont.headline)
                         .foregroundStyle(TextGrade.primary)
                         .lineLimit(2)
-                    Text("线程 · \(thread.events.count) 条记录 · \(RelativeTimeFormatter.string(for: thread.updatedAt))")
+                    Text("会话 · \(thread.events.count) 条记录 · \(RelativeTimeFormatter.string(for: thread.updatedAt))")
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.muted)
                 }

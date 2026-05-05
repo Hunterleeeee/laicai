@@ -136,7 +136,6 @@ public struct AppState: Equatable {
     public var isGenerating: Bool
     public var liveActivity: String  // Human-readable description of current AI activity
     public var pendingFollowUp: String?  // Queued follow-up instruction when task is running
-    public var userCreatedNewThread: Bool = false  // Set when user explicitly creates new thread; prevents auto-merge
     public var settings: AppSettings
     public var notice: AppNotice?
 
@@ -431,14 +430,13 @@ public final class AppStore: ObservableObject {
     public func newSession() {
         let connectorName = state.activeConnector?.name ?? state.settings.defaultConnectorName
         let thread = Thread(
-            title: "新线程",
+            title: "新会话",
             preview: "从一个具体任务开始，而不是空白页。",
             modelName: connectorName,
             category: .engineering
         )
         state.threads.insert(thread, at: 0)
         state.selectThread(id: thread.id)
-        state.userCreatedNewThread = true  // Prevent auto-merge into old threads
         persistThreads()
     }
 
@@ -501,7 +499,7 @@ public final class AppStore: ObservableObject {
         state.threads.insert(cloned, at: 0)
         state.selectThread(id: cloned.id)
         persistThreads()
-        notify("已克隆线程", style: .success)
+        notify("已克隆会话", style: .success)
     }
 
     public func exportSession(id: UUID) -> String? {
@@ -612,7 +610,7 @@ public final class AppStore: ObservableObject {
         state.threads.insert(imported, at: 0)
         state.selectThread(id: imported.id)
         persistThreads()
-        notify("已导入线程", style: .success)
+        notify("已导入会话", style: .success)
         return true
     }
 
@@ -942,10 +940,8 @@ public final class AppStore: ObservableObject {
         let agentInvocation = customAgentInvocation(from: message)
         let effectiveMessage = agentInvocation?.message ?? message
 
-        restoreRecentTaskSelectionForTinyFollowUp(effectiveMessage)
         reconcileSelectedRunningTaskIfIdle()
         if answerSelectedTaskStatusQuestion(effectiveMessage) {
-            state.userCreatedNewThread = false
             return
         }
         var decision = IntentRouter.plan(effectiveMessage)
@@ -956,14 +952,6 @@ public final class AppStore: ObservableObject {
                 reason: "用户选择了自定义 Agent「\(agent.name)」。",
                 routeLabel: "Agent",
                 expectedCapabilities: agent.tools.isEmpty ? ["按 Agent 提示词执行"] : agent.tools
-            )
-        } else if decision.intent == .chat, shouldContinueSelectedTask(with: effectiveMessage) {
-            decision = PlannerDecision(
-                intent: .task,
-                confidence: 0.76,
-                reason: "当前选中的是可继续任务，用户输入像是在追问或推进同一任务。",
-                routeLabel: "任务",
-                expectedCapabilities: ["延续上下文", "必要时调用工具", "总结结果"]
             )
         }
 
@@ -1035,8 +1023,6 @@ public final class AppStore: ObservableObject {
                 sendTaskDraft(message: effectiveMessage, decision: decision, customAgent: agentInvocation?.agent)
             }
         }
-        // Clear after all routing is done — sendTaskDraft/sendDirectDraft need to see it
-        state.userCreatedNewThread = false
     }
 
     private struct CustomAgentInvocation {
@@ -1082,19 +1068,14 @@ public final class AppStore: ObservableObject {
         let sessionID: UUID
         let priorSteps: [TaskStep]
         let assistantStepID = UUID()
-        // If user explicitly created a new thread but stale selection points to non-empty thread, force new
-        let forceNewThread = state.userCreatedNewThread
-            && state.selectedThreadID != nil
-            && state.threads.first(where: { $0.id == state.selectedThreadID })?.steps.isEmpty == false
-        if !forceNewThread,
-           let selectedID = state.selectedThreadID,
+        if let selectedID = state.selectedThreadID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }) {
             sessionID = selectedID
             priorSteps = Self.directHistory(for: state.threads[threadIndex].steps, message: message)
             state.threads[threadIndex].steps.append(TaskStep(id: UUID(), kind: .userInput, text: message, isCollapsible: false, isCollapsed: false))
             state.threads[threadIndex].steps.append(TaskStep(id: assistantStepID, kind: .textOutput, text: "", isCollapsible: false, isCollapsed: false))
             if state.threads[threadIndex].title.isEmpty
-                || state.threads[threadIndex].title == "新线程"
+                || state.threads[threadIndex].title == "新会话"
                 || state.threads[threadIndex].title == "新对话" {
                 state.threads[threadIndex].title = directSessionTitle(for: message)
             }
@@ -1188,20 +1169,6 @@ public final class AppStore: ObservableObject {
         customAgent: CustomAgentDefinition? = nil,
         allowedToolsOverride: Set<String>? = nil
     ) {
-        // Fallback: if nothing is selected but a recent completed thread exists,
-        // and the message looks like a follow-up, restore it so context is preserved.
-        // NEVER do this when user explicitly created a new thread.
-        if state.selectedThreadID == nil,
-           !state.userCreatedNewThread,
-           let recentThread = state.threads
-               .filter({ $0.status == .completed || $0.status == .failed || $0.status == .cancelled })
-               .sorted(by: { $0.updatedAt > $1.updatedAt })
-               .first,
-           Date().timeIntervalSince(recentThread.updatedAt) < 10 * 60,
-           Self.isLikelyTaskFollowUp(message) {
-            state.selectThread(id: recentThread.id)
-        }
-
         let selectedConnector = customAgent?.preferredConnectorID.flatMap { id in
             state.connectors.first(where: { $0.id == id })
         } ?? state.activeConnector
@@ -1246,12 +1213,7 @@ public final class AppStore: ObservableObject {
         )
         let targetTaskID: UUID
         let loopPriorSteps: [TaskStep]
-        // Defense: if user created a new thread, never append to a non-empty existing thread
-        let taskForceNew = state.userCreatedNewThread
-            && state.selectedThreadID != nil
-            && state.threads.first(where: { $0.id == state.selectedThreadID })?.steps.isEmpty == false
-        if !taskForceNew,
-           let selectedID = state.selectedThreadID,
+        if let selectedID = state.selectedThreadID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }),
            state.threads[threadIndex].status != .running {
             let isEmptyPlaceholder = state.threads[threadIndex].steps.isEmpty
@@ -1267,7 +1229,7 @@ public final class AppStore: ObservableObject {
             }
             // Update thread title if placeholder or generic
             let currentTitle = state.threads[threadIndex].title
-            if isEmptyPlaceholder || currentTitle.isEmpty || currentTitle == "新线程" || currentTitle == "新对话" {
+            if isEmptyPlaceholder || currentTitle.isEmpty || currentTitle == "新会话" || currentTitle == "新对话" {
                 state.threads[threadIndex].title = String(message.prefix(32))
             }
             state.threads[threadIndex].status = .running
@@ -2650,7 +2612,6 @@ public final class AppStore: ObservableObject {
     public func selectThread(_ record: ThreadRecord?) {
         state.selectThread(id: record?.id)
         if let record {
-            state.userCreatedNewThread = false
             switch record.source {
             case .session:
                 state.modeLabel = "聊天"
@@ -2658,8 +2619,6 @@ public final class AppStore: ObservableObject {
                 state.modeLabel = record.task?.workflowName == nil ? "任务" : "工作流"
             }
         } else {
-            // User explicitly created a new thread — prevent auto-merge
-            state.userCreatedNewThread = true
             state.modeLabel = "聊天"
         }
     }
@@ -2865,16 +2824,6 @@ public final class AppStore: ObservableObject {
     }
 
     // MARK: - Private Helpers
-
-    private func discardEmptySelectedSessionPlaceholder() {
-        guard let id = state.selectedSessionID,
-              let index = state.threads.firstIndex(where: { $0.id == id }) else { return }
-        let thread = state.threads[index]
-        guard thread.source == .session && Self.isEmptySessionPlaceholder(ChatSession(thread: thread)) else { return }
-        state.threads.remove(at: index)
-        state.selectThread(id: nil)
-        persistThreads()
-    }
 
     private func composedDraftMessage() -> String {
         var text = state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3172,28 +3121,11 @@ public final class AppStore: ObservableObject {
         let normalized = message
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return "新线程" }
+        guard !normalized.isEmpty else { return "新会话" }
         if Self.isTinyFollowUp(normalized), let title = state.selectedThread?.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return title
         }
         return String(normalized.prefix(32))
-    }
-
-    private func shouldContinueSelectedTask(with message: String) -> Bool {
-        guard let taskID = state.selectedTaskID,
-              let thread = state.threads.first(where: { $0.id == taskID }) else {
-            return false
-        }
-        guard state.executionMode != .ask else { return false }
-        if thread.status == .running {
-            return !state.isGenerating
-        }
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        if UserFrustrationDetector.shouldRecoverRecentTask(trimmed) {
-            return true
-        }
-        return Self.shouldRouteChatFollowUpIntoSelectedTask(message: trimmed, task: AgentTask(thread: thread))
     }
 
     private func reconcileSelectedRunningTaskIfIdle() {
@@ -3214,36 +3146,6 @@ public final class AppStore: ObservableObject {
             retryAction: "继续"
         ))
         persistThreads()
-    }
-
-    private func restoreRecentTaskSelectionForTinyFollowUp(_ message: String) {
-        guard state.executionMode != .ask else { return }
-        // User explicitly created a new thread — never auto-merge back into old threads
-        guard !state.userCreatedNewThread else { return }
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        let explicitTaskContinuation = Self.isContinuationCommand(normalized)
-            && (normalized.contains("任务") || normalized.contains("刚才") || normalized.contains("上个") || normalized.contains("上一"))
-        let contextualTaskReference = Self.isContextualTaskReference(normalized)
-        let frustratedTaskReference = UserFrustrationDetector.shouldRecoverRecentTask(normalized)
-        let likelyTaskFollowUp = Self.isLikelyTaskFollowUp(normalized)
-        guard explicitTaskContinuation || contextualTaskReference || frustratedTaskReference || likelyTaskFollowUp else { return }
-        let canReplaceSelectedSession: Bool = {
-            guard let sessionID = state.selectedSessionID else { return true }
-            guard explicitTaskContinuation || contextualTaskReference || frustratedTaskReference || likelyTaskFollowUp else { return false }
-            // If message is clearly a task follow-up, always allow switching back,
-            // even if the current session is not an empty placeholder.
-            if likelyTaskFollowUp { return true }
-            guard let thread = state.threads.first(where: { $0.id == sessionID }) else { return true }
-            return Self.isEmptySessionPlaceholder(ChatSession(thread: thread))
-        }()
-        guard state.selectedTaskID == nil,
-              canReplaceSelectedSession,
-              let latestTaskThread = state.threads.filter({ $0.source == .task }).sorted(by: { $0.updatedAt > $1.updatedAt }).first,
-              Date().timeIntervalSince(latestTaskThread.updatedAt) < 30 * 60 else { return }
-
-        discardEmptySelectedSessionPlaceholder()
-        state.selectThread(id: latestTaskThread.id)
-        state.modeLabel = latestTaskThread.workflowName == nil ? "任务" : "工作流"
     }
 
     private func answerSelectedTaskStatusQuestion(_ message: String) -> Bool {
@@ -3730,7 +3632,7 @@ public final class AppStore: ObservableObject {
 
     private static func isEmptySessionPlaceholder(_ session: ChatSession) -> Bool {
         let title = session.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return session.turns.isEmpty && (title.isEmpty || title == "新线程" || title == "新对话")
+        return session.turns.isEmpty && (title.isEmpty || title == "新会话" || title == "新对话")
     }
 
     private static func isContinuationCommand(_ message: String) -> Bool {
@@ -3748,7 +3650,7 @@ public final class AppStore: ObservableObject {
         guard !normalized.isEmpty else { return false }
         let threadMarkers = [
             "这个会话", "那个会话", "当前会话", "这轮对话", "那轮对话", "这条对话",
-            "新线程", "上下文", "丢了", "丢失", "没上下文"
+            "新会话", "上下文", "丢了", "丢失", "没上下文"
         ]
         let taskMarkers = [
             "这个任务", "那个任务", "刚才的任务", "上个任务", "读取本地项目",
@@ -3799,7 +3701,7 @@ public final class AppStore: ObservableObject {
             return true
         }
 
-        let explicitTaskMarkers = ["这个任务", "那个任务", "这个会话", "那个会话", "当前会话", "这轮对话", "这条任务", "刚才", "最近的", "最近这个", "上个", "上一轮", "前面", "上面", "上下文", "新线程", "丢失", "接着这个", "继续这个"]
+        let explicitTaskMarkers = ["这个任务", "那个任务", "这个会话", "那个会话", "当前会话", "这轮对话", "这条任务", "刚才", "最近的", "最近这个", "上个", "上一轮", "前面", "上面", "上下文", "新会话", "丢失", "接着这个", "继续这个"]
         if explicitTaskMarkers.contains(where: { normalized.contains($0) }) {
             return true
         }
@@ -3893,7 +3795,7 @@ public final class AppStore: ObservableObject {
         guard !normalized.isEmpty else { return false }
         let statusMarkers = ["什么情况", "怎么了", "哪里失败", "失败原因", "几个工具失败", "工具失败", "没完成", "卡住", "还在执行", "执行中", "进度", "状态"]
         let whyAboutCurrentTask = (normalized.contains("为什么") || normalized.contains("为啥"))
-            && ["失败", "没完成", "卡住", "中断", "新线程", "上下文", "任务", "工具"].contains { normalized.contains($0) }
+            && ["失败", "没完成", "卡住", "中断", "新会话", "上下文", "任务", "工具"].contains { normalized.contains($0) }
         let asksStatus = statusMarkers.contains { normalized.contains($0) }
             || whyAboutCurrentTask
             || ["?", "？"].contains(normalized)
@@ -3991,7 +3893,7 @@ public final class AppStore: ObservableObject {
     private func persistThreads() {
         updateSummaryCaches()
         do { try environment.threadRepository.saveThreads(state.threads) }
-        catch { recordToolActivity(name: "threads.save", summary: "线程持久化失败", statusLine: error.localizedDescription, isFailure: true) }
+        catch { recordToolActivity(name: "threads.save", summary: "会话持久化失败", statusLine: error.localizedDescription, isFailure: true) }
     }
 
     /// For threads with >20 steps, generate a summary cache of early steps
@@ -4258,7 +4160,7 @@ public extension AppState {
 
         // Migrate session titles from first user step
         for index in state.threads.indices where state.threads[index].source == .session {
-            if state.threads[index].title.isEmpty || state.threads[index].title == "新对话" || state.threads[index].title == "新线程" {
+            if state.threads[index].title.isEmpty || state.threads[index].title == "新对话" || state.threads[index].title == "新会话" {
                 let firstMsg = state.threads[index].steps.first(where: { $0.kind == .userInput })?.text ?? ""
                 let title = String(firstMsg.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
                 if !title.isEmpty { state.threads[index].title = title }

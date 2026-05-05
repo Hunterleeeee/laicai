@@ -149,7 +149,7 @@ public struct UserFrustrationDetector {
         guard !text.isEmpty else { return false }
         let markers = [
             "胡说八道", "乱说", "瞎说", "不对", "错了", "又错", "还是不行",
-            "没读", "没看", "没理解", "没上下文", "上下文没了", "新建线程",
+            "没读", "没看", "没理解", "没上下文", "上下文没了", "新建会话",
             "自动创建新", "说一半", "被截断", "没发完", "别重复", "不要重复",
             "费token", "费 token", "省点token", "省点 token", "认真", "一次性",
             "卡的", "难受", "差距", "你看了吗", "你看看"
@@ -162,7 +162,7 @@ public struct UserFrustrationDetector {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let taskMarkers = [
             "刚才", "最近", "上个", "上一轮", "这个会话", "那个会话", "这个任务", "那个任务",
-            "上下文", "新线程", "本地项目", "读取项目", "输出", "截断", "没发完", "没说完"
+            "上下文", "新会话", "本地项目", "读取项目", "输出", "截断", "没发完", "没说完"
         ]
         return taskMarkers.contains { text.localizedCaseInsensitiveContains($0) }
     }

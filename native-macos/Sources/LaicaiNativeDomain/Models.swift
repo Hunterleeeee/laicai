@@ -556,7 +556,7 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
 
     public init(
         id: UUID = UUID(),
-        title: String = "新线程",
+        title: String = "新会话",
         preview: String = "",
         status: TaskStatus = .queued,
         steps: [TaskStep] = [],

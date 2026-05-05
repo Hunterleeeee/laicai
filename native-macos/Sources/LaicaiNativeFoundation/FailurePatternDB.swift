@@ -297,7 +297,7 @@ public struct BehaviorSignalTracker {
     private static func extractKeywords(from thread: Thread) -> [String] {
         // Use first user input and title as keywords for pattern matching
         var keywords: [String] = []
-        if !thread.title.isEmpty && thread.title != "新线程" {
+        if !thread.title.isEmpty && thread.title != "新会话" {
             keywords.append(thread.title)
         }
         if let firstInput = thread.steps.first(where: { $0.kind == .userInput })?.text {

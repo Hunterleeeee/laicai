@@ -24,7 +24,7 @@ struct CommandPaletteView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(TextGrade.muted)
-                    TextField("输入命令或搜索线程...", text: $query)
+                    TextField("输入命令或搜索会话...", text: $query)
                         .textFieldStyle(.plain)
                         .font(.system(size: 15))
                         .foregroundStyle(TextGrade.primary)
@@ -51,7 +51,7 @@ struct CommandPaletteView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if !matchingThreads.isEmpty {
-                            CommandPaletteSectionTitle("线程")
+                            CommandPaletteSectionTitle("会话")
                             ForEach(matchingThreads) { thread in
                                 Button {
                                     open(thread)
@@ -79,7 +79,7 @@ struct CommandPaletteView: View {
                         }
 
                         if filteredActions.isEmpty && matchingThreads.isEmpty {
-                            Text("没有匹配的命令或线程")
+                            Text("没有匹配的命令或会话")
                                 .font(AppFont.caption)
                                 .foregroundStyle(TextGrade.muted)
                                 .frame(maxWidth: .infinity, alignment: .center)
@@ -167,8 +167,8 @@ struct CommandPaletteView: View {
 
     private var actions: [CommandPaletteAction] {
         var result: [CommandPaletteAction] = [
-            .init(kind: .newThread, icon: "square.and.pencil", title: "新线程", subtitle: "开始一个干净上下文", keywords: ["new", "thread"]),
-            .init(kind: .search, icon: "magnifyingglass", title: "搜索线程", subtitle: "打开侧栏搜索", keywords: ["find", "search"]),
+            .init(kind: .newThread, icon: "square.and.pencil", title: "新会话", subtitle: "开始一个干净上下文", keywords: ["new", "thread"]),
+            .init(kind: .search, icon: "magnifyingglass", title: "搜索会话", subtitle: "打开侧栏搜索", keywords: ["find", "search"]),
             .init(kind: .toggleWorkbench, icon: "sidebar.right", title: showWorkbench ? "收起工作台" : "展开工作台", subtitle: "切换右侧上下文面板", keywords: ["workbench", "panel"]),
             .init(kind: .settings, icon: "gearshape", title: "设置", subtitle: "模型、工作区与上下文配置", keywords: ["settings", "model"])
         ]
@@ -177,9 +177,9 @@ struct CommandPaletteView: View {
             result.insert(.init(kind: .continueTask, icon: "arrow.turn.down.right", title: "继续当前处理", subtitle: "沿用这条记录的上下文", keywords: ["continue", "resume"]), at: 1)
         }
         if store.state.selectedThread != nil {
-            result.append(.init(kind: .copyMarkdown, icon: "doc.on.doc", title: "复制当前线程 Markdown", subtitle: "导出可读记录", keywords: ["copy", "export", "markdown"]))
-            result.append(.init(kind: .exportJSON, icon: "square.and.arrow.up", title: "导出当前线程 JSON", subtitle: "导出完整结构化记录", keywords: ["export", "json"]))
-            result.append(.init(kind: .archiveThread, icon: "archivebox", title: "归档当前线程", subtitle: "从侧栏隐藏", keywords: ["archive", "hide"]))
+            result.append(.init(kind: .copyMarkdown, icon: "doc.on.doc", title: "复制当前会话 Markdown", subtitle: "导出可读记录", keywords: ["copy", "export", "markdown"]))
+            result.append(.init(kind: .exportJSON, icon: "square.and.arrow.up", title: "导出当前会话 JSON", subtitle: "导出完整结构化记录", keywords: ["export", "json"]))
+            result.append(.init(kind: .archiveThread, icon: "archivebox", title: "归档当前会话", subtitle: "从侧栏隐藏", keywords: ["archive", "hide"]))
         }
         if store.state.selectedTask != nil {
             result.append(.init(kind: .copyEvidence, icon: "checklist", title: "复制证据清单", subtitle: "导出已读文件、工具和验证状态", keywords: ["evidence", "verify", "proof"]))
@@ -236,7 +236,7 @@ struct CommandPaletteView: View {
             if let markdown = store.exportSelectedThreadMarkdown() {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(markdown, forType: .string)
-                ToastCenter.shared.success("已复制当前线程")
+                ToastCenter.shared.success("已复制当前会话")
             }
         case .copyEvidence:
             if let markdown = store.exportSelectedTaskEvidenceMarkdown() {

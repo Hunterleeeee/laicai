@@ -32,7 +32,7 @@ struct SidebarView: View {
             // Bottom actions
             bottomBar
         }
-        .alert("删除线程", isPresented: Binding(
+        .alert("删除会话", isPresented: Binding(
             get: { deletingSessionID != nil || deletingTaskID != nil },
             set: {
                 if !$0 {
@@ -51,7 +51,7 @@ struct SidebarView: View {
                 deletingSessionID = nil
                 deletingTaskID = nil
             }
-        } message: { Text("确定要删除这个线程吗？") }
+        } message: { Text("确定要删除这个会话吗？") }
         .alert("重命名", isPresented: Binding(
             get: { renamingSessionID != nil },
             set: { if !$0 { renamingSessionID = nil } }
@@ -203,7 +203,7 @@ struct SidebarView: View {
                         HStack(spacing: AppSpace.xs) {
                             Image(systemName: "plus")
                                 .font(.system(size: 11, weight: .bold))
-                            Text("新线程")
+                            Text("新会话")
                                 .font(AppFont.captionMedium)
                         }
                         .foregroundStyle(.white)
@@ -226,7 +226,7 @@ struct SidebarView: View {
             } else {
                 // Compact: icon buttons stacked
                 VStack(spacing: AppSpace.sm) {
-                    CompactRailButton(icon: "plus", tooltip: "新线程") {
+                    CompactRailButton(icon: "plus", tooltip: "新会话") {
                         store.newSession()
                     }
                     CompactRailButton(icon: "gearshape", tooltip: "设置") {

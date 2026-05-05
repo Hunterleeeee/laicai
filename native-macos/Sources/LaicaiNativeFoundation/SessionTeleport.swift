@@ -74,7 +74,7 @@ public final class SessionTeleport: ObservableObject {
 
         public var errorDescription: String? {
             switch self {
-            case .noThreads: return "没有可导出的线程"
+            case .noThreads: return "没有可导出的会话"
             case .encodingFailed: return "序列化失败"
             case .decodingFailed(let d): return "反序列化失败：\(d)"
             case .versionMismatch(let v): return "格式版本不兼容：\(v)"
@@ -200,7 +200,7 @@ public final class SessionTeleport: ObservableObject {
 
         public var summary: String {
             var parts: [String] = []
-            parts.append("从「\(sourceDevice)」导入 \(importedThreads) 个线程")
+            parts.append("从「\(sourceDevice)」导入 \(importedThreads) 个会话")
             if skippedThreads > 0 { parts.append("跳过 \(skippedThreads) 个重复") }
             if !connectorHints.isEmpty {
                 parts.append("建议添加连接器：\(connectorHints.joined(separator: "、"))")

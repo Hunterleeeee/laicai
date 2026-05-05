@@ -24,7 +24,7 @@ public final class MenuBarAgent: NSObject, ObservableObject {
         let menu = NSMenu()
         menu.addItem(makeItem("打开来财", action: #selector(activateApp)))
         menu.addItem(.separator())
-        menu.addItem(makeItem("新建线程", action: #selector(newThread), key: "n"))
+        menu.addItem(makeItem("新建会话", action: #selector(newThread), key: "n"))
         menu.addItem(makeItem("继续最近任务", action: #selector(continueLastTask), key: "r"))
         menu.addItem(.separator())
         let toggleItem = makeItem(isActive ? "暂停后台智能" : "恢复后台智能", action: #selector(toggleActive))
@@ -244,7 +244,7 @@ public struct ReportGenerator {
             "",
             "| 指标 | 数量 |",
             "|------|------|",
-            "| 活跃线程 | \(todayThreads.count) |",
+            "| 活跃会话 | \(todayThreads.count) |",
             "| 任务 | \(tasks.count)（✅ \(completedTasks.count)　❌ \(failedTasks.count)　🔄 \(runningTasks.count)）|",
             "| 对话 | \(chats.count) |",
             "| 工具调用 | \(countToolCalls(todayThreads)) 次 |",
@@ -366,7 +366,7 @@ public struct ReportGenerator {
             "",
             "| 指标 | 数量 |",
             "|------|------|",
-            "| 总线程 | \(weekThreads.count) |",
+            "| 总会话 | \(weekThreads.count) |",
             "| 完成任务 | \(completedTasks.count) |",
             "| 失败任务 | \(failedTasks.count) |",
             "| 对话 | \(chats.count) |",
@@ -387,7 +387,7 @@ public struct ReportGenerator {
             dayFmt.locale = Locale(identifier: "zh_CN")
             let dayTasks = dayThreads.filter { $0.source == .task }
             let dayCompleted = dayTasks.filter { $0.status == .completed }
-            lines.append("**\(dayFmt.string(from: day))**：\(dayThreads.count) 线程，\(dayCompleted.count)/\(dayTasks.count) 任务完成")
+            lines.append("**\(dayFmt.string(from: day))**：\(dayThreads.count) 会话，\(dayCompleted.count)/\(dayTasks.count) 任务完成")
             for t in dayThreads.prefix(5) {
                 let icon = t.source == .task ? statusIcon(t.status) : "💬"
                 lines.append("  - \(icon) \(t.title)")
