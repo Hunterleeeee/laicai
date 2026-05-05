@@ -438,6 +438,7 @@ public final class AppStore: ObservableObject {
         )
         state.threads.insert(thread, at: 0)
         state.selectThread(id: thread.id)
+        state.userCreatedNewThread = true  // Prevent auto-merge into old threads
         persistThreads()
     }
 
@@ -943,9 +944,8 @@ public final class AppStore: ObservableObject {
 
         restoreRecentTaskSelectionForTinyFollowUp(effectiveMessage)
         reconcileSelectedRunningTaskIfIdle()
-        // Clear flag after routing decisions — it only protects the first message
-        state.userCreatedNewThread = false
         if answerSelectedTaskStatusQuestion(effectiveMessage) {
+            state.userCreatedNewThread = false
             return
         }
         var decision = IntentRouter.plan(effectiveMessage)
@@ -1035,6 +1035,8 @@ public final class AppStore: ObservableObject {
                 sendTaskDraft(message: effectiveMessage, decision: decision, customAgent: agentInvocation?.agent)
             }
         }
+        // Clear after all routing is done — sendTaskDraft/sendDirectDraft need to see it
+        state.userCreatedNewThread = false
     }
 
     private struct CustomAgentInvocation {
@@ -1080,7 +1082,12 @@ public final class AppStore: ObservableObject {
         let sessionID: UUID
         let priorSteps: [TaskStep]
         let assistantStepID = UUID()
-        if let selectedID = state.selectedThreadID,
+        // If user explicitly created a new thread but stale selection points to non-empty thread, force new
+        let forceNewThread = state.userCreatedNewThread
+            && state.selectedThreadID != nil
+            && state.threads.first(where: { $0.id == state.selectedThreadID })?.steps.isEmpty == false
+        if !forceNewThread,
+           let selectedID = state.selectedThreadID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }) {
             sessionID = selectedID
             priorSteps = Self.directHistory(for: state.threads[threadIndex].steps, message: message)
@@ -1239,7 +1246,12 @@ public final class AppStore: ObservableObject {
         )
         let targetTaskID: UUID
         let loopPriorSteps: [TaskStep]
-        if let selectedID = state.selectedThreadID,
+        // Defense: if user created a new thread, never append to a non-empty existing thread
+        let taskForceNew = state.userCreatedNewThread
+            && state.selectedThreadID != nil
+            && state.threads.first(where: { $0.id == state.selectedThreadID })?.steps.isEmpty == false
+        if !taskForceNew,
+           let selectedID = state.selectedThreadID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }),
            state.threads[threadIndex].status != .running {
             let isEmptyPlaceholder = state.threads[threadIndex].steps.isEmpty
