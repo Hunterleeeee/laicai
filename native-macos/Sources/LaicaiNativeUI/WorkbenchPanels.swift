@@ -1932,13 +1932,15 @@ struct WikiPanel: View {
     @EnvironmentObject private var store: AppStore
     @State private var topic = ""
     @State private var useWeb = false
-    @State private var topK = 8
     @State private var result: WikiBuildResult?
+    @State private var streamingText = ""
     @State private var isRunning = false
     @State private var errorText: String?
+    @State private var showingSources = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpace.md) {
+            // Header
             HStack(spacing: AppSpace.sm) {
                 Image(systemName: "book.closed")
                     .font(.system(size: 11, weight: .semibold))
@@ -1947,6 +1949,61 @@ struct WikiPanel: View {
                     .font(AppFont.subheadline)
                     .foregroundStyle(TextGrade.primary)
                 Spacer()
+                if let result {
+                    wikiActions(result)
+                }
+            }
+
+            // Input
+            HStack(spacing: AppSpace.sm) {
+                TextField("输入主题", text: $topic)
+                    .textFieldStyle(.plain)
+                    .font(AppFont.body)
+                    .onSubmit { if canRun { runWiki(save: false) } }
+
+                if isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Button {
+                        runWiki(save: false)
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(canRun ? Brand.primary : TextGrade.ghost)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canRun)
+                }
+            }
+            .padding(.horizontal, AppSpace.md)
+            .padding(.vertical, AppSpace.sm)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .fill(SurfaceGrade.card)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .strokeBorder(SurfaceGrade.hairline, lineWidth: 0.75)
+            )
+
+            // Options pill
+            HStack(spacing: AppSpace.sm) {
+                wikiPill(label: "联网", icon: "globe", isOn: $useWeb)
+
+                if let connector = store.state.activeConnector {
+                    Text(connector.name)
+                        .font(AppFont.tiny)
+                        .foregroundStyle(TextGrade.ghost)
+                        .lineLimit(1)
+                } else {
+                    Text("未连接模型")
+                        .font(AppFont.tiny)
+                        .foregroundStyle(Semantic.error)
+                }
+
+                Spacer()
+
                 Text(vaultLabel)
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.ghost)
@@ -1954,86 +2011,19 @@ struct WikiPanel: View {
                     .truncationMode(.middle)
             }
 
-            VStack(alignment: .leading, spacing: AppSpace.sm) {
-                TextField("主题，例如：人工智能基础知识", text: $topic)
-                    .textFieldStyle(.plain)
-                    .font(AppFont.body)
-                    .padding(AppSpace.md)
-                    .background(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                            .fill(SurfaceGrade.card)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                            .strokeBorder(SurfaceGrade.hairline, lineWidth: 0.75)
-                    )
-
-                HStack(spacing: AppSpace.md) {
-                    Toggle("网页来源", isOn: $useWeb)
-                        .toggleStyle(.checkbox)
-                        .font(AppFont.caption)
-                        .foregroundStyle(TextGrade.secondary)
-
-                    Stepper("来源 \(topK)", value: $topK, in: 1...20)
-                        .font(AppFont.caption)
-                        .foregroundStyle(TextGrade.secondary)
-                }
-
-                HStack(spacing: AppSpace.sm) {
-                    Button {
-                        runWiki(save: false)
-                    } label: {
-                        Label("预览", systemImage: "doc.text.magnifyingglass")
-                            .font(AppFont.captionMedium)
-                    }
-                    .disabled(!canRun)
-
-                    Button {
-                        runWiki(save: true)
-                    } label: {
-                        Label("保存", systemImage: "square.and.arrow.down")
-                            .font(AppFont.captionMedium)
-                    }
-                    .disabled(!canRun)
-
-                    if isRunning {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
-                .buttonStyle(.borderless)
-            }
-
             if let errorText {
                 CurrentFocusCard(title: "错误", text: errorText, tone: .error)
             }
 
-            if let result {
-                wikiResult(result)
+            // Content area
+            if isRunning && !streamingText.isEmpty {
+                wikiStreamingContent
+            } else if let result {
+                wikiResultContent(result)
+            } else if !WikiEngine.recentResults.isEmpty {
+                wikiHistory
             } else {
                 emptyWikiState
-            }
-
-            if !WikiEngine.recentResults.isEmpty && result == nil {
-                Divider()
-                Text("最近生成")
-                    .font(AppFont.captionMedium)
-                    .foregroundStyle(TextGrade.secondary)
-                ForEach(WikiEngine.recentResults.suffix(5)) { r in
-                    HStack(spacing: AppSpace.sm) {
-                        Image(systemName: r.saved ? "checkmark.circle" : "doc.text")
-                            .font(.system(size: 10))
-                            .foregroundStyle(r.saved ? Semantic.success : TextGrade.muted)
-                        Text(r.topic)
-                            .font(AppFont.tiny)
-                            .foregroundStyle(TextGrade.muted)
-                            .lineLimit(1)
-                        Spacer()
-                        Text("\(r.sources.count) 来源")
-                            .font(AppFont.tiny)
-                            .foregroundStyle(TextGrade.ghost)
-                    }
-                }
             }
         }
         .onAppear {
@@ -2042,6 +2032,237 @@ struct WikiPanel: View {
             }
         }
     }
+
+    // MARK: - Actions
+
+    @ViewBuilder
+    private func wikiActions(_ result: WikiBuildResult) -> some View {
+        HStack(spacing: AppSpace.xs) {
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(result.renderedMarkdown, forType: .string)
+                ToastCenter.shared.success("已复制")
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 10))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(TextGrade.muted)
+            .help("复制 Markdown")
+
+            if !result.saved {
+                Button {
+                    runWiki(save: true)
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 10))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(TextGrade.muted)
+                .help("保存到 Vault")
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Semantic.success)
+                    .help("已保存")
+            }
+
+            Button {
+                self.result = nil
+                self.streamingText = ""
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(TextGrade.ghost)
+            .help("关闭")
+        }
+    }
+
+    // MARK: - Streaming content
+
+    private var wikiStreamingContent: some View {
+        VStack(alignment: .leading, spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.xs) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("正在生成…")
+                    .font(AppFont.tiny)
+                    .foregroundStyle(TextGrade.muted)
+            }
+            wikiMarkdownView(streamingText)
+        }
+    }
+
+    // MARK: - Result content
+
+    @ViewBuilder
+    private func wikiResultContent(_ result: WikiBuildResult) -> some View {
+        VStack(alignment: .leading, spacing: AppSpace.md) {
+            // Meta bar
+            HStack(spacing: AppSpace.md) {
+                HStack(spacing: AppSpace.xs) {
+                    Image(systemName: "link")
+                        .font(.system(size: 9))
+                        .foregroundStyle(TextGrade.ghost)
+                    Text("\(result.sources.count) 来源")
+                        .font(AppFont.tiny)
+                        .foregroundStyle(TextGrade.muted)
+                }
+                .onTapGesture { showingSources.toggle() }
+
+                Text(result.diffSummary)
+                    .font(AppFont.tiny)
+                    .foregroundStyle(TextGrade.ghost)
+
+                Spacer()
+
+                Text(result.notePath)
+                    .font(AppFont.tiny)
+                    .foregroundStyle(TextGrade.ghost)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+
+            // Sources (collapsible)
+            if showingSources && !result.sources.isEmpty {
+                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                    ForEach(Array(result.sources.prefix(8).enumerated()), id: \.offset) { _, source in
+                        WikiSourceRow(source: source)
+                    }
+                }
+                .padding(AppSpace.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                        .fill(SurfaceGrade.elevated.opacity(0.5))
+                )
+            }
+
+            // Rendered markdown
+            wikiMarkdownView(result.renderedMarkdown)
+        }
+    }
+
+    // MARK: - Markdown view
+
+    private func wikiMarkdownView(_ markdown: String) -> some View {
+        let cleaned = Self.stripFrontmatter(markdown)
+        let rendered: Text = {
+            if let attributed = try? AttributedString(markdown: cleaned, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+                return Text(attributed)
+            }
+            return Text(cleaned)
+        }()
+
+        return rendered
+            .font(AppFont.body)
+            .foregroundStyle(TextGrade.primary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(AppSpace.md)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .fill(SurfaceGrade.card)
+            )
+    }
+
+    private static func stripFrontmatter(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("---") else { return trimmed }
+        let parts = trimmed.components(separatedBy: "---")
+        guard parts.count >= 3 else { return trimmed }
+        return parts.dropFirst(2).joined(separator: "---").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - History
+
+    private var wikiHistory: some View {
+        VStack(alignment: .leading, spacing: AppSpace.sm) {
+            Text("最近")
+                .font(AppFont.captionMedium)
+                .foregroundStyle(TextGrade.secondary)
+
+            ForEach(WikiEngine.recentResults.suffix(8).reversed()) { r in
+                Button {
+                    result = r
+                    topic = r.topic
+                } label: {
+                    HStack(spacing: AppSpace.sm) {
+                        Image(systemName: r.saved ? "checkmark.circle.fill" : "doc.text")
+                            .font(.system(size: 10))
+                            .foregroundStyle(r.saved ? Semantic.success : TextGrade.muted)
+                        Text(r.topic)
+                            .font(AppFont.caption)
+                            .foregroundStyle(TextGrade.primary)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("\(r.sources.count) 来源")
+                            .font(AppFont.tiny)
+                            .foregroundStyle(TextGrade.ghost)
+                    }
+                    .padding(.vertical, AppSpace.xs)
+                    .padding(.horizontal, AppSpace.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                            .fill(SurfaceGrade.elevated.opacity(0.4))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: - Empty state
+
+    private var emptyWikiState: some View {
+        VStack(spacing: AppSpace.md) {
+            Image(systemName: "book.closed")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(TextGrade.ghost)
+            Text("输入主题，用 AI 生成知识页")
+                .font(AppFont.captionMedium)
+                .foregroundStyle(TextGrade.secondary)
+            Text("内容来自本地 Vault 笔记 + 模型知识")
+                .font(AppFont.tiny)
+                .foregroundStyle(TextGrade.ghost)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, AppSpace.xl)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .fill(SurfaceGrade.elevated.opacity(0.58))
+        )
+    }
+
+    // MARK: - Pill toggle
+
+    private func wikiPill(label: String, icon: String, isOn: Binding<Bool>) -> some View {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 9))
+                Text(label)
+                    .font(AppFont.tiny)
+            }
+            .foregroundStyle(isOn.wrappedValue ? Brand.primary : TextGrade.muted)
+            .padding(.horizontal, AppSpace.sm)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(isOn.wrappedValue ? Brand.primary.opacity(0.12) : SurfaceGrade.elevated.opacity(0.5))
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(isOn.wrappedValue ? Brand.primary.opacity(0.3) : Color.clear, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Helpers
 
     private var canRun: Bool {
         !topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isRunning
@@ -2061,75 +2282,28 @@ struct WikiPanel: View {
         return latest.isEmpty || latest == "新会话" ? "" : latest
     }
 
-    private var emptyWikiState: some View {
-        VStack(spacing: AppSpace.sm) {
-            Image(systemName: "book.closed")
-                .font(.system(size: 26, weight: .light))
-                .foregroundStyle(TextGrade.ghost)
-            Text("输入主题后生成 Wiki 预览")
-                .font(AppFont.captionMedium)
-                .foregroundStyle(TextGrade.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, AppSpace.xl)
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .fill(SurfaceGrade.elevated.opacity(0.58))
-        )
-    }
-
-    private func wikiResult(_ result: WikiBuildResult) -> some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            contextSectionCard(title: result.saved ? "已保存" : "预览") {
-                VStack(alignment: .leading, spacing: AppSpace.sm) {
-                    summaryRow(icon: "doc", label: "位置", value: result.notePath)
-                    summaryRow(icon: "plus.forwardslash.minus", label: "变更", value: result.diffSummary)
-                    summaryRow(icon: "link", label: "来源", value: "\(result.sources.count) 条")
-                }
-            }
-
-            contextSectionCard(title: "来源") {
-                if result.sources.isEmpty {
-                    Text("暂无来源")
-                        .font(AppFont.caption)
-                        .foregroundStyle(TextGrade.muted)
-                } else {
-                    VStack(alignment: .leading, spacing: AppSpace.xs) {
-                        ForEach(Array(result.sources.prefix(8).enumerated()), id: \.offset) { _, source in
-                            WikiSourceRow(source: source)
-                        }
-                    }
-                }
-            }
-
-            contextSectionCard(title: "正文") {
-                Text(result.renderedMarkdown)
-                    .font(AppFont.codeSmall)
-                    .foregroundStyle(TextGrade.secondary)
-                    .textSelection(.enabled)
-                    .lineLimit(80)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
     private func runWiki(save: Bool) {
         let cleanTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTopic.isEmpty else { return }
         isRunning = true
         errorText = nil
+        streamingText = ""
 
         Task {
-            let built = await WikiEngine.buildTopic(
+            let built = await store.buildWikiTopic(
                 topic: cleanTopic,
                 vaultRoot: vaultRoot,
                 save: save,
                 useWeb: useWeb,
-                topK: topK
+                onChunk: { chunk in
+                    self.streamingText += chunk
+                }
             )
             await MainActor.run {
                 result = built
+                streamingText = ""
                 isRunning = false
+                showingSources = false
                 if save {
                     ToastCenter.shared.success("已保存 Wiki：\(built.notePath)")
                 }

@@ -33,12 +33,17 @@ public enum WikiEngine {
     /// Recent wiki build results, persisted in memory for the session
     public private(set) static var recentResults: [WikiBuildResult] = []
 
+    /// Build a wiki topic using LLM synthesis with streaming output.
+    /// Falls back to template rendering when no connector/runtime is provided.
     public static func buildTopic(
         topic: String,
         vaultRoot: String,
         save: Bool,
         useWeb: Bool = false,
-        topK: Int = 8
+        topK: Int = 8,
+        connector: ConnectorProfile? = nil,
+        runtime: (any ChatRuntimeClient)? = nil,
+        onChunk: (@Sendable @MainActor (String) -> Void)? = nil
     ) async -> WikiBuildResult {
         let cleanTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
         let root = URL(fileURLWithPath: vaultRoot)
@@ -58,7 +63,20 @@ public enum WikiEngine {
             }
         }
 
-        let rendered = render(topic: cleanTopic, sources: sources)
+        let rendered: String
+        if let connector, let runtime {
+            rendered = await synthesizeWithLLM(
+                topic: cleanTopic,
+                sources: sources,
+                previous: previous,
+                connector: connector,
+                runtime: runtime,
+                onChunk: onChunk
+            )
+        } else {
+            rendered = render(topic: cleanTopic, sources: sources)
+        }
+
         if save {
             do {
                 try FileManager.default.createDirectory(at: noteURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -79,6 +97,80 @@ public enum WikiEngine {
         recentResults.append(result)
         if recentResults.count > 20 { recentResults.removeFirst(recentResults.count - 20) }
         return result
+    }
+
+    /// Use the LLM to synthesize a coherent wiki article from collected sources.
+    private static func synthesizeWithLLM(
+        topic: String,
+        sources: [WikiSource],
+        previous: String?,
+        connector: ConnectorProfile,
+        runtime: any ChatRuntimeClient,
+        onChunk: (@Sendable @MainActor (String) -> Void)?
+    ) async -> String {
+        let sourceMaterial = sources.prefix(10).enumerated().map { i, s in
+            "[\(i+1)] \(s.title)\n\(s.preview)"
+        }.joined(separator: "\n\n")
+
+        let existingNote = previous.map { "\n\n已有内容（请在此基础上更新而非重写）：\n\($0.prefix(3000))" } ?? ""
+
+        let systemPrompt = """
+        你是知识库写作助手。根据用户提供的主题和参考材料，写一篇结构清晰、信息密度高的中文 Wiki 文章。
+        要求：
+        - 用 Markdown 格式，包含标题、小标题、要点列表
+        - 内容简洁准确，不废话
+        - 如果有已有内容，在其基础上补充更新而非完全重写
+        - 不要输出 frontmatter，系统会自动添加
+        - 直接输出文章内容，不要包裹在代码块中
+        """
+
+        let userPrompt = """
+        主题：\(topic)
+
+        参考材料：
+        \(sourceMaterial.isEmpty ? "暂无参考材料，请根据你的知识写作。" : sourceMaterial)\(existingNote)
+        """
+
+        let messages = [
+            ChatMessage(role: "system", content: systemPrompt),
+            ChatMessage(role: "user", content: userPrompt)
+        ]
+        let request = SendMessageRequest(
+            sessionID: UUID(),
+            message: userPrompt,
+            connector: connector,
+            modeLabel: "Wiki",
+            systemPrompt: systemPrompt,
+            tools: [],
+            messages: messages,
+            maxOutputTokens: 4096
+        )
+
+        do {
+            let response: SendMessageResponse
+            if let onChunk {
+                response = try await runtime.sendMessageStream(request, onChunk: onChunk)
+            } else {
+                response = try await runtime.sendMessage(request)
+            }
+            let text = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return render(topic: topic, sources: sources) }
+
+            // Prepend frontmatter
+            let now = ISO8601DateFormatter().string(from: Date())
+            let frontmatter = """
+            ---
+            type: "topic"
+            topic: "\(topic)"
+            updated: "\(now)"
+            source_count: "\(sources.count)"
+            ---
+            """
+            return frontmatter + "\n" + text
+        } catch {
+            // Fallback to template on LLM failure
+            return render(topic: topic, sources: sources)
+        }
     }
 
     private static func collectVaultSources(topic: String, vaultRoot: URL, limit: Int) -> [WikiSource] {
