@@ -171,7 +171,7 @@ public final class AgentLoop: ObservableObject {
             && priorSteps.isEmpty
             && !Self.isPureContinuationCommand(message)
             && message.count > 10
-        if !priorSteps.contains(where: { $0.kind == .aiThinking }) {
+        if intent != .chat, !priorSteps.contains(where: { $0.kind == .aiThinking }) {
             let startStep = TaskStep(
                 kind: .aiThinking,
                 text: "正在理解任务并准备执行。",
@@ -1338,7 +1338,7 @@ public final class AgentLoop: ObservableObject {
                     )
                     task.steps.append(thinkStep)
                     onStep(thinkStep)
-                    if isReadOnlyRun {
+                    if isReadOnlyRun || intent == .chat {
                         break
                     }
                     messages.append(ChatMessage(role: "assistant", content: text))

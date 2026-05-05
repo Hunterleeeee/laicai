@@ -18,31 +18,38 @@ struct WelcomeView: View {
     @State private var orbRotation: Double = 0
 
     var body: some View {
-        ZStack {
-            // Animated gradient mesh background
-            ambientBackground
+        GeometryReader { geo in
+            let isCompact = geo.size.height < 680
+            let isNarrow = geo.size.width < 640
+            let topPad = isCompact ? max(24, geo.size.height * 0.06) : 80
+            let sectionGap = isCompact ? max(20, geo.size.height * 0.04) : 48
+            let contentWidth = min(680, geo.size.width - 48)
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    Spacer().frame(height: 80)
-                    heroSection
-                    Spacer().frame(height: 48)
+            ZStack {
+                ambientBackground
 
-                    if store.state.activeConnector == nil {
-                        connectPrompt
-                    } else {
-                        samplePromptsGrid
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        Spacer().frame(height: topPad)
+                        heroSection(compact: isCompact)
+                        Spacer().frame(height: sectionGap)
+
+                        if store.state.activeConnector == nil {
+                            connectPrompt
+                        } else {
+                            samplePromptsGrid(narrow: isNarrow)
+                        }
+
+                        Spacer().frame(height: sectionGap)
+                        capabilityCards(narrow: isNarrow)
+                        Spacer().frame(height: isCompact ? 12 : 24)
+                        keyboardHints
+                        Spacer().frame(height: isCompact ? 20 : 40)
                     }
-
-                    Spacer().frame(height: 48)
-                    capabilityCards
-                    Spacer().frame(height: 24)
-                    keyboardHints
-                    Spacer().frame(height: 40)
+                    .frame(maxWidth: contentWidth)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, AppSpace.xl)
                 }
-                .frame(maxWidth: 680)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, AppSpace.xl)
             }
         }
     }
@@ -107,10 +114,15 @@ struct WelcomeView: View {
 
     @State private var heroGlowPulse = false
 
-    private var heroSection: some View {
-        VStack(spacing: 28) {
+    private func heroSection(compact: Bool) -> some View {
+        let coreSize: CGFloat = compact ? 48 : 64
+        let ringSize: CGFloat = compact ? 72 : 96
+        let glowSize: CGFloat = compact ? 84 : 112
+        let titleSize: CGFloat = compact ? 22 : 28
+        let logoFont: CGFloat = compact ? 22 : 28
+
+        return VStack(spacing: compact ? 18 : 28) {
             ZStack {
-                // Outer breathing ring
                 Circle()
                     .strokeBorder(
                         AngularGradient(
@@ -119,11 +131,10 @@ struct WelcomeView: View {
                         ),
                         lineWidth: 2
                     )
-                    .frame(width: 96, height: 96)
+                    .frame(width: ringSize, height: ringSize)
                     .rotationEffect(.degrees(orbRotation * 2))
                     .opacity(0.6)
 
-                // Middle glow ring
                 Circle()
                     .fill(
                         RadialGradient(
@@ -133,11 +144,11 @@ struct WelcomeView: View {
                                 Color.clear
                             ],
                             center: .center,
-                            startRadius: 20,
-                            endRadius: 56
+                            startRadius: coreSize * 0.3,
+                            endRadius: glowSize * 0.5
                         )
                     )
-                    .frame(width: 112, height: 112)
+                    .frame(width: glowSize, height: glowSize)
                     .scaleEffect(heroGlowPulse ? 1.08 : 0.92)
                     .onAppear {
                         withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) {
@@ -145,22 +156,21 @@ struct WelcomeView: View {
                         }
                     }
 
-                // Core logo
                 Circle()
                     .fill(Brand.premiumGradient)
-                    .frame(width: 64, height: 64)
+                    .frame(width: coreSize, height: coreSize)
                     .overlay(
                         Text("财")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .font(.system(size: logoFont, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                     )
                     .shadow(color: Brand.primary.opacity(0.5), radius: 24, y: 0)
             }
-            .frame(height: 120)
+            .frame(height: glowSize + 8)
 
-            VStack(spacing: 12) {
+            VStack(spacing: compact ? 8 : 12) {
                 Text("有什么我能帮你的？")
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.system(size: titleSize, weight: .bold))
                     .foregroundStyle(
                         LinearGradient(
                             colors: [TextGrade.primary, TextGrade.secondary],
@@ -170,7 +180,7 @@ struct WelcomeView: View {
                     )
 
                 Text("描述你的目标，来财自动决定搜索、分析还是直接动手")
-                    .font(.system(size: 14, weight: .regular))
+                    .font(.system(size: compact ? 12 : 14, weight: .regular))
                     .foregroundStyle(TextGrade.muted)
                     .multilineTextAlignment(.center)
             }
@@ -215,8 +225,12 @@ struct WelcomeView: View {
 
     // MARK: - Sample Prompts
 
-    private var samplePromptsGrid: some View {
-        VStack(spacing: AppSpace.sm) {
+    private func samplePromptsGrid(narrow: Bool) -> some View {
+        let columns = narrow
+            ? [GridItem(.flexible())]
+            : [GridItem(.flexible()), GridItem(.flexible())]
+
+        return LazyVGrid(columns: columns, spacing: AppSpace.sm) {
             ForEach(Array(samplePrompts.enumerated()), id: \.offset) { _, prompt in
                 SamplePromptRow(icon: prompt.icon, text: prompt.text, subtitle: prompt.sub) {
                     store.updateDraft(prompt.text)
@@ -227,8 +241,9 @@ struct WelcomeView: View {
 
     // MARK: - Capabilities
 
-    private var capabilityCards: some View {
-        HStack(spacing: AppSpace.md) {
+    @ViewBuilder
+    private func capabilityCards(narrow: Bool) -> some View {
+        let cards = Group {
             CapabilityCard(
                 icon: "bolt.fill",
                 iconColor: Brand.primary,
@@ -249,6 +264,12 @@ struct WelcomeView: View {
                 title: "工作流",
                 description: "批量审查、重构、文档一键启动"
             )
+        }
+
+        if narrow {
+            VStack(spacing: AppSpace.sm) { cards }
+        } else {
+            HStack(spacing: AppSpace.md) { cards }
         }
     }
 

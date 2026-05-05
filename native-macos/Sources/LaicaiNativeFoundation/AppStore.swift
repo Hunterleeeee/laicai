@@ -1036,13 +1036,9 @@ public final class AppStore: ObservableObject {
             )
             sendTaskDraft(message: effectiveMessage, decision: actDecision, customAgent: agentInvocation?.agent)
         case .auto:
-            // Claude Code insight: don't override the planner's intent.
-            // Chat = direct response (no tools, fast). Task/research/workflow = agent loop.
-            if decision.intent == .chat {
-                sendDirectDraft(message: effectiveMessage)
-            } else {
-                sendTaskDraft(message: effectiveMessage, decision: decision, customAgent: agentInvocation?.agent)
-            }
+            // Claude insight: always give tools to the LLM, let it decide.
+            // IntentRouter provides UI label only, not routing.
+            sendTaskDraft(message: effectiveMessage, decision: decision, customAgent: agentInvocation?.agent)
         }
     }
 
@@ -1225,13 +1221,21 @@ public final class AppStore: ObservableObject {
             return
         }
 
+        let isChatIntent = intent == .chat
         let userStep = TaskStep(kind: .userInput, text: message, isCollapsible: false, isCollapsed: false)
-        let planStep = TaskStep(
-            kind: .aiThinking,
-            text: Self.plannerStepText(for: decision),
-            isCollapsible: true,
-            isCollapsed: true
-        )
+        // Chat intent: skip verbose planning step to keep UI clean
+        let initialSteps: [TaskStep]
+        if isChatIntent {
+            initialSteps = [userStep]
+        } else {
+            let planStep = TaskStep(
+                kind: .aiThinking,
+                text: Self.plannerStepText(for: decision),
+                isCollapsible: true,
+                isCollapsed: true
+            )
+            initialSteps = [userStep, planStep]
+        }
         let targetTaskID: UUID
         let loopPriorSteps: [TaskStep]
         if let selectedID = state.selectedThreadID,
@@ -1257,19 +1261,21 @@ public final class AppStore: ObservableObject {
             state.threads[threadIndex].connectorID = state.activeConnectorID
             state.threads[threadIndex].workflowName = workflowName
             state.threads[threadIndex].context = context
-            state.threads[threadIndex].steps.append(userStep)
-            state.threads[threadIndex].steps.append(planStep)
-            loopPriorSteps = isEmptyPlaceholder ? [userStep, planStep] : state.threads[threadIndex].steps
+            for step in initialSteps {
+                state.threads[threadIndex].steps.append(step)
+            }
+            loopPriorSteps = isEmptyPlaceholder ? initialSteps : state.threads[threadIndex].steps
             state.threads[threadIndex].updatedAt = .now
             targetTaskID = selectedID
         } else {
             let thread = Thread(
                 title: String(message.prefix(32)),
                 status: .running,
-                steps: [userStep, planStep],
+                steps: initialSteps,
                 connectorID: state.activeConnectorID,
                 workflowName: workflowName,
-                context: context
+                context: context,
+                source: isChatIntent ? .session : nil
             )
             state.threads.insert(thread, at: 0)
             targetTaskID = thread.id
@@ -1281,7 +1287,7 @@ public final class AppStore: ObservableObject {
 
         let capturedImages = state.draftImages
         state.isGenerating = true
-        state.liveActivity = "正在分析任务…"
+        state.liveActivity = isChatIntent ? "思考中…" : "正在分析任务…"
         state.draftMessage = ""
         state.draftAttachments = []
         state.draftImages = []
@@ -1299,6 +1305,10 @@ public final class AppStore: ObservableObject {
         }
         if allowedToolsOverride != nil {
             loopConfig.maxIterations = min(loopConfig.maxIterations, 20)
+        }
+        // Chat intent: cap iterations — LLM decides if tools needed, but don't run away
+        if isChatIntent {
+            loopConfig.maxIterations = min(loopConfig.maxIterations, 3)
         }
         let attemptedToolCalling = loopConfig.supportsToolCalling
         let loop = AgentLoop(
