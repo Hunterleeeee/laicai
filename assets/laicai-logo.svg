@@ -1,0 +1,20 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="116" fill="#EADBC3"/>
+  <rect x="82" y="42" width="348" height="428" rx="44" fill="url(#tileBg)"/>
+  <rect x="96" y="58" width="320" height="394" rx="32" fill="#FFFDF8"/>
+  <rect x="108" y="72" width="296" height="366" rx="24" fill="#F4ECDC"/>
+  <rect x="120" y="86" width="272" height="338" rx="18" fill="#FFFDFC"/>
+  <path d="M154 82H356" stroke="#CDB896" stroke-width="8" stroke-linecap="round" opacity="0.7"/>
+  <path d="M120 410H392" stroke="#D7C4A2" stroke-width="10" stroke-linecap="round"/>
+  <text x="256" y="286" text-anchor="middle" font-size="178" font-weight="700" fill="#149250" font-family="KaiTi, STKaiti, serif">發</text>
+  <circle cx="172" cy="168" r="12" fill="#D0312D"/>
+  <circle cx="340" cy="168" r="12" fill="#D0312D"/>
+  <circle cx="172" cy="344" r="12" fill="#D0312D"/>
+  <circle cx="340" cy="344" r="12" fill="#D0312D"/>
+  <defs>
+    <linearGradient id="tileBg" x1="96" y1="52" x2="402" y2="462" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF6E8"/>
+      <stop offset="1" stop-color="#DCC5A2"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,6 @@
+#!/bin/bash
+if [[ "$1" == "--sdk" && "$2" == "macosx" && "$*" == *"--show-sdk-platform-path"* ]]; then
+    echo "/Library/Developer/CommandLineTools"
+    exit 0
+fi
+exec /usr/bin/xcrun "$@"

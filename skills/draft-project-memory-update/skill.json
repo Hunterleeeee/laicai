@@ -1,0 +1,40 @@
+{
+  "name": "draft-project-memory-update",
+  "description": "做一个先查 Obsidian 再整理项目经验的 skill",
+  "tools": [
+    "vault.search"
+  ],
+  "steps": [
+    {
+      "kind": "vault_context",
+      "name": "vault-context",
+      "query_from": "goal",
+      "limit": 4
+    },
+    {
+      "kind": "prompt",
+      "name": "prompt",
+      "max_tokens": 160
+    },
+    {
+      "kind": "save_note",
+      "name": "save-note",
+      "folder": "06 Memory",
+      "save_by_default": false
+    }
+  ],
+  "vault_context": {
+    "enabled": true,
+    "query_from": "goal",
+    "limit": 4
+  },
+  "web_fetch": {
+    "enabled": false,
+    "url_from": "manual"
+  },
+  "output": {
+    "save_by_default": false,
+    "folder": "06 Memory",
+    "title_template": "{{skill}} - {{goal}}"
+  }
+}

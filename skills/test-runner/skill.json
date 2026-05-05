@@ -1,0 +1,24 @@
+{
+  "name": "test-runner",
+  "version": "1.0.0",
+  "description": "自动检测项目测试/构建命令并运行验证，失败时提取关键错误用于修复。",
+  "author": "Laicai Agent",
+  "tags": ["test", "build", "ci", "verification"],
+  "arguments": [
+    {
+      "name": "target",
+      "type": "string",
+      "required": false,
+      "description": "要验证的文件、目录或模块"
+    },
+    {
+      "name": "command",
+      "type": "string",
+      "required": false,
+      "description": "自定义测试/构建命令；为空时自动检测"
+    }
+  ],
+  "requires": {
+    "tools": ["verify_build", "shell_exec", "code_search", "file_read"]
+  }
+}

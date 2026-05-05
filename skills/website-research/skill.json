@@ -1,0 +1,47 @@
+{
+  "name": "website-research",
+  "description": "先查 Obsidian 再抓网页",
+  "tools": [
+    "web.fetch",
+    "vault.search"
+  ],
+  "steps": [
+    {
+      "kind": "vault_context",
+      "name": "vault-context",
+      "query_from": "goal",
+      "limit": 4
+    },
+    {
+      "kind": "web_fetch",
+      "name": "web-fetch",
+      "url_from": "manual",
+      "chars": 1600
+    },
+    {
+      "kind": "prompt",
+      "name": "prompt",
+      "max_tokens": 160
+    },
+    {
+      "kind": "save_note",
+      "name": "save-note",
+      "folder": "02 Notes",
+      "save_by_default": false
+    }
+  ],
+  "vault_context": {
+    "enabled": true,
+    "query_from": "goal",
+    "limit": 4
+  },
+  "web_fetch": {
+    "enabled": true,
+    "url_from": "manual"
+  },
+  "output": {
+    "save_by_default": false,
+    "folder": "02 Notes",
+    "title_template": "{{skill}} - {{goal}}"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "name": "web-to-wiki-draft",
+  "description": "输入网页链接，先查 Obsidian 相关笔记，再读取网页内容，生成长期主题 Wiki 草稿，可按需保存到 Obsidian",
+  "tools": [
+    "web.fetch",
+    "vault.search",
+    "vault.capture"
+  ],
+  "steps": [
+    {
+      "kind": "vault_context",
+      "name": "vault-context",
+      "query_from": "goal",
+      "limit": 6
+    },
+    {
+      "kind": "web_fetch",
+      "name": "web-fetch",
+      "url_from": "manual",
+      "chars": 6000
+    },
+    {
+      "kind": "prompt",
+      "name": "prompt",
+      "max_tokens": 1200
+    },
+    {
+      "kind": "save_note",
+      "name": "save-note",
+      "folder": "03 Wiki",
+      "save_by_default": false
+    }
+  ],
+  "vault_context": {
+    "enabled": true,
+    "query_from": "goal",
+    "limit": 6
+  },
+  "web_fetch": {
+    "enabled": true,
+    "url_from": "manual"
+  },
+  "output": {
+    "save_by_default": false,
+    "folder": "03 Wiki",
+    "title_template": "Wiki 草稿 - {{goal}}"
+  }
+}

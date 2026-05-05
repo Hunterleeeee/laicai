@@ -1,0 +1,1113 @@
+import Foundation
+import LaicaiNativeDomain
+
+// MARK: - Skill Definition
+
+public struct SkillDefinition: Identifiable, Equatable, Codable, Sendable {
+    public let id: UUID
+    public var name: String
+    public var description: String
+    public var tools: [String]
+    public var workflowName: String?
+    public var modelPreference: ModelPreference
+    public var isBuiltin: Bool
+    public var isPublished: Bool
+    public var systemHint: String?
+    public var category: String?
+
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        description: String,
+        tools: [String] = [],
+        workflowName: String? = nil,
+        modelPreference: ModelPreference = .default,
+        isBuiltin: Bool = false,
+        isPublished: Bool = false,
+        systemHint: String? = nil,
+        category: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.tools = tools
+        self.workflowName = workflowName
+        self.modelPreference = modelPreference
+        self.isBuiltin = isBuiltin
+        self.isPublished = isPublished
+        self.systemHint = systemHint
+        self.category = category
+    }
+}
+
+public enum ModelPreference: String, Codable, Sendable, CaseIterable {
+    case `default` = "default"
+    case fast = "fast"
+    case strong = "strong"
+    case code = "code"
+
+    public var title: String {
+        switch self {
+        case .default: return "默认"
+        case .fast: return "快速"
+        case .strong: return "强力"
+        case .code: return "代码"
+        }
+    }
+
+    public var icon: String {
+        switch self {
+        case .default: return "cpu"
+        case .fast: return "bolt"
+        case .strong: return "brain"
+        case .code: return "chevron.left.forwardslash.chevron.right"
+        }
+    }
+}
+
+// MARK: - Skill Registry
+
+@MainActor
+public final class SkillRegistry: ObservableObject {
+    public static let shared = SkillRegistry()
+
+    @Published public private(set) var skills: [SkillDefinition] = builtinSkills
+
+    private init() {}
+
+    public func refresh(workspaceRoot: String) {
+        var next = builtinSkills
+        for skill in Self.loadLocalSkills(workspaceRoot: workspaceRoot)
+        where !next.contains(where: { $0.name == skill.name }) {
+            next.append(skill)
+        }
+        skills = next
+    }
+
+    public func register(_ skill: SkillDefinition) {
+        if !skills.contains(where: { $0.name == skill.name }) {
+            skills.append(skill)
+        }
+    }
+
+    /// Publish a skill: marks it as published and persists it to .laicai/skills/
+    public func publish(skillID: UUID, workspaceRoot: String) -> Bool {
+        guard let index = skills.firstIndex(where: { $0.id == skillID }) else { return false }
+        skills[index].isPublished = true
+        let skill = skills[index]
+        let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !root.isEmpty else { return true }
+        let dir = (root as NSString).appendingPathComponent(".laicai/skills")
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let url = URL(fileURLWithPath: dir).appendingPathComponent("\(skill.name).json")
+        guard let data = try? JSONEncoder().encode(skill) else { return false }
+        try? data.write(to: url, options: .atomic)
+        return true
+    }
+
+    public func skill(named name: String) -> SkillDefinition? {
+        skills.first(where: { $0.name == name })
+    }
+
+    public func skillsForIntent(_ intent: UserIntent) -> [SkillDefinition] {
+        switch intent {
+        case .chat:
+            return skills.filter { $0.tools.isEmpty && $0.workflowName == nil }
+        case .research:
+            return skills.filter { $0.tools.contains("web.search") || $0.tools.contains("web.fetch") }
+        case .task:
+            return skills.filter { !$0.tools.isEmpty || $0.workflowName != nil }
+        case .workflow(let name):
+            return skills.filter { $0.workflowName == name }
+        }
+    }
+
+    @discardableResult
+    public func createDraft(
+        name: String,
+        description: String,
+        tools: [String],
+        workflowName: String? = nil,
+        category: String? = nil,
+        workspaceRoot: String
+    ) throws -> SkillDefinition {
+        let skill = SkillDefinition(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            description: description.trimmingCharacters(in: .whitespacesAndNewlines),
+            tools: tools,
+            workflowName: workflowName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            modelPreference: tools.contains("file.write") ? .code : .default,
+            isBuiltin: false,
+            category: category
+        )
+
+        let dir = (workspaceRoot as NSString).appendingPathComponent(".laicai/skills")
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let filename = Self.slug(skill.name).isEmpty ? skill.id.uuidString : Self.slug(skill.name)
+        let url = URL(fileURLWithPath: (dir as NSString).appendingPathComponent("\(filename).json"))
+        guard !FileManager.default.fileExists(atPath: url.path) else {
+            throw SkillRegistryError.alreadyExists(skill.name)
+        }
+        let data = try JSONEncoder.pretty.encode(skill)
+        try data.write(to: url, options: .atomic)
+        register(skill)
+        return skill
+    }
+
+    public static func loadLocalSkills(workspaceRoot: String) -> [SkillDefinition] {
+        let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !root.isEmpty else { return [] }
+
+        let dirs = [
+            (root as NSString).appendingPathComponent(".laicai/skills"),
+            (root as NSString).appendingPathComponent("skills")
+        ]
+        let urls = dirs.flatMap { dir in
+            (try? FileManager.default.contentsOfDirectory(
+                at: URL(fileURLWithPath: dir),
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )) ?? []
+        }
+
+        return urls
+            .flatMap { url -> [URL] in
+                if url.pathExtension.lowercased() == "json" { return [url] }
+                let nested = url.appendingPathComponent("skill.json")
+                return FileManager.default.fileExists(atPath: nested.path) ? [nested] : []
+            }
+            .compactMap { url -> SkillDefinition? in
+                guard let data = try? Data(contentsOf: url) else {
+                    return nil
+                }
+                var skill: SkillDefinition
+                if let decoded = try? JSONDecoder().decode(SkillDefinition.self, from: data) {
+                    skill = decoded
+                } else if let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let name = raw["name"] as? String {
+                    let description = raw["description"] as? String ?? "本地 skill：\(name)"
+                    let tools = raw["tools"] as? [String] ?? []
+                    skill = SkillDefinition(name: name, description: description, tools: tools, isBuiltin: false, isPublished: true)
+                } else {
+                    return nil
+                }
+                skill.isBuiltin = false
+                skill.isPublished = true
+                return skill
+            }
+            .sorted { $0.name < $1.name }
+    }
+
+    private static func slug(_ value: String) -> String {
+        value
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9\u{4e00}-\u{9fa5}]+"#, with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+}
+
+public enum SkillRegistryError: LocalizedError {
+    case alreadyExists(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .alreadyExists(let name): return "技能已存在：\(name)"
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
+private extension JSONEncoder {
+    static var pretty: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }
+}
+
+// MARK: - Model Router
+
+public struct ModelRouter {
+    public static func selectModel(
+        for skill: SkillDefinition,
+        connectors: [ConnectorProfile],
+        activeConnectorID: UUID?
+    ) -> ConnectorProfile? {
+        switch skill.modelPreference {
+        case .default:
+            return connectors.first(where: { $0.id == activeConnectorID }) ?? connectors.first
+        case .fast:
+            return connectors.first(where: { $0.kind.contains("ollama") || $0.modelName.contains("mini") || $0.modelName.contains("flash") })
+                ?? connectors.first(where: { $0.id == activeConnectorID })
+                ?? connectors.first
+        case .strong:
+            return connectors.first(where: { $0.modelName.contains("gpt-4") || $0.modelName.contains("claude") || $0.modelName.contains("opus") || $0.modelName.contains("max") })
+                ?? connectors.first(where: { $0.id == activeConnectorID })
+                ?? connectors.first
+        case .code:
+            return connectors.first(where: { $0.modelName.contains("code") || $0.modelName.contains("coder") || $0.modelName.contains("deepseek") })
+                ?? connectors.first(where: { $0.id == activeConnectorID })
+                ?? connectors.first
+        }
+    }
+
+    /// Route model based on task phase: explore→fast, execute→code, verify→strong, summarize→default
+    public static func selectModel(
+        forPhase phase: TaskPhase,
+        connectors: [ConnectorProfile],
+        activeConnectorID: UUID?
+    ) -> ConnectorProfile? {
+        let active = connectors.first(where: { $0.id == activeConnectorID }) ?? connectors.first
+        // Only route if there are multiple connectors to choose from
+        guard connectors.count > 1 else { return active }
+
+        switch phase {
+        case .explore:
+            // Fast model for search/read operations
+            return connectors.first(where: { $0.kind.contains("ollama") || $0.modelName.contains("mini") || $0.modelName.contains("flash") })
+                ?? active
+        case .execute:
+            // Code model for file writes and shell execution
+            return connectors.first(where: { $0.modelName.contains("code") || $0.modelName.contains("coder") || $0.modelName.contains("deepseek") })
+                ?? active
+        case .verify:
+            // Strong model for verification and review
+            return connectors.first(where: { $0.modelName.contains("gpt-4") || $0.modelName.contains("claude") || $0.modelName.contains("opus") || $0.modelName.contains("max") })
+                ?? active
+        case .summarize:
+            // Default model for summarization
+            return active
+        }
+    }
+}
+
+// MARK: - Built-in Skills
+
+private let builtinSkills: [SkillDefinition] = [
+
+    // ── 工作流 Skills ──
+
+    SkillDefinition(
+        name: "代码审查",
+        description: "审查代码变更，发现潜在问题、安全漏洞和风格问题",
+        tools: ["git", "file.read", "code.search"],
+        workflowName: "code-review",
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "生成测试",
+        description: "为指定代码生成单元测试，覆盖边界情况",
+        tools: ["file.read", "code.search", "file.write"],
+        workflowName: "test-gen",
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "调试",
+        description: "根据错误信息搜索代码、定位问题并分析根因",
+        tools: ["code.search", "git", "shell.exec"],
+        workflowName: "debug",
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "重构",
+        description: "分析代码结构，给出重构方案并自动执行",
+        tools: ["file.read", "code.search", "file.write", "file.edit"],
+        workflowName: "refactor",
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "生成文档",
+        description: "为代码生成文档注释和 README",
+        tools: ["file.read", "code.search", "file.write"],
+        workflowName: "doc-gen",
+        modelPreference: .default,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "翻译",
+        description: "将代码注释或文档翻译为目标语言",
+        tools: ["file.read", "file.write"],
+        workflowName: "translate",
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+
+    // ── 分析 Skills ──
+
+    SkillDefinition(
+        name: "搜索代码",
+        description: "在工作区中搜索文件或内容，支持正则",
+        tools: ["code.search", "file.read"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "读取文件",
+        description: "读取工作区中的文件内容",
+        tools: ["file.read"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "项目概览",
+        description: "索引项目结构、技术栈、入口文件和关键模块",
+        tools: ["workspace.index", "file.read", "code.search"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "Git 分析",
+        description: "查看 Git 历史、分支状态、变更差异",
+        tools: ["git", "file.read"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "依赖分析",
+        description: "分析项目依赖关系、版本冲突和安全漏洞",
+        tools: ["file.read", "code.search", "shell.exec"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "性能分析",
+        description: "审查代码性能瓶颈，提出优化建议",
+        tools: ["code.search", "file.read"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "安全审计",
+        description: "检查代码中的安全漏洞、敏感信息泄露和不安全模式",
+        tools: ["code.search", "file.read", "git"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "架构分析",
+        description: "分析项目架构设计、模块边界和依赖方向",
+        tools: ["workspace.index", "code.search", "file.read"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+
+    // ── 编辑 Skills ──
+
+    SkillDefinition(
+        name: "修改文件",
+        description: "修改文件内容（生成 diff 需审查确认）",
+        tools: ["file.write", "file.edit"],
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "批量重命名",
+        description: "跨文件重命名变量、函数或类名",
+        tools: ["code.search", "file.edit", "batch.apply"],
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "代码格式化",
+        description: "统一代码风格，修复缩进、空格和换行",
+        tools: ["file.read", "file.edit"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "添加类型注解",
+        description: "为 Python/TS/JS 代码添加类型注解和接口定义",
+        tools: ["file.read", "file.edit", "code.search"],
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "API 接口生成",
+        description: "根据数据模型生成 CRUD 接口代码",
+        tools: ["file.read", "file.write", "code.search"],
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "数据模型生成",
+        description: "根据 JSON/SQL/描述生成数据模型和 ORM 代码",
+        tools: ["file.write", "code.search"],
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "配置文件生成",
+        description: "生成 Docker、CI/CD、环境配置等基础设施文件",
+        tools: ["file.write", "file.read"],
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "错误处理增强",
+        description: "为代码添加完善的错误处理、日志记录和重试逻辑",
+        tools: ["file.read", "file.edit", "code.search"],
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+
+    // ── 执行 Skills ──
+
+    SkillDefinition(
+        name: "执行命令",
+        description: "运行终端命令（白名单限制）",
+        tools: ["shell.exec"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "构建验证",
+        description: "执行构建/测试命令，分析错误并自动修复",
+        tools: ["verify.build", "file.edit", "code.search"],
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "环境检查",
+        description: "检查开发环境、依赖版本、端口占用等",
+        tools: ["shell.exec"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "Git 提交",
+        description: "暂存变更、生成 commit message 并提交",
+        tools: ["git", "file.read"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+
+    // ── 研究 Skills ──
+
+    SkillDefinition(
+        name: "网页搜索",
+        description: "搜索网页获取最新信息和技术方案",
+        tools: ["web.search", "web.fetch"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "技术调研",
+        description: "深度调研技术方案，对比优劣并给出推荐",
+        tools: ["web.search", "web.fetch", "file.write"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "知识页生成",
+        description: "根据主题生成结构化 Wiki 知识页，整合多来源",
+        tools: ["web.search", "web.fetch", "wiki.build", "file.write"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "API 文档查阅",
+        description: "查阅 API 文档，提取用法示例和参数说明",
+        tools: ["web.search", "web.fetch"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+
+    // ── 研究 Skills（续）──
+
+    SkillDefinition(
+        name: "链接内容总结",
+        description: "读取微信公众号、小红书、抖音、B站等链接内容，自动提取正文并生成结构化总结",
+        tools: ["web.fetch", "web.search"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        systemHint: """
+        用户会提供一个或多个链接（微信公众号、小红书、抖音、B站、知乎、微博等）。
+        执行步骤：
+        1. 用 web.fetch 抓取链接内容
+        2. 如果页面需要动态渲染导致内容为空，尝试用 web.search 搜索该链接标题获取缓存/摘要
+        3. 提取正文，忽略广告、导航、推荐等无关内容
+        4. 输出结构化总结：
+           📌 标题：
+           👤 作者/来源：
+           📅 发布时间（如果可获取）：
+           📝 核心内容（3-5个要点）：
+           💡 关键观点/结论：
+           🏷️ 标签/话题：
+        5. 如果是视频类内容（抖音/B站），尽量提取描述、评论摘要
+        6. 多个链接时逐一总结，最后给出对比或综合分析
+        """
+    ),
+    SkillDefinition(
+        name: "竞品分析",
+        description: "搜索竞品信息，对比功能、定价、技术栈，生成分析报告",
+        tools: ["web.search", "web.fetch", "file.write"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "论文速读",
+        description: "读取论文链接或 PDF 内容，提取核心贡献、方法和结论",
+        tools: ["web.fetch", "web.search"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+
+    // ── 通用 Skills ──
+
+    SkillDefinition(
+        name: "解释代码",
+        description: "逐行解释代码逻辑，适合学习和交接",
+        tools: ["file.read", "code.search"],
+        modelPreference: .default,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "需求分析",
+        description: "分析需求描述，拆解任务并估算工作量",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "代码转换",
+        description: "在不同编程语言之间转换代码实现",
+        tools: ["file.read", "file.write"],
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "正则编写",
+        description: "根据描述生成正则表达式，附带测试用例",
+        tools: [],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "SQL 编写",
+        description: "根据需求编写 SQL 查询、建表和数据迁移脚本",
+        tools: ["file.read", "file.write"],
+        modelPreference: .code,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "Prompt 优化",
+        description: "优化 AI 提示词，提升输出质量和一致性",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+
+    // ── Git 自动化 Skills（市场热门）──
+
+    SkillDefinition(
+        name: "Commit Message 生成",
+        description: "根据 git diff 自动生成规范的 commit message（Conventional Commits）",
+        tools: ["git", "file.read"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "PR 描述生成",
+        description: "根据分支差异自动生成 PR/MR 描述，含变更摘要和影响分析",
+        tools: ["git", "file.read", "code.search"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "Changelog 生成",
+        description: "从 Git 历史自动生成 CHANGELOG，按 feat/fix/refactor 分类",
+        tools: ["git", "file.read", "file.write"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+
+    // ── DevOps / 部署 Skills（市场热门）──
+
+    SkillDefinition(
+        name: "CI/CD 调试",
+        description: "分析 CI/CD 构建日志，定位失败原因并给出修复方案",
+        tools: ["file.read", "shell.exec", "web.fetch"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "迁移指南生成",
+        description: "生成框架/库版本升级迁移指南，含 breaking changes 和修改步骤",
+        tools: ["file.read", "code.search", "web.search", "file.write"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+
+    // ── 生产力 Skills（市场热门）──
+
+    SkillDefinition(
+        name: "README 生成",
+        description: "分析项目结构自动生成专业 README，含安装、用法、API 文档",
+        tools: ["workspace.index", "file.read", "file.write"],
+        modelPreference: .default,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "代码问答",
+        description: "基于项目代码回答问题，免去手动翻代码",
+        tools: ["code.search", "file.read", "workspace.index"],
+        modelPreference: .fast,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "学习路径规划",
+        description: "根据目标技术栈规划学习路线、推荐资源和实践项目",
+        tools: ["web.search"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+    SkillDefinition(
+        name: "面试准备",
+        description: "根据岗位和技术栈生成面试题库、考点解析和模拟问答",
+        tools: ["web.search"],
+        modelPreference: .strong,
+        isBuiltin: true
+    ),
+
+    // ══════════════════════════════════════════════════
+    // 非开发行业技能
+    // ══════════════════════════════════════════════════
+
+    // ── 营销 Marketing ──
+
+    SkillDefinition(
+        name: "营销文案",
+        description: "生成品牌推广、产品介绍、活动宣传等营销文案，支持多种调性",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "marketing"
+    ),
+    SkillDefinition(
+        name: "小红书笔记",
+        description: "生成小红书风格种草笔记，含标题、正文、标签和封面建议",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true,
+        systemHint: """
+        生成小红书风格笔记，要求：
+        1. 标题：用数字+emoji+痛点/解决方案，如「❗️5个被忽略的XXX技巧」
+        2. 正文：口语化、分段短句、多emoji、穿插个人体验
+        3. 标签：5-10个相关话题标签
+        4. 封面文案建议：适合做图片封面的关键词
+        5. 语气自然真诚，避免过度营销感
+        """,
+        category: "marketing"
+    ),
+    SkillDefinition(
+        name: "公众号文章",
+        description: "生成微信公众号长文，含标题、摘要、正文和排版建议",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true,
+        systemHint: """
+        生成微信公众号文章，要求：
+        1. 标题：吸引点击但不标题党，可提供2-3个备选
+        2. 摘要：30字以内，激发阅读欲望
+        3. 正文：结构清晰，段落分明，适当使用小标题
+        4. 金句：在关键位置插入可被转发的金句
+        5. 结尾：引导关注/转发/留言互动
+        6. 排版建议：推荐字号、颜色、配图位置
+        """,
+        category: "marketing"
+    ),
+    SkillDefinition(
+        name: "短视频脚本",
+        description: "生成抖音/快手/视频号短视频脚本，含镜头、台词和时间线",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true,
+        systemHint: """
+        生成短视频脚本，格式：
+        时间 | 画面 | 台词/旁白 | 字幕/特效
+        要求：
+        - 前3秒抓眼球（hook）
+        - 总时长控制在15-60秒
+        - 节奏紧凑，信息密度高
+        - 适合竖屏拍摄
+        - 结尾设置互动引导（点赞/评论/关注）
+        """,
+        category: "marketing"
+    ),
+    SkillDefinition(
+        name: "SEO 优化",
+        description: "分析内容的 SEO 表现，优化标题、描述、关键词和结构",
+        tools: ["web.search"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "marketing"
+    ),
+    SkillDefinition(
+        name: "广告投放文案",
+        description: "为信息流广告、搜索广告生成多组测试文案",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "marketing"
+    ),
+    SkillDefinition(
+        name: "用户评价回复",
+        description: "批量生成电商/外卖/App Store 用户评价的专业回复",
+        tools: [],
+        modelPreference: .fast,
+        isBuiltin: true,
+        category: "marketing"
+    ),
+
+    // ── 产品 Product ──
+
+    SkillDefinition(
+        name: "PRD 编写",
+        description: "根据需求描述生成产品需求文档，含背景、目标、功能列表、用户故事",
+        tools: ["file.write"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "product"
+    ),
+    SkillDefinition(
+        name: "用户故事",
+        description: "将模糊需求转化为标准用户故事（As a...I want...So that...）和验收标准",
+        tools: [],
+        modelPreference: .default,
+        isBuiltin: true,
+        category: "product"
+    ),
+    SkillDefinition(
+        name: "功能优先级排序",
+        description: "用 RICE/MoSCoW/Kano 模型评估功能优先级，输出排序建议",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "product"
+    ),
+    SkillDefinition(
+        name: "用户调研问卷",
+        description: "设计用户调研问卷，含筛选题、核心题和开放题",
+        tools: [],
+        modelPreference: .default,
+        isBuiltin: true,
+        category: "product"
+    ),
+    SkillDefinition(
+        name: "产品发布计划",
+        description: "生成产品上线 checklist 和发布计划，含灰度策略和回滚方案",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "product"
+    ),
+
+    // ── 内容 Content ──
+
+    SkillDefinition(
+        name: "长文写作",
+        description: "生成深度长文，含大纲、正文、参考资料，支持多种风格",
+        tools: ["web.search"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "content"
+    ),
+    SkillDefinition(
+        name: "周报/日报",
+        description: "根据工作描述生成规范的日报/周报，突出成果和进展",
+        tools: [],
+        modelPreference: .fast,
+        isBuiltin: true,
+        systemHint: """
+        生成工作周报/日报，格式：
+        一、本周完成
+        - 【项目名】完成内容（量化成果）
+        二、进行中
+        - 【项目名】进展说明（完成百分比）
+        三、下周计划
+        - 计划事项和预期产出
+        四、需要协助
+        - 阻塞项和需要的支持
+        要求：语言专业简练，突出数据和结果
+        """,
+        category: "content"
+    ),
+    SkillDefinition(
+        name: "邮件撰写",
+        description: "生成商务邮件，支持英文/中文，多种场景（邀请、感谢、催促、道歉等）",
+        tools: [],
+        modelPreference: .default,
+        isBuiltin: true,
+        category: "content"
+    ),
+    SkillDefinition(
+        name: "会议纪要",
+        description: "将会议录音/笔记整理为结构化纪要，含决议、待办和负责人",
+        tools: [],
+        modelPreference: .fast,
+        isBuiltin: true,
+        category: "content"
+    ),
+    SkillDefinition(
+        name: "演示文稿制作",
+        description: "生成专业演示文稿全套方案：结构布局、页面内容、视觉设计、演讲者备注",
+        tools: ["web.search", "file.write"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        systemHint: """
+        你是一位顶尖演示文稿设计顾问，精通 McKinsey/BCG 风格的专业 PPT 制作。
+
+        收到用户主题后，输出完整的演示文稿方案：
+
+        ## 1. 整体策略
+        - 核心叙事线：问题 → 洞察 → 方案 → 价值 → 行动
+        - 受众分析：谁在看、关心什么、决策因素
+        - 时长建议和节奏控制
+
+        ## 2. 每页内容（逐页输出）
+        每一页包含：
+        - 【页标题】简洁有力，一句话传递核心信息
+        - 【布局类型】全出血/左右分栏/三栏/数据卡片/时间线/对比图/引用页
+        - 【核心观点】这一页要传递的唯一核心信息
+        - 【要素布局】具体包含哪些元素（标题/副标题/正文/图表/图片/图标/数据卡片）
+        - 【视觉建议】配色、字体大小、图表类型、配图建议
+        - 【演讲者备注】讲到这页说什么，用什么过渡，健谈时间
+        - 【动画建议】元素出现顺序和动画效果
+
+        ## 3. 视觉设计规范
+        - 主色/辅助色/强调色 Hex 值
+        - 字体树：标题/副标题/正文/数据的字体字号
+        - 图表风格统一规范
+        - 留白和对齐原则
+
+        ## 4. 输出格式要求
+        - 使用 Markdown 表格展示每页结构
+        - 如果用户要求，可生成 Marp/Slidev/reveal.js 格式的 Markdown PPT
+        - 可提供可复制的设计关键词（用于配图搜索）
+
+        ## 5. 质量标准
+        - 每页只传递一个核心信息（one message per slide）
+        - 文字精炼，绝不堆砌文字墙
+        - 数据可视化优先于文字描述
+        - 每个图表都有清晰的 insight 标注
+        - 开头抽眼尾记得住，中间节奏紧凑
+        """,
+        category: "design"
+    ),
+    SkillDefinition(
+        name: "多语言翻译",
+        description: "翻译文档/文案，保持原文语气和风格，支持中英日韩法德等",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "content"
+    ),
+    SkillDefinition(
+        name: "文风改写",
+        description: "将同一内容改写为不同风格：正式/口语/学术/幽默/种草等",
+        tools: [],
+        modelPreference: .default,
+        isBuiltin: true,
+        category: "content"
+    ),
+
+    // ── 设计 Design ──
+
+    SkillDefinition(
+        name: "UI 设计方案",
+        description: "生成完整的 UI 设计规范：组件库、页面结构、交互流程、响应式适配",
+        tools: ["web.search", "file.write"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        systemHint: """
+        你是一位资深 UI/UX 设计师，精通 Apple HIG、Material Design、以及现代 Web 设计系统。
+
+        收到设计需求后，输出专业的 UI 设计方案：
+
+        ## 1. 设计策略
+        - 目标用户画像和使用场景
+        - 设计原则：简洁/高效/可访问/一致性
+        - 参考竞品和设计趋势
+
+        ## 2. 设计系统 Tokens
+        - 色彩体系：主色/辅色/语义色/中性色（含 Hex、亮暗主题变体）
+        - 字体树：字体家族/字号梯度/字重/行高
+        - 间距系统：4px 基数的间距梯度
+        - 圆角梯度：小/中/大/全圆
+        - 阴影梯度：浅/中/深
+        - 动画规范：时长/缓动曲线
+
+        ## 3. 组件库设计
+        每个组件包含：
+        - 【组件名称】和用途
+        - 【变体】尺寸(sm/md/lg)、状态(default/hover/active/disabled/focus)
+        - 【结构】包含哪些子元素
+        - 【尺寸规范】宽高/内边距/外边距
+        - 【代码示例】SwiftUI/React/CSS 示例（根据用户技术栈）
+
+        核心组件清单：
+        Button, Input, Card, Modal, Toast, Badge, Avatar, Tab, Sidebar, NavBar,
+        Table, Dropdown, Toggle, Slider, Progress, Tooltip, Alert
+
+        ## 4. 页面设计
+        每个页面包含：
+        - 【页面名】和核心任务
+        - 【布局结构】栅格系统、模块划分
+        - 【线框图】用 ASCII art 或结构化描述展示布局
+        - 【交互流程】用户操作 → 反馈 → 状态转换
+        - 【响应式适配】桌面/平板/手机的布局差异
+        - 【动效设计】转场/进入/反馈动效
+
+        ## 5. 输出标准
+        - 可以直接交付给开发团队实现的精确规范
+        - 含尺寸、颜色、间距的确切数值
+        - 可复制的 CSS 变量 / SwiftUI 扩展 / Tailwind 配置
+        - 若用户指定框架，直接输出可运行的组件代码
+        """,
+        category: "design"
+    ),
+    SkillDefinition(
+        name: "品牌视觉设计",
+        description: "生成品牌视觉识别系统：Logo 概念、色彩方案、字体组合、应用场景",
+        tools: ["web.search"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        systemHint: """
+        你是一位品牌视觉设计顾问，精通品牌识别系统和视觉传达。
+
+        ## 1. 品牌分析
+        - 品牌定位、受众、价值观
+        - 竞品视觉语言分析
+        - 情绪版关键词：专业/活泼/科技/温暖…
+
+        ## 2. Logo 概念
+        - 提供 3-5 个方向，每个包含：
+          - 创意说明和含义
+          - 结构描述（几何/文字/图形组合）
+          - AI 生图提示词（可直接喜用 Midjourney/DALL-E）
+          - 适用场景和尺寸变体
+
+        ## 3. 色彩方案
+        - 主色 + 辅助色 + 点缀色（含 Hex/RGB/HSL）
+        - 亮/暗主题变体
+        - 渐变色规范
+        - 无障碍对比度检查
+
+        ## 4. 字体组合
+        - 主字体/辅助字体推荐（含中英文搭配）
+        - 字体梯度规范
+        - 使用场景示例
+
+        ## 5. 应用场景示例
+        - 名片、信纸抬头、邮件签名
+        - 社交媒体头像、封面模板
+        - 网站/App 方案概览
+        - 周边/印刷品建议
+        """,
+        category: "design"
+    ),
+
+    // ── 数据 Data ──
+
+    SkillDefinition(
+        name: "数据分析报告",
+        description: "分析数据指标趋势，生成分析报告含图表建议和改进方案",
+        tools: ["file.read"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "data"
+    ),
+    SkillDefinition(
+        name: "Excel 公式",
+        description: "根据需求生成 Excel/Google Sheets 公式和 VBA 宏",
+        tools: [],
+        modelPreference: .code,
+        isBuiltin: true,
+        category: "data"
+    ),
+    SkillDefinition(
+        name: "数据可视化建议",
+        description: "根据数据类型推荐最佳图表类型和配色方案",
+        tools: [],
+        modelPreference: .default,
+        isBuiltin: true,
+        category: "data"
+    ),
+    SkillDefinition(
+        name: "问卷数据分析",
+        description: "分析问卷调查结果，生成交叉分析和关键发现",
+        tools: ["file.read"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "data"
+    ),
+
+    // ── 商业 Business ──
+
+    SkillDefinition(
+        name: "商业计划书",
+        description: "生成 BP 大纲和核心章节：市场分析、商业模式、财务预测",
+        tools: ["web.search"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "business"
+    ),
+    SkillDefinition(
+        name: "合同审查",
+        description: "审查合同条款，标注风险点和不合理条款，给出修改建议",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true,
+        systemHint: """
+        审查合同时注意：
+        1. 标注每个风险条款的风险等级（高/中/低）
+        2. 说明不合理之处和可能后果
+        3. 给出修改建议和替代条款
+        4. 检查：违约责任、知识产权、竞业限制、保密义务、管辖法院
+        5. 输出格式：逐条分析 + 整体风险评估
+        注意：仅供参考，不构成法律意见
+        """,
+        category: "business"
+    ),
+    SkillDefinition(
+        name: "JD 编写",
+        description: "根据岗位和团队情况生成规范的招聘 JD，含职责和任职要求",
+        tools: [],
+        modelPreference: .default,
+        isBuiltin: true,
+        category: "business"
+    ),
+    SkillDefinition(
+        name: "OKR 制定",
+        description: "帮助制定 OKR，分解目标为可量化的关键结果",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "business"
+    ),
+    SkillDefinition(
+        name: "客户方案书",
+        description: "生成客户提案/方案书，含问题分析、解决方案、报价和时间表",
+        tools: [],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "business"
+    ),
+    SkillDefinition(
+        name: "SWOT 分析",
+        description: "对产品/项目/公司进行 SWOT 分析，输出结构化的战略建议",
+        tools: ["web.search"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        category: "business"
+    ),
+]

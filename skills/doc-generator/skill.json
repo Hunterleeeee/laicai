@@ -1,0 +1,24 @@
+{
+  "name": "doc-generator",
+  "version": "1.0.0",
+  "description": "根据代码、配置或主题生成 README、API 文档、使用说明或 Obsidian 风格文档。",
+  "author": "Laicai Agent",
+  "tags": ["documentation", "readme", "api", "obsidian"],
+  "arguments": [
+    {
+      "name": "target",
+      "type": "string",
+      "required": true,
+      "description": "要生成文档的文件、目录、模块或主题"
+    },
+    {
+      "name": "doc_type",
+      "type": "string",
+      "required": false,
+      "description": "文档类型，如 README、API、使用指南、Wiki、变更说明"
+    }
+  ],
+  "requires": {
+    "tools": ["file_read", "code_search", "wiki_build", "file_write", "file_edit"]
+  }
+}

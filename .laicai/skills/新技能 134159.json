@@ -1,0 +1,11 @@
+{
+  "description" : "本地技能草稿，可在 .laicai\/skills 中继续编辑。",
+  "id" : "7255195E-6BAD-4116-B3E3-E2D02AA0FA91",
+  "isBuiltin" : false,
+  "modelPreference" : "default",
+  "name" : "新技能 134159",
+  "tools" : [
+    "code.search",
+    "file.read"
+  ]
+}

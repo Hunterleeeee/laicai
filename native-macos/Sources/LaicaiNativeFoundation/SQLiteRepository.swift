@@ -1,0 +1,478 @@
+import Foundation
+#if canImport(SQLite3)
+import SQLite3
+#endif
+import LaicaiNativeDomain
+
+public final class SQLiteRepository {
+    private var db: OpaquePointer?
+    private let queue = DispatchQueue(label: "laicai.sqlite", qos: .utility)
+    private let path: String
+
+    public init(path: String? = nil) {
+        let base = path ?? (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory())
+        let dir = (base as NSString).appendingPathComponent("Laicai")
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        self.path = (dir as NSString).appendingPathComponent("store.sqlite3")
+        open()
+        migrate()
+    }
+
+    deinit {
+        sqlite3_close(db)
+    }
+
+    private func open() {
+        if sqlite3_open(path, &db) != SQLITE_OK {
+            db = nil
+        }
+    }
+
+    private func migrate() {
+        exec("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            preview TEXT NOT NULL DEFAULT '',
+            updated_at REAL NOT NULL,
+            is_pinned INTEGER NOT NULL DEFAULT 0,
+            category TEXT NOT NULL DEFAULT 'general',
+            model_name TEXT NOT NULL DEFAULT '',
+            unread_count INTEGER NOT NULL DEFAULT 0,
+            turns_json TEXT NOT NULL DEFAULT '[]'
+        );
+        """)
+        exec("""
+        CREATE TABLE IF NOT EXISTS connectors (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            api_key TEXT NOT NULL DEFAULT '',
+            health INTEGER NOT NULL DEFAULT 1,
+            last_checked REAL NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 0
+        );
+        """)
+        exec("ALTER TABLE connectors ADD COLUMN tool_calling_policy TEXT NOT NULL DEFAULT 'automatic';")
+        exec("ALTER TABLE connectors ADD COLUMN tool_calling_capability TEXT;")
+        exec("ALTER TABLE connectors ADD COLUMN tool_calling_capability_source TEXT;")
+        exec("ALTER TABLE connectors ADD COLUMN tool_calling_capability_learned_at REAL;")
+        exec("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            steps_json TEXT NOT NULL DEFAULT '[]',
+            context_json TEXT NOT NULL DEFAULT '{}',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            connector_id TEXT,
+            workflow_name TEXT
+        );
+        """)
+        exec("ALTER TABLE tasks ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}';")
+        exec("""
+        CREATE TABLE IF NOT EXISTS threads (
+            id TEXT PRIMARY KEY,
+            updated_at REAL NOT NULL,
+            record_json TEXT NOT NULL
+        );
+        """)
+        exec("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        """)
+        // G1: Persistent memory — cross-session project knowledge
+        exec("""
+        CREATE TABLE IF NOT EXISTS persistent_memory (
+            id TEXT PRIMARY KEY,
+            workspace TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'general',
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            access_count INTEGER NOT NULL DEFAULT 0
+        );
+        """)
+        exec("CREATE INDEX IF NOT EXISTS idx_pm_workspace ON persistent_memory(workspace);")
+        exec("CREATE INDEX IF NOT EXISTS idx_pm_category ON persistent_memory(category);")
+    }
+
+    // MARK: - Persistent Memory (G1)
+
+    public func saveMemory(id: String = UUID().uuidString, workspace: String, category: String, key: String, value: String) {
+        let now = Date().timeIntervalSinceReferenceDate
+        guard let stmt = prepare("""
+            INSERT OR REPLACE INTO persistent_memory (id, workspace, category, key, value, created_at, updated_at, access_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT access_count FROM persistent_memory WHERE id = ?), 0))
+        """) else { return }
+        bindText(stmt, index: 1, value: id)
+        bindText(stmt, index: 2, value: workspace)
+        bindText(stmt, index: 3, value: category)
+        bindText(stmt, index: 4, value: key)
+        bindText(stmt, index: 5, value: value)
+        sqlite3_bind_double(stmt, 6, now)
+        sqlite3_bind_double(stmt, 7, now)
+        bindText(stmt, index: 8, value: id)
+        _ = step(stmt)
+    }
+
+    public func loadMemories(workspace: String, category: String? = nil, limit: Int = 50) -> [(id: String, category: String, key: String, value: String)] {
+        let sql: String
+        if let category {
+            sql = "SELECT id, category, key, value FROM persistent_memory WHERE workspace = '\(workspace)' AND category = '\(category)' ORDER BY updated_at DESC LIMIT \(limit)"
+        } else {
+            sql = "SELECT id, category, key, value FROM persistent_memory WHERE workspace = '\(workspace)' ORDER BY updated_at DESC LIMIT \(limit)"
+        }
+        guard let stmt = prepare(sql) else { return [] }
+        var results: [(String, String, String, String)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = String(cString: sqlite3_column_text(stmt, 0))
+            let cat = String(cString: sqlite3_column_text(stmt, 1))
+            let key = String(cString: sqlite3_column_text(stmt, 2))
+            let value = String(cString: sqlite3_column_text(stmt, 3))
+            results.append((id, cat, key, value))
+        }
+        sqlite3_finalize(stmt)
+        return results
+    }
+
+    public func deleteMemory(id: String) {
+        exec("DELETE FROM persistent_memory WHERE id = '\(id)'")
+    }
+
+    private func exec(_ sql: String) {
+        var err: UnsafeMutablePointer<CChar>?
+        sqlite3_exec(db, sql, nil, nil, &err)
+        if let err { sqlite3_free(err) }
+    }
+
+    private func prepare(_ sql: String) -> OpaquePointer? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        return stmt
+    }
+
+    private func bindText(_ stmt: OpaquePointer, index: Int, value: String) {
+        sqlite3_bind_text(stmt, Int32(index), value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    }
+
+    private func step(_ stmt: OpaquePointer) -> Bool {
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        return rc == SQLITE_DONE
+    }
+}
+
+extension SQLiteRepository: ThreadRepository {
+    public func loadThreads() throws -> [Thread]? {
+        guard let stmt = prepare("SELECT record_json FROM threads ORDER BY updated_at DESC") else {
+            return nil
+        }
+        var threads: [Thread] = []
+        let decoder = JSONDecoder()
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let recordJSON = String(cString: sqlite3_column_text(stmt, 0))
+            if let data = recordJSON.data(using: .utf8),
+               let thread = try? decoder.decode(Thread.self, from: data) {
+                threads.append(thread)
+            }
+        }
+        sqlite3_finalize(stmt)
+        // If no threads in unified table, try migrating from legacy session/task tables
+        if threads.isEmpty {
+            return try migrateLegacyToThreads()
+        }
+        return threads
+    }
+
+    public func saveThreads(_ threads: [Thread]) throws {
+        // Safety: never wipe a non-empty DB with an empty list (protects against decode-fail cascades)
+        if threads.isEmpty {
+            if let countStmt = prepare("SELECT count(*) FROM threads") {
+                if sqlite3_step(countStmt) == SQLITE_ROW {
+                    let existing = sqlite3_column_int(countStmt, 0)
+                    sqlite3_finalize(countStmt)
+                    if existing > 0 { return }
+                } else {
+                    sqlite3_finalize(countStmt)
+                }
+            }
+        }
+        exec("BEGIN")
+        exec("DELETE FROM threads")
+        let encoder = JSONEncoder()
+        for thread in threads {
+            guard let stmt = prepare("INSERT INTO threads (id, updated_at, record_json) VALUES (?, ?, ?)") else { continue }
+            bindText(stmt, index: 1, value: thread.id.uuidString)
+            sqlite3_bind_double(stmt, 2, thread.updatedAt.timeIntervalSince1970)
+            let data = (try? encoder.encode(thread)) ?? Data()
+            bindText(stmt, index: 3, value: String(data: data, encoding: .utf8) ?? "{}")
+            _ = step(stmt)
+        }
+        exec("COMMIT")
+    }
+
+    /// One-time migration: load sessions + tasks from legacy tables, convert to Thread, save to threads table.
+    private func migrateLegacyToThreads() throws -> [Thread] {
+        var threads: [Thread] = []
+        if let sessions = try? loadSessions() {
+            threads += sessions.map(Thread.init(session:))
+        }
+        if let tasks = try? loadTasks() {
+            threads += tasks.map(Thread.init(task:))
+        }
+        if !threads.isEmpty {
+            try saveThreads(threads)
+        }
+        return threads
+    }
+}
+
+extension SQLiteRepository: SessionRepository {
+    public func loadSessions() throws -> [ChatSession]? {
+        guard let stmt = prepare("SELECT id, title, preview, updated_at, is_pinned, category, model_name, unread_count, turns_json FROM sessions ORDER BY updated_at DESC") else {
+            return nil
+        }
+        var sessions: [ChatSession] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) ?? UUID()
+            let title = String(cString: sqlite3_column_text(stmt, 1))
+            let preview = String(cString: sqlite3_column_text(stmt, 2))
+            let updatedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
+            let isPinned = sqlite3_column_int(stmt, 4) != 0
+            let categoryStr = String(cString: sqlite3_column_text(stmt, 5))
+            let category = SessionCategory(rawValue: categoryStr) ?? .inbox
+            let modelName = String(cString: sqlite3_column_text(stmt, 6))
+            let unreadCount = Int(sqlite3_column_int(stmt, 7))
+            let turnsJSON = String(cString: sqlite3_column_text(stmt, 8))
+            let turns = (try? JSONDecoder().decode([ChatTurn].self, from: turnsJSON.data(using: .utf8) ?? Data())) ?? []
+            sessions.append(ChatSession(
+                id: id, title: title, preview: preview,
+                updatedAt: updatedAt, isPinned: isPinned,
+                category: category, modelName: modelName,
+                unreadCount: unreadCount, turns: turns
+            ))
+        }
+        sqlite3_finalize(stmt)
+        return sessions
+    }
+
+    public func saveSessions(_ sessions: [ChatSession]) throws {
+        exec("BEGIN")
+        exec("DELETE FROM sessions")
+        for s in sessions {
+            guard let stmt = prepare("INSERT INTO sessions (id, title, preview, updated_at, is_pinned, category, model_name, unread_count, turns_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)") else { continue }
+            bindText(stmt, index: 1, value: s.id.uuidString)
+            bindText(stmt, index: 2, value: s.title)
+            bindText(stmt, index: 3, value: s.preview)
+            sqlite3_bind_double(stmt, 4, s.updatedAt.timeIntervalSince1970)
+            sqlite3_bind_int(stmt, 5, s.isPinned ? 1 : 0)
+            bindText(stmt, index: 6, value: s.category.rawValue)
+            bindText(stmt, index: 7, value: s.modelName)
+            sqlite3_bind_int(stmt, 8, Int32(s.unreadCount))
+            let turnsData = (try? JSONEncoder().encode(s.turns)) ?? Data()
+            bindText(stmt, index: 9, value: String(data: turnsData, encoding: .utf8) ?? "[]")
+            _ = step(stmt)
+        }
+        exec("COMMIT")
+    }
+}
+
+extension SQLiteRepository: TaskRepository {
+    public func loadTasks() throws -> [AgentTask]? {
+        guard let stmt = prepare("SELECT id, title, status, steps_json, context_json, created_at, updated_at, connector_id, workflow_name FROM tasks ORDER BY updated_at DESC") else {
+            return nil
+        }
+        var tasks: [AgentTask] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) ?? UUID()
+            let title = String(cString: sqlite3_column_text(stmt, 1))
+            let statusStr = String(cString: sqlite3_column_text(stmt, 2))
+            let status = TaskStatus(rawValue: statusStr) ?? .queued
+            let stepsJSON = String(cString: sqlite3_column_text(stmt, 3))
+            let steps = (try? JSONDecoder().decode([TaskStep].self, from: stepsJSON.data(using: .utf8) ?? Data())) ?? []
+            let contextJSON = String(cString: sqlite3_column_text(stmt, 4))
+            let context = (try? JSONDecoder().decode(TaskContext.self, from: contextJSON.data(using: .utf8) ?? Data())) ?? TaskContext()
+            let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 5))
+            let updatedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
+            let connectorID = sqlite3_column_text(stmt, 7).map { UUID(uuidString: String(cString: $0)) } ?? nil
+            let workflowName = sqlite3_column_text(stmt, 8).map { String(cString: $0) }
+            tasks.append(AgentTask(
+                id: id, title: title, status: status, steps: steps,
+                connectorID: connectorID, workflowName: workflowName,
+                context: context, createdAt: createdAt, updatedAt: updatedAt
+            ))
+        }
+        sqlite3_finalize(stmt)
+        return tasks
+    }
+
+    public func saveTasks(_ tasks: [AgentTask]) throws {
+        exec("BEGIN")
+        exec("DELETE FROM tasks")
+        for t in tasks {
+            try appendTask(t)
+        }
+        exec("COMMIT")
+    }
+
+    public func appendTask(_ task: AgentTask) throws {
+        guard let stmt = prepare("INSERT INTO tasks (id, title, status, steps_json, context_json, created_at, updated_at, connector_id, workflow_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)") else { return }
+        bindText(stmt, index: 1, value: task.id.uuidString)
+        bindText(stmt, index: 2, value: task.title)
+        bindText(stmt, index: 3, value: task.status.rawValue)
+        let stepsData = (try? JSONEncoder().encode(task.steps)) ?? Data()
+        bindText(stmt, index: 4, value: String(data: stepsData, encoding: .utf8) ?? "[]")
+        let contextData = (try? JSONEncoder().encode(task.context)) ?? Data()
+        bindText(stmt, index: 5, value: String(data: contextData, encoding: .utf8) ?? "{}")
+        sqlite3_bind_double(stmt, 6, task.createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(stmt, 7, task.updatedAt.timeIntervalSince1970)
+        if let cid = task.connectorID {
+            bindText(stmt, index: 8, value: cid.uuidString)
+        } else {
+            sqlite3_bind_null(stmt, 8)
+        }
+        if let wn = task.workflowName {
+            bindText(stmt, index: 9, value: wn)
+        } else {
+            sqlite3_bind_null(stmt, 9)
+        }
+        _ = step(stmt)
+    }
+
+    public func updateTask(id: UUID, _ mutate: (inout AgentTask) -> Void) throws {
+        var tasks = try loadTasks() ?? []
+        guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&tasks[idx])
+        // Update single row
+        let task = tasks[idx]
+        guard let stmt = prepare("UPDATE tasks SET title=?, status=?, steps_json=?, context_json=?, updated_at=?, connector_id=?, workflow_name=? WHERE id=?") else { return }
+        bindText(stmt, index: 1, value: task.title)
+        bindText(stmt, index: 2, value: task.status.rawValue)
+        let stepsData = (try? JSONEncoder().encode(task.steps)) ?? Data()
+        bindText(stmt, index: 3, value: String(data: stepsData, encoding: .utf8) ?? "[]")
+        let contextData = (try? JSONEncoder().encode(task.context)) ?? Data()
+        bindText(stmt, index: 4, value: String(data: contextData, encoding: .utf8) ?? "{}")
+        sqlite3_bind_double(stmt, 5, task.updatedAt.timeIntervalSince1970)
+        if let cid = task.connectorID {
+            bindText(stmt, index: 6, value: cid.uuidString)
+        } else {
+            sqlite3_bind_null(stmt, 6)
+        }
+        if let wn = task.workflowName {
+            bindText(stmt, index: 7, value: wn)
+        } else {
+            sqlite3_bind_null(stmt, 7)
+        }
+        bindText(stmt, index: 8, value: id.uuidString)
+        _ = step(stmt)
+    }
+
+    public func deleteTask(id: UUID) throws {
+        guard let stmt = prepare("DELETE FROM tasks WHERE id=?") else { return }
+        bindText(stmt, index: 1, value: id.uuidString)
+        _ = step(stmt)
+    }
+}
+
+extension SQLiteRepository: ConnectorRepository {
+    public func loadConnectorCatalog() throws -> ConnectorCatalog? {
+        guard let stmt = prepare("SELECT id, name, kind, endpoint, model_name, api_key, health, last_checked, tool_calling_policy, tool_calling_capability, tool_calling_capability_source, tool_calling_capability_learned_at, is_active FROM connectors") else {
+            return nil
+        }
+        var connectors: [ConnectorProfile] = []
+        var activeID: UUID?
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) ?? UUID()
+            let name = String(cString: sqlite3_column_text(stmt, 1))
+            let kind = String(cString: sqlite3_column_text(stmt, 2))
+            let endpoint = String(cString: sqlite3_column_text(stmt, 3))
+            let modelName = String(cString: sqlite3_column_text(stmt, 4))
+            let apiKey = String(cString: sqlite3_column_text(stmt, 5))
+            let healthInt = sqlite3_column_int(stmt, 6)
+            let health: ConnectorHealth = healthInt == 2 ? .ready : healthInt == 1 ? .attention : .offline
+            let lastChecked = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 7))
+            let toolCallingPolicy: ConnectorToolCallingPolicy?
+            if sqlite3_column_type(stmt, 8) == SQLITE_NULL {
+                toolCallingPolicy = nil
+            } else {
+                toolCallingPolicy = ConnectorToolCallingPolicy(rawValue: String(cString: sqlite3_column_text(stmt, 8)))
+            }
+            let toolCallingCapability: ConnectorToolCallingCapability?
+            if sqlite3_column_type(stmt, 9) == SQLITE_NULL {
+                toolCallingCapability = nil
+            } else {
+                toolCallingCapability = ConnectorToolCallingCapability(rawValue: String(cString: sqlite3_column_text(stmt, 9)))
+            }
+            let toolCallingCapabilitySource: ConnectorToolCallingCapabilityObservationSource?
+            if sqlite3_column_type(stmt, 10) == SQLITE_NULL {
+                toolCallingCapabilitySource = nil
+            } else {
+                toolCallingCapabilitySource = ConnectorToolCallingCapabilityObservationSource(rawValue: String(cString: sqlite3_column_text(stmt, 10)))
+            }
+            let toolCallingCapabilityLearnedAt: Date?
+            if sqlite3_column_type(stmt, 11) == SQLITE_NULL {
+                toolCallingCapabilityLearnedAt = nil
+            } else {
+                toolCallingCapabilityLearnedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 11))
+            }
+            let isActive = sqlite3_column_int(stmt, 12) != 0
+            connectors.append(ConnectorProfile(
+                id: id, name: name, kind: kind, endpoint: endpoint,
+                modelName: modelName,
+                note: apiKey,
+                toolCallingPolicy: toolCallingPolicy,
+                toolCallingCapability: toolCallingCapability,
+                toolCallingCapabilitySource: toolCallingCapabilitySource,
+                toolCallingCapabilityLearnedAt: toolCallingCapabilityLearnedAt,
+                health: health,
+                lastCheckedAt: lastChecked
+            ))
+            if isActive { activeID = id }
+        }
+        sqlite3_finalize(stmt)
+        return ConnectorCatalog(connectors: connectors, activeConnectorID: activeID)
+    }
+
+    public func saveConnectors(_ connectors: [ConnectorProfile], activeConnectorID: UUID?) throws {
+        exec("BEGIN")
+        exec("DELETE FROM connectors")
+        for c in connectors {
+            guard let stmt = prepare("INSERT INTO connectors (id, name, kind, endpoint, model_name, api_key, health, last_checked, tool_calling_policy, tool_calling_capability, tool_calling_capability_source, tool_calling_capability_learned_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") else { continue }
+            bindText(stmt, index: 1, value: c.id.uuidString)
+            bindText(stmt, index: 2, value: c.name)
+            bindText(stmt, index: 3, value: c.kind)
+            bindText(stmt, index: 4, value: c.endpoint)
+            bindText(stmt, index: 5, value: c.modelName)
+            bindText(stmt, index: 6, value: c.note)
+            let healthInt: Int32 = c.health == .ready ? 2 : c.health == .attention ? 1 : 0
+            sqlite3_bind_int(stmt, 7, healthInt)
+            sqlite3_bind_double(stmt, 8, c.lastCheckedAt.timeIntervalSince1970)
+            bindText(stmt, index: 9, value: (c.toolCallingPolicy ?? .automatic).rawValue)
+            if let capability = c.toolCallingCapability {
+                bindText(stmt, index: 10, value: capability.rawValue)
+            } else {
+                sqlite3_bind_null(stmt, 10)
+            }
+            if let source = c.toolCallingCapabilitySource {
+                bindText(stmt, index: 11, value: source.rawValue)
+            } else {
+                sqlite3_bind_null(stmt, 11)
+            }
+            if let learnedAt = c.toolCallingCapabilityLearnedAt {
+                sqlite3_bind_double(stmt, 12, learnedAt.timeIntervalSince1970)
+            } else {
+                sqlite3_bind_null(stmt, 12)
+            }
+            sqlite3_bind_int(stmt, 13, (c.id == activeConnectorID) ? 1 : 0)
+            _ = step(stmt)
+        }
+        exec("COMMIT")
+    }
+}

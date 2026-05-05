@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# 来财 CLI 入口脚本
+# 安装：ln -s "$(pwd)/laicai" /usr/local/bin/来财
+# 或：cp laicai /usr/local/bin/来财
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_BUNDLE="/Applications/Laicai.app"
+CLI_SWIFT="$SCRIPT_DIR/Sources/LaicaiNativeCLI/LaicaiCLI.swift"
+
+# If the app is running, send task via URL scheme
+if pgrep -f "LaicaiNativeApp" > /dev/null 2>&1; then
+    if [ $# -gt 0 ]; then
+        MESSAGE="$*"
+        WORKSPACE="$(pwd)"
+        ENCODED_MSG=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$MESSAGE'))" 2>/dev/null || echo "$MESSAGE" | sed 's/ /%20/g')
+        ENCODED_WS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$WORKSPACE'))" 2>/dev/null || echo "$WORKSPACE" | sed 's/ /%20/g')
+        open "laicai://task?message=${ENCODED_MSG}&workspace=${ENCODED_WS}"
+        echo "✓ 已发送到来财桌面版"
+    else
+        # No args, just bring app to front
+        open -a "Laicai"
+    fi
+else
+    # App not running, try to launch it
+    if [ -d "$APP_BUNDLE" ]; then
+        open -a "Laicai"
+        echo "正在启动来财..."
+        sleep 2
+        if [ $# -gt 0 ]; then
+            exec "$0" "$@"
+        fi
+    else
+        echo "⚠ 来财桌面版未安装或未运行"
+        echo "  请先安装并启动来财"
+        echo ""
+        echo "用法："
+        echo "  来财 <消息>          执行任务"
+        echo "  <命令> | 来财 <消息>  pipe 输入"
+        echo "  来财 --help          显示帮助"
+        exit 1
+    fi
+fi

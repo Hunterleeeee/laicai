@@ -1,0 +1,37 @@
+{
+  "name": "project-memory-update",
+  "description": "Turn a raw project insight or lesson into a reusable Obsidian memory note.",
+  "tools": ["vault.search", "vault.capture"],
+  "steps": [
+    {
+      "kind": "vault_context",
+      "name": "vault-context",
+      "query_from": "goal",
+      "limit": 5
+    },
+    {
+      "kind": "prompt",
+      "name": "prompt",
+      "max_tokens": 160
+    },
+    {
+      "kind": "save_note",
+      "name": "save-note",
+      "folder": "06 Memory",
+      "save_by_default": true
+    }
+  ],
+  "vault_context": {
+    "enabled": true,
+    "query_from": "goal",
+    "limit": 5
+  },
+  "web_fetch": {
+    "enabled": false
+  },
+  "output": {
+    "save_by_default": true,
+    "folder": "06 Memory",
+    "title_template": "项目记忆 - {{goal}}"
+  }
+}

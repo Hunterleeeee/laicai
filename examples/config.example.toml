@@ -1,0 +1,66 @@
+[runtime]
+profile = "balanced-lite"
+workspace_root = "/Users/lifenghe/Documents/troe_projects/harness"
+request_timeout_seconds = 40
+max_output_tokens = 160
+ollama_num_ctx = 1536
+web_text_chars = 1600
+vault_context_chars = 1200
+vault_context_limit = 3
+
+[vault]
+path = "/Users/lifenghe/Desktop/文件/人工智能/本地知识库/本地知识库"
+inbox_dir = "00 Inbox"
+sources_dir = "01 Sources"
+notes_dir = "02 Notes"
+memory_dir = "06 Memory"
+
+[mineru]
+app_path = "/Applications/MinerU.app/Contents/MacOS/MinerU"
+enabled = true
+cli_path = ""
+command_template = ""
+
+[web]
+user_agent = "Laicai/0.1 (+local-agent)"
+timeout_seconds = 20
+browser_enabled = true
+browser_channel = ""
+browser_executable_path = ""
+browser_cdp_url = "http://127.0.0.1:9222"
+browser_headless = true
+browser_storage_dir = ""
+
+[storage]
+sqlite_path = "data/memory/harness.db"
+
+[skills]
+dirs = ["skills"]
+
+[image_generation]
+enabled = true
+provider = "comfyui"
+endpoint = "http://127.0.0.1:8000"
+timeout_seconds = 600
+output_dir = "~/Documents/ComfyUI/output"
+filename_prefix = "laicai_qwen_image"
+width = 512
+height = 512
+steps = 8
+cfg = 1.0
+sampler = "euler"
+scheduler = "simple"
+shift = 3.1
+batch_size = 1
+unet = "qwen-image-Q3_K_M.gguf"
+text_encoder = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+vae = "qwen_image_vae.safetensors"
+lora = "Qwen-Image-Lightning-8steps-V2.0-bf16.safetensors"
+lora_strength = 1.0
+
+[model]
+provider = "local-openai-compatible"
+endpoint = "http://127.0.0.1:11434/v1"
+model = "qwen3.5:9b"
+api_key = "ollama"
+api_key_env = ""

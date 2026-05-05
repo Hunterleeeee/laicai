@@ -1,0 +1,48 @@
+{
+  "name": "obsidian-web-brief",
+  "description": "做一个 skill，先查 Obsidian 知识库里的相关笔记，再抓网页内容，最后整理成可保存的研究笔记并默认保存",
+  "tools": [
+    "web.fetch",
+    "vault.search",
+    "vault.capture"
+  ],
+  "steps": [
+    {
+      "kind": "vault_context",
+      "name": "vault-context",
+      "query_from": "goal",
+      "limit": 4
+    },
+    {
+      "kind": "web_fetch",
+      "name": "web-fetch",
+      "url_from": "manual",
+      "chars": 1600
+    },
+    {
+      "kind": "prompt",
+      "name": "prompt",
+      "max_tokens": 160
+    },
+    {
+      "kind": "save_note",
+      "name": "save-note",
+      "folder": "02 Notes",
+      "save_by_default": true
+    }
+  ],
+  "vault_context": {
+    "enabled": true,
+    "query_from": "goal",
+    "limit": 4
+  },
+  "web_fetch": {
+    "enabled": true,
+    "url_from": "manual"
+  },
+  "output": {
+    "save_by_default": true,
+    "folder": "02 Notes",
+    "title_template": "{{skill}} - {{goal}}"
+  }
+}
