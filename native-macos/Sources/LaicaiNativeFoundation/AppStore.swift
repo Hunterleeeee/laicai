@@ -55,16 +55,14 @@ func normalizedSessionPreview(_ text: String, limit: Int = 80) -> String {
 
 // MARK: - App State
 
-public enum ExecutionMode: String, CaseIterable, Codable, Equatable, Sendable {
+public enum ExecutionMode: String, CaseIterable, Equatable, Sendable, Codable {
     case auto
-    case ask
     case inspect
     case act
 
     public var title: String {
         switch self {
         case .auto: return "自动"
-        case .ask: return "聊天"
         case .inspect: return "看项目"
         case .act: return "执行"
         }
@@ -72,8 +70,7 @@ public enum ExecutionMode: String, CaseIterable, Codable, Equatable, Sendable {
 
     public var subtitle: String {
         switch self {
-        case .auto: return "自动判断是否需要工具"
-        case .ask: return "只回答，不读取项目"
+        case .auto: return "LLM 自决是否使用工具"
         case .inspect: return "可读文件和搜索，不写入"
         case .act: return "可执行任务，高风险需确认"
         }
@@ -82,10 +79,15 @@ public enum ExecutionMode: String, CaseIterable, Codable, Equatable, Sendable {
     public var icon: String {
         switch self {
         case .auto: return "wand.and.stars"
-        case .ask: return "bubble.left.and.bubble.right"
         case .inspect: return "folder.badge.questionmark"
         case .act: return "hammer"
         }
+    }
+
+    // Backward compat: legacy "ask" maps to .auto
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ExecutionMode(rawValue: raw) ?? .auto
     }
 }
 
@@ -993,25 +995,6 @@ public final class AppStore: ObservableObject {
         }
 
         switch state.executionMode {
-        case .ask:
-            // Detect explicit upgrade request: user in chat mode asking to switch to task
-            if Self.isExplicitModeUpgradeRequest(effectiveMessage) || (decision.intent == .task && decision.confidence >= 0.80) {
-                state.executionMode = .auto
-                ToastCenter.shared.show("已自动切换到自动模式")
-                // Re-route through auto logic
-                if Self.shouldUseReadOnlyTools(for: decision) && !Self.containsMutationIntent(effectiveMessage) {
-                    sendTaskDraft(
-                        message: effectiveMessage,
-                        decision: decision,
-                        customAgent: agentInvocation?.agent,
-                        allowedToolsOverride: Self.readOnlyToolNames
-                    )
-                } else {
-                    sendTaskDraft(message: effectiveMessage, decision: decision, customAgent: agentInvocation?.agent)
-                }
-                return
-            }
-            sendDirectDraft(message: effectiveMessage)
         case .inspect:
             let inspectDecision = PlannerDecision(
                 intent: .task,
@@ -1064,119 +1047,6 @@ public final class AppStore: ObservableObject {
         let contentStart = message.index(after: endIndex)
         let content = String(message[contentStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
         return CustomAgentInvocation(agent: agent, message: content.isEmpty ? "请按你的 Agent 职责继续处理当前任务。" : content)
-    }
-
-    /// Send a plain chat draft directly to the model, without Agent orchestration or tools.
-    private func sendDirectDraft(message: String) {
-        guard let connector = state.activeConnector else {
-            notify("请先选择一个连接器", style: .error)
-            return
-        }
-
-        let context = AutoContextEngine.buildContext(
-            workspaceRoot: state.settings.workspacePath,
-            vaultRoot: state.settings.vaultPath,
-            userInput: message,
-            fileLimit: 0,
-            comfyUIServerURL: state.settings.comfyUIServerURL,
-            comfyUIModelName: state.settings.comfyUIModelName
-        )
-
-        let sessionID: UUID
-        let priorSteps: [TaskStep]
-        let assistantStepID = UUID()
-        if let selectedID = state.selectedThreadID,
-           let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }) {
-            sessionID = selectedID
-            priorSteps = Self.directHistory(for: state.threads[threadIndex].steps, message: message)
-            state.threads[threadIndex].steps.append(TaskStep(id: UUID(), kind: .userInput, text: message, isCollapsible: false, isCollapsed: false))
-            state.threads[threadIndex].steps.append(TaskStep(id: assistantStepID, kind: .textOutput, text: "", isCollapsible: false, isCollapsed: false))
-            if state.threads[threadIndex].title.isEmpty
-                || state.threads[threadIndex].title == "新会话"
-                || state.threads[threadIndex].title == "新对话" {
-                state.threads[threadIndex].title = directSessionTitle(for: message)
-            }
-            state.threads[threadIndex].preview = normalizedSessionPreview(message)
-            state.threads[threadIndex].modelName = connector.name
-            state.threads[threadIndex].updatedAt = .now
-        } else {
-            let thread = Thread(
-                title: directSessionTitle(for: message),
-                preview: normalizedSessionPreview(message),
-                steps: [
-                    TaskStep(kind: .userInput, text: message, isCollapsible: false, isCollapsed: false),
-                    TaskStep(id: assistantStepID, kind: .textOutput, text: "", isCollapsible: false, isCollapsed: false)
-                ],
-                modelName: connector.name,
-                category: .engineering
-            )
-            sessionID = thread.id
-            priorSteps = []
-            state.threads.insert(thread, at: 0)
-        }
-
-        state.selectThread(id: sessionID)
-        state.modeLabel = "聊天"
-        let capturedImages = state.draftImages
-        state.isGenerating = true
-        state.liveActivity = "正在生成回复…"
-        state.draftMessage = ""
-        state.draftAttachments = []
-        state.draftImages = []
-        persistThreads()
-
-        generationTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let request = SendMessageRequest(
-                    sessionID: sessionID,
-                    message: message,
-                    connector: connector,
-                    modeLabel: "聊天",
-                    history: priorSteps,
-                    systemPrompt: Self.chatPrompt(context: context, message: message),
-                    tools: nil,
-                    messages: nil,
-                    maxOutputTokens: Self.directOutputLimit(for: connector),
-                    imageAttachments: capturedImages
-                )
-                let response = try await self.environment.runtimeClient.sendMessageStream(
-                    request,
-                    onChunk: { [weak self] delta in
-                        guard let self else { return }
-                        self.appendAssistantDelta(delta, stepID: assistantStepID, in: sessionID, connectorName: connector.name)
-                    }
-                )
-                guard !Task.isCancelled else { return }
-                self.flushAssistantBuffer(stepID: assistantStepID, in: sessionID, connectorName: connector.name)
-                self.updateAssistantStep(
-                    assistantStepID,
-                    in: sessionID,
-                    finalText: response.assistantText,
-                    metrics: response.metrics,
-                    connectorName: connector.name
-                )
-                self.recordConnectorOutcome(response, connectorID: connector.id)
-                for activity in response.toolActivities {
-                    self.recordToolActivity(activity)
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                self.flushAssistantBuffer(stepID: assistantStepID, in: sessionID, connectorName: connector.name)
-                self.updateAssistantStep(
-                    assistantStepID,
-                    in: sessionID,
-                    finalText: "请求失败：\(error.localizedDescription)",
-                    connectorName: connector.name
-                )
-                self.updateConnectorHealth(connector.id, to: .offline)
-                self.recordToolActivity(name: "chat.error", summary: "直接回复失败", statusLine: error.localizedDescription, isFailure: true)
-            }
-
-            self.state.isGenerating = false
-            self.state.liveActivity = ""
-            self.generationTask = nil
-        }
     }
 
     /// Send a task draft through the local task engine.

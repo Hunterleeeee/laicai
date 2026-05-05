@@ -520,7 +520,6 @@ struct ChatDetailView: View {
     private var executionModeColor: Color {
         switch store.state.executionMode {
         case .auto: return TextGrade.muted
-        case .ask: return Brand.primary
         case .inspect: return Semantic.success
         case .act: return Semantic.warning
         }
@@ -815,9 +814,7 @@ struct ChatDetailView: View {
         let defaultPlaceholder: String
         switch store.state.executionMode {
         case .auto:
-            defaultPlaceholder = "输入问题或目标，系统会判断是否需要工具…"
-        case .ask:
-            defaultPlaceholder = "聊天：只回答，不读取项目…"
+            defaultPlaceholder = "输入问题或目标…"
         case .inspect:
             defaultPlaceholder = "看项目：可读文件和搜索，不写入…"
         case .act:
