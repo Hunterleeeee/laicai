@@ -165,42 +165,13 @@ public final class AgentLoop: ObservableObject {
             onStep(userStep)
         }
 
-        // Explicit Planning Step: ask the model to think before acting.
-        // Skip for chat, pure continuation, trivial messages, or when resuming.
+        // Inline planning: instead of a separate LLM call, instruct the model
+        // to think-then-act in its first turn. This saves one full API roundtrip.
         let needsPlanning = intent != .chat
             && priorSteps.isEmpty
             && !Self.isPureContinuationCommand(message)
             && message.count > 10
-        if needsPlanning {
-            let planningStep = TaskStep(
-                kind: .aiThinking,
-                text: "正在分析任务并制定执行计划…",
-                isCollapsible: true,
-                isCollapsed: true
-            )
-            task.steps.append(planningStep)
-            onStep(planningStep)
-
-            if let plan = try? await Self.generatePlan(
-                message: message,
-                intent: intent,
-                context: taskContext,
-                connector: connector,
-                runtime: runtime,
-                maxTokens: min(1024, config.maxTokensPerTurn / 4)
-            ) {
-                let planStep = TaskStep(
-                    kind: .aiThinking,
-                    text: "执行计划\n\(plan)",
-                    isCollapsible: true,
-                    isCollapsed: false
-                )
-                task.steps.append(planStep)
-                onStep(planStep)
-                // Inject plan into task memory so subsequent iterations see it
-                taskContext.memory.userDecisions.insert("执行计划：\(plan)", at: 0)
-            }
-        } else if !priorSteps.contains(where: { $0.kind == .aiThinking }) {
+        if !priorSteps.contains(where: { $0.kind == .aiThinking }) {
             let startStep = TaskStep(
                 kind: .aiThinking,
                 text: "正在理解任务并准备执行。",
@@ -291,6 +262,8 @@ public final class AgentLoop: ObservableObject {
         let hasPlan = taskContext.memory.userDecisions.contains(where: { $0.hasPrefix("执行计划：") })
         if hasPlan {
             systemPrompt += "\n\n## 执行纪律\n严格按照上面的执行计划推进。每轮只做计划中的下一步。最终回复必须说明已验证什么、未验证什么。"
+        } else if needsPlanning {
+            systemPrompt += "\n\n## 首轮规划\n第一次回复时，先用1-2句话说明计划（做什么、改哪些文件），然后立即调用工具执行第一步。不要只输出计划不行动。"
         }
 
         // Persist trim details from token budget estimation
@@ -758,6 +731,7 @@ public final class AgentLoop: ObservableObject {
         var transientRetryCount = 0
         let maxTransientRetries = isReadOnlyRun ? 1 : 2
         var toolFailureCounts: [String: Int] = [:]  // "toolName:target" → count
+        var didInjectWorkingSet = false
         let maxRepeatedFailures = 3
         let usesOllamaChat = Self.usesOllamaChat(connector)
         // A4: Dynamic iteration budget — learn from historical average
@@ -841,18 +815,15 @@ public final class AgentLoop: ObservableObject {
                     }
                     return "- \(URL(fileURLWithPath: path).lastPathComponent)"
                 }.joined(separator: "\n")
-                if !workingSet.isEmpty {
-                    // Only inject if not already in recent messages
-                    let alreadyInjected = messages.suffix(3).contains { ($0.content ?? "").contains("已读文件摘要") }
-                    if !alreadyInjected {
-                        messages.append(ChatMessage(role: "system", content: "已读文件摘要（可直接 file_edit，无需再 file_read）：\n\(workingSet)"))
-                    }
+                if !workingSet.isEmpty && !didInjectWorkingSet {
+                    messages.append(ChatMessage(role: "system", content: "已读文件摘要（可直接 file_edit，无需再 file_read）：\n\(workingSet)"))
+                    didInjectWorkingSet = true
                 }
             }
 
             // Proactive nudge: only in act mode, trigger early to prevent read-only loops.
             let isActMode = !isReadOnlyRun && isToolAllowed("shell.exec") && isToolAllowed("file.write")
-            if iteration >= 1 && isActMode && intent != .chat && intent != .research {
+            if iteration >= 3 && isActMode && intent != .chat && intent != .research {
                 let execTools: Set<String> = ["file.write", "file.edit", "shell.exec", "verify.build"]
                 let proactiveToolCallCount = task.steps.filter({ $0.kind == .toolCall }).count
                 let proactiveHasExec = task.steps.contains(where: { $0.kind == .toolCall && execTools.contains($0.toolName ?? "") })
@@ -908,7 +879,7 @@ public final class AgentLoop: ObservableObject {
                     )
                     task.steps.append(retryStep)
                     onStep(retryStep)
-                    try? await Task.sleep(for: .milliseconds(UInt64(min(pow(2.0, Double(iteration)), 8)) * 1000))
+                    try? await Task.sleep(for: .milliseconds(UInt64(min(pow(2.0, Double(transientRetryCount)), 8)) * 1000))
                     continue
                 }
                 let errorStep = TaskStep(
@@ -1030,8 +1001,11 @@ public final class AgentLoop: ObservableObject {
                                    let readPath = callStep.toolParams?["path"],
                                    callStep.toolParams?["offset"] == nil,
                                    let cached = taskContext.memory.fileContentCache[readPath] ?? taskContext.memory.fileContentCache[(taskContext.workspaceRoot as NSString).appendingPathComponent(readPath)] {
+                                    // Return summary instead of full content to save tokens
+                                    let summary = taskContext.memory.fileSummaries[readPath] ?? String(cached.prefix(500))
+                                    let cacheNote = "✅ 已缓存（\(cached.count)字符）。摘要：\(summary)\n如需完整内容可再次 file_read 加 offset 参数，或直接 file_edit。"
                                     toolResult = ToolResult(
-                                        output: cached,
+                                        output: cacheNote,
                                         data: ["path": readPath, "size": "\(cached.count)", "cached": "true"]
                                     )
                                     return (index, toolResult, nil as RecoveryPlan?)
@@ -1063,7 +1037,7 @@ public final class AgentLoop: ObservableObject {
                                         error: "tool_not_allowed"
                                     )
                                 } else if let tool = self.toolRegistry.tool(named: apiToolName) {
-                                    if tool.requiresReview || toolName == "shell.exec" {
+                                    if tool.requiresReview || ["file.write", "file.edit"].contains(toolName) {
                                         Self.gitCheckpoint(workspaceRoot: self.config.workspaceRoot)
                                     }
 
@@ -1550,19 +1524,7 @@ public final class AgentLoop: ObservableObject {
                 }
                 didComplete = !wasTruncated
 
-                // If task is in execute/verify phase and model just gave text,
-                // add a completion check step so user knows what was verified
-                if didComplete && currentPhase != .explore {
-                    let checkStep = Self.completionCheckStep(
-                        for: task,
-                        didComplete: true,
-                        hadFailure: hadFailure,
-                        wasTruncated: wasTruncated,
-                        isReadOnlyRun: isReadOnlyRun
-                    )
-                    task.steps.append(checkStep)
-                    onStep(checkStep)
-                }
+                // Completion check is emitted at loop end — no need to duplicate here
                 break
             }
         }
@@ -2828,24 +2790,20 @@ public final class AgentLoop: ObservableObject {
         return result
     }
 
-    /// Detect if the model is writing tool call syntax as plain text instead of using
-    /// the function calling API. This is common with small local models that don't
-    /// properly support function calling.
+    /// Unified detection: model writing tool calls as text instead of using function calling API.
+    /// Covers both fake syntax patterns and tool name spam.
     private static func containsFakeToolCallSyntax(_ text: String) -> Bool {
-        let patterns = [
+        // Pattern 1: explicit tool call syntax in text
+        let syntaxPatterns = [
             "[tool:", "[TOOL:", "tool:web_search", "tool:file_read", "tool:code_search",
             "tool:workspace_index", "tool:shell_exec",
             "<file_read", "<code_search", "<web_search", "<shell_exec",
             "web_search(query=", "file_read(path=", "code_search(query=",
             "workspace_index(path=", "shell_exec(command="
         ]
-        let matchCount = patterns.filter { text.contains($0) }.count
-        return matchCount >= 2
-    }
-
-    /// Detect when the model outputs a spam list of tool names as text instead of
-    /// actually calling them. e.g. "我将调用这些工具：shell.exec, shell.exec, shell.exec..."
-    private static func looksLikeToolSpam(_ text: String) -> Bool {
+        let syntaxMatches = syntaxPatterns.filter { text.contains($0) }.count
+        if syntaxMatches >= 2 { return true }
+        // Pattern 2: spam list of tool names (10+ mentions)
         let toolNames = ["shell.exec", "file.read", "file.write", "file.edit",
                          "web.search", "web.fetch", "code.search", "workspace.index",
                          "shell_exec", "file_read", "file_write", "file_edit",
@@ -2854,6 +2812,11 @@ public final class AgentLoop: ObservableObject {
             count + text.components(separatedBy: name).count - 1
         }
         return totalMentions >= 10
+    }
+
+    /// Alias for backward compat — same as containsFakeToolCallSyntax
+    private static func looksLikeToolSpam(_ text: String) -> Bool {
+        containsFakeToolCallSyntax(text)
     }
 
     private static func looksLikeProviderError(_ text: String) -> Bool {
