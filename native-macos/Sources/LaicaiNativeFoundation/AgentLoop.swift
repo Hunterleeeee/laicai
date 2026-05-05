@@ -2864,20 +2864,13 @@ public final class AgentLoop: ObservableObject {
     }
 
     public static func toolDefinitions(for intent: UserIntent, phase: TaskPhase = .explore, registry: ToolRegistry = .shared) -> [ToolDefinition] {
+        // All intents get all tools — the LLM decides what to use.
+        // Phase filtering only applies for task/workflow to progressively unlock write tools.
+        let allDefs = registry.toolDefinitions
         switch intent {
-        case .chat:
-            // Provide basic read tools so model CAN use them if needed (e.g. user asks about code)
-            let chatTools: Set<String> = ["file.read", "code.search", "workspace.index", "web.search", "web.fetch"]
-            return registry.toolDefinitions.filter { def in
-                chatTools.contains(ToolNameCodec.canonicalName(def.function.name))
-            }
-        case .research:
-            let allowed: Set<String> = ["web.search", "web.fetch", "code.search", "workspace.index", "file.read"]
-            return registry.toolDefinitions.filter { def in
-                allowed.contains(ToolNameCodec.canonicalName(def.function.name))
-            }
+        case .chat, .research:
+            return allDefs
         case .task, .workflow:
-            let allDefs = registry.toolDefinitions
             let allowed = phase.allowedTools
             return allDefs.filter { def in
                 let canonical = ToolNameCodec.canonicalName(def.function.name)

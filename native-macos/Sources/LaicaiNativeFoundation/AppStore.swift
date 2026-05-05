@@ -57,41 +57,15 @@ func normalizedSessionPreview(_ text: String, limit: Int = 80) -> String {
 
 public enum ExecutionMode: String, CaseIterable, Equatable, Sendable, Codable {
     case auto
-    case inspect
-    case act
 
-    public var title: String {
-        switch self {
-        case .auto: return "自动"
-        case .inspect: return "看项目"
-        case .act: return "执行"
-        }
-    }
+    public var title: String { "自动" }
+    public var icon: String { "wand.and.stars" }
 
-    public var subtitle: String {
-        switch self {
-        case .auto: return "LLM 自决是否使用工具"
-        case .inspect: return "可读文件和搜索，不写入"
-        case .act: return "可执行任务，高风险需确认"
-        }
-    }
-
-    public var icon: String {
-        switch self {
-        case .auto: return "wand.and.stars"
-        case .inspect: return "folder.badge.questionmark"
-        case .act: return "hammer"
-        }
-    }
-
-    // Backward compat: legacy "ask" maps to .auto
     public init(from decoder: Decoder) throws {
-        let raw = try decoder.singleValueContainer().decode(String.self)
-        self = ExecutionMode(rawValue: raw) ?? .auto
+        let _ = try decoder.singleValueContainer().decode(String.self)
+        self = .auto
     }
 }
-
-// MARK: - Image Attachment (multimodal vision)
 
 public struct ImageAttachment: Identifiable, Equatable, Sendable {
     public let id: UUID
@@ -336,7 +310,6 @@ public final class AppStore: ObservableObject {
     private let environment: AppEnvironment
     private var agentLoop: AgentLoop?
     private static let streamingOutputID = "__streaming_output__"
-    private static let readOnlyToolNames: Set<String> = ["file.read", "code.search", "workspace.index", "web.search", "web.fetch"]
     private var streamBuffers: [UUID: String] = [:]
     private var streamLastFlushAt: [UUID: Date] = [:]
     private var chatStreamBuffers: [UUID: String] = [:]
@@ -719,7 +692,12 @@ public final class AppStore: ObservableObject {
     }
 
     public func clearLearnedToolCallingCapability(id: UUID, showsToast: Bool = true) {
-        guard let index = state.connectors.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = state.connectors.firstIndex(where: { $0.id == id }) else {
+            if showsToast {
+                notify("未找到该连接器", style: .info)
+            }
+            return
+        }
         guard state.connectors[index].toolCallingCapability != nil else {
             if showsToast {
                 notify("\(state.connectors[index].name) 当前没有已学习的工具兼容性记录", style: .info)
@@ -967,62 +945,11 @@ public final class AppStore: ObservableObject {
         if answerSelectedTaskStatusQuestion(effectiveMessage) {
             return
         }
-        var decision = IntentRouter.plan(effectiveMessage)
-        if let agent = agentInvocation?.agent {
-            decision = PlannerDecision(
-                intent: .task,
-                confidence: 0.95,
-                reason: "用户选择了自定义 Agent「\(agent.name)」。",
-                routeLabel: "Agent",
-                expectedCapabilities: agent.tools.isEmpty ? ["按 Agent 提示词执行"] : agent.tools
-            )
-        }
+        let decision = IntentRouter.plan(effectiveMessage)
 
-        // Self-evolution: check routing drift from historical outcomes
-        let outcomeStats = TaskOutcomeRecorder.shared.stats(days: 7)
-        if let suggestion = ResultEvaluator.suggestRoutingAdjustment(
-            outcomes: outcomeStats,
-            intent: decision.intent,
-            currentRouteLabel: decision.routeLabel
-        ), suggestion.confidence > 0.85 {
-            // Inject routing drift hint into thinking step when sending task
-            // but do not override explicit user mode selection
-            if state.executionMode == .auto, suggestion.direction == .relax,
-               (decision.intent == .task && Self.shouldUseReadOnlyTools(for: decision)) {
-                decision.confidence = max(0.5, decision.confidence - 0.1)
-                decision.reason = "历史数据显示当前路由取消率偏高，本次降低置信度、优先只读分析。"
-            }
-        }
-
-        switch state.executionMode {
-        case .inspect:
-            let inspectDecision = PlannerDecision(
-                intent: .task,
-                confidence: 0.95,
-                reason: "用户选择了“看项目”：允许读取文件和搜索代码，但不写入、不执行命令。",
-                routeLabel: "看项目",
-                expectedCapabilities: ["读取文件", "搜索代码", "分析项目"]
-            )
-            sendTaskDraft(
-                message: effectiveMessage,
-                decision: inspectDecision,
-                customAgent: agentInvocation?.agent,
-                allowedToolsOverride: Self.readOnlyToolNames
-            )
-        case .act:
-            let actDecision = PlannerDecision(
-                intent: .task,
-                confidence: max(decision.confidence, 0.95),
-                reason: "用户选择了“执行”：允许完成任务，高风险操作仍需确认。",
-                routeLabel: agentInvocation == nil ? "执行" : "Agent",
-                expectedCapabilities: decision.expectedCapabilities.isEmpty ? ["读取文件", "搜索代码", "提出文件修改", "执行命令"] : decision.expectedCapabilities
-            )
-            sendTaskDraft(message: effectiveMessage, decision: actDecision, customAgent: agentInvocation?.agent)
-        case .auto:
-            // Claude insight: always give tools to the LLM, let it decide.
-            // IntentRouter provides UI label only, not routing.
-            sendTaskDraft(message: effectiveMessage, decision: decision, customAgent: agentInvocation?.agent)
-        }
+        // Single path: always give full tools, LLM decides what to use.
+        // Safety: file writes go through approval flow, dangerous commands need confirmation.
+        sendTaskDraft(message: effectiveMessage, decision: decision, customAgent: agentInvocation?.agent)
     }
 
     private struct CustomAgentInvocation {
@@ -1053,8 +980,7 @@ public final class AppStore: ObservableObject {
     private func sendTaskDraft(
         message: String,
         decision: PlannerDecision,
-        customAgent: CustomAgentDefinition? = nil,
-        allowedToolsOverride: Set<String>? = nil
+        customAgent: CustomAgentDefinition? = nil
     ) {
         let selectedConnector = customAgent?.preferredConnectorID.flatMap { id in
             state.connectors.first(where: { $0.id == id })
@@ -1084,7 +1010,6 @@ public final class AppStore: ObservableObject {
 
         // Check if multi-agent collaboration is warranted
         if customAgent == nil,
-           !Self.shouldUseReadOnlyTools(for: decision),
            MultiAgentOrchestrator.shouldUseMultiAgent(message: message, intent: intent),
            let plan = MultiAgentOrchestrator.createPlan(for: message, intent: intent, connectors: state.connectors, activeConnectorID: state.activeConnectorID) {
             executeMultiAgent(message: message, context: context, connector: connector, plan: plan, intent: intent, decision: decision)
@@ -1165,16 +1090,9 @@ public final class AppStore: ObservableObject {
         if let customAgent {
             loopConfig.customSystemPrompt = customAgent.systemPrompt
             let agentTools = Set(customAgent.tools.map { ToolNameCodec.canonicalName($0) })
-            if let allowedToolsOverride {
-                loopConfig.allowedTools = agentTools.isEmpty ? allowedToolsOverride : agentTools.intersection(allowedToolsOverride)
-            } else {
+            if !agentTools.isEmpty {
                 loopConfig.allowedTools = agentTools
             }
-        } else if let allowedToolsOverride {
-            loopConfig.allowedTools = allowedToolsOverride
-        }
-        if allowedToolsOverride != nil {
-            loopConfig.maxIterations = min(loopConfig.maxIterations, 20)
         }
         // Chat intent: cap iterations — LLM decides if tools needed, but don't run away
         if isChatIntent {
@@ -1381,34 +1299,6 @@ public final class AppStore: ObservableObject {
         }
     }
 
-    /// Detects when user explicitly asks to switch from chat to task/action mode
-    private static func isExplicitModeUpgradeRequest(_ message: String) -> Bool {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let upgradePatterns = [
-            "转任务", "切换任务", "切到任务", "换成任务", "进入任务",
-            "转执行", "切换执行", "切到执行", "换成执行", "进入执行",
-            "用任务模式", "用执行模式", "切任务模式", "切执行模式",
-            "别聊了", "不要聊天", "别光说", "动手吧", "开始执行", "开始做",
-            "帮我做", "帮我改", "帮我修", "帮我写", "帮我创建", "帮我删",
-            "帮我重构", "帮我优化", "帮我生成", "帮我运行", "帮我部署",
-            "帮我查", "帮我搜", "帮我找", "帮我看看", "帮我分析",
-            "帮我读", "帮我审查", "帮我检查", "帮我测试", "帮我调试",
-            "请执行", "请修改", "请创建", "请写", "请重构", "请优化",
-            "读一下", "看一下代码", "看下代码", "看下文件", "看一下文件",
-            "打开文件", "读取文件", "搜索代码", "搜索文件",
-            "执行一下", "跑一下", "运行一下", "试一下", "测一下"
-        ]
-        return upgradePatterns.contains { normalized.contains($0) }
-    }
-
-    private static func shouldUseReadOnlyTools(for decision: PlannerDecision) -> Bool {
-        let capabilities = Set(decision.expectedCapabilities)
-        let readSignals = ["理解意图", "读取工作区", "搜索代码", "输出建议", "分析项目"]
-        let writeSignals = ["提出文件修改", "运行命令", "执行命令", "生成测试"]
-        return readSignals.contains { capabilities.contains($0) }
-            && !writeSignals.contains { capabilities.contains($0) }
-    }
-
     // MARK: - Slash Commands
 
     /// Handle /goal, /background, /schedule, /gateway commands. Returns true if handled.
@@ -1548,21 +1438,6 @@ public final class AppStore: ObservableObject {
         }
 
         return false
-    }
-
-    /// Detect if user message contains explicit mutation intent (delete, modify, fix, etc.)
-    /// Used to auto-upgrade from read-only to full tool access
-    private static func containsMutationIntent(_ message: String) -> Bool {
-        let lower = message.lowercased()
-        let mutationKeywords = [
-            "删掉", "删除", "去掉", "移除", "清掉", "清理", "清除",
-            "改一下", "修改", "修复", "修一下", "改掉", "替换", "更新",
-            "写入", "创建", "新建", "添加", "加上", "执行", "运行",
-            "重构", "重写", "部署", "安装", "提交", "commit", "push",
-            "fix", "delete", "remove", "update", "create", "write",
-            "你去做", "你来做", "帮我做", "动手", "去吧", "搞定"
-        ]
-        return mutationKeywords.contains(where: { lower.contains($0) })
     }
 
     /// Execute a predefined workflow

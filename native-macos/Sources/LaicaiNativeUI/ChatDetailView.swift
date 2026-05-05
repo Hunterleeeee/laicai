@@ -347,9 +347,9 @@ struct ChatDetailView: View {
                 .opacity(store.state.activeConnector == nil ? 0.4 : 1)
 
                 HStack(spacing: 0) {
-                    // Left: mode + skill
+                    // Left: skill picker
                     HStack(spacing: AppSpace.xs) {
-                        executionModeMenu
+                        modeIndicator
                         skillPickerMenu
                     }
 
@@ -480,49 +480,24 @@ struct ChatDetailView: View {
         .help("技能快捷入口")
     }
 
-    private var executionModeMenu: some View {
-        Menu {
-            ForEach(ExecutionMode.allCases, id: \.self) { mode in
-                Button {
-                    store.updateExecutionMode(mode)
-                } label: {
-                    HStack {
-                        Label(mode.title, systemImage: mode.icon)
-                        Text(mode.subtitle)
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: AppSpace.xs) {
-                Image(systemName: store.state.executionMode.icon)
-                    .font(.system(size: 12, weight: .medium))
-                Text(store.state.executionMode.title)
-                    .font(AppFont.captionMedium)
-            }
-            .foregroundStyle(executionModeColor)
-            .padding(.horizontal, AppSpace.sm + 2)
-            .frame(height: 28)
-            .background(
-                Capsule()
-                    .fill(executionModeColor.opacity(0.12))
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(executionModeColor.opacity(0.28), lineWidth: 0.8)
-            )
+    private var modeIndicator: some View {
+        HStack(spacing: AppSpace.xs) {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 12, weight: .medium))
+            Text(store.state.modeLabel.isEmpty ? "自动" : store.state.modeLabel)
+                .font(AppFont.captionMedium)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(store.state.executionMode.subtitle)
-    }
-
-    private var executionModeColor: Color {
-        switch store.state.executionMode {
-        case .auto: return TextGrade.muted
-        case .inspect: return Semantic.success
-        case .act: return Semantic.warning
-        }
+        .foregroundStyle(TextGrade.muted)
+        .padding(.horizontal, AppSpace.sm + 2)
+        .frame(height: 28)
+        .background(
+            Capsule()
+                .fill(TextGrade.muted.opacity(0.12))
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(TextGrade.muted.opacity(0.28), lineWidth: 0.8)
+        )
     }
 
     private func applySkillTemplate(_ skill: SkillDefinition) {
@@ -811,26 +786,17 @@ struct ChatDetailView: View {
 
     private var composerPlaceholder: String {
         if store.state.activeConnector == nil { return "先连接模型…" }
-        let defaultPlaceholder: String
-        switch store.state.executionMode {
-        case .auto:
-            defaultPlaceholder = "输入问题或目标…"
-        case .inspect:
-            defaultPlaceholder = "看项目：可读文件和搜索，不写入…"
-        case .act:
-            defaultPlaceholder = "执行：可完成任务，高风险操作需确认…"
-        }
+        let base = "输入问题或目标…"
         if let task = store.state.selectedTask {
             switch task.status {
             case .cancelled: return "继续处理，或输入新的处理方式…"
             case .failed: return "描述如何处理失败，或直接重试…"
             case .waitingReview: return "审查完成后继续…"
-            case .running: return "补充指令…"
-            default: return "继续处理，或输入新的处理方式…"
+            case .running: return "追加指令或等待完成…"
+            default: break
             }
         }
-        if store.state.selectedSession != nil { return "\(defaultPlaceholder)    ⌘K 命令面板" }
-        return "\(defaultPlaceholder)    ⌘K 命令面板"
+        return "\(base)    ⌘K 命令面板"
     }
 
     private func chooseFileForDraft() {

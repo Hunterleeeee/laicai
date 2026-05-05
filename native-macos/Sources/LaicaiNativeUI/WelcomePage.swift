@@ -17,22 +17,24 @@ struct WelcomeView: View {
 
     @State private var orbRotation: Double = 0
 
+    // Composer overlay height (input area at bottom)
+    private let composerHeight: CGFloat = 150
+
     var body: some View {
         GeometryReader { geo in
-            let isCompact = geo.size.height < 680
-            let isNarrow = geo.size.width < 640
-            let topPad = isCompact ? max(24, geo.size.height * 0.06) : 80
-            let sectionGap = isCompact ? max(20, geo.size.height * 0.04) : 48
-            let contentWidth = min(680, geo.size.width - 48)
+            let w = geo.size.width
+            let h = geo.size.height
+            let isCompact = h < 720
+            let isNarrow = w < 560
+            let gap: CGFloat = isCompact ? 20 : 36
+            let contentWidth = isNarrow ? w - 32 : min(640, w * 0.78)
 
             ZStack {
                 ambientBackground
 
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        Spacer().frame(height: topPad)
+                    VStack(spacing: gap) {
                         heroSection(compact: isCompact)
-                        Spacer().frame(height: sectionGap)
 
                         if store.state.activeConnector == nil {
                             connectPrompt
@@ -40,15 +42,15 @@ struct WelcomeView: View {
                             samplePromptsGrid(narrow: isNarrow)
                         }
 
-                        Spacer().frame(height: sectionGap)
                         capabilityCards(narrow: isNarrow)
-                        Spacer().frame(height: isCompact ? 12 : 24)
+
                         keyboardHints
-                        Spacer().frame(height: isCompact ? 20 : 40)
                     }
                     .frame(maxWidth: contentWidth)
                     .frame(maxWidth: .infinity)
-                    .padding(.horizontal, AppSpace.xl)
+                    .padding(.horizontal, isNarrow ? AppSpace.md : AppSpace.xl)
+                    .padding(.top, isCompact ? 24 : 56)
+                    .padding(.bottom, composerHeight)
                 }
             }
         }
