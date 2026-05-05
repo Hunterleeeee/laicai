@@ -578,7 +578,7 @@ private struct GatewaySettingsTab: View {
                 // Channels
                 settingsCard(title: "消息通道") {
                     if gateway.channels.isEmpty {
-                        Text("暂无消息通道，点击下方按钮添加飞书、Telegram 等平台的机器人接入。")
+                        Text("暂无消息通道，点击下方按钮添加飞书、Telegram 等平台接入。")
                             .font(AppFont.caption)
                             .foregroundStyle(TextGrade.muted)
                             .padding(.vertical, AppSpace.sm)

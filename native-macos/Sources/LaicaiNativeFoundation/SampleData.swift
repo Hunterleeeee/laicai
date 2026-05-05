@@ -15,6 +15,7 @@ enum SampleData {
     static let appState = AppState(
         workspaceName: "来财",
         modeLabel: "聊天",
+
         threads: sessions.map(Thread.init(session:)),
         selectedThreadID: sessions.first?.id,
         workbenchTab: .tools,

@@ -22,7 +22,7 @@ struct ChatDetailView: View {
         .background(SurfaceGrade.base)
         .onAppear { PasteImageMonitor.install(store: store) }
         .onReceive(NotificationCenter.default.publisher(for: .laicaiNewThread)) { _ in
-            store.selectThread(nil as ThreadRecord?)
+            store.newSession()
             composerFocused = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .laicaiContinueLastTask)) { _ in
@@ -817,7 +817,7 @@ struct ChatDetailView: View {
         case .auto:
             defaultPlaceholder = "输入问题或目标，系统会判断是否需要工具…"
         case .ask:
-            defaultPlaceholder = "问一问：只回答，不读取项目…"
+            defaultPlaceholder = "聊天：只回答，不读取项目…"
         case .inspect:
             defaultPlaceholder = "看项目：可读文件和搜索，不写入…"
         case .act:

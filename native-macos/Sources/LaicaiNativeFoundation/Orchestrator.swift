@@ -104,7 +104,7 @@ public struct IntentRouter {
             intent: .chat,
             confidence: 0.55,
             reason: "无法确定是否需要工具，先按问答理解用户意图，不主动执行工具。",
-            routeLabel: "问一问",
+            routeLabel: "聊天",
             expectedCapabilities: ["理解意图", "解释", "规划"]
         )
     }
@@ -1022,7 +1022,7 @@ public struct PromptComposer {
         if intent != .chat {
             parts.append("""
             ## 核心准则 — 高效行动
-            你是 Agent，不是聊天机器人。你必须用工具行动，不能只说不做。
+            你必须用工具行动，不能只说不做。
             1. **速度第一**：每轮必须调用工具或给出最终结果。禁止返回"我建议你…"。
             2. **最少探索**：读 1-2 个关键文件后立即开始执行。禁止把所有文件都读一遍。
             3. **并行调用**：同一轮可以同时调用多个只读工具（file_read、code_search、web_search），减少轮次。
@@ -1033,7 +1033,7 @@ public struct PromptComposer {
             8. **联网优先**：不认识的概念→web_search 先搜再做。需要实时信息→web_search。有 URL→web_fetch。
             """)
         } else {
-            parts.append("你可以在聊天模式直接回答问题。不要自称云端 AI。")
+            parts.append("直接回答问题。")
         }
 
         if let claudeMD = context.claudeMD {
@@ -1100,19 +1100,17 @@ public struct PromptComposer {
         formatter.dateFormat = "yyyy年M月d日"
         return formatter.string(from: Date())
     }
-
     /// Compose system prompt for simple chat (no tools)
     public static func composeChatPrompt(context: TaskContext) -> String {
         var parts: [String] = []
         parts.append("""
-        你是来财（Laicai），运行在用户 macOS 上的本地 AI 助手。当前日期：\(currentDateString())。
+        你是来财（Laicai），运行在用户 macOS 上的本地助手。当前日期：\(currentDateString())。
         
-        聊天模式规则：
+        聊天规则：
         - 直接回答问题，保持简洁有深度
-        - 认真阅读对话历史，保持上下文连贯
-        - 用户追问时，基于之前的对话内容回答，不要要求重复
+        - 认真阅读会话历史，保持上下文连贯
+        - 用户追问时，基于之前的会话内容回答，不要要求重复
         - 你是运行在本机的 Agent，拥有文件读写、代码搜索、命令执行、联网搜索等工具能力
-        - 当前为轻量聊天模式，如果用户需要操作项目，建议他们切换到"自动"或"执行"模式
         - 你是来财，不是 ChatGPT/Qwen/DeepSeek
         """)
 

@@ -757,7 +757,7 @@ public final class AgentLoop: ObservableObject {
                     if messages.count > 10 {
                         messages = Self.compressMidTaskHistory(messages, maxMessages: 8)
                         // Inject phase transition marker so model knows what happened
-                        let transitionSummary = "阶段转换：\(oldPhase.title) → \(currentPhase.title)。已压缩前序对话。继续执行计划中的下一步。"
+                        let transitionSummary = "阶段转换：\(oldPhase.title) → \(currentPhase.title)。已压缩前序会话。继续执行计划中的下一步。"
                         messages.append(ChatMessage(role: "system", content: transitionSummary))
                     }
 
@@ -2703,7 +2703,7 @@ public final class AgentLoop: ObservableObject {
             let summary = compressedBlock.joined(separator: "\n")
             result.append(ChatMessage(
                 role: "user",
-                content: "以下是之前对话的压缩摘要（已完成步骤）：\n\(summary)\n\n请基于以上摘要和后续对话继续任务。"
+                content: "以下是之前会话的压缩摘要（已完成步骤）：\n\(summary)\n\n请基于以上摘要继续任务。"
             ))
         }
 

@@ -1056,7 +1056,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
 
     private static func fallbackResponse(request: SendMessageRequest) -> SendMessageResponse {
         SendMessageResponse(
-            assistantText: "未选择连接器。请从顶部选择一个模型开始对话。",
+            assistantText: "未选择连接器。请从顶部选择一个模型开始。",
             toolActivities: [ToolActivity(name: "chat.fallback", summary: "无可用连接器", statusLine: "等待选择连接器", isFailure: true)]
         )
     }

@@ -104,7 +104,7 @@ struct ReportPanel: View {
                 Text("包含：活动日志、文件变更汇总、Wiki 建议")
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.ghost)
-                Text(reportType == .daily ? "汇总今日的任务、对话、工具调用和文件变更" : "汇总本周活动 + 每日分解 + 知识沉淀建议")
+                Text(reportType == .daily ? "汇总今日的任务、会话、工具调用和文件变更" : "汇总本周活动 + 每日分解 + 知识沉淀建议")
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.ghost)
             }

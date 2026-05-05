@@ -246,7 +246,7 @@ public struct ReportGenerator {
             "|------|------|",
             "| 活跃会话 | \(todayThreads.count) |",
             "| 任务 | \(tasks.count)（✅ \(completedTasks.count)　❌ \(failedTasks.count)　🔄 \(runningTasks.count)）|",
-            "| 对话 | \(chats.count) |",
+            "| 会话 | \(chats.count) |",
             "| 工具调用 | \(countToolCalls(todayThreads)) 次 |",
             "| 文件变更 | \(countFileChanges(todayThreads)) 个文件 |",
         ]
@@ -323,7 +323,7 @@ public struct ReportGenerator {
         let wikiSuggestions = extractWikiSuggestions(todayThreads)
         if !wikiSuggestions.isEmpty {
             lines += ["## 📝 建议存入 Wiki", ""]
-            lines.append("以下内容来自今天的对话和任务，可能值得沉淀为知识库条目：")
+            lines.append("以下内容来自今天的会话和任务，可能值得沉淀为知识库条目：")
             lines.append("")
             for suggestion in wikiSuggestions {
                 lines.append("### \(suggestion.topic)")
@@ -369,7 +369,7 @@ public struct ReportGenerator {
             "| 总会话 | \(weekThreads.count) |",
             "| 完成任务 | \(completedTasks.count) |",
             "| 失败任务 | \(failedTasks.count) |",
-            "| 对话 | \(chats.count) |",
+            "| 会话 | \(chats.count) |",
             "| 工具调用 | \(countToolCalls(weekThreads)) 次 |",
             "| 文件变更 | \(countFileChanges(weekThreads)) 个文件 |",
         ]
@@ -547,8 +547,8 @@ public struct ReportGenerator {
                     let topics = extractTopicsFromText(userSteps.map(\.text).joined(separator: " "))
                     if !topics.isEmpty {
                         suggestions.append(WikiSuggestion(
-                            topic: topics.first ?? "对话知识点",
-                            reason: "多轮深度对话，讨论了 \(topics.joined(separator: "、")) 等话题",
+                            topic: topics.first ?? "会话知识点",
+                            reason: "多轮深度会话，讨论了 \(topics.joined(separator: "、")) 等话题",
                             keyContent: String((aiSteps.last?.text ?? "").prefix(200)),
                             sourceThread: thread.title
                         ))

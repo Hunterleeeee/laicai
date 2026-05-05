@@ -64,7 +64,7 @@ public enum ExecutionMode: String, CaseIterable, Codable, Equatable, Sendable {
     public var title: String {
         switch self {
         case .auto: return "自动"
-        case .ask: return "问一问"
+        case .ask: return "聊天"
         case .inspect: return "看项目"
         case .act: return "执行"
         }
@@ -452,7 +452,7 @@ public final class AppStore: ObservableObject {
         let connectorName = state.activeConnector?.name ?? state.settings.defaultConnectorName
         let thread = Thread(
             title: "新会话",
-            preview: "从一个具体任务开始，而不是空白页。",
+            preview: "",
             modelName: connectorName,
             category: .engineering
         )
@@ -463,7 +463,7 @@ public final class AppStore: ObservableObject {
 
     public func selectSession(id: UUID?) {
         state.selectThread(id: id)
-        state.modeLabel = "问一问"
+        state.modeLabel = "聊天"
     }
 
     public func updateExecutionMode(_ mode: ExecutionMode) {
@@ -546,7 +546,7 @@ public final class AppStore: ObservableObject {
     public func exportSelectedThreadMarkdown() -> String? {
         guard let thread = state.selectedThread else { return nil }
         var lines: [String] = ["# \(thread.title)", ""]
-        lines.append("- 类型：\(thread.source == .task ? "任务" : "聊天")")
+        lines.append("- 类型：\(thread.source == .task ? "任务" : "会话")")
         if thread.source == .task { lines.append("- 状态：\(thread.status.title)") }
         lines.append("- 更新时间：\(thread.updatedAt)")
         lines.append("")

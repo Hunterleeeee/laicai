@@ -380,7 +380,7 @@ private struct CommandPaletteThreadRow: View {
     }
 
     private var subtitle: String {
-        let type = thread.source == .task ? "执行记录" : "对话"
+        let type = thread.source == .task ? "执行记录" : "会话"
         let status = thread.status.map { " · \($0.title)" } ?? ""
         let preview = thread.preview.trimmingCharacters(in: .whitespacesAndNewlines)
         return preview.isEmpty ? "\(type)\(status)" : "\(type)\(status) · \(preview)"

@@ -1463,7 +1463,7 @@ private struct AgentCard: View {
                 }
                 Spacer()
                 HStack(spacing: 4) {
-                    MiniBtn(icon: "bubble.left.fill", color: Brand.primary, tip: "对话") { onChat() }
+                    MiniBtn(icon: "bubble.left.fill", color: Brand.primary, tip: "会话") { onChat() }
                     MiniBtn(icon: "pencil", color: TextGrade.secondary, tip: "编辑") { onEdit() }
                     MiniBtn(icon: "trash", color: Semantic.error.opacity(0.7), tip: "删除") { onDelete() }
                 }
