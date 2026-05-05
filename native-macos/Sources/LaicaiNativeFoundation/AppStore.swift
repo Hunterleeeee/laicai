@@ -1024,17 +1024,10 @@ public final class AppStore: ObservableObject {
             )
             sendTaskDraft(message: effectiveMessage, decision: actDecision, customAgent: agentInvocation?.agent)
         case .auto:
-            // Always route through task engine — the model decides whether to use tools.
-            // No readOnly gating here: the model can choose to write or not.
+            // Claude Code insight: don't override the planner's intent.
+            // Chat = direct response (no tools, fast). Task/research/workflow = agent loop.
             if decision.intent == .chat {
-                let chatDecision = PlannerDecision(
-                    intent: .task,
-                    confidence: 0.6,
-                    reason: "auto: model will respond directly if no tools needed",
-                    routeLabel: "自动",
-                    expectedCapabilities: []
-                )
-                sendTaskDraft(message: effectiveMessage, decision: chatDecision, customAgent: agentInvocation?.agent)
+                sendDirectDraft(message: effectiveMessage)
             } else {
                 sendTaskDraft(message: effectiveMessage, decision: decision, customAgent: agentInvocation?.agent)
             }

@@ -821,26 +821,10 @@ public final class AgentLoop: ObservableObject {
                 }
             }
 
-            // Proactive nudge: only in act mode, trigger early to prevent read-only loops.
-            let isActMode = !isReadOnlyRun && isToolAllowed("shell.exec") && isToolAllowed("file.write")
-            if iteration >= 3 && isActMode && intent != .chat && intent != .research {
-                let execTools: Set<String> = ["file.write", "file.edit", "shell.exec", "verify.build"]
-                let proactiveToolCallCount = task.steps.filter({ $0.kind == .toolCall }).count
-                let proactiveHasExec = task.steps.contains(where: { $0.kind == .toolCall && execTools.contains($0.toolName ?? "") })
-                // Trigger after 3+ read-only tool calls with no execution
-                if proactiveToolCallCount >= 3 && !proactiveHasExec {
-                    let remaining = effectiveMaxIterations - iteration
-                    let urgency: String
-                    if remaining <= 4 {
-                        urgency = "⚠️ 只剩 \(remaining) 轮！必须立即执行或给出结论。"
-                    } else if remaining <= effectiveMaxIterations / 2 {
-                        urgency = "已用过半预算在调研。"
-                    } else {
-                        urgency = "调研够了。"
-                    }
-                    let proactiveNudge = "\(urgency)已做 \(proactiveToolCallCount) 次搜索/读取，0 次执行。立刻：①分析任务→file_edit/shell_exec执行，或②已有足够信息→直接给结论。禁止继续纯读取。"
-                    messages.append(ChatMessage(role: "user", content: proactiveNudge))
-                }
+            // No proactive nudge: Claude Code insight — let the model decide.
+            // Only inject a budget warning when truly running low.
+            if iteration == effectiveMaxIterations - 2 && iteration > 3 {
+                messages.append(ChatMessage(role: "system", content: "剩余 2 轮迭代预算。请尽快给出结论或完成执行。"))
             }
 
             // Send to LLM with tools
@@ -1405,46 +1389,21 @@ public final class AgentLoop: ObservableObject {
                     // Don't mark as complete — this is a malfunction, not success
                     break
                 }
-                // Nudge logic: only nudge if model is avoiding tools when it should use them.
-                // In read-only/inspect mode, never force execution — allow analysis to conclude.
+                // Nudge logic (minimal): Claude Code never nudges — model gives text = done.
+                // We only nudge as last resort: 5+ reads, 0 writes, past half budget, in act mode.
                 let isActMode = !isReadOnlyRun && isToolAllowed("shell.exec") && isToolAllowed("file.write")
-                let tooFewTools = isActMode ? toolCallCount < 2 : toolCallCount < 1
-                let allReadNoWrite = isActMode && toolCallCount >= 3 && !hasWritten
-
-                let shouldNudge: Bool
-                if allReadNoWrite {
-                    // Only aggressively nudge in act mode when user explicitly asked for execution
-                    shouldNudge = isActMode && intent != .chat && intent != .research && nudgeCount < maxNudges
-                } else {
-                    shouldNudge = tooFewTools
-                        && isActMode
-                        && intent != .chat
-                        && intent != .research
-                        && !toolDefs.isEmpty
-                        && iteration < effectiveMaxIterations - 1
-                        && !Self.looksLikeProviderError(text)
-                        && !usedToolCompatibilityFallback
-                        && nudgeCount < maxNudges
-                        && !hasFakeToolCalls
-                }
+                let allReadNoWrite = isActMode && toolCallCount >= 5 && !hasWritten
+                let pastHalfBudget = iteration > effectiveMaxIterations / 2
+                let shouldNudge = allReadNoWrite && pastHalfBudget
+                    && intent != .chat && intent != .research
+                    && nudgeCount < 1  // max 1 nudge ever
+                    && !Self.looksLikeProviderError(text)
+                    && !hasFakeToolCalls
 
                 if shouldNudge {
                     nudgeCount += 1
                     messages.append(ChatMessage(role: "assistant", content: text))
-                    let nudgeMsg = allReadNoWrite
-                        ? "已调研\(toolCallCount)次但0次执行。立刻：file_edit/shell_exec执行，或直接给结论。禁止再搜索。"
-                        : "停止输出文本。直接调用工具完成任务，或给出最终结论。"
-                    messages.append(ChatMessage(role: "user", content: nudgeMsg))
-                    let nudgeStep = TaskStep(
-                        kind: .aiThinking,
-                        text: allReadNoWrite
-                            ? "模型做了多次调研但未执行写入/命令。提醒：分析任务可直接给结论，执行任务可调用工具（第 \(nudgeCount)/\(maxNudges) 次）。"
-                            : "模型尝试直接回复文本。提醒：基于已有信息回答或按需调用工具（第 \(nudgeCount)/\(maxNudges) 次）。",
-                        isCollapsible: true,
-                        isCollapsed: true
-                    )
-                    task.steps.append(nudgeStep)
-                    onStep(nudgeStep)
+                    messages.append(ChatMessage(role: "user", content: "已调研\(toolCallCount)次但0次执行。请执行或给出结论。"))
                     continue
                 }
 
@@ -1560,17 +1519,22 @@ public final class AgentLoop: ObservableObject {
             onStep(continueStep)
         }
 
-        let checkStep = Self.completionCheckStep(for: task, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun)
-        task.steps.append(checkStep)
-        onStep(checkStep)
-        if Self.shouldEmitStageSummary(for: task, hasPlan: hasPlan, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun) {
-            let summaryStep = Self.stageSummaryStep(for: task, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated)
-            task.steps.append(summaryStep)
-            onStep(summaryStep)
-        }
-        if let evidenceStep = Self.evidenceChecklistStep(for: task, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun) {
-            task.steps.append(evidenceStep)
-            onStep(evidenceStep)
+        // Only emit detailed diagnostics for non-trivial tasks with issues
+        let toolCallCount = task.steps.filter { $0.kind == .toolCall }.count
+        let needsDiagnostics = hadFailure || wasTruncated || (!didComplete && toolCallCount > 0)
+        if needsDiagnostics {
+            let checkStep = Self.completionCheckStep(for: task, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun)
+            task.steps.append(checkStep)
+            onStep(checkStep)
+            if Self.shouldEmitStageSummary(for: task, hasPlan: hasPlan, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun) {
+                let summaryStep = Self.stageSummaryStep(for: task, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated)
+                task.steps.append(summaryStep)
+                onStep(summaryStep)
+            }
+            if let evidenceStep = Self.evidenceChecklistStep(for: task, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun) {
+                task.steps.append(evidenceStep)
+                onStep(evidenceStep)
+            }
         }
 
         let finalStatus: TaskStatus = Self.meetsCompletionCriteria(task: task, intent: intent, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun)
