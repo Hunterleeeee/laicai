@@ -76,9 +76,6 @@ struct ChatDetailView: View {
                 tokenUsageBadge(steps: task.steps)
             }
 
-            // Center/Right: model picker
-            modelPicker
-
             // Actions
             if store.state.isGenerating {
                 Button {
@@ -217,7 +214,7 @@ struct ChatDetailView: View {
                     Label("管理连接器", systemImage: "gearshape")
                 }
             } label: {
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.xs) {
                     ZStack {
                         Circle()
                             .fill(connector.health.color)
@@ -227,17 +224,17 @@ struct ChatDetailView: View {
                             .frame(width: 16, height: 16)
                     }
                     Text(connector.modelName.isEmpty ? connector.name : connector.modelName)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(TextGrade.primary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .frame(maxWidth: 200, alignment: .leading)
+                        .frame(maxWidth: 150, alignment: .leading)
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(TextGrade.ghost)
                 }
-                .padding(.horizontal, AppSpace.md + 2)
-                .padding(.vertical, AppSpace.sm + 1)
+                .padding(.horizontal, AppSpace.sm + 2)
+                .frame(height: 28)
                 .background(
                     Capsule()
                         .fill(SurfaceGrade.elevated.opacity(0.6))
@@ -361,6 +358,7 @@ struct ChatDetailView: View {
 
                     // Right: attach + send
                     HStack(spacing: AppSpace.sm) {
+                        modelPicker
                         attachImageButton
                         attachFileButton
                         if store.state.isGenerating {
