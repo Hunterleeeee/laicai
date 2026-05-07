@@ -115,15 +115,11 @@ extension AgentLoop {
         let message = task.steps.filter { $0.kind == .userInput }.map(\.text).joined(separator: "\n").lowercased()
         let hasWrite = Self.hasSuccessfulWrite(in: task)
         let hasSavedWiki = Self.hasSavedWiki(in: task)
-        let expectsWikiOutput = message.contains("wiki")
-            || message.contains("知识库")
-            || message.contains("整理到")
-            || message.contains("整理成笔记")
-            || message.contains("obsidian")
+        let expectsWikiOutput = Self.expectsWikiOutput(message)
         let hasUnrecoveredFailure = !failedResults.isEmpty && !Self.hasRecoveryAfterLastFailure(task)
         let hasVerificationFailure = task.steps.contains { $0.toolName == "verify.build" && $0.isFailure }
 
-        if expectsWikiOutput && !isReadOnlyRun {
+        if expectsWikiOutput {
             return hasFinalOutput && (hasSavedWiki || hasWrite) && !hasUnrecoveredFailure
         }
         if hasUnrecoveredFailure && !isReadOnlyRun {
@@ -224,6 +220,233 @@ extension AgentLoop {
             issues.append("用户要求整理到 Wiki/知识库，但没有保存任何 Wiki 笔记")
         }
         return issues
+    }
+
+    func runFallbackWikiBuildIfNeeded(
+        message: String,
+        taskContext: inout TaskContext,
+        task: inout AgentTask,
+        emitMissingMaterialFailure: Bool = false,
+        onStep: @MainActor (TaskStep) -> Void
+    ) async -> Bool? {
+        guard Self.expectsWikiOutput(message),
+              !Self.hasSavedWiki(in: task),
+              !Self.hasSuccessfulWrite(in: task) else {
+            return nil
+        }
+
+        guard let source = Self.fallbackWikiSource(message: message, taskContext: taskContext) else {
+            guard emitMissingMaterialFailure else { return nil }
+            let noMaterialStep = TaskStep(
+                kind: .error,
+                text: "Wiki 任务没有可落盘的已读材料；请先读取或提取附件后继续。",
+                isFailure: true,
+                recoverable: true,
+                retryAction: "继续处理"
+            )
+            task.steps.append(noMaterialStep)
+            onStep(noMaterialStep)
+            return false
+        }
+
+        guard isToolAllowed("wiki.build") else {
+            let blockedStep = TaskStep(
+                kind: .error,
+                text: "Wiki 任务必须保存笔记，但当前 Agent 工具权限不包含 wiki.build，无法完成落盘。",
+                isFailure: true,
+                recoverable: true,
+                retryAction: "允许 wiki.build 后重试"
+            )
+            task.steps.append(blockedStep)
+            onStep(blockedStep)
+            return false
+        }
+        guard let wikiTool = toolRegistry.tool(named: "wiki_build") ?? toolRegistry.tool(named: "wiki.build") else {
+            let missingStep = TaskStep(
+                kind: .error,
+                text: "Wiki 任务必须保存笔记，但工具注册表中没有 wiki.build。",
+                isFailure: true,
+                recoverable: true
+            )
+            task.steps.append(missingStep)
+            onStep(missingStep)
+            return false
+        }
+
+        let gateStep = TaskStep(
+            kind: .aiThinking,
+            text: "编排层兜底：模型未完成 Wiki 保存，正在基于已提取材料自动调用 wiki_build(save=true)。",
+            isCollapsible: true,
+            isCollapsed: true
+        )
+        task.steps.append(gateStep)
+        onStep(gateStep)
+
+        let topic = Self.fallbackWikiTopic(message: message, sourcePath: source.path)
+        guard let atomicResult = await executeFallbackWikiBuild(
+            tool: wikiTool,
+            topic: topic,
+            mode: "atomic",
+            source: source,
+            taskContext: taskContext,
+            task: &task,
+            onStep: onStep
+        ) else {
+            return false
+        }
+        guard atomicResult.success else {
+            return false
+        }
+
+        taskContext.memory.userDecisions.append("已保存 Wiki：\(topic)")
+
+        if let mocResult = await executeFallbackWikiBuild(
+            tool: wikiTool,
+            topic: topic,
+            mode: "moc",
+            source: source,
+            taskContext: taskContext,
+            task: &task,
+            onStep: onStep,
+            emitFailure: false
+        ), mocResult.success {
+            taskContext.memory.userDecisions.append("已保存 Wiki 索引：\(topic)")
+        }
+
+        let savedPath = atomicResult.data?["path"] ?? "02 Atomic/\(topic).md"
+        let doneStep = TaskStep(
+            kind: .textOutput,
+            text: "已基于已提取材料保存 Wiki 笔记：\(topic) → \(savedPath)。",
+            isCollapsible: false,
+            isCollapsed: false
+        )
+        task.steps.append(doneStep)
+        onStep(doneStep)
+        return true
+    }
+
+    private func executeFallbackWikiBuild(
+        tool: any LaicaiTool,
+        topic: String,
+        mode: String,
+        source: FallbackWikiSource,
+        taskContext: TaskContext,
+        task: inout AgentTask,
+        onStep: @MainActor (TaskStep) -> Void,
+        emitFailure: Bool = true
+    ) async -> ToolResult? {
+        let args: [String: Any] = [
+            "topic": topic,
+            "mode": mode,
+            "save": true,
+            "topK": 8,
+            "sourceTitle": source.title,
+            "sourcePath": source.path,
+            "sourceText": String(source.text.prefix(40_000))
+        ]
+        let argumentsJSON = (try? JSONSerialization.data(withJSONObject: args))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let params = Self.displayParamsFromJSON(argumentsJSON)
+        let callId = "call_fallback_wiki_\(mode)_\(UUID().uuidString.prefix(8))"
+        let callStep = TaskStep(
+            kind: .toolCall,
+            text: "编排层兜底：" + ToolStepFormatter.callText(toolName: "wiki.build", arguments: params),
+            toolName: "wiki.build",
+            toolParams: params,
+            toolCallId: callId,
+            isCollapsible: true,
+            isCollapsed: true
+        )
+        task.steps.append(callStep)
+        onStep(callStep)
+
+        let (result, _) = await ValidationEngine.executeWithValidationJSON(
+            tool: tool,
+            argumentsJSON: argumentsJSON,
+            context: taskContext,
+            maxRetries: 1
+        )
+        if result.success || emitFailure {
+            let resultText = ToolResultFormatter.displayText(
+                toolName: "wiki.build",
+                arguments: params,
+                result: result
+            )
+            let resultStep = TaskStep(
+                kind: .toolResult,
+                text: resultText,
+                toolName: "wiki.build",
+                toolParams: params,
+                toolCallId: callId,
+                isCollapsible: true,
+                isCollapsed: true,
+                isFailure: !result.success
+            )
+            task.steps.append(resultStep)
+            onStep(resultStep)
+        }
+        return result
+    }
+
+    private struct FallbackWikiSource {
+        var path: String
+        var title: String
+        var text: String
+    }
+
+    private static func fallbackWikiSource(message: String, taskContext: TaskContext) -> FallbackWikiSource? {
+        var candidates: [String] = []
+        if let path = firstLocalPath(in: message) {
+            candidates.append(path)
+        }
+        candidates.append(contentsOf: taskContext.memory.readFiles)
+        candidates.append(contentsOf: taskContext.memory.fileContentCache.keys.sorted())
+
+        var seen: Set<String> = []
+        for rawPath in candidates {
+            let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !path.isEmpty, seen.insert(path).inserted else { continue }
+            let variants = [
+                path,
+                path.hasPrefix("/") ? path : (taskContext.workspaceRoot as NSString).appendingPathComponent(path)
+            ]
+            for variant in variants {
+                guard let content = taskContext.memory.fileContentCache[variant] ?? taskContext.memory.fileContentCache[path] else { continue }
+                let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard trimmed.count > 20 else { continue }
+                return FallbackWikiSource(
+                    path: variant,
+                    title: URL(fileURLWithPath: variant).lastPathComponent,
+                    text: trimmed
+                )
+            }
+        }
+        return nil
+    }
+
+    private static func fallbackWikiTopic(message: String, sourcePath: String) -> String {
+        if let path = firstLocalPath(in: message) ?? (sourcePath.isEmpty ? nil : sourcePath) {
+            let url = URL(fileURLWithPath: path)
+            var parts = url.pathComponents
+            let fileBase = url.deletingPathExtension().lastPathComponent
+                .replacingOccurrences(of: #"[\s_-]?(20\d{2}|[01]?\d[0-3]?\d)$"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !parts.isEmpty { parts.removeLast() }
+            let parentNames = parts.suffix(2).filter { part in
+                !["Desktop", "Downloads", "Documents", "文件"].contains(part)
+            }
+            let prefix = parentNames.joined()
+            let topic = prefix.isEmpty || fileBase.contains(prefix) ? fileBase : prefix + fileBase
+            let cleaned = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty { return String(cleaned.prefix(80)) }
+        }
+        let compact = message
+            .components(separatedBy: .newlines)
+            .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
+            .replacingOccurrences(of: "整理到", with: "")
+            .replacingOccurrences(of: "wiki", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return compact?.isEmpty == false ? String(compact!.prefix(80)) : "整理资料"
     }
 
     static func autoExtractUnsupportedRead(path: String, extractTool: any LaicaiTool, context: TaskContext) async -> ToolResult? {

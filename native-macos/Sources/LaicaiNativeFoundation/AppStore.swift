@@ -785,6 +785,9 @@ public final class AppStore: ObservableObject {
             let agentTools = Set(customAgent.tools.map { ToolNameCodec.canonicalName($0) })
             if !agentTools.isEmpty {
                 loopConfig.allowedTools = agentTools
+                if AgentLoop.expectsWikiOutput(message) {
+                    loopConfig.allowedTools?.formUnion(["file.read", "file.extract", "wiki.build"])
+                }
             }
         }
         // Inject matched skill hint into system prompt

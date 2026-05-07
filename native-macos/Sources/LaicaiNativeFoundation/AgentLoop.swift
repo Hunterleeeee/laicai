@@ -221,6 +221,7 @@ public final class AgentLoop: ObservableObject {
             && !isToolAllowed("file.write")
             && !isToolAllowed("file.edit")
             && !isToolAllowed("shell.exec")
+            && !isToolAllowed("wiki.build")
             && !isToolAllowed("verify.build")
 
         // Build initial messages, carrying compact prior thread context when the
@@ -1939,20 +1940,56 @@ public final class AgentLoop: ObservableObject {
                 }
 
                 let isEmptyResponse = rawText.isEmpty
-                let text = isEmptyResponse ? "（空响应）" : rawText
 
-                // Empty / thinking-only responses: retry with a counter to prevent infinite loops
-                if isEmptyResponse && iteration < effectiveMaxIterations - 1 {
+                // Empty / thinking-only responses must never become visible final output.
+                // For Wiki tasks with already-read material, the orchestration layer can
+                // finish the required save directly instead of waiting for another model turn.
+                if isEmptyResponse {
                     consecutiveEmptyResponses += 1
+                    if intent != .chat,
+                       let fallbackSaved = await runFallbackWikiBuildIfNeeded(
+                           message: message,
+                           taskContext: &taskContext,
+                           task: &task,
+                           emitMissingMaterialFailure: false,
+                           onStep: onStep
+                       ) {
+                        didComplete = fallbackSaved
+                        hadFailure = !fallbackSaved
+                        break
+                    }
+
+                    guard iteration < effectiveMaxIterations - 1 else {
+                        let exhaustedStep = TaskStep(
+                            kind: .error,
+                            text: response.reasoningContent?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                                ? "模型只返回了思考内容，没有给出最终答案或工具调用。本轮未形成可交付结果。"
+                                : "模型返回了空内容，没有给出最终答案或工具调用。本轮未形成可交付结果。",
+                            isFailure: true,
+                            recoverable: true,
+                            retryAction: "继续处理"
+                        )
+                        task.steps.append(exhaustedStep)
+                        onStep(exhaustedStep)
+                        hadFailure = true
+                        didComplete = false
+                        break
+                    }
+
                     if consecutiveEmptyResponses >= maxConsecutiveEmpty || (toolDefs.isEmpty && consecutiveEmptyResponses > 1) {
                         let stopStep = TaskStep(
-                            kind: .aiThinking,
-                            text: "模型连续 \(consecutiveEmptyResponses) 次返回空响应/纯思考内容，停止重试。建议换用非思考模型或简化任务描述。",
+                            kind: .error,
+                            text: "模型连续 \(consecutiveEmptyResponses) 次返回空响应/纯思考内容，停止重试。本轮未形成可交付结果。",
                             isCollapsible: false,
-                            isCollapsed: false
+                            isCollapsed: false,
+                            isFailure: true,
+                            recoverable: true,
+                            retryAction: "继续处理"
                         )
                         task.steps.append(stopStep)
                         onStep(stopStep)
+                        hadFailure = true
+                        didComplete = false
                         break
                     }
                     // D5: On 2nd empty response, strip tools — thinking models sometimes choke on schemas
@@ -1981,23 +2018,12 @@ public final class AgentLoop: ObservableObject {
                         onStep(retryStep)
                         continue  // retry same messages, URLSession will get a fresh response
                     }
-                    if isReadOnlyRun || intent == .chat {
-                        let errorStep = TaskStep(
-                            kind: .textOutput,
-                            text: (response.reasoningContent ?? "").isEmpty
-                                ? "模型返回了空内容，可能是接口不稳定。请重新发送消息试试。"
-                                : "模型只返回了思考内容，没有给出最终答案。请重试或换用非思考模型。"
-                        )
-                        task.steps.append(errorStep)
-                        onStep(errorStep)
-                        break
-                    }
-                    messages.append(ChatMessage(role: "assistant", content: text))
                     let nudgeText = Self.buildEmptyResponseNudge(task: task, intent: intent)
                     messages.append(ChatMessage(role: "user", content: nudgeText))
                     continue
                 }
                 consecutiveEmptyResponses = 0
+                let text = rawText
 
                 let toolCallCount = task.steps.filter({ $0.kind == .toolCall }).count
                 let hasFakeToolCalls = Self.containsFakeToolCallSyntax(text)
@@ -2215,6 +2241,19 @@ public final class AgentLoop: ObservableObject {
             onStep(roundStep)
         }
         } while !didComplete && !hadFailure && !wasTruncated && autoRound > 0 && autoRound <= maxAutoRounds && intent != .chat
+
+        if !didComplete && !hadFailure && !wasTruncated && intent != .chat {
+            if let fallbackSaved = await runFallbackWikiBuildIfNeeded(
+                message: message,
+                taskContext: &taskContext,
+                task: &task,
+                emitMissingMaterialFailure: false,
+                onStep: onStep
+            ) {
+                didComplete = fallbackSaved
+                hadFailure = !fallbackSaved
+            }
+        }
 
         // Try to finalize even with minor failures — the agent may have gathered
         // enough evidence from successful tools to produce a useful result.

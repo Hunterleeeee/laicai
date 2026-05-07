@@ -497,6 +497,18 @@ public struct WikiBuildTool: LaicaiTool {
     public var name: String { "wiki.build" }
     public var description: String { "生成知识图谱风格的 Obsidian 笔记。mode=atomic 创建原子笔记（一个概念一个文件），mode=moc 创建索引页（MOC）。自动添加双链和更新 MOC。" }
 
+    private struct Params: Codable {
+        var topic: String
+        var mode: String?
+        var vaultPath: String?
+        var save: Bool?
+        var useWeb: Bool?
+        var topK: Int?
+        var sourceTitle: String?
+        var sourcePath: String?
+        var sourceText: String?
+    }
+
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(
             name: name,
@@ -508,7 +520,10 @@ public struct WikiBuildTool: LaicaiTool {
                     "vaultPath": FunctionProperty(type: "string", description: "Vault 根目录，默认使用当前工作区"),
                     "save": FunctionProperty(type: "boolean", description: "是否写入 Vault；false 只生成预览"),
                     "useWeb": FunctionProperty(type: "boolean", description: "是否补充网页来源"),
-                    "topK": FunctionProperty(type: "integer", description: "最多使用的本地笔记数量")
+                    "topK": FunctionProperty(type: "integer", description: "最多使用的本地笔记数量"),
+                    "sourceTitle": FunctionProperty(type: "string", description: "可选：当前任务已读取或提取的来源标题"),
+                    "sourcePath": FunctionProperty(type: "string", description: "可选：当前任务已读取或提取的来源路径"),
+                    "sourceText": FunctionProperty(type: "string", description: "可选：当前任务已读取或提取的正文材料，优先用于生成笔记")
                 ],
                 required: ["topic"]
             )
@@ -516,15 +531,6 @@ public struct WikiBuildTool: LaicaiTool {
     }
 
     public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
-        struct Params: Codable {
-            var topic: String
-            var mode: String?
-            var vaultPath: String?
-            var save: Bool?
-            var useWeb: Bool?
-            var topK: Int?
-        }
-
         let params: Params
         do {
             let jsonData = argumentsJSON.data(using: .utf8) ?? Data()
@@ -550,7 +556,7 @@ public struct WikiBuildTool: LaicaiTool {
         if !root.isEmpty, !WorkspaceSandbox.isOverlyBroadWorkspace(root) {
             await WorkspaceSandbox.shared.addAllowedPath(root)
         }
-        let result = await WikiEngine.buildTopic(
+        var result = await WikiEngine.buildTopic(
             topic: topic,
             vaultRoot: root,
             save: params.save ?? false,
@@ -558,11 +564,43 @@ public struct WikiBuildTool: LaicaiTool {
             useWeb: params.useWeb ?? false,
             topK: max(1, min(params.topK ?? 8, 20))
         )
+        if let providedSource = Self.providedSource(from: params) {
+            result.sources.insert(providedSource, at: 0)
+            let rendered = Self.renderProvidedSourceNote(
+                topic: result.topic,
+                mode: mode,
+                sources: result.sources,
+                existingMarkdown: result.renderedMarkdown
+            )
+            result.renderedMarkdown = rendered
+            if params.save ?? false {
+                let target = URL(fileURLWithPath: root).appendingPathComponent(result.notePath)
+                if let securityError = await SecurityManager.shared.checkWrite(path: target.path) {
+                    result.saved = false
+                    result.saveError = securityError
+                } else {
+                    do {
+                        try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try rendered.write(to: target, atomically: true, encoding: .utf8)
+                        result.saved = true
+                        result.saveError = nil
+                    } catch {
+                        result.saved = false
+                        result.saveError = error.localizedDescription
+                    }
+                }
+            }
+        }
 
         let sourceLines = result.sources.prefix(8).map { source in
-            source.kind == "web"
-                ? "- [\(source.title)](\(source.path))"
-                : "- [[\(WikiEngine.wikilinkTarget(for: source))]]"
+            switch source.kind {
+            case "web":
+                return "- [\(source.title)](\(source.path))"
+            case "task":
+                return "- \(source.title)：\(source.path)"
+            default:
+                return "- [[\(WikiEngine.wikilinkTarget(for: source))]]"
+            }
         }.joined(separator: "\n")
         let wantedSave = params.save ?? false
         let action: String
@@ -595,11 +633,12 @@ public struct WikiBuildTool: LaicaiTool {
         \(preview)\(truncated)
         """
 
+        let success = !wantedSave || result.saved
         await AuditLog.shared.record(
             tool: name,
             input: "\(topic) [\(mode.rawValue)]",
             output: "\(action) \(result.notePath)，来源 \(result.sources.count) 条，双链 \(result.backlinksAdded.count) 个",
-            success: true
+            success: success
         )
 
         return ToolResult(
@@ -614,7 +653,82 @@ public struct WikiBuildTool: LaicaiTool {
                 "backlinksAdded": "\(result.backlinksAdded.count)",
                 "mocUpdated": result.mocUpdated ?? "",
                 "saveError": result.saveError ?? ""
-            ]
+            ],
+            success: success,
+            error: success ? nil : "wiki_save_failed"
         )
+    }
+
+    private static func providedSource(from params: Params) -> WikiSource? {
+        guard let sourceText = params.sourceText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !sourceText.isEmpty else {
+            return nil
+        }
+        let path = params.sourcePath?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = params.sourceTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return WikiSource(
+            path: path?.isEmpty == false ? path! : "当前任务材料",
+            title: title?.isEmpty == false ? title! : "当前任务材料",
+            preview: sourceText,
+            kind: "task"
+        )
+    }
+
+    private static func renderProvidedSourceNote(
+        topic: String,
+        mode: WikiMode,
+        sources: [WikiSource],
+        existingMarkdown: String
+    ) -> String {
+        let provided = sources.first(where: { $0.kind == "task" })?.preview.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !provided.isEmpty else { return existingMarkdown }
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        let heading = mode == .atomic ? "# \(topic)" : "# \(topic) MOC"
+        let points = provided
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .prefix(24)
+            .map { "- \(String($0.prefix(220)))" }
+            .joined(separator: "\n")
+        let source = sources.first(where: { $0.kind == "task" })
+        let sourceLine = source.map { "- \($0.title)：\($0.path)" } ?? "- 当前任务材料"
+
+        return """
+        ---
+        type: "\(mode == .atomic ? "atomic" : "moc")"
+        topic: "\(frontmatterString(topic))"
+        updated: "\(now)"
+        mode: "\(mode.rawValue)"
+        source_count: "\(sources.count)"
+        ---
+
+        \(heading)
+
+        ## Summary
+        这篇笔记由当前任务读取/提取的真实材料整理而来，用于沉淀到本地 Wiki。
+
+        ## Key Points
+        \(points.isEmpty ? "- 已读取材料，但未提取到可展示的行级要点。" : points)
+
+        ## Source
+        \(sourceLine)
+
+        ## Raw Material
+        ```text
+        \(String(provided.prefix(12000)))
+        ```
+
+        ## Related Notes
+        \(sources.filter { $0.kind != "task" }.prefix(8).map { "- [[\(WikiEngine.wikilinkTarget(for: $0))]]" }.joined(separator: "\n"))
+
+        """
+    }
+
+    private static func frontmatterString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
