@@ -467,6 +467,30 @@ final class AppStoreToolingTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(task.steps.contains { $0.kind == .toolCall && $0.toolName == "code.search" })
     }
 
+    func testAgentLoopBootstrapsSpreadsheetAttachmentWithFileExtract() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let xlsx = workspace.appendingPathComponent("会员系统替换需求调研0428.xlsx")
+        try makeMinimalXLSX(at: xlsx)
+        let runtime = CapturingToolsRuntime()
+        let loop = AgentLoop(
+            config: .init(maxIterations: 2, maxTokensPerTurn: 1024, workspaceRoot: workspace.path),
+            runtime: runtime
+        )
+
+        let task = try await loop.run(
+            message: "整理到wiki\n请读取这个附件：\(xlsx.path)",
+            intent: .task,
+            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            context: TaskContext(workspaceRoot: workspace.path, vaultRoot: workspace.path)
+        )
+
+        XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "file.extract" && $0.toolCallId == "call_bootstrap_file_extract" })
+        XCTAssertTrue(task.steps.contains { $0.kind == .toolResult && $0.toolName == "file.extract" && !$0.isFailure && $0.text.contains("会员系统") })
+        XCTAssertFalse(task.steps.contains { $0.kind == .toolCall && $0.toolName == "file.read" && $0.toolCallId == "call_bootstrap_file_read" })
+        XCTAssertTrue(runtime.requests.first?.messages?.contains { ($0.content ?? "").contains("我已直接提取用户提供的表格/文档") } == true)
+    }
+
     func testAgentLoopDoesNotCompleteWikiTaskWithoutSavedWiki() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }

@@ -358,6 +358,18 @@ public final class AgentLoop: ObservableObject {
                 \(resultContent)
                 """
             ))
+        } else if !isPureContinuation, !toolDefs.isEmpty, let localPath = Self.firstLocalPath(in: message),
+                  Self.shouldBootstrapExtract(path: localPath), isToolAllowed("file.extract"),
+                  let extractTool = toolRegistry.tool(named: "file_extract") ?? toolRegistry.tool(named: "file.extract") {
+            let bootstrapMessage = await Self.runBootstrapFileExtract(
+                path: localPath,
+                extractTool: extractTool,
+                taskContext: &taskContext,
+                task: &task,
+                maxTokens: config.maxTokensPerTurn,
+                onStep: onStep
+            )
+            messages.append(bootstrapMessage)
         } else if !isPureContinuation, !toolDefs.isEmpty, isToolAllowed("file.read"), let localPath = Self.firstLocalPath(in: message),
                   let readTool = toolRegistry.tool(named: "file_read") {
             let argumentsJSON = Self.bootstrapReadArgumentsJSON(for: localPath)
@@ -515,55 +527,30 @@ public final class AgentLoop: ObservableObject {
             )
             var autoReadBlock = ""
             if toolResult.success,
-               let readTool = toolRegistry.tool(named: "file_read"),
                let path = Self.firstReadablePath(inSearchOutput: toolResult.output, workspaceRoot: taskContext.workspaceRoot) {
-                let readArgumentsJSON = Self.bootstrapReadArgumentsJSON(for: path)
-                let readParams = parseParamsFromJSON(readArgumentsJSON)
-                let readCallId = "call_bootstrap_file_read"
-                let readCallStep = TaskStep(
-                    kind: .toolCall,
-                    text: ToolStepFormatter.callText(toolName: "file.read", arguments: readParams),
-                    toolName: "file.read",
-                    toolParams: readParams,
-                    toolCallId: readCallId,
-                    isCollapsible: true,
-                    isCollapsed: true
-                )
-                task.steps.append(readCallStep)
-                onStep(readCallStep)
-
-                let (readResult, _) = await ValidationEngine.executeWithValidationJSON(
-                    tool: readTool,
-                    argumentsJSON: readArgumentsJSON,
-                    context: taskContext
-                )
-                let readDisplayText = ToolResultFormatter.displayText(
-                    toolName: "file.read",
-                    arguments: readParams,
-                    result: readResult
-                )
-                let readResultStep = TaskStep(
-                    kind: .toolResult,
-                    text: readDisplayText,
-                    toolName: "file.read",
-                    toolCallId: readCallId,
-                    isCollapsible: true,
-                    isCollapsed: true,
-                    isFailure: !readResult.success
-                )
-                task.steps.append(readResultStep)
-                onStep(readResultStep)
-
-                let readContent = ToolResultFormatter.modelContent(
-                    toolName: "file.read",
-                    result: readResult,
-                    limit: max(1200, config.maxTokensPerTurn / 2)
-                )
-                autoReadBlock = """
-
-                自动读取的首个高相关文件片段（\(path)）：
-                \(readContent)
-                """
+                if Self.shouldBootstrapExtract(path: path),
+                   isToolAllowed("file.extract"),
+                   let extractTool = toolRegistry.tool(named: "file_extract") ?? toolRegistry.tool(named: "file.extract") {
+                    let extract = await Self.runBootstrapFileExtract(
+                        path: path,
+                        extractTool: extractTool,
+                        taskContext: &taskContext,
+                        task: &task,
+                        callId: "call_bootstrap_search_file_extract",
+                        maxTokens: max(1200, config.maxTokensPerTurn / 2),
+                        onStep: onStep
+                    )
+                    autoReadBlock = "\n\n自动提取的首个高相关表格/文档（\(path)）：\n\(extract.content ?? "")"
+                } else if let readTool = toolRegistry.tool(named: "file_read") {
+                    autoReadBlock = await Self.runBootstrapFileRead(
+                        path: path,
+                        readTool: readTool,
+                        taskContext: &taskContext,
+                        task: &task,
+                        maxTokens: max(1200, config.maxTokensPerTurn / 2),
+                        onStep: onStep
+                    )
+                }
             }
             let fileHints = taskContext.relevantFiles.prefix(12).map { "- \($0.path) (\($0.language))" }.joined(separator: "\n")
             let hintBlock = fileHints.isEmpty ? "" : "\n\n自动相关文件线索：\n\(fileHints)"
