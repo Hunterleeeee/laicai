@@ -105,11 +105,12 @@ struct MarkdownText: View {
         case .listItem(let indent, let ordered, let index, let text):
             let bullets = ["•", "◦", "▪"]
             let bullet = ordered ? "\(index)." : bullets[min(indent, bullets.count - 1)]
+            let markerWidth = ordered ? max(CGFloat(18), CGFloat(bullet.count * 8 + 8)) : CGFloat(10)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(bullet)
                     .font(.system(size: ordered ? fontSize - 1 : fontSize, weight: .medium, design: ordered ? .monospaced : .default))
                     .foregroundStyle(TextGrade.muted)
-                    .frame(minWidth: ordered ? 18 : 10, alignment: .trailing)
+                    .frame(minWidth: markerWidth, alignment: .trailing)
                 Text(Self.inlineAttributed(text))
                     .font(.system(size: fontSize, weight: .regular))
                     .foregroundStyle(TextGrade.primary)
@@ -251,8 +252,10 @@ struct MarkdownText: View {
         // Heading not at line start
         r = r.replacingOccurrences(of: "([^\\n])\\s*(#{1,6}\\s)", with: "$1\n\n$2", options: .regularExpression)
         // List item not at line start
-        r = r.replacingOccurrences(of: "([^\\n])\\s+([-*]\\s)", with: "$1\n$2", options: .regularExpression)
-        r = r.replacingOccurrences(of: "([^\\n])\\s+(\\d+\\.\\s)", with: "$1\n$2", options: .regularExpression)
+        r = r.replacingOccurrences(of: "([：:;；。!?])\\s+([-*]\\s)", with: "$1\n$2", options: .regularExpression)
+        r = r.replacingOccurrences(of: "([^\\n])\\s{2,}([-*]\\s)", with: "$1\n$2", options: .regularExpression)
+        r = r.replacingOccurrences(of: "([：:;；。!?])\\s+(\\d{1,3}[\\.)]\\s+)", with: "$1\n$2", options: .regularExpression)
+        r = r.replacingOccurrences(of: "([^\\n])\\s{2,}(\\d{1,3}[\\.)]\\s+)", with: "$1\n$2", options: .regularExpression)
         // Collapse excessive newlines
         r = r.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
         return r
@@ -262,7 +265,17 @@ struct MarkdownText: View {
         var blocks: [Block] = []
         let lines = source.components(separatedBy: "\n")
         var i = 0
-        var orderedCounter = 0
+        var orderedCounters: [Int: Int] = [:]
+
+        func resetOrderedCounters(atOrBelow indent: Int? = nil) {
+            if let indent {
+                for key in Array(orderedCounters.keys) where key >= indent {
+                    orderedCounters.removeValue(forKey: key)
+                }
+            } else {
+                orderedCounters.removeAll()
+            }
+        }
 
         while i < lines.count {
             let line = lines[i]
@@ -282,7 +295,7 @@ struct MarkdownText: View {
                     i += 1
                 }
                 blocks.append(.code(lang: lang, code: codeLines.joined(separator: "\n")))
-                orderedCounter = 0
+                resetOrderedCounters()
                 continue
             }
 
@@ -293,7 +306,7 @@ struct MarkdownText: View {
                 } else {
                     blocks.append(.blank)
                 }
-                orderedCounter = 0
+                resetOrderedCounters()
                 i += 1
                 continue
             }
@@ -301,7 +314,7 @@ struct MarkdownText: View {
             // Divider (--- or ***)
             if trimmed.allSatisfy({ $0 == "-" || $0 == "*" || $0 == " " }) && trimmed.filter({ $0 == "-" || $0 == "*" }).count >= 3 {
                 blocks.append(.divider)
-                orderedCounter = 0
+                resetOrderedCounters()
                 i += 1
                 continue
             }
@@ -322,7 +335,7 @@ struct MarkdownText: View {
                         blocks.append(.paragraph(tl))
                     }
                 }
-                orderedCounter = 0
+                resetOrderedCounters()
                 continue
             }
 
@@ -331,7 +344,7 @@ struct MarkdownText: View {
                 let hashes = trimmed[headingMatch].filter { $0 == "#" }.count
                 let content = String(trimmed[headingMatch.upperBound...])
                 blocks.append(.heading(level: hashes, text: content))
-                orderedCounter = 0
+                resetOrderedCounters()
                 i += 1
                 continue
             }
@@ -351,7 +364,7 @@ struct MarkdownText: View {
                     i += 1
                 }
                 blocks.append(.blockquote(quoteLines.joined(separator: " ").trimmingCharacters(in: .whitespaces)))
-                orderedCounter = 0
+                resetOrderedCounters()
                 continue
             }
 
@@ -361,18 +374,30 @@ struct MarkdownText: View {
                 let indent = leadingSpaces / 2
                 let content = String(trimmed[listMatch.upperBound...])
                 blocks.append(.listItem(indent: indent, ordered: false, index: 0, text: content))
-                orderedCounter = 0
+                resetOrderedCounters(atOrBelow: indent)
                 i += 1
                 continue
             }
 
             // Ordered list item
-            if let numMatch = trimmed.range(of: "^\\d+\\.\\s+", options: .regularExpression) {
+            if let numMatch = trimmed.range(of: "^\\d+[\\.)]\\s+", options: .regularExpression) {
                 let leadingSpaces = line.prefix(while: { $0 == " " || $0 == "\t" }).count
                 let indent = leadingSpaces / 2
                 let content = String(trimmed[numMatch.upperBound...])
-                orderedCounter += 1
-                blocks.append(.listItem(indent: indent, ordered: true, index: orderedCounter, text: content))
+                let marker = String(trimmed[numMatch])
+                let explicitIndex = Int(marker.prefix(while: { $0.isNumber })) ?? 1
+                let previousIndex = orderedCounters[indent]
+                let displayIndex: Int
+                if let previousIndex, explicitIndex <= 1 {
+                    displayIndex = previousIndex + 1
+                } else {
+                    displayIndex = explicitIndex
+                }
+                for key in Array(orderedCounters.keys) where key > indent {
+                    orderedCounters.removeValue(forKey: key)
+                }
+                orderedCounters[indent] = displayIndex
+                blocks.append(.listItem(indent: indent, ordered: true, index: displayIndex, text: content))
                 i += 1
                 continue
             }
@@ -381,7 +406,7 @@ struct MarkdownText: View {
             // For CJK text, preserve line breaks instead of joining with space —
             // Chinese content uses line breaks semantically (计划/结论/总结 etc.).
             var paraLines: [String] = [trimmed]
-            orderedCounter = 0
+            resetOrderedCounters()
             i += 1
             while i < lines.count {
                 let next = lines[i].trimmingCharacters(in: .whitespaces)
@@ -389,7 +414,7 @@ struct MarkdownText: View {
                     || next.hasPrefix(">")
                     || (next.hasPrefix("|") && next.hasSuffix("|"))
                     || next.range(of: "^[-*+]\\s+", options: .regularExpression) != nil
-                    || next.range(of: "^\\d+\\.\\s+", options: .regularExpression) != nil {
+                    || next.range(of: "^\\d+[\\.)]\\s+", options: .regularExpression) != nil {
                     break
                 }
                 // Break paragraph when next line starts with a CJK label (e.g. "计划：", "结论：")

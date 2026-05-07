@@ -54,7 +54,6 @@ struct ThreadTimelineView: View {
     @State private var showFullHistory = false
     @State private var userScrolledAway = false
     @State private var expandedPhases: Set<String> = []
-    @State private var eventMonitor: Any?
     @State private var lastContentWidth: CGFloat = 0
 
     var body: some View {
@@ -150,18 +149,6 @@ struct ThreadTimelineView: View {
             .background(SurfaceGrade.base)
             .onAppear {
                 scrollToBottom(proxy)
-                if eventMonitor == nil {
-                    eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
-                        if event.deltaY > 0 { self.userScrolledAway = true }
-                        return event
-                    }
-                }
-            }
-            .onDisappear {
-                if let monitor = eventMonitor {
-                    NSEvent.removeMonitor(monitor)
-                    eventMonitor = nil
-                }
             }
             .onChange(of: thread.events.count) { _ in scheduleScrollToBottom(proxy) }
             .onChange(of: thread.task?.status) { newStatus in
@@ -210,6 +197,7 @@ struct ThreadTimelineView: View {
         scrollToken += 1
         let token = scrollToken
         Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(90))
             guard token == scrollToken else { return }
             proxy.scrollTo(bottomID, anchor: .bottom)
         }

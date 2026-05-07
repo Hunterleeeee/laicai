@@ -416,8 +416,8 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         // Instead of one await per SSE token, batch small deltas.
         var pendingDelta = ""
         var lastChunkAt = CFAbsoluteTimeGetCurrent()
-        let chunkFlushThreshold = 80  // chars
-        let chunkFlushInterval = 0.15 // seconds
+        let chunkFlushThreshold = 240  // chars
+        let chunkFlushInterval = 0.35 // seconds
 
         for try await line in bytes.lines {
             if isOllamaNative {
@@ -829,7 +829,9 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         case 401:
             return "鉴权失败，请检查 API 密钥是否正确。"
         case 403:
-            return "请求被拒绝，请检查当前密钥或服务权限。"
+            return extracted.isEmpty
+                ? "请求被拒绝，请检查当前密钥或服务权限。"
+                : "请求被拒绝，请检查当前密钥或服务权限：\(extracted)"
         case 404:
             return "未找到接口，请检查端点地址是否正确。\n提示：OpenAI 兼容接口通常以 /v1/chat/completions 结尾，Ollama 以 /api/chat 结尾。"
         case 429:

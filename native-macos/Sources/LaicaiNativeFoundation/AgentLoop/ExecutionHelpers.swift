@@ -1162,13 +1162,21 @@ extension AgentLoop {
     }
 
     public static func toolDefinitions(for intent: UserIntent, phase: TaskPhase = .explore, registry: ToolRegistry = .shared) -> [ToolDefinition] {
-        // All intents get all tools — the LLM decides what to use.
-        // Phase filtering only applies for task/workflow to progressively unlock write tools.
         let allDefs = registry.toolDefinitions
         let phaseDefs: [ToolDefinition]
         switch intent {
-        case .chat, .research:
-            phaseDefs = allDefs
+        case .chat:
+            // Plain chat should stay provider-friendly: no function schema for
+            // greetings or short follow-ups. Action requests are routed as task.
+            phaseDefs = []
+        case .research:
+            let allowed: Set<String> = [
+                "web.search", "web.fetch", "file.read", "file.extract",
+                "code.search", "workspace.index"
+            ]
+            phaseDefs = allDefs.filter { def in
+                allowed.contains(ToolNameCodec.canonicalName(def.function.name))
+            }
         case .task, .workflow:
             let allowed = phase.allowedTools
             phaseDefs = allDefs.filter { def in
@@ -1327,13 +1335,18 @@ extension AgentLoop {
     ) -> Bool {
         guard !requestedTools.isEmpty, !hasRetriedWithoutTools else { return false }
         let text = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.hasPrefix("请求格式不被") || text.localizedCaseInsensitiveContains("HTTP 400") else { return false }
+        guard text.hasPrefix("请求格式不被")
+                || text.hasPrefix("请求被拒绝")
+                || text.localizedCaseInsensitiveContains("HTTP 400")
+                || text.localizedCaseInsensitiveContains("HTTP 403") else { return false }
         let detail = ([text] + response.toolActivities.map { "\($0.summary) \($0.statusLine)" })
             .joined(separator: " ")
             .lowercased()
         return detail.contains("tool")
             || detail.contains("function")
+            || detail.contains("schema")
             || detail.contains("400")
+            || detail.contains("422")
             || detail.contains("兼容")
     }
 

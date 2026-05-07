@@ -15,10 +15,10 @@ public final class AppStore: ObservableObject {
     var chatStreamBuffers: [UUID: String] = [:]
     var chatStreamLastFlushAt: [UUID: Date] = [:]
     var healthChecksInFlight: Set<UUID> = []
-    let streamFlushCharacterThreshold = 200
-    let streamFlushInterval: TimeInterval = 0.25
-    let chatStreamFlushCharacterThreshold = 900
-    let chatStreamFlushInterval: TimeInterval = 0.65
+    let streamFlushCharacterThreshold = 900
+    let streamFlushInterval: TimeInterval = 0.8
+    let chatStreamFlushCharacterThreshold = 1_200
+    let chatStreamFlushInterval: TimeInterval = 0.9
     private var shellStreamObserver: NSObjectProtocol?
 
     // H1: Debounced persistence — collapse rapid persist calls into one
@@ -819,7 +819,7 @@ public final class AppStore: ObservableObject {
         if isChatIntent {
             loopConfig.maxIterations = min(loopConfig.maxIterations, 3)
         }
-        let attemptedToolCalling = loopConfig.supportsToolCalling
+        let attemptedToolCalling = loopConfig.supportsToolCalling && !isChatIntent
         let loop = AgentLoop(
             config: loopConfig,
             runtime: environment.runtimeClient

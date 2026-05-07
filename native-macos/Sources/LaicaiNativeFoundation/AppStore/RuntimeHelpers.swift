@@ -228,7 +228,6 @@ extension AppStore {
                 isCollapsed: false
             ))
         }
-        state.threads[threadIndex].updatedAt = Date()
     }
 
     func mergeCompletedTask(_ completedTask: AgentTask, into taskID: UUID) {
@@ -338,9 +337,9 @@ extension AppStore {
         let text = state.threads[threadIndex].steps[stepIndex].text
         state.threads[threadIndex].preview = normalizedSessionPreview(text)
         state.threads[threadIndex].modelName = connectorName
-        state.threads[threadIndex].updatedAt = .now
         state.selectThread(id: sessionID)
         if shouldPersist {
+            state.threads[threadIndex].updatedAt = .now
             chatStreamBuffers.removeValue(forKey: stepID)
             chatStreamLastFlushAt.removeValue(forKey: stepID)
             persistThreads()
@@ -551,6 +550,7 @@ extension AppStore {
             || preview == "请求失败，请检查连接器配置。"
             || text.contains("HTTP 400")
             || text.contains("HTTP 401")
+            || text.contains("HTTP 403")
             || text.contains("HTTP 404")
     }
 
