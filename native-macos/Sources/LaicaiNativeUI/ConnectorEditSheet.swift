@@ -73,7 +73,7 @@ struct ConnectorEditSheet: View {
             Form {
                 Section {
                     TextField("名称", text: $name)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
 
                     Picker("类型", selection: $kind) {
                         HStack { Image(systemName: "globe"); Text("OpenAI 兼容") }
@@ -90,7 +90,7 @@ struct ConnectorEditSheet: View {
 
                 Section {
                     TextField("端点", text: $endpoint)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
                         .help(kind == "ollama" ? "http://127.0.0.1:11434 或完整 /api/chat" : "https://api.openai.com/v1")
 
                     if !endpoint.trimmingCharacters(in: .whitespaces).isEmpty && !isEndpointValid {
@@ -100,7 +100,7 @@ struct ConnectorEditSheet: View {
                     }
 
                     TextField("模型名称", text: $modelName)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
                         .help("例如：gpt-4.1、claude-sonnet、qwen3")
                 } header: {
                     Text("模型配置")
@@ -110,7 +110,7 @@ struct ConnectorEditSheet: View {
 
                 Section {
                     SecureField("API 密钥", text: $apiKey)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
                         .help(kind == "ollama" ? "本地 Ollama 留空" : "填入 API 密钥")
                 } header: {
                     Text("认证")

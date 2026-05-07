@@ -1,0 +1,28 @@
+{
+  "name": "opencli",
+  "description": "生成或改进命令行工具接口，包括参数设计、帮助文本、错误输出和终端交互流程。",
+  "tools": [
+    "file.read",
+    "code.search",
+    "file.edit",
+    "shell.exec"
+  ],
+  "steps": [
+    {
+      "kind": "prompt",
+      "name": "prompt",
+      "max_tokens": 1200
+    }
+  ],
+  "vault_context": {
+    "enabled": false
+  },
+  "web_fetch": {
+    "enabled": false
+  },
+  "output": {
+    "save_by_default": false,
+    "folder": "03 Reviews",
+    "title_template": "CLI 设计 - {{goal}}"
+  }
+}

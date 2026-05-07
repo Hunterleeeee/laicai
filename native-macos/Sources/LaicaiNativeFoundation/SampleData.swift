@@ -35,5 +35,7 @@ enum SampleData {
 }
 
 private func defaultWorkspacePath() -> String {
-    return FileManager.default.homeDirectoryForCurrentUser.path
+    // Never default to home directory — that gives the agent access to everything.
+    // An empty path forces the user to set a project-specific workspace.
+    return ""
 }

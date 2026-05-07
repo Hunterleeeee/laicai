@@ -111,13 +111,13 @@ struct WorkflowEditorView: View {
                     Text(category.rawValue)
                         .font(.system(size: 10, weight: .medium))
                 }
-                .foregroundStyle(Color(hex: category.tintHex) ?? Brand.primary)
+                .foregroundStyle(Color(hex: category.tintHex))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(
-                    Capsule().fill((Color(hex: category.tintHex) ?? Brand.primary).opacity(0.1))
+                    Capsule().fill(Color(hex: category.tintHex).opacity(0.1))
                 )
-                .overlay(Capsule().strokeBorder((Color(hex: category.tintHex) ?? Brand.primary).opacity(0.2), lineWidth: 0.5))
+                .overlay(Capsule().strokeBorder(Color(hex: category.tintHex).opacity(0.2), lineWidth: 0.5))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -827,11 +827,11 @@ struct WorkflowEditorView: View {
     private func nodeColor(for type: NodeToolType) -> Color {
         switch type {
         case .tool: return Brand.primary
-        case .llm: return Color(hex: "8B5CF6") ?? Brand.purple
-        case .code: return Color(hex: "10B981") ?? Semantic.success
-        case .condition: return Color(hex: "F59E0B") ?? Semantic.warning
-        case .humanInput: return Color(hex: "3B82F6") ?? Brand.primary
-        case .http: return Color(hex: "06B6D4") ?? Brand.teal
+        case .llm: return Color(hex: "8B5CF6")
+        case .code: return Color(hex: "10B981")
+        case .condition: return Color(hex: "F59E0B")
+        case .humanInput: return Color(hex: "3B82F6")
+        case .http: return Color(hex: "06B6D4")
         }
     }
 

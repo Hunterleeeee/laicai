@@ -1,1 +1,40 @@
-{"author":"Laicai Agent","description":"将 DeepSeek 网页端对话转换为可调用的本地 API 接口，支持提取聊天记录、模拟请求或搭建代理服务。","name":"deepseek-web-to-api","output":{"folder":"deepseek-api","save_by_default":true,"title_template":"DeepSeek API - {{goal}}"},"parameters":[{"description":"DeepSeek 聊天页面或分享链接 URL","name":"url","required":true,"type":"string"},{"description":"输出模式：request_code 生成请求代码 / proxy_service 搭建本地代理服务（默认 request_code）","name":"mode","required":false,"type":"string"}],"promptFile":"prompt.md","requires":{"tools":["web_fetch","file_write","shell_exec"]},"schema_version":"1.0","tags":["deepseek","api","web"],"vault_context":{"enabled":false},"version":"1.0.0","web_fetch":{"enabled":true,"url_from":"url"}}
+{
+  "name": "deepseek-web-to-api",
+  "description": "将 DeepSeek 网页端对话转换为可调用的本地 API 接口，支持提取聊天记录、模拟请求或搭建代理服务。",
+  "tools": [
+    "web.fetch",
+    "file.write",
+    "shell.exec"
+  ],
+  "steps": [
+    {
+      "kind": "web_fetch",
+      "name": "web-fetch",
+      "url_from": "url",
+      "chars": 8000
+    },
+    {
+      "kind": "prompt",
+      "name": "prompt",
+      "max_tokens": 1400
+    },
+    {
+      "kind": "save_note",
+      "name": "save-note",
+      "folder": "deepseek-api",
+      "save_by_default": true
+    }
+  ],
+  "vault_context": {
+    "enabled": false
+  },
+  "web_fetch": {
+    "enabled": true,
+    "url_from": "url"
+  },
+  "output": {
+    "save_by_default": true,
+    "folder": "deepseek-api",
+    "title_template": "DeepSeek API - {{goal}}"
+  }
+}

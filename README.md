@@ -15,8 +15,25 @@ macOS 原生 AI Agent，运行在本机，拥有完整工具链。
 
 ```bash
 bash native-macos/build.sh
-# 产出: native-macos/dist/Laicai.app
-cp -R native-macos/dist/Laicai.app /Applications/
+# 产出:
+#   native-macos/dist/Laicai.app
+#   native-macos/dist/laicai
+#   native-macos/dist/install_laicai.command
+```
+
+`build.sh` 会从脚本位置推导仓库根目录，默认构建 macOS 14 universal binary（arm64 + x86_64）。
+如需只构建当前架构，可设置：
+
+```bash
+LAICAI_ARCHS=arm64 bash native-macos/build.sh
+```
+
+SwiftPM 入口：
+
+```bash
+cd native-macos
+swift run LaicaiNativeApp
+swift run laicai --help
 ```
 
 ## 项目结构

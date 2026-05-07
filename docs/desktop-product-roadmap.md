@@ -2,7 +2,7 @@
 
 ## Product Goal
 
-把桌面端做成一个本地优先、聊天优先、可日用的 Agent 工作台，而不是一个只能发消息的 Electron 演示。
+把桌面端做成一个本地优先、聊天优先、可日用的 Agent 工作台，而不是一个只能发消息的技术演示。
 
 核心目标：
 
@@ -27,17 +27,18 @@
 - 启动恢复最近会话
 - degraded mode 仍可看历史与切换会话
 - 清晰错误提示与恢复路径
-- Electron smoke / Python regression 全覆盖
+- SwiftPM 单元测试、本地构建脚本和关键工作流 smoke 全覆盖
 
 ## Milestone 2: Agent Workspace
 
 ### Agent Core
 
-- 长任务分阶段推进
+- 长任务分阶段推进：探索、执行、验证、总结
 - 计划模式 / 分析模式 / 执行模式
-- 工具调用前说明意图
+- 工具调用前说明意图，工具调用后保留证据摘要
 - 工具调用过程可视化
-- 工具结果总结与失败重试
+- 工具结果总结与失败换路，避免重复同一失败参数
+- 写入任务默认走审查和验证，不默认提交 git
 
 ### Interaction Style
 
@@ -50,10 +51,12 @@
 ### Wiki
 
 - 从聊天直接发起 `/wiki`
-- 主题页 preview / save / update
+- 原子笔记 preview / save / update，默认写入 `02 Atomic/`
+- MOC 索引页 preview / save / update，默认写入 `03 MOC/`
 - 展示 wiki 生成阶段进度
 - 展示 vault sources 与 web sources
 - 最近 wiki 任务与结果面板
+- 主题名自动清洗，避免 `/`、`:` 等字符造成错误路径
 
 ### Obsidian
 
@@ -96,8 +99,8 @@
 ### Quality
 
 - 后端 API regression
-- renderer interaction regression
-- Electron end-to-end smoke
+- SwiftUI interaction regression
+- macOS app end-to-end smoke
 - wiki / web / agent / obsidian integration smoke
 
 ## Full Backlog
@@ -119,7 +122,7 @@
 
 ### Wiki
 
-- `/wiki`、`/wiki-save`、topic update
+- `/wiki`、`/wiki-save`、atomic/MOC update
 - preview / save / source cards / progress timeline
 
 ### Obsidian

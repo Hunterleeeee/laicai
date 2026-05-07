@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "LaicaiNativeApp", targets: ["LaicaiNativeApp"]),
+        .executable(name: "laicai", targets: ["LaicaiNativeCLI"]),
         .library(name: "LaicaiNativeDomain", targets: ["LaicaiNativeDomain"]),
         .library(name: "LaicaiNativeFoundation", targets: ["LaicaiNativeFoundation"]),
         .library(name: "LaicaiNativeUI", targets: ["LaicaiNativeUI"]),
@@ -18,6 +19,7 @@ let package = Package(
         .target(name: "LaicaiNativeFoundation", dependencies: ["LaicaiNativeDomain"]),
         .target(name: "LaicaiNativeUI", dependencies: ["LaicaiNativeDomain", "LaicaiNativeFoundation"]),
         .executableTarget(name: "LaicaiNativeApp", dependencies: ["LaicaiNativeUI", "LaicaiNativeFoundation"]),
+        .executableTarget(name: "LaicaiNativeCLI", dependencies: ["LaicaiNativeFoundation", "LaicaiNativeDomain"]),
         .testTarget(name: "LaicaiNativeFoundationTests", dependencies: ["LaicaiNativeFoundation", "LaicaiNativeDomain"]),
     ]
 )

@@ -121,8 +121,8 @@ public final class SkillEvolutionEngine {
             """
             var checkStmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, checkSQL, -1, &checkStmt, nil) == SQLITE_OK else { return }
-            sqlite3_bind_text(checkStmt, 1, (intent as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(checkStmt, 2, (modelName as NSString).utf8String, -1, nil)
+            sqlite3_bind_text_safe(checkStmt, 1, intent)
+            sqlite3_bind_text_safe(checkStmt, 2, modelName)
 
             var existingID: Int?
             while sqlite3_step(checkStmt) == SQLITE_ROW {
@@ -167,11 +167,11 @@ public final class SkillEvolutionEngine {
                 """
                 var insertStmt: OpaquePointer?
                 guard sqlite3_prepare_v2(db, insertSQL, -1, &insertStmt, nil) == SQLITE_OK else { return }
-                sqlite3_bind_text(insertStmt, 1, (skillName as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(insertStmt, 2, (intent as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(insertStmt, 3, (toolStr as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(insertStmt, 4, (strategy as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(insertStmt, 5, (modelName as NSString).utf8String, -1, nil)
+                sqlite3_bind_text_safe(insertStmt, 1, skillName)
+                sqlite3_bind_text_safe(insertStmt, 2, intent)
+                sqlite3_bind_text_safe(insertStmt, 3, toolStr)
+                sqlite3_bind_text_safe(insertStmt, 4, strategy)
+                sqlite3_bind_text_safe(insertStmt, 5, modelName)
                 sqlite3_bind_double(insertStmt, 6, Double(outcomeScore) / 100.0)
                 sqlite3_bind_double(insertStmt, 7, now)
                 sqlite3_bind_double(insertStmt, 8, now)
@@ -201,10 +201,10 @@ public final class SkillEvolutionEngine {
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        sqlite3_bind_text(stmt, 1, (intent as NSString).utf8String, -1, nil)
+        sqlite3_bind_text_safe(stmt, 1, intent)
         sqlite3_bind_double(stmt, 2, minQ)
-        sqlite3_bind_text(stmt, 3, (modelName as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 4, (modelName as NSString).utf8String, -1, nil)
+        sqlite3_bind_text_safe(stmt, 3, modelName)
+        sqlite3_bind_text_safe(stmt, 4, modelName)
 
         var result: LearnedSkill?
         if sqlite3_step(stmt) == SQLITE_ROW {
@@ -332,13 +332,17 @@ public final class SkillEvolutionEngine {
         if count > maxSkills {
             // Delete the weakest (low Q, old, unused) skills
             let toDelete = count - maxSkills + 10 // delete a small buffer
-            exec("""
+            var deleteStmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, """
             DELETE FROM learned_skills WHERE id IN (
                 SELECT id FROM learned_skills
                 ORDER BY q_value ASC, last_used ASC
-                LIMIT \(toDelete)
+                LIMIT ?
             );
-            """)
+            """, -1, &deleteStmt, nil) == SQLITE_OK else { return }
+            sqlite3_bind_int(deleteStmt, 1, Int32(toDelete))
+            sqlite3_step(deleteStmt)
+            sqlite3_finalize(deleteStmt)
         }
     }
 }

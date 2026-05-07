@@ -16,4 +16,4 @@ The logo is designed as a compact wealth mark for a local AI workspace:
 
 ## Asset
 
-- SVG logo: [laicai-logo.svg](/Users/lifenghe/Documents/troe_projects/harness/assets/laicai-logo.svg)
+- SVG logo: `assets/laicai-logo.svg`

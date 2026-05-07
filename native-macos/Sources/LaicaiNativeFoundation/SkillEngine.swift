@@ -75,6 +75,21 @@ public final class SkillRegistry: ObservableObject {
 
     private init() {}
 
+    /// Non-isolated accessor for builtin skills array
+    public nonisolated static func loadBuiltinSkills() -> [SkillDefinition] {
+        builtinSkills
+    }
+
+    /// Non-isolated summary of builtin skills for injection into system prompt
+    public nonisolated static func skillSummary() -> String {
+        let all = builtinSkills
+        guard !all.isEmpty else { return "" }
+        var catCounts: [String: Int] = [:]
+        for s in all { catCounts[s.category ?? "通用/开发", default: 0] += 1 }
+        let breakdown = catCounts.sorted(by: { $0.value > $1.value }).map { "\($0.key) \($0.value)" }.joined(separator: "、")
+        return "共 \(all.count) 个技能（\(breakdown)）"
+    }
+
     public func refresh(workspaceRoot: String) {
         var next = builtinSkills
         for skill in Self.loadLocalSkills(workspaceRoot: workspaceRoot)
@@ -154,7 +169,7 @@ public final class SkillRegistry: ObservableObject {
         return skill
     }
 
-    public static func loadLocalSkills(workspaceRoot: String) -> [SkillDefinition] {
+    public nonisolated static func loadLocalSkills(workspaceRoot: String) -> [SkillDefinition] {
         let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !root.isEmpty else { return [] }
 
@@ -186,8 +201,16 @@ public final class SkillRegistry: ObservableObject {
                 } else if let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                           let name = raw["name"] as? String {
                     let description = raw["description"] as? String ?? "本地 skill：\(name)"
-                    let tools = raw["tools"] as? [String] ?? []
-                    skill = SkillDefinition(name: name, description: description, tools: tools, isBuiltin: false, isPublished: true)
+                    let tools = Self.normalizedTools(from: raw)
+                    let prompt = Self.loadPromptHint(for: url)
+                    skill = SkillDefinition(
+                        name: name,
+                        description: description,
+                        tools: tools,
+                        isBuiltin: false,
+                        isPublished: true,
+                        systemHint: prompt
+                    )
                 } else {
                     return nil
                 }
@@ -196,6 +219,34 @@ public final class SkillRegistry: ObservableObject {
                 return skill
             }
             .sorted { $0.name < $1.name }
+    }
+
+    private nonisolated static func normalizedTools(from raw: [String: Any]) -> [String] {
+        var values = raw["tools"] as? [String] ?? []
+        if values.isEmpty,
+           let requires = raw["requires"] as? [String: Any],
+           let requiredTools = requires["tools"] as? [String] {
+            values = requiredTools
+        }
+        if values.isEmpty,
+           let steps = raw["steps"] as? [[String: Any]] {
+            values = steps.compactMap { step in
+                switch step["kind"] as? String {
+                case "web_fetch": return "web.fetch"
+                case "vault_context": return "vault.search"
+                case "save_note": return "vault.capture"
+                default: return nil
+                }
+            }
+        }
+        return Array(Set(values.map(ToolNameCodec.canonicalName))).sorted()
+    }
+
+    private nonisolated static func loadPromptHint(for manifestURL: URL) -> String? {
+        let promptURL = manifestURL.deletingLastPathComponent().appendingPathComponent("prompt.md")
+        guard let prompt = try? String(contentsOf: promptURL, encoding: .utf8) else { return nil }
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : String(trimmed.prefix(4000))
     }
 
     private static func slug(_ value: String) -> String {
@@ -283,6 +334,165 @@ public struct ModelRouter {
             // Default model for summarization
             return active
         }
+    }
+}
+
+// MARK: - Skill Matcher (Auto-routing)
+
+public struct SkillMatchResult: Sendable {
+    public let skill: SkillDefinition
+    public let score: Double
+    public let reason: String
+}
+
+public struct SkillMatcher {
+    /// Minimum score threshold to consider a skill match valid
+    private static let threshold: Double = 0.50
+
+    /// Match user input to the best skill from the registry.
+    /// Returns nil if no skill scores above threshold.
+    @MainActor
+    public static func match(input: String, intent: UserIntent = .task) -> SkillMatchResult? {
+        let skills = SkillRegistry.shared.skills
+        let lower = input.lowercased()
+        let tokens = lower.split { !$0.isLetter && !$0.isNumber && $0 != "." }
+            .map(String.init)
+            .filter { $0.count > 1 }
+
+        var best: (skill: SkillDefinition, score: Double, reason: String)?
+
+        for skill in skills {
+            let score = computeScore(input: lower, tokens: tokens, skill: skill, intent: intent)
+            if score > (best?.score ?? 0) {
+                let reason = describeMatch(skill: skill, score: score)
+                best = (skill, score, reason)
+            }
+        }
+
+        guard let match = best, match.score >= threshold else { return nil }
+        return SkillMatchResult(skill: match.skill, score: match.score, reason: match.reason)
+    }
+
+    private static func computeScore(input: String, tokens: [String], skill: SkillDefinition, intent: UserIntent) -> Double {
+        var score: Double = 0
+
+        // Short inputs are too ambiguous for skill matching
+        if input.count < 8 { return 0 }
+
+        // 1. Keyword synonyms / patterns — primary matching signal
+        let kwBoost = keywordBoost(input: input, skill: skill)
+        score += kwBoost
+
+        // 2. Exact skill name in input (only for longer, specific names ≥ 3 chars)
+        let nameLower = skill.name.lowercased()
+        if nameLower.count >= 3 && input.contains(nameLower) {
+            score += 0.4
+        }
+
+        // 3. Token overlap — minor signal only, avoid matching on common words
+        let stopWords: Set<String> = ["的", "是", "在", "了", "和", "与", "用", "为", "一", "个", "不", "有", "这", "到", "上", "中", "大", "可以", "请", "帮", "我", "你", "把",
+            "the", "a", "an", "is", "in", "to", "of", "for", "and", "or", "with", "by", "from", "on", "at",
+            "文件", "内容", "数据", "工具", "使用", "生成", "创建", "写", "读", "分析", "文档", "格式", "方案", "设计", "管理"]
+        let skillNameTokens = Set(skill.name.lowercased().split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { $0.count > 1 && !stopWords.contains($0) })
+        let inputTokenSet = Set(tokens.filter { !stopWords.contains($0) })
+        let overlap = inputTokenSet.intersection(skillNameTokens)
+        if !skillNameTokens.isEmpty && overlap.count >= 2 {
+            score += 0.15
+        }
+
+        // 4. Penalize workflow skills (they have their own routing)
+        if skill.workflowName != nil {
+            score -= 0.15
+        }
+
+        return min(score, 1.0)
+    }
+
+    /// Boost score for common synonyms and patterns that map to specific skills
+    private static func keywordBoost(input: String, skill: SkillDefinition) -> Double {
+        let patterns: [(keywords: [String], skillName: String, boost: Double)] = [
+            // Marketing
+            (["小红书", "种草", "笔记"], "小红书笔记", 0.5),
+            (["公众号", "微信文章"], "公众号文章", 0.5),
+            (["短视频", "抖音", "脚本", "视频号"], "短视频脚本", 0.5),
+            (["seo", "搜索优化"], "SEO 优化", 0.4),
+            (["广告文案", "投放文案", "信息流"], "广告投放文案", 0.4),
+            (["营销", "推广", "宣传"], "营销文案", 0.3),
+            (["评价回复", "好评回复", "差评回复"], "用户评价回复", 0.4),
+            // Product
+            (["prd", "需求文档", "产品需求"], "PRD 编写", 0.5),
+            (["用户故事", "user story"], "用户故事", 0.4),
+            (["okr", "目标管理"], "OKR 制定", 0.4),
+            (["排期", "优先级"], "功能优先级排序", 0.3),
+            (["发布计划", "上线"], "产品发布计划", 0.3),
+            // Content
+            (["周报", "日报"], "周报/日报", 0.5),
+            (["邮件", "email"], "邮件撰写", 0.4),
+            (["会议纪要", "会议记录"], "会议纪要", 0.5),
+            (["长文", "深度文章"], "长文写作", 0.3),
+            (["改写", "文风"], "文风改写", 0.4),
+            (["翻译", "translate"], "多语言翻译", 0.4),
+            // Design
+            (["ppt", "演示", "汇报", "presentation", "slide"], "演示文稿制作", 0.5),
+            (["ui设计", "ui方案", "界面设计", "ux"], "UI 设计方案", 0.5),
+            (["品牌", "logo", "vi", "视觉识别"], "品牌视觉设计", 0.5),
+            // Data
+            (["excel", "公式", "表格"], "Excel 公式", 0.4),
+            (["数据分析", "指标"], "数据分析报告", 0.3),
+            (["图表", "可视化"], "数据可视化建议", 0.3),
+            // Business
+            (["bp", "商业计划", "融资"], "商业计划书", 0.4),
+            (["合同", "条款审查"], "合同审查", 0.5),
+            (["jd", "招聘", "岗位描述"], "JD 编写", 0.4),
+            (["swot"], "SWOT 分析", 0.5),
+            (["方案书", "客户提案", "报价"], "客户方案书", 0.4),
+            // Dev
+            (["commit message", "提交信息"], "Commit Message 生成", 0.5),
+            (["pr描述", "merge request"], "PR 描述生成", 0.4),
+            (["changelog", "变更日志"], "Changelog 生成", 0.5),
+            (["正则", "regex"], "正则编写", 0.5),
+            (["sql", "查询语句"], "SQL 编写", 0.4),
+            (["prompt", "提示词"], "Prompt 优化", 0.4),
+            (["代码审查", "code review", "review"], "代码审查", 0.4),
+            (["单元测试", "写测试"], "生成测试", 0.4),
+            (["重构"], "重构", 0.4),
+            (["readme"], "README 生成", 0.5),
+            (["ci", "cd", "流水线"], "CI/CD 调试", 0.3),
+            (["迁移", "升级"], "迁移指南生成", 0.3),
+            // Research
+            (["竞品", "竞争对手"], "竞品分析", 0.4),
+            (["论文", "paper"], "论文速读", 0.4),
+            (["调研", "技术选型"], "技术调研", 0.3),
+            (["链接", "总结链接", "文章总结"], "链接内容总结", 0.3),
+            // Knowledge
+            (["知识图谱", "wiki", "整理笔记", "知识库"], "知识图谱构建", 0.4),
+            // Meta
+            (["创建技能", "新技能", "封装技能"], "技能创建", 0.5),
+        ]
+
+        let nameLower = skill.name.lowercased()
+        for pattern in patterns {
+            guard nameLower.contains(pattern.skillName.lowercased()) || skill.name == pattern.skillName else { continue }
+            // Count how many keywords from this pattern match the input
+            let hits = pattern.keywords.filter { input.contains($0.lowercased()) }
+            if hits.count >= 2 {
+                return pattern.boost  // Strong match: 2+ keywords
+            } else if hits.count == 1 {
+                // Single keyword match: only boost if keyword is specific enough (≥ 3 chars)
+                let kw = hits[0]
+                if kw.count >= 3 {
+                    return min(pattern.boost, 0.35) // Capped: single keyword can't exceed threshold alone
+                }
+            }
+        }
+        return 0
+    }
+
+    private static func describeMatch(skill: SkillDefinition, score: Double) -> String {
+        let pct = Int(score * 100)
+        return "匹配技能「\(skill.name)」（置信度 \(pct)%）"
     }
 }
 
@@ -507,11 +717,35 @@ private let builtinSkills: [SkillDefinition] = [
         isBuiltin: true
     ),
     SkillDefinition(
-        name: "知识页生成",
-        description: "根据主题生成结构化 Wiki 知识页，整合多来源",
-        tools: ["web.search", "web.fetch", "wiki.build", "file.write"],
+        name: "知识图谱构建",
+        description: "将资料整理为知识图谱：拆分概念为原子笔记，自动添加双链，生成 MOC 索引页",
+        tools: ["wiki.build", "web.search", "web.fetch", "file.read", "workspace.index"],
         modelPreference: .strong,
-        isBuiltin: true
+        isBuiltin: true,
+        systemHint: """
+        你是知识图谱构建专家。用户会提供资料来源（文件夹、链接、文本），你需要将其整理为 Obsidian 知识图谱。
+
+        ## 工作流程
+        1. **分析来源**：读取用户提供的资料，提取所有独立概念/实体/产品
+        2. **拆分概念**：每个概念必须独立成一个原子笔记，不要把多个概念塞进一个文件
+           - 例："万旅会员CRM与营销体系" → 拆为 "会员CRM体系"、"万旅CRM实施方案"、"竞盛SCRM平台" 三个原子笔记
+        3. **逐个创建**：对每个概念调用 wiki_build(topic="概念名", mode="atomic", save=true)
+           - 系统会自动在已有相关页面添加 [[反向链接]]
+        4. **创建索引**：所有原子笔记创建完后，调用 wiki_build(topic="领域名", mode="moc", save=true) 创建索引页
+        5. **验证覆盖率**：确保源资料中的所有重要概念都被覆盖
+
+        ## 命名规范
+        - 用概念本身命名，不用来源命名：✅ "会员CRM体系" ❌ "万旅会员CRM与营销体系文档"
+        - 通用概念和特定实施分开：✅ "酒店直销平台" + "万旅直销平台方案" ❌ "万旅酒店直销平台"
+        - 中文命名，简洁明确
+
+        ## 质量标准
+        - 每个原子笔记只讲一个概念
+        - 必须包含 [[双链]] 指向相关概念
+        - 内容精炼，信息密度高
+        - MOC 索引页按子主题分组，每个条目一句话概括
+        """,
+        category: "knowledge"
     ),
     SkillDefinition(
         name: "API 文档查阅",
@@ -1109,5 +1343,45 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .strong,
         isBuiltin: true,
         category: "business"
+    ),
+
+    // ── 元技能 Meta ──
+
+    SkillDefinition(
+        name: "技能创建",
+        description: "创建新的可复用技能。描述你想要的技能，我会用 skill.manage 工具自动生成并保存。",
+        tools: ["skill.manage"],
+        modelPreference: .strong,
+        isBuiltin: true,
+        systemHint: """
+        你是技能工厂。用户会描述一个需要反复使用的工作流程，你要将其封装为一个可复用的技能。
+
+        ## 创建流程
+        1. **理解需求**：明确技能要解决什么问题、输入是什么、输出是什么
+        2. **设计技能**：
+           - name：简洁中文名（2-6字），如 "代码审查"、"知识图谱构建"
+           - description：一句话说明（30字内）
+           - tools：需要用到的工具（从 file.read, file.write, file.edit, code.search, web.search, web.fetch, wiki.build, shell.exec, git, verify.build, workspace.index 中选）
+           - instructions：详细的分步执行说明，写清楚每一步做什么、用什么工具、注意什么
+           - trigger：可选，自动触发的关键词
+        3. **调用创建**：用 skill.manage(action="create", ...) 保存技能
+        4. **确认结果**：告知用户技能已创建，说明如何触发使用
+
+        ## 质量标准
+        - instructions 必须足够具体，让任何模型都能按步骤执行
+        - 工具列表只包含真正需要的工具，不要多选
+        - 触发词要具体，避免误触发
+        - 如果用户描述模糊，先追问再创建
+
+        ## 示例
+        用户说："帮我做一个能自动整理会议纪要的技能"
+        你应该创建：
+        - name: "会议纪要整理"
+        - description: "将会议录音/笔记整理为结构化纪要，含决议和待办"
+        - tools: "file.read,file.write"
+        - instructions: "1. 读取用户提供的会议记录文件...2. 提取关键信息...3. 输出标准格式..."
+        - trigger: "会议纪要,整理会议,meeting notes"
+        """,
+        category: "meta"
     ),
 ]

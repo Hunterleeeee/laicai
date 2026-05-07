@@ -105,12 +105,11 @@ public struct SandboxExecutor: Sendable {
 
         try process.run()
 
-        let timeoutTask = Task {
-            try await Task.sleep(for: .seconds(timeout))
-            if process.isRunning { process.terminate() }
+        let didTimeout = await waitForExit(process, timeoutSeconds: timeout)
+        if didTimeout {
+            process.terminate()
+            process.waitUntilExit()
         }
-        process.waitUntilExit()
-        timeoutTask.cancel()
 
         let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
@@ -118,6 +117,33 @@ public struct SandboxExecutor: Sendable {
         let errOutput = String(data: errData, encoding: .utf8) ?? ""
 
         return (output, errOutput, process.terminationStatus)
+    }
+
+    private static func waitForExit(_ process: Process, timeoutSeconds: Int) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let finished = Locked(false)
+            process.terminationHandler = { _ in
+                let shouldResume = finished.withValue { value in
+                    guard !value else { return false }
+                    value = true
+                    return true
+                }
+                if shouldResume {
+                    continuation.resume(returning: false)
+                }
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(timeoutSeconds))
+                let shouldResume = finished.withValue { value in
+                    guard !value else { return false }
+                    value = true
+                    return true
+                }
+                if shouldResume {
+                    continuation.resume(returning: true)
+                }
+            }
+        }
     }
 
     // MARK: - macOS sandbox-exec

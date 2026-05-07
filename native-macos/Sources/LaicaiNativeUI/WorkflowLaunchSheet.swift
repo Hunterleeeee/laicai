@@ -436,7 +436,7 @@ struct WorkflowLaunchSheet: View {
     // MARK: - Helpers
 
     private var categoryColor: Color {
-        Color(hex: workflow.category.tintHex) ?? Brand.primary
+        Color(hex: workflow.category.tintHex)
     }
 
     private var missingRequiredParams: [String] {
@@ -472,4 +472,3 @@ struct WorkflowLaunchSheet: View {
         onDismiss()
     }
 }
-

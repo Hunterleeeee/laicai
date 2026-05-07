@@ -117,15 +117,14 @@ struct WelcomeView: View {
     @State private var heroGlowPulse = false
 
     private func heroSection(compact: Bool) -> some View {
-        let coreSize: CGFloat = compact ? 48 : 64
-        let ringSize: CGFloat = compact ? 72 : 96
-        let glowSize: CGFloat = compact ? 84 : 112
+        let logoSize: CGFloat = compact ? 56 : 72
+        let ringSize: CGFloat = compact ? 80 : 104
+        let glowSize: CGFloat = compact ? 92 : 120
         let titleSize: CGFloat = compact ? 22 : 28
-        let logoFont: CGFloat = compact ? 22 : 28
 
         return VStack(spacing: compact ? 18 : 28) {
             ZStack {
-                Circle()
+                RoundedRectangle(cornerRadius: ringSize * 0.26, style: .continuous)
                     .strokeBorder(
                         AngularGradient(
                             colors: [Brand.primary, Brand.purple, Brand.teal, Brand.primary],
@@ -135,38 +134,31 @@ struct WelcomeView: View {
                     )
                     .frame(width: ringSize, height: ringSize)
                     .rotationEffect(.degrees(orbRotation * 2))
-                    .opacity(0.6)
+                    .opacity(0.5)
 
-                Circle()
+                RoundedRectangle(cornerRadius: glowSize * 0.24, style: .continuous)
                     .fill(
                         RadialGradient(
                             colors: [
-                                Brand.primary.opacity(0.25),
-                                Brand.purple.opacity(0.12),
+                                Brand.primary.opacity(0.22),
+                                Brand.purple.opacity(0.10),
                                 Color.clear
                             ],
                             center: .center,
-                            startRadius: coreSize * 0.3,
+                            startRadius: logoSize * 0.2,
                             endRadius: glowSize * 0.5
                         )
                     )
                     .frame(width: glowSize, height: glowSize)
-                    .scaleEffect(heroGlowPulse ? 1.08 : 0.92)
+                    .scaleEffect(heroGlowPulse ? 1.06 : 0.94)
                     .onAppear {
                         withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) {
                             heroGlowPulse = true
                         }
                     }
 
-                Circle()
-                    .fill(Brand.premiumGradient)
-                    .frame(width: coreSize, height: coreSize)
-                    .overlay(
-                        Text("财")
-                            .font(.system(size: logoFont, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                    )
-                    .shadow(color: Brand.primary.opacity(0.5), radius: 24, y: 0)
+                BrandLogo(size: logoSize)
+                    .shadow(color: Brand.primary.opacity(0.5), radius: 20, y: 0)
             }
             .frame(height: glowSize + 8)
 

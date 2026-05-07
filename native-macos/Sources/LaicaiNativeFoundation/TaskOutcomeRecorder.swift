@@ -108,12 +108,12 @@ public final class TaskOutcomeRecorder {
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
             let now = Date().timeIntervalSince1970
-            sqlite3_bind_text(stmt, 1, (taskID as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 2, (intent as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 3, (routeLabel as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 4, (executionMode as NSString).utf8String, -1, nil)
+            sqlite3_bind_text_safe(stmt, 1, taskID)
+            sqlite3_bind_text_safe(stmt, 2, intent)
+            sqlite3_bind_text_safe(stmt, 3, routeLabel)
+            sqlite3_bind_text_safe(stmt, 4, executionMode)
             sqlite3_bind_int(stmt, 5, Int32(iterations))
-            sqlite3_bind_text(stmt, 6, (status.rawValue as NSString).utf8String, -1, nil)
+            sqlite3_bind_text_safe(stmt, 6, status.rawValue)
             sqlite3_bind_int(stmt, 7, hadFailure ? 1 : 0)
             sqlite3_bind_int(stmt, 8, wasCancelled ? 1 : 0)
             sqlite3_bind_int(stmt, 9, wasTruncated ? 1 : 0)
@@ -121,10 +121,10 @@ public final class TaskOutcomeRecorder {
             sqlite3_bind_int(stmt, 11, Int32(toolFailures))
             sqlite3_bind_double(stmt, 12, durationSeconds)
             sqlite3_bind_int(stmt, 13, Int32(userFollowupCount))
-            sqlite3_bind_text(stmt, 14, (promptTag as NSString).utf8String, -1, nil)
+            sqlite3_bind_text_safe(stmt, 14, promptTag)
             sqlite3_bind_int(stmt, 15, Int32(userRating))
             sqlite3_bind_double(stmt, 16, now)
-            sqlite3_bind_text(stmt, 17, (modelName as NSString).utf8String, -1, nil)
+            sqlite3_bind_text_safe(stmt, 17, modelName)
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
         }
@@ -211,7 +211,7 @@ public final class TaskOutcomeRecorder {
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
             sqlite3_bind_int(stmt, 1, Int32(rating))
-            sqlite3_bind_text(stmt, 2, (taskID as NSString).utf8String, -1, nil)
+            sqlite3_bind_text_safe(stmt, 2, taskID)
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
         }
@@ -248,9 +248,9 @@ public final class TaskOutcomeRecorder {
             let sql = "INSERT INTO tool_outcomes (task_id, tool_name, model_name, success, duration_seconds, was_retry, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-            sqlite3_bind_text(stmt, 1, (taskID as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 2, (toolName as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 3, (modelName as NSString).utf8String, -1, nil)
+            sqlite3_bind_text_safe(stmt, 1, taskID)
+            sqlite3_bind_text_safe(stmt, 2, toolName)
+            sqlite3_bind_text_safe(stmt, 3, modelName)
             sqlite3_bind_int(stmt, 4, success ? 1 : 0)
             sqlite3_bind_double(stmt, 5, durationSeconds)
             sqlite3_bind_int(stmt, 6, wasRetry ? 1 : 0)
@@ -322,8 +322,8 @@ public final class TaskOutcomeRecorder {
             let sql = "INSERT OR REPLACE INTO execution_traces (task_id, trace, created_at) VALUES (?, ?, ?);"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-            sqlite3_bind_text(stmt, 1, (taskID as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 2, (traceJSON as NSString).utf8String, -1, nil)
+            sqlite3_bind_text_safe(stmt, 1, taskID)
+            sqlite3_bind_text_safe(stmt, 2, traceJSON)
             sqlite3_bind_double(stmt, 3, Date().timeIntervalSince1970)
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
@@ -338,7 +338,7 @@ public final class TaskOutcomeRecorder {
         let sql = "SELECT AVG(iterations) FROM task_outcomes WHERE intent = ? AND status = 'completed' AND created_at > ? AND iterations > 0;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        sqlite3_bind_text(stmt, 1, (intent as NSString).utf8String, -1, nil)
+        sqlite3_bind_text_safe(stmt, 1, intent)
         sqlite3_bind_double(stmt, 2, cutoff)
         var result: Double?
         if sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) != SQLITE_NULL {
@@ -362,7 +362,7 @@ public final class TaskOutcomeRecorder {
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_text(stmt, 1, (intent as NSString).utf8String, -1, nil)
+        sqlite3_bind_text_safe(stmt, 1, intent)
         sqlite3_bind_int(stmt, 2, Int32(limit))
         var rows: [OutcomeRow] = []
         while sqlite3_step(stmt) == SQLITE_ROW {

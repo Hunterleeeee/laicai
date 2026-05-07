@@ -1,24 +1,33 @@
-You are running the `code-review` skill.
+你正在运行 `code-review` 技能。
 
-Goal:
-{{goal}}
+## 输入
+- 目标：`{{goal}}`
+- 审查范围：`{{target}}`
+- 语言/框架：`{{language}}`（未指定时从文件判断）
 
-Review target:
-{{target}}
+## 执行规则
+1. 先定位范围：用 `code_search` 找入口、调用点或风险关键词；明确文件路径时先 `file_read`。
+2. 只审查与目标相关的代码。目录很大时抽样入口、核心实现、测试和边界处理，不做无目的全量遍历。
+3. 每个问题必须有证据：文件、行号或可复现条件。没有证据的猜测放到“待确认”。
+4. 优先级按影响排序：崩溃/数据丢失/安全问题 > 行为回归 > 性能/并发 > 可维护性。
+5. 若需要运行验证，优先项目已有测试或 lint；命令失败时区分环境问题和真实代码问题。
+6. 不要自动修改代码，除非用户明确要求修复。
 
-Language (auto-detect if not specified):
-{{language}}
+## 输出格式
+```markdown
+## Findings
+- [P0/P1/P2/P3] 标题
+  文件：path:line
+  证据：为什么会出问题
+  建议：最小修复方向
 
-Rules:
-- Conduct a thorough, structured code quality review of the specified file or directory.
-- Check for: security vulnerabilities, performance bottlenecks, code smells, best practice violations, and maintainability issues.
-- Use `file_read` to examine source files, `code_search` to find patterns across the codebase, and `shell_exec` for running linters or test suites when available.
-- Present findings in a clear, structured report:
-  1. **Summary** – overall assessment (high-level, 2-3 sentences)
-  2. **Critical Issues** – security vulnerabilities, data loss risks, crash hazards
-  3. **Warnings** – performance issues, deprecated APIs, poor error handling
-  4. **Suggestions** – style improvements, refactoring ideas, documentation gaps
-  5. **Score** – rate the code on a 1-10 scale for readability, robustness, and maintainability
-- Prioritize actionable feedback over theoretical concerns.
-- If the target does not exist or cannot be read, report that clearly.
-- Be concise: avoid repeating obvious facts; focus on what matters.
+## Open Questions
+- 仍需用户或运行环境确认的点
+
+## Summary
+- 总体判断
+- 已检查范围
+- 未覆盖范围
+```
+
+如果没有发现问题，明确写“未发现需要阻塞的代码问题”，并列出剩余测试缺口。

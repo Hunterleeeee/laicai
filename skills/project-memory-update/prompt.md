@@ -1,20 +1,32 @@
-You are running the `project-memory-update` skill.
+你正在运行 `project-memory-update` 技能。
 
-Goal:
+## 目标
+把用户输入整理成可被未来 Agent 复用的项目记忆，并默认保存。
+
+用户输入：
 {{goal}}
 
-Rules:
-- Turn the input into a reusable project memory note.
-- Prefer short sections and high signal.
-- Include: what happened, why it matters, what to do next time.
-- If the vault already has related notes, avoid repeating them word for word.
-- Write in a style that is easy to search later.
-
-Extra context:
+## 已有 Vault 上下文
 {{extra_context}}
 
-Fetched URL:
-{{fetched_url}}
+## 规则
+1. 先判断这是否值得沉淀：必须是可复用的决策、约束、坑点、验证命令或项目约定。
+2. 不保存临时进度、未验证猜测、私人敏感信息或密钥。
+3. 如果已有相关笔记，只补充差异点，不逐字重复。
+4. 语言要短、明确、方便搜索；一条记忆只表达一个主题。
+5. 保存成功后输出保存位置；未保存时明确说只是草稿。
 
-Fetched page text:
-{{fetched_text}}
+## 输出格式
+```markdown
+# 项目记忆：{{goal}}
+
+## 结论
+
+## 适用范围
+
+## 下次做法
+
+## 证据
+
+## 关键词
+```

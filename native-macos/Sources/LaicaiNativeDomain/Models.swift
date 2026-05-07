@@ -606,25 +606,31 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(UUID.self, forKey: .id)
-        title = try c.decode(String.self, forKey: .title)
-        preview = try c.decode(String.self, forKey: .preview)
-        status = try c.decode(TaskStatus.self, forKey: .status)
-        steps = try c.decode([TaskStep].self, forKey: .steps)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? "新会话"
+        preview = try c.decodeIfPresent(String.self, forKey: .preview) ?? ""
+        status = try c.decodeIfPresent(TaskStatus.self, forKey: .status) ?? .completed
+        steps = try c.decodeIfPresent([TaskStep].self, forKey: .steps) ?? []
         connectorID = try c.decodeIfPresent(UUID.self, forKey: .connectorID)
         workflowName = try c.decodeIfPresent(String.self, forKey: .workflowName)
-        context = try c.decode(TaskContext.self, forKey: .context)
-        modelName = try c.decode(String.self, forKey: .modelName)
-        category = try c.decode(SessionCategory.self, forKey: .category)
-        isPinned = try c.decode(Bool.self, forKey: .isPinned)
+        context = try c.decodeIfPresent(TaskContext.self, forKey: .context) ?? TaskContext()
+        modelName = try c.decodeIfPresent(String.self, forKey: .modelName) ?? ""
+        category = try c.decodeIfPresent(SessionCategory.self, forKey: .category) ?? .engineering
+        isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
-        unreadCount = try c.decode(Int.self, forKey: .unreadCount)
+        unreadCount = try c.decodeIfPresent(Int.self, forKey: .unreadCount) ?? 0
         summaryCache = try c.decodeIfPresent(String.self, forKey: .summaryCache)
         multiAgentPlan = try c.decodeIfPresent(MultiAgentPlan.self, forKey: .multiAgentPlan)
         userRating = try c.decodeIfPresent(Int.self, forKey: .userRating) ?? 0
-        createdAt = try c.decode(Date.self, forKey: .createdAt)
-        updatedAt = try c.decode(Date.self, forKey: .updatedAt)
-        source = try c.decode(ThreadSource.self, forKey: .source)
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? updatedAt
+        source = try c.decodeIfPresent(ThreadSource.self, forKey: .source)
+            ?? Self.inferSource(context: context, workflowName: workflowName, steps: steps)
+    }
+
+    /// Short human-readable ID (first 6 hex chars of UUID, uppercased)
+    public var shortID: String {
+        String(id.uuidString.prefix(6))
     }
 
     /// Infer ThreadSource from content — used as fallback when source is not explicitly set
@@ -702,6 +708,8 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
     public var events: [ThreadEvent]
     public var session: ChatSession?
     public var task: AgentTask?
+
+    public var shortID: String { String(id.uuidString.prefix(6)) }
 
     public init(thread: Thread, includeEvents: Bool = true) {
         id = thread.id

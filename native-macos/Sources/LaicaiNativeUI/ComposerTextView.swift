@@ -173,8 +173,11 @@ final class ComposerNSTextView: NSTextView {
     var onImagePaste: ((Data, String) -> Void)?
 
     // Catch ⌘V at the key-event level so it always routes to our paste logic
+    // Only intercept when this view is the first responder to avoid stealing
+    // paste from other text fields (e.g. skill search box)
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+        if window?.firstResponder === self,
+           event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
            event.charactersIgnoringModifiers == "v" {
             pasteAsImage(sender: nil)
             return true

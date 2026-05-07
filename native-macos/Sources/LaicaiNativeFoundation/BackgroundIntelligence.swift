@@ -487,7 +487,6 @@ public struct ReportGenerator {
             // 1. Threads with substantial AI output (solutions, analysis, architecture)
             let aiOutputs = thread.steps.filter { $0.kind == .textOutput && $0.text.count > 200 }
             let toolCalls = thread.steps.filter { $0.kind == .toolCall }
-            let hasCodeChanges = thread.steps.contains { $0.diffFilePath != nil }
 
             // Debug / fix tasks — document the problem + solution
             if thread.title.containsAny(["调试", "debug", "修复", "fix", "bug", "错误"]) && thread.status == .completed {

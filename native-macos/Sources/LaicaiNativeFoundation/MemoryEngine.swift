@@ -267,14 +267,23 @@ public final class MemoryEngine: ObservableObject {
 
     public func delete(id: UUID) {
         guard isOpen else { return }
-        exec("DELETE FROM memories WHERE id = '\(id.uuidString)'")
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM memories WHERE id = ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        sqlite3_bind_text_safe(stmt, 1, id.uuidString)
+        sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
         refreshCount()
     }
 
     public func deleteOlderThan(days: Int) {
         guard isOpen else { return }
         let cutoff = Date().addingTimeInterval(Double(-days * 86400)).timeIntervalSinceReferenceDate
-        exec("DELETE FROM memories WHERE score < 5.0 AND accessed_at < \(cutoff)")
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM memories WHERE score < ? AND accessed_at < ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        sqlite3_bind_double(stmt, 1, 5.0)
+        sqlite3_bind_double(stmt, 2, cutoff)
+        sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
         refreshCount()
     }
 
@@ -401,7 +410,12 @@ public final class MemoryEngine: ObservableObject {
     }
 
     private func bumpAccess(id: UUID) {
-        exec("UPDATE memories SET accessed_at = \(Date().timeIntervalSinceReferenceDate), access_count = access_count + 1 WHERE id = '\(id.uuidString)'")
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "UPDATE memories SET accessed_at = ?, access_count = access_count + 1 WHERE id = ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        sqlite3_bind_double(stmt, 1, Date().timeIntervalSinceReferenceDate)
+        sqlite3_bind_text_safe(stmt, 2, id.uuidString)
+        sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
     }
 
     private func refreshCount() {
@@ -410,7 +424,17 @@ public final class MemoryEngine: ObservableObject {
 
     private func countWhere(_ condition: String?) -> Int {
         guard isOpen else { return 0 }
-        let sql = condition != nil ? "SELECT COUNT(*) FROM memories WHERE \(condition!)" : "SELECT COUNT(*) FROM memories"
+        let sql: String
+        switch condition {
+        case "kind = 'fact'":
+            sql = "SELECT COUNT(*) FROM memories WHERE kind = 'fact'"
+        case "kind = 'outcome'":
+            sql = "SELECT COUNT(*) FROM memories WHERE kind = 'outcome'"
+        case "kind = 'preference'":
+            sql = "SELECT COUNT(*) FROM memories WHERE kind = 'preference'"
+        default:
+            sql = "SELECT COUNT(*) FROM memories"
+        }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_finalize(stmt) }

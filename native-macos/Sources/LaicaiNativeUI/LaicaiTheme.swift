@@ -331,3 +331,84 @@ extension Color {
         )
     }
 }
+
+// MARK: - Brand Logo
+
+/// Custom 4-pointed spark shape — elongated vertically with smooth curves.
+struct SparkMark: Shape {
+    func path(in rect: CGRect) -> Path {
+        let cx = rect.midX
+        let cy = rect.midY
+        let rx = rect.width / 2
+        let ry = rect.height / 2
+        let pinch: CGFloat = 0.18
+
+        var p = Path()
+        // Top
+        p.move(to: CGPoint(x: cx, y: cy - ry))
+        // To right
+        p.addQuadCurve(
+            to: CGPoint(x: cx + rx, y: cy),
+            control: CGPoint(x: cx + rx * pinch, y: cy - ry * pinch)
+        )
+        // To bottom
+        p.addQuadCurve(
+            to: CGPoint(x: cx, y: cy + ry),
+            control: CGPoint(x: cx + rx * pinch, y: cy + ry * pinch)
+        )
+        // To left
+        p.addQuadCurve(
+            to: CGPoint(x: cx - rx, y: cy),
+            control: CGPoint(x: cx - rx * pinch, y: cy + ry * pinch)
+        )
+        // Back to top
+        p.addQuadCurve(
+            to: CGPoint(x: cx, y: cy - ry),
+            control: CGPoint(x: cx - rx * pinch, y: cy - ry * pinch)
+        )
+        return p
+    }
+}
+
+/// Reusable brand logo at any size.
+struct BrandLogo: View {
+    let size: CGFloat
+
+    var body: some View {
+        let corner = size * 0.24
+        let sparkH = size * 0.58
+        let sparkW = sparkH * 0.72
+        let dotR = max(2, size * 0.05)
+
+        ZStack {
+            // Squircle base
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .fill(Brand.premiumGradient)
+                .frame(width: size, height: size)
+
+            // Subtle inner glow
+            RoundedRectangle(cornerRadius: corner * 0.8, style: .continuous)
+                .fill(
+                    RadialGradient(
+                        colors: [.white.opacity(0.12), .clear],
+                        center: .topLeading,
+                        startRadius: 0,
+                        endRadius: size * 0.7
+                    )
+                )
+                .frame(width: size * 0.92, height: size * 0.92)
+
+            // Main spark mark
+            SparkMark()
+                .fill(.white.opacity(0.92))
+                .frame(width: sparkW, height: sparkH)
+
+            // Small accent dot — top-right of spark
+            Circle()
+                .fill(.white)
+                .frame(width: dotR * 2, height: dotR * 2)
+                .offset(x: sparkW * 0.42, y: -sparkH * 0.28)
+                .opacity(size >= 40 ? 0.7 : 0)
+        }
+    }
+}

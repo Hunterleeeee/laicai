@@ -28,7 +28,12 @@ struct TaskStepCard: View {
             } else {
                 UserInputCard(text: step.text)
             }
-        case .aiThinking: ThinkingCard(text: step.text, reasoningContent: step.reasoningContent, isRunning: isRunning)
+        case .aiThinking:
+            if step.isCollapsed && !isRunning {
+                EmptyView()
+            } else {
+                ThinkingCard(text: step.text, reasoningContent: step.reasoningContent, isRunning: isRunning)
+            }
         case .toolCall: ToolCallCard(step: step, taskID: taskID)
         case .toolResult:
             if step.isCollapsed && !step.isFailure {
@@ -176,7 +181,7 @@ struct ThinkingCard: View {
     let reasoningContent: String?
     let isRunning: Bool
 
-    @State private var showReasoning = false
+    @State private var showReasoning = true
 
     var body: some View {
         HStack(alignment: .top, spacing: AppSpace.sm) {
@@ -470,8 +475,14 @@ struct ToolResultCard: View {
         ["shell.exec", "verify.build"].contains(step.toolName ?? "")
     }
 
+    private var displayText: String {
+        let maxLen = 2000
+        if step.text.count <= maxLen { return step.text }
+        return String(step.text.prefix(maxLen)) + "\n\n… 共 \(step.text.count) 字，已截断显示"
+    }
+
     private var toolTextView: some View {
-        Text(step.text)
+        Text(displayText)
             .font(AppFont.codeSmall)
             .foregroundStyle(step.isFailure ? Semantic.error : TextGrade.muted)
             .textSelection(.enabled)
@@ -504,7 +515,7 @@ struct TerminalOutputCard: View {
             .background(SurfaceGrade.elevated.opacity(0.45))
 
             ScrollView {
-                Text(text.isEmpty ? "命令无输出" : text)
+                Text(text.isEmpty ? "命令无输出" : (text.count > 3000 ? String(text.prefix(3000)) + "\n\n… 共 \(text.count) 字，已截断" : text))
                     .font(AppFont.codeSmall)
                     .foregroundStyle(isFailure ? Semantic.error : TextGrade.secondary)
                     .textSelection(.enabled)
@@ -638,8 +649,80 @@ struct TextOutputCard: View {
             }
             .onHover { isHovered = $0 }
             .animation(.easeInOut(duration: 0.12), value: isHovered)
+            .contextMenu {
+                if !trimmedText.isEmpty {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                        ToastCenter.shared.success("已复制")
+                    } label: {
+                        Label("复制全文", systemImage: "doc.on.doc")
+                    }
 
-            Spacer()
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString("```\n\(text)\n```", forType: .string)
+                        ToastCenter.shared.success("已复制为代码块")
+                    } label: {
+                        Label("复制为代码块", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+
+                    Divider()
+
+                    Button {
+                        let service = NSSharingService(named: .composeEmail)
+                        ?? NSSharingService(named: .composeMessage)
+                        if let service {
+                            service.perform(withItems: [text as NSString])
+                        } else {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(text, forType: .string)
+                            ToastCenter.shared.success("已复制，请粘贴分享")
+                        }
+                    } label: {
+                        Label("分享…", systemImage: "square.and.arrow.up")
+                    }
+
+                    Button {
+                        saveToWiki(text)
+                    } label: {
+                        Label("存入 Wiki", systemImage: "book.closed")
+                    }
+
+                    Divider()
+
+                    if let m = metrics {
+                        Button {} label: {
+                            Label(metricsLine(m), systemImage: "gauge.with.dots.needle.33percent")
+                        }
+                        .disabled(true)
+                    }
+                }
+            }
+        }
+    }
+
+    private var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @MainActor private func saveToWiki(_ content: String) {
+        let vault = UserDefaults.standard.string(forKey: "vaultPath") ?? ""
+        guard !vault.isEmpty else {
+            ToastCenter.shared.error("请先在设置中配置 Vault 路径")
+            return
+        }
+        let dir = URL(fileURLWithPath: vault).appendingPathComponent("05 AI Outputs", isDirectory: true)
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd_HHmmss"
+        let fileName = "output-\(fmt.string(from: Date())).md"
+        let fileURL = dir.appendingPathComponent(fileName)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try content.write(to: fileURL, atomically: true, encoding: .utf8)
+            ToastCenter.shared.success("已保存到 Wiki")
+        } catch {
+            ToastCenter.shared.error("保存失败：\(error.localizedDescription)")
         }
     }
 

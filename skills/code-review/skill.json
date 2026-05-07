@@ -1,1 +1,27 @@
-{"author":"Laicai Agent","commandSample":"laicai skill run code-review target=src/harness","description":"对代码文件或目录进行质量审查，检查潜在的安全漏洞、性能瓶颈、代码异味和最佳实践偏离。输出结构化的审查报告。","name":"code-review","parameters":[{"description":"要审查的文件或目录路径","name":"target","required":true,"type":"string"},{"description":"主要编程语言（自动检测如不指定）","name":"language","required":false,"type":"string"}],"promptFile":"prompt.md","requires":{"tools":["file_read","code_search","shell_exec"]},"schema_version":"1.0","tags":["code","review","quality","security"],"version":"1.0.0"}
+{
+  "name": "code-review",
+  "description": "对代码文件或目录进行质量审查，检查潜在的安全漏洞、性能瓶颈、代码异味和最佳实践偏离。输出结构化的审查报告。",
+  "tools": [
+    "file.read",
+    "code.search",
+    "shell.exec"
+  ],
+  "steps": [
+    {
+      "kind": "prompt",
+      "name": "prompt",
+      "max_tokens": 1400
+    }
+  ],
+  "vault_context": {
+    "enabled": false
+  },
+  "web_fetch": {
+    "enabled": false
+  },
+  "output": {
+    "save_by_default": false,
+    "folder": "03 Reviews",
+    "title_template": "Code Review - {{goal}}"
+  }
+}

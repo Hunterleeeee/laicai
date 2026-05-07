@@ -1,24 +1,28 @@
-You are running the `website-research` skill.
+你正在运行 `website-research` 技能。
 
-Goal:
+## 目标
+先查 Obsidian 相关笔记，再读取网页，输出一份轻量研究结论。
+
+用户目标：
 {{goal}}
 
-Skill request:
-先查 Obsidian 再抓网页
-
-Rules:
-- Be concise and practical.
-- Use the goal as the main task boundary.
-- Prefer reusable output that can be stored in Obsidian.
-- Call out uncertainty clearly.
-- When fetched page text exists, prioritize it over vague prior assumptions.
-- Use vault context as supporting evidence, not as a substitute for the requested task.
-
-Extra context:
+## Vault 上下文
 {{extra_context}}
 
-Fetched URL:
-{{fetched_url}}
+## 网页
+- URL：{{fetched_url}}
+- 正文：{{fetched_text}}
 
-Fetched page text:
-{{fetched_text}}
+## 规则
+1. 网页正文优先于先验知识；Vault 上下文用于连接已有知识。
+2. 只输出对用户目标有用的内容，不做整页复述。
+3. 页面抓取失败、内容过短或需要登录时明确说明。
+4. 标注哪些结论来自网页，哪些来自既有笔记，哪些是你的判断。
+5. 默认不保存；只有 save_note 成功后才能说已保存。
+
+## 输出格式
+- **结论**：3-5 条。
+- **网页证据**：关键摘录或事实。
+- **已有笔记连接**：相关笔记/概念。
+- **建议动作**：下一步可执行建议。
+- **来源**：{{fetched_url}}

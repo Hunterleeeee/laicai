@@ -88,7 +88,7 @@ public final class FailurePatternDB {
             var updateStmt: OpaquePointer?
             if sqlite3_prepare_v2(db, updateSQL, -1, &updateStmt, nil) == SQLITE_OK {
                 sqlite3_bind_double(updateStmt, 1, now)
-                sqlite3_bind_text(updateStmt, 2, (hash as NSString).utf8String, -1, nil)
+                sqlite3_bind_text_safe(updateStmt, 2, hash)
                 sqlite3_step(updateStmt)
                 let rowsChanged = sqlite3_changes(db)
                 sqlite3_finalize(updateStmt)
@@ -104,12 +104,12 @@ public final class FailurePatternDB {
             """
             var insertStmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, insertSQL, -1, &insertStmt, nil) == SQLITE_OK else { return }
-            sqlite3_bind_text(insertStmt, 1, (hash as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(insertStmt, 2, (intent as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(insertStmt, 3, (tools as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(insertStmt, 4, (keywords as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(insertStmt, 5, (rootCause as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(insertStmt, 6, (preemptiveInstruction as NSString).utf8String, -1, nil)
+            sqlite3_bind_text_safe(insertStmt, 1, hash)
+            sqlite3_bind_text_safe(insertStmt, 2, intent)
+            sqlite3_bind_text_safe(insertStmt, 3, tools)
+            sqlite3_bind_text_safe(insertStmt, 4, keywords)
+            sqlite3_bind_text_safe(insertStmt, 5, rootCause)
+            sqlite3_bind_text_safe(insertStmt, 6, preemptiveInstruction)
             sqlite3_bind_double(insertStmt, 7, now)
             sqlite3_bind_double(insertStmt, 8, now)
             sqlite3_step(insertStmt)
@@ -136,10 +136,10 @@ public final class FailurePatternDB {
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_text(stmt, 1, (intent as NSString).utf8String, -1, nil)
+        sqlite3_bind_text_safe(stmt, 1, intent)
         sqlite3_bind_double(stmt, 2, cutoff)
-        sqlite3_bind_text(stmt, 3, (modelName as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 4, (modelName as NSString).utf8String, -1, nil)
+        sqlite3_bind_text_safe(stmt, 3, modelName)
+        sqlite3_bind_text_safe(stmt, 4, modelName)
         let now = Date()
         let decayThreshold: TimeInterval = 14 * 86400
         var results: [FailurePattern] = []
@@ -190,7 +190,7 @@ public final class FailurePatternDB {
             let sql = "UPDATE failure_patterns SET success_after_fix = success_after_fix + 1 WHERE pattern_hash = ?;"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-            sqlite3_bind_text(stmt, 1, (patternHash as NSString).utf8String, -1, nil)
+            sqlite3_bind_text_safe(stmt, 1, patternHash)
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
         }

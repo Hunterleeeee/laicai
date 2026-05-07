@@ -8,6 +8,12 @@ public struct WikiSource: Equatable, Sendable {
     public var kind: String
 }
 
+public enum WikiMode: String, Codable, Sendable {
+    case atomic  // One concept per file → 02 Atomic/
+    case moc     // Map of Content index → 03 MOC/
+    case topic   // Legacy: big overview page → 03 MOC/ (backward compat)
+}
+
 public struct WikiBuildResult: Sendable, Identifiable {
     public let id: UUID = UUID()
     public var topic: String
@@ -16,16 +22,20 @@ public struct WikiBuildResult: Sendable, Identifiable {
     public var previousMarkdown: String?
     public var sources: [WikiSource]
     public var saved: Bool
+    public var mode: WikiMode
+    public var backlinksAdded: [String] = []
+    public var mocUpdated: String?
+    public var saveError: String?
 
     public static func == (lhs: WikiBuildResult, rhs: WikiBuildResult) -> Bool {
         lhs.topic == rhs.topic && lhs.notePath == rhs.notePath && lhs.saved == rhs.saved
     }
 
     public var diffSummary: String {
-        guard let previousMarkdown else { return "新建主题页" }
+        guard let previousMarkdown else { return mode == .atomic ? "新建原子笔记" : "新建索引页" }
         let oldLines = previousMarkdown.components(separatedBy: .newlines).count
         let newLines = renderedMarkdown.components(separatedBy: .newlines).count
-        return "更新主题页（原 \(oldLines) 行，新 \(newLines) 行）"
+        return "更新（原 \(oldLines) 行 → 新 \(newLines) 行）"
     }
 }
 
@@ -33,25 +43,37 @@ public enum WikiEngine {
     /// Recent wiki build results, persisted in memory for the session
     public private(set) static var recentResults: [WikiBuildResult] = []
 
-    /// Build a wiki topic using LLM synthesis with streaming output.
-    /// Falls back to template rendering when no connector/runtime is provided.
+    /// Build a wiki note using LLM synthesis with knowledge-graph approach.
+    /// mode=.atomic → concept-per-file in 02 Atomic/
+    /// mode=.moc → index page in 03 MOC/
     public static func buildTopic(
         topic: String,
         vaultRoot: String,
         save: Bool,
+        mode: WikiMode = .atomic,
         useWeb: Bool = false,
         topK: Int = 8,
         connector: ConnectorProfile? = nil,
         runtime: (any ChatRuntimeClient)? = nil,
         onChunk: (@Sendable @MainActor (String) -> Void)? = nil
     ) async -> WikiBuildResult {
-        let cleanTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanTopic = sanitizedTopic(topic)
         let root = URL(fileURLWithPath: vaultRoot)
+
+        // Determine target directory based on mode
+        let subdir: String
+        switch mode {
+        case .atomic: subdir = "02 Atomic"
+        case .moc, .topic: subdir = "03 MOC"
+        }
         let noteURL = root
-            .appendingPathComponent("03 Topics", isDirectory: true)
-            .appendingPathComponent(slug(cleanTopic) + ".md")
+            .appendingPathComponent(subdir, isDirectory: true)
+            .appendingPathComponent(cleanTopic + ".md")
         let previous = try? String(contentsOf: noteURL, encoding: .utf8)
         var sources = collectVaultSources(topic: cleanTopic, vaultRoot: root, limit: topK)
+
+        // Scan vault for existing pages to build backlinks
+        let existingPages = scanVaultPages(root: root)
 
         if useWeb {
             let web = try? await WebSearchTool().execute(
@@ -69,20 +91,43 @@ public enum WikiEngine {
                 topic: cleanTopic,
                 sources: sources,
                 previous: previous,
+                existingPages: existingPages,
+                mode: mode,
                 connector: connector,
                 runtime: runtime,
                 onChunk: onChunk
             )
         } else {
-            rendered = render(topic: cleanTopic, sources: sources)
+            rendered = render(topic: cleanTopic, sources: sources, existingPages: existingPages, mode: mode)
         }
 
+        var didSave = false
+        var backlinksAdded: [String] = []
+        var mocUpdated: String? = nil
+        var saveError: String?
+
         if save {
-            do {
-                try FileManager.default.createDirectory(at: noteURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try rendered.write(to: noteURL, atomically: true, encoding: .utf8)
-            } catch {
-                // Save failures are represented by the caller via a ToolResult.
+            let securityError = await SecurityManager.shared.checkWrite(path: noteURL.path)
+            if securityError == nil {
+                do {
+                    try FileManager.default.createDirectory(at: noteURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try rendered.write(to: noteURL, atomically: true, encoding: .utf8)
+                    didSave = true
+
+                    // Auto-add backlinks to related existing pages
+                    if mode == .atomic {
+                        backlinksAdded = addBacklinks(topic: cleanTopic, noteURL: noteURL, root: root, existingPages: existingPages)
+                    }
+
+                    // Auto-update MOC when creating atomic notes
+                    if mode == .atomic {
+                        mocUpdated = updateMOC(topic: cleanTopic, root: root, existingPages: existingPages)
+                    }
+                } catch {
+                    saveError = error.localizedDescription
+                }
+            } else {
+                saveError = securityError
             }
         }
 
@@ -92,18 +137,24 @@ public enum WikiEngine {
             renderedMarkdown: rendered,
             previousMarkdown: previous,
             sources: sources,
-            saved: save
+            saved: didSave,
+            mode: mode,
+            backlinksAdded: backlinksAdded,
+            mocUpdated: mocUpdated,
+            saveError: saveError
         )
         recentResults.append(result)
         if recentResults.count > 20 { recentResults.removeFirst(recentResults.count - 20) }
         return result
     }
 
-    /// Use the LLM to synthesize a coherent wiki article from collected sources.
+    /// Use the LLM to synthesize a wiki note with knowledge-graph approach.
     private static func synthesizeWithLLM(
         topic: String,
         sources: [WikiSource],
         previous: String?,
+        existingPages: [VaultPage],
+        mode: WikiMode,
         connector: ConnectorProfile,
         runtime: any ChatRuntimeClient,
         onChunk: (@Sendable @MainActor (String) -> Void)?
@@ -114,21 +165,48 @@ public enum WikiEngine {
 
         let existingNote = previous.map { "\n\n已有内容（请在此基础上更新而非重写）：\n\($0.prefix(3000))" } ?? ""
 
-        let systemPrompt = """
-        你是知识库写作助手。根据用户提供的主题和参考材料，写一篇结构清晰、信息密度高的中文 Wiki 文章。
-        要求：
-        - 用 Markdown 格式，包含标题、小标题、要点列表
-        - 内容简洁准确，不废话
-        - 如果有已有内容，在其基础上补充更新而非完全重写
-        - 不要输出 frontmatter，系统会自动添加
-        - 直接输出文章内容，不要包裹在代码块中
-        """
+        // Build backlink context: show existing pages that can be linked
+        let relatedPages = existingPages
+            .filter { $0.title.lowercased() != topic.lowercased() }
+            .prefix(30)
+            .map { "- [\($0.title)](\($0.relativePath))" }
+            .joined(separator: "\n")
+
+        let systemPrompt: String
+        if mode == .atomic {
+            systemPrompt = """
+            你是知识图谱写作助手。写一篇关于单一概念的**原子笔记**。
+
+            ## 规则
+            - 一个文件只讲一个概念/实体/产品，不要把多个概念混在一起
+            - 用 Markdown 格式：# 标题 → ## 定义 → ## 核心要点 → ## 关联概念 → ## 来源
+            - **必须使用 [[双链]]** 引用已有知识库中的相关页面
+            - 内容精炼，信息密度高，每个要点用 1-2 句话
+            - 如果有已有内容，在其基础上补充更新而非完全重写
+            - 不要输出 frontmatter，系统会自动添加
+            - 直接输出文章内容，不要包裹在代码块中
+            """
+        } else {
+            systemPrompt = """
+            你是知识图谱写作助手。写一篇**索引页（MOC）**，汇总某个领域下所有相关概念。
+
+            ## 规则
+            - 用 [[双链]] 列出该领域下所有相关原子笔记
+            - 按子主题分组，每组用 ## 小标题
+            - 每个条目用一句话概括，后跟 [[页面名]]
+            - 不写具体内容，只做导航和索引
+            - 不要输出 frontmatter，系统会自动添加
+            - 直接输出文章内容，不要包裹在代码块中
+            """
+        }
+
+        let backlinkHint = relatedPages.isEmpty ? "" : "\n\n知识库中已有的页面（请在文中用 [[页面名]] 引用相关项）：\n\(relatedPages)"
 
         let userPrompt = """
         主题：\(topic)
 
         参考材料：
-        \(sourceMaterial.isEmpty ? "暂无参考材料，请根据你的知识写作。" : sourceMaterial)\(existingNote)
+        \(sourceMaterial.isEmpty ? "暂无参考材料，请根据你的知识写作。" : sourceMaterial)\(existingNote)\(backlinkHint)
         """
 
         let messages = [
@@ -160,10 +238,11 @@ public enum WikiEngine {
             let now = ISO8601DateFormatter().string(from: Date())
             let frontmatter = """
             ---
-            type: "topic"
-            topic: "\(topic)"
+            type: "\(mode == .atomic ? "atomic" : "moc")"
+            topic: "\(frontmatterValue(topic))"
             updated: "\(now)"
             source_count: "\(sources.count)"
+            mode: "\(mode.rawValue)"
             ---
             """
             return frontmatter + "\n" + text
@@ -217,15 +296,119 @@ public enum WikiEngine {
         }
     }
 
-    private static func render(topic: String, sources: [WikiSource]) -> String {
+    private static func sanitizedTopic(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed
+            .replacingOccurrences(of: #"[/:\\]+"#, with: " - ", options: .regularExpression)
+            .replacingOccurrences(of: #"[?%*|\"<>]+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        let fallback = normalized.isEmpty ? "Untitled" : normalized
+        return String(fallback.prefix(120)).trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+    }
+
+    private static func frontmatterValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    fileprivate static func wikilinkTarget(for source: WikiSource) -> String {
+        let withoutExt = source.path.hasSuffix(".md") ? String(source.path.dropLast(3)) : source.path
+        return withoutExt.components(separatedBy: "/").last ?? withoutExt
+    }
+
+    // MARK: - Vault Page Scanning
+
+    struct VaultPage {
+        var title: String
+        var relativePath: String
+    }
+
+    /// Scan vault for all .md pages (for backlink discovery)
+    private static func scanVaultPages(root: URL) -> [VaultPage] {
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        var pages: [VaultPage] = []
+        guard let enumerator = FileManager.default.enumerator(atPath: root.path) else { return [] }
+        while let file = enumerator.nextObject() as? String {
+            let name = (file as NSString).lastPathComponent
+            if name.hasPrefix(".") {
+                enumerator.skipDescendants()
+                continue
+            }
+            guard file.hasSuffix(".md") else { continue }
+            let title = (name as NSString).deletingPathExtension
+            pages.append(VaultPage(title: title, relativePath: file))
+        }
+        return pages
+    }
+
+    /// Add backlinks: find existing pages that mention this topic and add [[link]] to them
+    private static func addBacklinks(topic: String, noteURL: URL, root: URL, existingPages: [VaultPage]) -> [String] {
+        var updated: [String] = []
+        let topicLower = topic.lowercased()
+        for page in existingPages {
+            guard page.title.lowercased() != topicLower else { continue }
+            guard page.relativePath.hasPrefix("02 Atomic/") || page.relativePath.hasPrefix("03 MOC/") else { continue }
+            let fullPath = root.appendingPathComponent(page.relativePath)
+            guard let content = try? String(contentsOf: fullPath, encoding: .utf8) else { continue }
+            let lower = content.lowercased()
+            // If the page mentions this topic but doesn't already have a [[link]] to it
+            if lower.contains(topicLower) && !content.contains("[[\(topic)]]") {
+                let newContent = appendRelatedConceptLink(to: content, topic: topic)
+                try? newContent.write(to: fullPath, atomically: true, encoding: .utf8)
+                updated.append(page.title)
+            }
+        }
+        return Array(updated.prefix(10))
+    }
+
+    /// Auto-update or create MOC page when adding an atomic note
+    @discardableResult
+    private static func updateMOC(topic: String, root: URL, existingPages: [VaultPage]) -> String? {
+        // Find the best MOC to update: look for existing MOC pages that mention related terms
+        let mocDir = root.appendingPathComponent("03 MOC", isDirectory: true)
+        try? FileManager.default.createDirectory(at: mocDir, withIntermediateDirectories: true)
+
+        // Check if any existing MOC already references this topic
+        let mocPages = existingPages.filter { $0.relativePath.hasPrefix("03 MOC/") }
+        for moc in mocPages {
+            let fullPath = root.appendingPathComponent(moc.relativePath)
+            guard let content = try? String(contentsOf: fullPath, encoding: .utf8) else { continue }
+            if content.lowercased().contains(topic.lowercased()) && !content.contains("[[\(topic)]]") {
+                // Add link to existing MOC
+                let updated = content.trimmingCharacters(in: .whitespacesAndNewlines) + "\n- [[\(topic)]]\n"
+                try? updated.write(to: fullPath, atomically: true, encoding: .utf8)
+                return moc.title
+            }
+        }
+        // No matching MOC found — don't force-create one
+        return nil
+    }
+
+    private static func appendRelatedConceptLink(to content: String, topic: String) -> String {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let linkLine = "- [[\(topic)]]"
+        if trimmed.localizedCaseInsensitiveContains("## 关联概念") {
+            return trimmed + "\n\(linkLine)\n"
+        }
+        if trimmed.localizedCaseInsensitiveContains("## Related") {
+            return trimmed + "\n\(linkLine)\n"
+        }
+        return trimmed + "\n\n## 关联概念\n\(linkLine)\n"
+    }
+
+    private static func render(topic: String, sources: [WikiSource], existingPages: [VaultPage] = [], mode: WikiMode = .atomic) -> String {
         let now = ISO8601DateFormatter().string(from: Date())
         let vaultSources = sources.filter { $0.kind == "vault" }
         let webSources = sources.filter { $0.kind == "web" }
+        let isAtomic = mode == .atomic
         var lines: [String] = [
             "---",
-            #"type: "topic""#,
-            #"topic: "\#(topic)""#,
+            #"type: "\#(isAtomic ? "atomic" : "moc")""#,
+            #"topic: "\#(frontmatterValue(topic))""#,
             #"updated: "\#(now)""#,
+            #"mode: "\#(mode.rawValue)""#,
             #"source_count: "\#(sources.count)""#,
             #"web_source_count: "\#(webSources.count)""#,
             "---",
@@ -233,7 +416,9 @@ public enum WikiEngine {
             "# \(topic)",
             "",
             "## Summary",
-            "这是关于 **\(topic)** 的初始 Wiki 草稿，由本地 Vault 笔记和可选网页来源整理而来。"
+            isAtomic
+                ? "这是关于 **\(topic)** 的原子笔记草稿，由本地 Vault 笔记和可选网页来源整理而来。"
+                : "这是 **\(topic)** 的 MOC 索引草稿，用于连接相关原子笔记和来源。"
         ]
 
         if sources.isEmpty {
@@ -241,14 +426,15 @@ public enum WikiEngine {
         } else {
             lines += ["", "## Key Points"]
             for source in sources.prefix(6) {
-                lines.append("- \(source.preview)")
+                let sourceLabel = source.kind == "web" ? source.title : "[[\(wikilinkTarget(for: source))]]"
+                lines.append("- \(source.preview)（来源：\(sourceLabel)）")
             }
         }
 
         if !vaultSources.isEmpty {
             lines += ["", "## Related Notes"]
             for source in vaultSources {
-                let link = source.path.hasSuffix(".md") ? String(source.path.dropLast(3)) : source.path
+                let link = wikilinkTarget(for: source)
                 lines.append("- [[\(link)]]")
             }
         }
@@ -260,16 +446,21 @@ public enum WikiEngine {
             }
         }
 
-        lines += ["", "## Open Questions", "- 还需要补充哪些证据、实验或反例？", ""]
-        return lines.joined(separator: "\n")
-    }
+        // Add backlinks to related existing pages
+        let related = existingPages.filter { page in
+            let lower = page.title.lowercased()
+            let topicLower = topic.lowercased()
+            return lower != topicLower && (lower.contains(topicLower) || topicLower.contains(lower))
+        }.prefix(10)
+        if !related.isEmpty {
+            lines += ["", "## 关联概念"]
+            for page in related {
+                lines.append("- [[\(page.title)]]")
+            }
+        }
 
-    private static func slug(_ text: String) -> String {
-        let cleaned = text
-            .lowercased()
-            .replacingOccurrences(of: #"[^a-z0-9\u{4e00}-\u{9fff}]+"#, with: "-", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        return cleaned.isEmpty ? "untitled" : cleaned
+        lines += ["", ""]
+        return lines.joined(separator: "\n")
     }
 
     private static func relativePath(_ url: URL, root: URL) -> String {
@@ -304,7 +495,7 @@ public enum WikiEngine {
 
 public struct WikiBuildTool: LaicaiTool {
     public var name: String { "wiki.build" }
-    public var description: String { "生成或保存 Obsidian 风格的长期主题 Wiki 页" }
+    public var description: String { "生成知识图谱风格的 Obsidian 笔记。mode=atomic 创建原子笔记（一个概念一个文件），mode=moc 创建索引页（MOC）。自动添加双链和更新 MOC。" }
 
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(
@@ -312,7 +503,8 @@ public struct WikiBuildTool: LaicaiTool {
             description: description,
             parameters: FunctionParameters(
                 properties: [
-                    "topic": FunctionProperty(type: "string", description: "主题名称"),
+                    "topic": FunctionProperty(type: "string", description: "概念/实体/主题名称（一个笔记只对应一个概念）"),
+                    "mode": FunctionProperty(type: "string", description: "atomic=原子笔记（默认，一个概念一个文件存入 02 Atomic/）；moc=索引页（存入 03 MOC/）"),
                     "vaultPath": FunctionProperty(type: "string", description: "Vault 根目录，默认使用当前工作区"),
                     "save": FunctionProperty(type: "boolean", description: "是否写入 Vault；false 只生成预览"),
                     "useWeb": FunctionProperty(type: "boolean", description: "是否补充网页来源"),
@@ -326,6 +518,7 @@ public struct WikiBuildTool: LaicaiTool {
     public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
         struct Params: Codable {
             var topic: String
+            var mode: String?
             var vaultPath: String?
             var save: Bool?
             var useWeb: Bool?
@@ -345,13 +538,23 @@ public struct WikiBuildTool: LaicaiTool {
             return ToolResult(output: "主题不能为空。", success: false, error: "empty_topic")
         }
 
+        let mode: WikiMode
+        switch params.mode?.lowercased() {
+        case "moc", "topic": mode = .moc
+        default: mode = .atomic
+        }
+
         let root = (params.vaultPath?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
             ?? context.vaultRoot
             ?? (context.workspaceRoot.isEmpty ? FileManager.default.homeDirectoryForCurrentUser.path : context.workspaceRoot)
+        if !root.isEmpty, !WorkspaceSandbox.isOverlyBroadWorkspace(root) {
+            await WorkspaceSandbox.shared.addAllowedPath(root)
+        }
         let result = await WikiEngine.buildTopic(
             topic: topic,
             vaultRoot: root,
             save: params.save ?? false,
+            mode: mode,
             useWeb: params.useWeb ?? false,
             topK: max(1, min(params.topK ?? 8, 20))
         )
@@ -359,29 +562,43 @@ public struct WikiBuildTool: LaicaiTool {
         let sourceLines = result.sources.prefix(8).map { source in
             source.kind == "web"
                 ? "- [\(source.title)](\(source.path))"
-                : "- [[\(source.path.hasSuffix(".md") ? String(source.path.dropLast(3)) : source.path)]]"
+                : "- [[\(WikiEngine.wikilinkTarget(for: source))]]"
         }.joined(separator: "\n")
-        let action = result.saved ? "已保存" : "已生成预览"
-        let recentLines = WikiEngine.recentResults.suffix(5).map { r in
-            "- \(r.topic)（\(r.saved ? "已保存" : "预览")，\(r.sources.count) 来源）"
-        }.joined(separator: "\n")
+        let wantedSave = params.save ?? false
+        let action: String
+        if result.saved {
+            action = "已保存"
+        } else if wantedSave {
+            action = "保存失败（\(result.saveError ?? "路径可能超出工作区范围或权限不足")），仅生成预览"
+        } else {
+            action = "已生成预览"
+        }
+        // Only include summary in tool result — full content is in the Wiki panel.
+        let preview = String(result.renderedMarkdown.prefix(500))
+        let truncated = result.renderedMarkdown.count > 500 ? "\n\n... （共 \(result.renderedMarkdown.count) 字，完整内容见 Wiki 面板）" : ""
+        var extraInfo = ""
+        if !result.backlinksAdded.isEmpty {
+            extraInfo += "\n\n自动双链：已在 \(result.backlinksAdded.count) 个页面添加了指向 [[\(topic)]] 的反向链接"
+            extraInfo += "\n（\(result.backlinksAdded.prefix(5).joined(separator: "、"))）"
+        }
+        if let moc = result.mocUpdated {
+            extraInfo += "\n\nMOC 更新：已将 [[\(topic)]] 添加到索引页「\(moc)」"
+        }
         let output = """
-        \(action)：\(result.notePath)
+        \(action)：\(result.notePath)（\(mode == .atomic ? "原子笔记" : "索引页")）
         \(result.diffSummary)
 
         来源：
-        \(sourceLines.isEmpty ? "- 暂无来源" : sourceLines)
+        \(sourceLines.isEmpty ? "- 暂无来源" : sourceLines)\(extraInfo)
 
-        最近生成：
-        \(recentLines.isEmpty ? "- 这是本次会话的第一个知识页" : recentLines)
-
-        \(result.renderedMarkdown)
+        预览：
+        \(preview)\(truncated)
         """
 
         await AuditLog.shared.record(
             tool: name,
-            input: topic,
-            output: "\(action) \(result.notePath)，来源 \(result.sources.count) 条",
+            input: "\(topic) [\(mode.rawValue)]",
+            output: "\(action) \(result.notePath)，来源 \(result.sources.count) 条，双链 \(result.backlinksAdded.count) 个",
             success: true
         )
 
@@ -390,9 +607,13 @@ public struct WikiBuildTool: LaicaiTool {
             data: [
                 "topic": result.topic,
                 "path": result.notePath,
+                "mode": mode.rawValue,
                 "sourceCount": "\(result.sources.count)",
                 "saved": result.saved ? "true" : "false",
-                "diffSummary": result.diffSummary
+                "diffSummary": result.diffSummary,
+                "backlinksAdded": "\(result.backlinksAdded.count)",
+                "mocUpdated": result.mocUpdated ?? "",
+                "saveError": result.saveError ?? ""
             ]
         )
     }

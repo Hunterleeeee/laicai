@@ -3,333 +3,34 @@ import Combine
 import Foundation
 import LaicaiNativeDomain
 
-// MARK: - Product Notices
-
-public enum AppNoticeStyle: String, Equatable, Sendable {
-    case info
-    case success
-    case warning
-    case error
-}
-
-public struct AppNotice: Identifiable, Equatable, Sendable {
-    public let id: UUID
-    public var message: String
-    public var style: AppNoticeStyle
-
-    public init(id: UUID = UUID(), message: String, style: AppNoticeStyle = .info) {
-        self.id = id
-        self.message = message
-        self.style = style
-    }
-}
-
-func normalizedSessionPreview(_ text: String, limit: Int = 80) -> String {
-    let preview = text
-        .replacingOccurrences(of: "\n", with: " ")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-
-    guard !preview.isEmpty else { return "" }
-
-    if preview.hasPrefix("Request failed (404)") || preview.hasPrefix("未找到") || preview.contains("HTTP 404") {
-        return "未找到接口，请检查端点地址是否正确。"
-    }
-    if preview.hasPrefix("Request failed (401)") || preview.hasPrefix("鉴权") || preview.contains("HTTP 401") {
-        return "鉴权失败，请检查 API 密钥是否正确。"
-    }
-    if preview.hasPrefix("请求失败")
-        || preview.hasPrefix("请求格式不被")
-        || preview.hasPrefix("任务执行失败")
-        || preview.contains("Request failed")
-        || preview.contains("provider returned")
-        || preview.contains("{\"error\"")
-        || preview.localizedCaseInsensitiveContains("\"error\"")
-        || preview.localizedCaseInsensitiveContains("invalid_request_error") {
-        return "请求失败，请检查连接器配置。"
-    }
-    if preview.count > limit {
-        return String(preview.prefix(max(0, limit - 1))) + "…"
-    }
-    return preview
-}
-
-// MARK: - App State
-
-public enum ExecutionMode: String, CaseIterable, Equatable, Sendable, Codable {
-    case auto
-
-    public var title: String { "自动" }
-    public var icon: String { "wand.and.stars" }
-
-    public init(from decoder: Decoder) throws {
-        let _ = try decoder.singleValueContainer().decode(String.self)
-        self = .auto
-    }
-}
-
-public struct ImageAttachment: Identifiable, Equatable, Sendable {
-    public let id: UUID
-    public let data: Data           // PNG or JPEG bytes
-    public let mediaType: String    // "image/png" or "image/jpeg"
-    public let thumbnailName: String // display name e.g. "截图 1"
-    public let width: Int
-    public let height: Int
-
-    public init(id: UUID = UUID(), data: Data, mediaType: String = "image/png", thumbnailName: String = "图片", width: Int = 0, height: Int = 0) {
-        self.id = id
-        self.data = data
-        self.mediaType = mediaType
-        self.thumbnailName = thumbnailName
-        self.width = width
-        self.height = height
-    }
-
-    public static func == (lhs: ImageAttachment, rhs: ImageAttachment) -> Bool {
-        lhs.id == rhs.id
-    }
-
-    /// Convert to OpenAI vision ContentPart
-    public func toContentPart() -> ContentPart {
-        .imageBase64(data: data, mediaType: mediaType, detail: "auto")
-    }
-}
-
-public struct AppState: Equatable {
-    public var workspaceName: String
-    public var modeLabel: String
-    public var executionMode: ExecutionMode
-    public var searchText: String
-    public var threads: [Thread]
-    public var selectedThreadID: UUID?
-    public var workbenchTab: WorkbenchTab
-    public var connectors: [ConnectorProfile]
-    public var activeConnectorID: UUID?
-    public var toolActivities: [ToolActivity]
-    public var workflowRuns: [WorkflowRun]
-    public var draftMessage: String
-    public var draftAttachments: [String]
-    public var draftImages: [ImageAttachment]
-    public var isGenerating: Bool
-    public var liveActivity: String  // Human-readable description of current AI activity
-    public var pendingFollowUp: String?  // Queued follow-up instruction when task is running
-    public var settings: AppSettings
-    public var notice: AppNotice?
-
-    // MARK: - Computed compatibility (legacy consumers)
-
-    public var selectedThreadSource: ThreadSource? {
-        threads.first(where: { $0.id == selectedThreadID })?.source
-    }
-
-    public var sessions: [ChatSession] {
-        threads.filter { $0.source == .session }.map { ChatSession(thread: $0) }
-    }
-
-    public var selectedSessionID: UUID? {
-        threads.first(where: { $0.id == selectedThreadID })?.source == .session ? selectedThreadID : nil
-    }
-
-    public var tasks: [AgentTask] {
-        threads.filter { $0.source == .task }.map { AgentTask(thread: $0) }
-    }
-
-    public var selectedTaskID: UUID? {
-        threads.first(where: { $0.id == selectedThreadID })?.source == .task ? selectedThreadID : nil
-    }
-
-    public var selectedSession: ChatSession? {
-        guard let id = selectedThreadID, let thread = threads.first(where: { $0.id == id }), thread.source == .session else { return nil }
-        return ChatSession(thread: thread)
-    }
-
-    public var activeConnector: ConnectorProfile? {
-        connectors.first(where: { $0.id == activeConnectorID })
-    }
-
-    public var selectedTask: AgentTask? {
-        guard let id = selectedThreadID, let thread = threads.first(where: { $0.id == id }), thread.source == .task else { return nil }
-        return AgentTask(thread: thread)
-    }
-
-    public var selectedThread: Thread? {
-        guard let id = selectedThreadID else { return nil }
-        return threads.first(where: { $0.id == id })
-    }
-
-    // MARK: - ThreadRecord-based views (sidebar)
-
-    public var threadRecords: [ThreadRecord] {
-        threads.map { ThreadRecord(thread: $0, includeEvents: true) }.sorted { lhs, rhs in
-            if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
-            return lhs.updatedAt > rhs.updatedAt
-        }
-    }
-
-    public var threadRecordSummaries: [ThreadRecord] {
-        threads.map { ThreadRecord(thread: $0, includeEvents: false) }.sorted { lhs, rhs in
-            if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
-            return lhs.updatedAt > rhs.updatedAt
-        }
-    }
-
-    public var filteredThreadRecords: [ThreadRecord] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return threadRecords }
-        return threadRecords.filter { record in
-            record.title.localizedCaseInsensitiveContains(query)
-                || record.preview.localizedCaseInsensitiveContains(query)
-                || record.events.contains { event in
-                    event.text.localizedCaseInsensitiveContains(query)
-                }
-        }
-    }
-
-    public var filteredThreadRecordSummaries: [ThreadRecord] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return threadRecordSummaries }
-        return filteredThreadRecords
-    }
-
-    // MARK: - Legacy compatibility aliases
-
-    /// Alias for `threadRecords` to ease migration of existing UI consumers.
-    public var threads_legacy: [ThreadRecord] { threadRecords }
-
-    /// Alias for `threadRecordSummaries`.
-    public var threadSummaries: [ThreadRecord] { threadRecordSummaries }
-
-    /// Alias for `filteredThreadRecords`.
-    public var filteredThreads: [ThreadRecord] { filteredThreadRecords }
-
-    /// Alias for `filteredThreadRecordSummaries`.
-    public var filteredThreadSummaries: [ThreadRecord] { filteredThreadRecordSummaries }
-
-    // MARK: - Init
-
-    public init(
-        workspaceName: String,
-        modeLabel: String,
-        executionMode: ExecutionMode = .auto,
-        searchText: String = "",
-        threads: [Thread] = [],
-        selectedThreadID: UUID? = nil,
-        workbenchTab: WorkbenchTab,
-        connectors: [ConnectorProfile],
-        activeConnectorID: UUID?,
-        toolActivities: [ToolActivity],
-        workflowRuns: [WorkflowRun],
-        draftMessage: String,
-        draftAttachments: [String] = [],
-        isGenerating: Bool,
-        liveActivity: String = "",
-        pendingFollowUp: String? = nil,
-        settings: AppSettings,
-        notice: AppNotice? = nil
-    ) {
-        self.workspaceName = workspaceName
-        self.modeLabel = modeLabel
-        self.executionMode = executionMode
-        self.searchText = searchText
-        self.threads = threads
-        self.selectedThreadID = selectedThreadID
-        self.workbenchTab = workbenchTab
-        self.connectors = connectors
-        self.activeConnectorID = activeConnectorID
-        self.toolActivities = toolActivities
-        self.workflowRuns = workflowRuns
-        self.draftMessage = draftMessage
-        self.draftAttachments = draftAttachments
-        self.draftImages = []
-        self.isGenerating = isGenerating
-        self.liveActivity = liveActivity
-        self.pendingFollowUp = pendingFollowUp
-        self.settings = settings
-        self.notice = notice
-    }
-
-    /// Legacy init from sessions + tasks (for migration paths).
-    public init(
-        workspaceName: String,
-        modeLabel: String,
-        executionMode: ExecutionMode = .auto,
-        searchText: String = "",
-        sessions: [ChatSession],
-        selectedSessionID: UUID?,
-        workbenchTab: WorkbenchTab,
-        connectors: [ConnectorProfile],
-        activeConnectorID: UUID?,
-        toolActivities: [ToolActivity],
-        workflowRuns: [WorkflowRun],
-        draftMessage: String,
-        draftAttachments: [String] = [],
-        isGenerating: Bool,
-        settings: AppSettings,
-        tasks: [AgentTask] = [],
-        selectedTaskID: UUID? = nil,
-        selectedThreadID: UUID? = nil,
-        selectedThreadSource: ThreadSource? = nil,
-        notice: AppNotice? = nil
-    ) {
-        self.workspaceName = workspaceName
-        self.modeLabel = modeLabel
-        self.executionMode = executionMode
-        self.searchText = searchText
-        self.threads = sessions.map(Thread.init(session:)) + tasks.map(Thread.init(task:))
-        if let selectedThreadID, let _ = selectedThreadSource {
-            self.selectedThreadID = selectedThreadID
-        } else if let selectedTaskID {
-            self.selectedThreadID = selectedTaskID
-        } else if let selectedSessionID {
-            self.selectedThreadID = selectedSessionID
-        } else {
-            self.selectedThreadID = nil
-        }
-        self.workbenchTab = workbenchTab
-        self.connectors = connectors
-        self.activeConnectorID = activeConnectorID
-        self.toolActivities = toolActivities
-        self.workflowRuns = workflowRuns
-        self.draftMessage = draftMessage
-        self.draftAttachments = draftAttachments
-        self.draftImages = []
-        self.isGenerating = isGenerating
-        self.liveActivity = ""
-        self.settings = settings
-        self.notice = notice
-    }
-
-    public mutating func selectThread(id: UUID?) {
-        selectedThreadID = id
-    }
-}
-
 @MainActor
 public final class AppStore: ObservableObject {
-    @Published public private(set) var state: AppState
+    @Published public internal(set) var state: AppState
     @Published public var isShowingTaskModeInfo = false
-    private let environment: AppEnvironment
-    private var agentLoop: AgentLoop?
-    private static let streamingOutputID = "__streaming_output__"
-    private var streamBuffers: [UUID: String] = [:]
-    private var streamLastFlushAt: [UUID: Date] = [:]
-    private var chatStreamBuffers: [UUID: String] = [:]
-    private var chatStreamLastFlushAt: [UUID: Date] = [:]
-    private var healthChecksInFlight: Set<UUID> = []
-    private let streamFlushCharacterThreshold = 96
-    private let streamFlushInterval: TimeInterval = 0.14
-    private let chatStreamFlushCharacterThreshold = 160
-    private let chatStreamFlushInterval: TimeInterval = 0.22
+    let environment: AppEnvironment
+    var agentLoops: [UUID: AgentLoop] = [:]
+    static let streamingOutputID = "__streaming_output__"
+    var streamBuffers: [UUID: String] = [:]
+    var streamLastFlushAt: [UUID: Date] = [:]
+    var chatStreamBuffers: [UUID: String] = [:]
+    var chatStreamLastFlushAt: [UUID: Date] = [:]
+    var healthChecksInFlight: Set<UUID> = []
+    let streamFlushCharacterThreshold = 200
+    let streamFlushInterval: TimeInterval = 0.25
+    let chatStreamFlushCharacterThreshold = 240
+    let chatStreamFlushInterval: TimeInterval = 0.30
     private var shellStreamObserver: NSObjectProtocol?
+
+    // H1: Debounced persistence — collapse rapid persist calls into one
+    var persistDebounceTask: Task<Void, Never>?
+    var lastPersistedAt: Date = .distantPast
+    let persistDebounceInterval: TimeInterval = 1.0
 
     public init(state: AppState, environment: AppEnvironment = .preview) {
         var initialState = state
         Self.markStaleRunningTasks(in: &initialState)
         self.state = initialState
         self.environment = environment
-        self.agentLoop = AgentLoop(
-            config: Self.agentLoopConfig(settings: initialState.settings, connector: initialState.activeConnector),
-            runtime: environment.runtimeClient
-        )
         if initialState.threads != state.threads {
             persistThreads()
         }
@@ -344,43 +45,6 @@ public final class AppStore: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self = self, let info = info else { return }
                 self.handleShellStreamNotification(info)
-            }
-        }
-    }
-
-    private func handleShellStreamNotification(_ info: [AnyHashable: Any]) {
-        guard let stepID = info["stepID"] as? UUID,
-              let callID = info["callID"] as? String,
-              let command = info["command"] as? String,
-              let text = info["text"] as? String,
-              let isFailure = info["isFailure"] as? Bool else { return }
-        let isFinal = info["isFinal"] as? Bool ?? false
-
-        let step = TaskStep(
-            id: stepID,
-            kind: .toolResult,
-            text: text,
-            toolName: "shell.exec",
-            toolParams: ["command": command],
-            toolCallId: callID,
-            isCollapsible: true,
-            isCollapsed: false,
-            isFailure: isFailure,
-            recoverable: isFinal && isFailure,
-            retryAction: isFinal && isFailure ? "根据终端输出修复后重试" : nil
-        )
-
-        // Find current running thread and update/insert the step
-        if let threadIndex = state.threads.firstIndex(where: { $0.status == .running }) {
-            if let existingIndex = state.threads[threadIndex].steps.firstIndex(where: { $0.id == stepID }) {
-                state.threads[threadIndex].steps[existingIndex] = step
-            } else {
-                state.threads[threadIndex].steps.append(step)
-            }
-            updateLiveActivity(from: step)
-            state.threads[threadIndex].updatedAt = Date()
-            if isFinal {
-                persistThreads()
             }
         }
     }
@@ -632,10 +296,6 @@ public final class AppStore: ObservableObject {
         guard let connector = state.connectors.first(where: { $0.id == id }) else { return }
         state.activeConnectorID = connector.id
         state.settings.defaultConnectorName = connector.name
-        agentLoop = AgentLoop(
-            config: Self.agentLoopConfig(settings: state.settings, connector: connector),
-            runtime: environment.runtimeClient
-        )
         if let threadIndex = state.threads.firstIndex(where: { $0.id == state.selectedThreadID }), state.threads[threadIndex].source == .session {
             state.threads[threadIndex].modelName = connector.name
         }
@@ -651,10 +311,6 @@ public final class AppStore: ObservableObject {
         if state.activeConnectorID == nil {
             state.activeConnectorID = normalized.id
             state.settings.defaultConnectorName = normalized.name
-            agentLoop = AgentLoop(
-                config: Self.agentLoopConfig(settings: state.settings, connector: normalized),
-                runtime: environment.runtimeClient
-            )
         }
         persistSettings()
         persistConnectors()
@@ -669,10 +325,6 @@ public final class AppStore: ObservableObject {
         state.connectors[index] = normalized
         if state.activeConnectorID == normalized.id {
             state.settings.defaultConnectorName = normalized.name
-            agentLoop = AgentLoop(
-                config: Self.agentLoopConfig(settings: state.settings, connector: normalized),
-                runtime: environment.runtimeClient
-            )
         }
         persistSettings()
         persistConnectors()
@@ -820,7 +472,7 @@ public final class AppStore: ObservableObject {
     // MARK: - Live Activity Tracking
 
     /// Update the human-readable live activity description based on the latest step.
-    private func updateLiveActivity(from step: TaskStep) {
+    func updateLiveActivity(from step: TaskStep) {
         switch step.kind {
         case .aiThinking:
             state.liveActivity = "正在思考…"
@@ -850,7 +502,7 @@ public final class AppStore: ObservableObject {
         }
     }
 
-    private static func friendlyActivityName(_ toolName: String, params: [String: String]?) -> String {
+    static func friendlyActivityName(_ toolName: String, params: [String: String]?) -> String {
         switch toolName {
         case "workspace.index": return "索引项目结构…"
         case "code.search":
@@ -886,13 +538,20 @@ public final class AppStore: ObservableObject {
 
     // MARK: - Message Sending
 
-    private var generationTask: Task<Void, Never>?
+    private var generationTasks: [UUID: Task<Void, Never>] = [:]
 
     public func stopGenerating() {
-        generationTask?.cancel()
-        generationTask = nil
-        state.isGenerating = false
-        state.liveActivity = ""
+        // Cancel only the selected thread's generation task
+        if let threadID = state.selectedThreadID {
+            generationTasks[threadID]?.cancel()
+            generationTasks.removeValue(forKey: threadID)
+            agentLoops.removeValue(forKey: threadID)
+        }
+        if generationTasks.isEmpty {
+            state.isGenerating = false
+            state.generationStartedAt = nil
+            state.liveActivity = ""
+        }
         if let threadID = state.selectedThreadID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }),
            state.threads[threadIndex].source == .task,
@@ -924,6 +583,7 @@ public final class AppStore: ObservableObject {
                 }
                 state.threads[threadIndex].steps = steps
                 state.threads[threadIndex].preview = normalizedSessionPreview(steps.last?.text ?? "")
+                state.threads[threadIndex].updatedAt = .now
             }
         }
         chatStreamBuffers.removeAll()
@@ -933,7 +593,12 @@ public final class AppStore: ObservableObject {
 
     public func sendDraft() {
         let message = composedDraftMessage()
-        guard !message.isEmpty, !state.isGenerating else { return }
+        // Allow concurrent tasks: only block if the selected thread is already running
+        let selectedThreadRunning: Bool = {
+            guard let tid = state.selectedThreadID else { return false }
+            return generationTasks[tid] != nil
+        }()
+        guard !message.isEmpty, !selectedThreadRunning else { return }
 
         // Slash commands: /goal, /background, /schedule, /gateway
         if handleSlashCommand(message) { return }
@@ -947,9 +612,12 @@ public final class AppStore: ObservableObject {
         }
         let decision = IntentRouter.plan(effectiveMessage)
 
+        // Auto-match skill from registry
+        let matchedSkill = SkillMatcher.match(input: effectiveMessage, intent: decision.intent)
+
         // Single path: always give full tools, LLM decides what to use.
         // Safety: file writes go through approval flow, dangerous commands need confirmation.
-        sendTaskDraft(message: effectiveMessage, decision: decision, customAgent: agentInvocation?.agent)
+        sendTaskDraft(message: effectiveMessage, decision: decision, customAgent: agentInvocation?.agent, matchedSkill: matchedSkill)
     }
 
     private struct CustomAgentInvocation {
@@ -980,7 +648,8 @@ public final class AppStore: ObservableObject {
     private func sendTaskDraft(
         message: String,
         decision: PlannerDecision,
-        customAgent: CustomAgentDefinition? = nil
+        customAgent: CustomAgentDefinition? = nil,
+        matchedSkill: SkillMatchResult? = nil
     ) {
         let selectedConnector = customAgent?.preferredConnectorID.flatMap { id in
             state.connectors.first(where: { $0.id == id })
@@ -988,6 +657,18 @@ public final class AppStore: ObservableObject {
         guard let connector = selectedConnector else {
             notify("请先选择一个连接器", style: .error)
             return
+        }
+        // Safety: block tool-using tasks when workspace is not set or is overly broad
+        if decision.intent != .chat {
+            let wp = state.settings.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+            if wp.isEmpty {
+                notify("请先在设置中指定工作区目录，再执行任务。", style: .error)
+                return
+            }
+            if WorkspaceSandbox.isOverlyBroadWorkspace(wp) {
+                notify("工作区不能设为 home 目录或根目录，请指定一个具体的项目文件夹。", style: .error)
+                return
+            }
         }
         // Don't discard empty placeholder — we'll reuse it as the new task thread
         var context = AutoContextEngine.buildContext(
@@ -1023,13 +704,24 @@ public final class AppStore: ObservableObject {
         if isChatIntent {
             initialSteps = [userStep]
         } else {
+            var steps = [userStep]
             let planStep = TaskStep(
                 kind: .aiThinking,
                 text: Self.plannerStepText(for: decision),
                 isCollapsible: true,
                 isCollapsed: true
             )
-            initialSteps = [userStep, planStep]
+            steps.append(planStep)
+            if let match = matchedSkill {
+                let skillStep = TaskStep(
+                    kind: .aiThinking,
+                    text: "🎯 \(match.reason)",
+                    isCollapsible: true,
+                    isCollapsed: true
+                )
+                steps.append(skillStep)
+            }
+            initialSteps = steps
         }
         let targetTaskID: UUID
         let loopPriorSteps: [TaskStep]
@@ -1082,6 +774,7 @@ public final class AppStore: ObservableObject {
 
         let capturedImages = state.draftImages
         state.isGenerating = true
+        state.generationStartedAt = Date()
         state.liveActivity = isChatIntent ? "思考中…" : "正在分析任务…"
         state.draftMessage = ""
         state.draftAttachments = []
@@ -1094,6 +787,31 @@ public final class AppStore: ObservableObject {
                 loopConfig.allowedTools = agentTools
             }
         }
+        // Inject matched skill hint into system prompt
+        if customAgent == nil, let match = matchedSkill {
+            let skill = match.skill
+            var hint = "\n\n## 已激活技能：\(skill.name)\n\(skill.description)"
+            if let systemHint = skill.systemHint, !systemHint.isEmpty {
+                hint += "\n\n\(systemHint)"
+            }
+            if !skill.tools.isEmpty {
+                hint += "\n推荐工具：\(skill.tools.joined(separator: "、"))"
+            }
+            hint += """
+
+执行要求：
+- 先按技能指南确认输入边界，再调用所需工具；不要只复述技能说明。
+- 输出必须符合该技能的格式要求；保存类技能只有在 save_note/wiki_build/file_write 成功后才能说已保存。
+- 如果技能请求与用户当前目标冲突，以用户当前目标为准，并说明取舍。
+"""
+            loopConfig.customSystemPrompt = (loopConfig.customSystemPrompt ?? "") + hint
+            state.liveActivity = "已激活技能：\(skill.name)"
+            // Switch to preferred model if needed
+            if let preferred = ModelRouter.selectModel(for: skill, connectors: state.connectors, activeConnectorID: state.activeConnectorID),
+               preferred.id != connector.id {
+                loopConfig.modelName = preferred.modelName
+            }
+        }
         // Chat intent: cap iterations — LLM decides if tools needed, but don't run away
         if isChatIntent {
             loopConfig.maxIterations = min(loopConfig.maxIterations, 3)
@@ -1103,9 +821,9 @@ public final class AppStore: ObservableObject {
             config: loopConfig,
             runtime: environment.runtimeClient
         )
-        agentLoop = loop
+        agentLoops[targetTaskID] = loop
 
-        generationTask = Task { [weak self] in
+        generationTasks[targetTaskID] = Task { [weak self] in
             guard let self else { return }
             do {
                 let completedTask = try await loop.run(
@@ -1135,11 +853,32 @@ public final class AppStore: ObservableObject {
                 self.mergeCompletedTask(completedTask, into: targetTaskID)
                 self.recordConnectorOutcome(completedTask, connectorID: connector.id, attemptedToolCalling: attemptedToolCalling)
                 MemoryEngine.shared.extractFromTask(completedTask)
-                self.persistThreads()
+                self.persistThreadsNow()
 
                 // Record tool activities
                 for step in completedTask.steps where step.kind == .toolCall {
                     self.recordToolActivity(name: step.toolName ?? "tool", summary: step.text, statusLine: "", isFailure: false)
+                }
+
+                // Post-mortem: scan completed session for known failure patterns
+                if completedTask.context.metadata["selfImproveTask"] == nil,
+                   let threadIndex = self.state.threads.firstIndex(where: { $0.id == targetTaskID }) {
+                    let thread = self.state.threads[threadIndex]
+                    let report = SessionPostMortem.shared.analyze(thread: thread)
+                    if report.hasCritical {
+                        AuditLog.shared.record(
+                            tool: "postmortem",
+                            input: "thread:\(thread.id)",
+                            output: report.summary,
+                            success: false
+                        )
+                        // Feed precise diagnosis to SelfImprovementEngine with session replay + source context
+                        let precisePrompt = SelfImprovementEngine.shared.generatePreciseFixPrompt(
+                            from: report,
+                            steps: thread.steps
+                        )
+                        self.triggerPreciseSelfImprovement(prompt: precisePrompt, report: report)
+                    }
                 }
 
                 // Self-improvement: check if metrics warrant auto-improving harness code
@@ -1163,7 +902,7 @@ public final class AppStore: ObservableObject {
                     )
                     self.state.threads[threadIndex].status = .failed
                     self.state.threads[threadIndex].updatedAt = Date()
-                    self.persistThreads()
+                    self.persistThreadsNow()
                 }
                 self.recordToolActivity(name: "task.error", summary: "任务执行失败", statusLine: error.localizedDescription, isFailure: true)
             }
@@ -1174,16 +913,20 @@ public final class AppStore: ObservableObject {
                     let step = TaskStep(kind: .userInput, text: followUp, isCollapsible: false, isCollapsed: false)
                     self.state.threads[threadIndex].steps.append(step)
                     self.state.threads[threadIndex].updatedAt = .now
-                    self.persistThreads()
+                    self.persistThreadsNow()
                 }
                 self.state.pendingFollowUp = nil
             }
 
-            self.state.isGenerating = false
-            self.state.liveActivity = ""
-            self.generationTask = nil
+            self.generationTasks.removeValue(forKey: targetTaskID)
+            self.agentLoops.removeValue(forKey: targetTaskID)
             self.streamBuffers.removeValue(forKey: targetTaskID)
             self.streamLastFlushAt.removeValue(forKey: targetTaskID)
+            if self.generationTasks.isEmpty {
+                self.state.isGenerating = false
+                self.state.generationStartedAt = nil
+                self.state.liveActivity = ""
+            }
         }
     }
 
@@ -1223,6 +966,7 @@ public final class AppStore: ObservableObject {
         persistThreads()
 
         state.isGenerating = true
+        state.generationStartedAt = Date()
         var loopConfig = AgentLoop.Config(
             maxIterations: 20,
             maxTokensPerTurn: 16384,
@@ -1235,9 +979,9 @@ public final class AppStore: ObservableObject {
 
         let loop = AgentLoop(config: loopConfig, runtime: environment.runtimeClient)
         let targetID = thread.id
-        agentLoop = loop
+        agentLoops[targetID] = loop
 
-        generationTask = Task { [weak self] in
+        generationTasks[targetID] = Task { [weak self] in
             guard let self else { return }
             do {
                 let completedTask: AgentTask = try await loop.run(
@@ -1260,7 +1004,7 @@ public final class AppStore: ObservableObject {
 
                 self.flushStreamBuffer(for: targetID)
                 self.mergeCompletedTask(completedTask, into: targetID)
-                self.persistThreads()
+                self.persistThreadsNow()
 
                 let succeeded = completedTask.status == .completed
                 SelfImprovementEngine.shared.recordAttempt(
@@ -1286,16 +1030,148 @@ public final class AppStore: ObservableObject {
                     )
                     self.state.threads[threadIndex].status = .failed
                     self.state.threads[threadIndex].updatedAt = Date()
-                    self.persistThreads()
+                    self.persistThreadsNow()
                 }
                 SelfImprovementEngine.shared.onImprovementFailure()
             }
 
-            self.state.isGenerating = false
-            self.state.liveActivity = ""
-            self.generationTask = nil
+            self.generationTasks.removeValue(forKey: targetID)
+            self.agentLoops.removeValue(forKey: targetID)
             self.streamBuffers.removeValue(forKey: targetID)
             self.streamLastFlushAt.removeValue(forKey: targetID)
+            if self.generationTasks.isEmpty {
+                self.state.isGenerating = false
+                self.state.generationStartedAt = nil
+                self.state.liveActivity = ""
+            }
+        }
+    }
+
+    // MARK: - Precise Self-Improvement (PostMortem-driven)
+
+    /// Trigger a self-improvement task based on a precise PostMortem diagnosis.
+    /// Unlike the stats-based approach, this provides exact source locations and fix descriptions.
+    private func triggerPreciseSelfImprovement(prompt: String, report: SessionPostMortem.Report) {
+        // Respect cooldown and guard conditions
+        guard SelfImprovementEngine.shared.shouldTrigger() != nil || report.hasCritical else { return }
+        guard let connector = state.activeConnector else { return }
+        guard !state.isGenerating else { return }
+
+        let message = """
+        # 自我改进任务（会话后检触发）
+
+        \(prompt)
+
+        ## 执行步骤
+        1. 先读取上述建议修复文件中指定行号附近的代码
+        2. 理解当前实现和问题根因
+        3. 用 file_edit 修改代码（最小化修改）
+        4. 运行 `bash \(SelfImprovementEngine.shared.buildScript)` 验证编译
+        5. 编译通过后提交：先运行 `git status --short`，只 `git add -- <本轮修改文件>`，再 `git commit -m "self-fix: \(report.findings.first?.pattern.rawValue ?? "postmortem")"`
+        6. 重启应用
+
+        ## 限制
+        - 只修改 LaicaiNativeFoundation 目录下的 .swift 文件
+        - 不要修改 Models.swift 的 struct 定义
+        - 每次最多修改 3 个文件
+        - 必须编译通过
+        """
+
+        var context = AutoContextEngine.buildContext(
+            workspaceRoot: SelfImprovementEngine.shared.harnessRoot,
+            userInput: message
+        )
+        context.metadata["selfImproveTask"] = "true"
+        context.metadata["postmortemThreadID"] = report.threadID.uuidString
+
+        let targetID = UUID()
+        let thread = Thread(
+            id: targetID,
+            title: "🔧 自动修复：\(report.findings.first?.pattern.rawValue ?? "postmortem")",
+            status: .running,
+            connectorID: connector.id,
+            context: context,
+            modelName: connector.modelName,
+            category: .engineering,
+            source: .task
+        )
+        state.threads.insert(thread, at: 0)
+        persistThreadsNow()
+
+        var loopConfig = AgentLoop.Config(
+            maxIterations: 20,
+            maxTokensPerTurn: 16384,
+            workspaceRoot: SelfImprovementEngine.shared.harnessRoot,
+            supportsToolCalling: true,
+            contextMode: .deep,
+            modelName: connector.modelName
+        )
+        loopConfig.allowedTools = ["file.read", "file.edit", "code.search", "workspace.index", "shell.exec", "verify.build", "git"]
+
+        let loop = AgentLoop(config: loopConfig, runtime: environment.runtimeClient)
+        agentLoops[targetID] = loop
+
+        state.isGenerating = true
+        state.generationStartedAt = Date()
+        let targetTaskID = targetID
+
+        generationTasks[targetTaskID] = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let completedTask: AgentTask = try await loop.run(
+                    taskID: targetID,
+                    message: message,
+                    intent: UserIntent.task,
+                    connector: connector,
+                    context: context,
+                    priorSteps: [],
+                    onStep: { @MainActor [weak self] (step: TaskStep) in
+                        guard let self else { return }
+                        self.appendTaskStep(step, to: targetTaskID)
+                    },
+                    onStreamDelta: { @Sendable @MainActor [weak self] (delta: String) in
+                        guard let self else { return }
+                        self.appendStreamDelta(delta, to: targetTaskID)
+                    }
+                )
+                self.mergeCompletedTask(completedTask, into: targetTaskID)
+                self.persistThreadsNow()
+
+                let succeeded = completedTask.status == .completed
+                SelfImprovementEngine.shared.recordAttempt(
+                    category: report.findings.first?.pattern.rawValue ?? "postmortem",
+                    description: report.summary,
+                    filesChanged: completedTask.steps
+                        .filter { $0.kind == .reviewRequest }
+                        .compactMap(\.diffFilePath),
+                    buildSuccess: succeeded,
+                    commitHash: nil
+                )
+                if succeeded {
+                    SelfImprovementEngine.shared.onImprovementSuccess()
+                } else {
+                    SelfImprovementEngine.shared.onImprovementFailure()
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                if let ti = self.state.threads.firstIndex(where: { $0.id == targetTaskID }) {
+                    self.state.threads[ti].steps.append(
+                        TaskStep(kind: .error, text: "自动修复失败：\(error.localizedDescription)", isFailure: true, recoverable: false)
+                    )
+                    self.state.threads[ti].status = .failed
+                    self.state.threads[ti].updatedAt = Date()
+                    self.persistThreadsNow()
+                }
+                SelfImprovementEngine.shared.onImprovementFailure()
+            }
+
+            self.generationTasks.removeValue(forKey: targetTaskID)
+            self.agentLoops.removeValue(forKey: targetTaskID)
+            if self.generationTasks.isEmpty {
+                self.state.isGenerating = false
+                self.state.generationStartedAt = nil
+                self.state.liveActivity = ""
+            }
         }
     }
 
@@ -1481,6 +1357,7 @@ public final class AppStore: ObservableObject {
         state.selectThread(id: thread.id)
         state.modeLabel = "工作流"
         state.isGenerating = true
+        state.generationStartedAt = Date()
         state.liveActivity = "正在执行工作流…"
         state.draftMessage = ""
         state.draftAttachments = []
@@ -1490,7 +1367,8 @@ public final class AppStore: ObservableObject {
         if state.workflowRuns.count > 20 { state.workflowRuns = Array(state.workflowRuns.prefix(20)) }
         persistThreads()
 
-        generationTask = Task { [weak self] in
+        let wfThreadID = thread.id
+        generationTasks[wfThreadID] = Task { [weak self] in
             guard let self else { return }
 
             let steps = await StepExecutor.executeWorkflow(
@@ -1517,12 +1395,15 @@ public final class AppStore: ObservableObject {
                     self.state.workflowRuns[runIndex].statusLine = hasError ? "失败" : "完成"
                     self.state.workflowRuns[runIndex].updatedAt = .now
                 }
-                self.persistThreads()
+                self.persistThreadsNow()
             }
 
-            self.state.isGenerating = false
-            self.state.liveActivity = ""
-            self.generationTask = nil
+            self.generationTasks.removeValue(forKey: wfThreadID)
+            if self.generationTasks.isEmpty {
+                self.state.isGenerating = false
+                self.state.generationStartedAt = nil
+                self.state.liveActivity = ""
+            }
         }
     }
 
@@ -1559,6 +1440,7 @@ public final class AppStore: ObservableObject {
         state.selectThread(id: thread.id)
         state.modeLabel = "多Agent协同"
         state.isGenerating = true
+        state.generationStartedAt = Date()
         state.liveActivity = "正在规划多Agent协同…"
         state.draftMessage = ""
         state.draftAttachments = []
@@ -1574,11 +1456,12 @@ public final class AppStore: ObservableObject {
             runtime: environment.runtimeClient
         )
 
-        generationTask = Task { [weak self] in
+        let maThreadID = thread.id
+        generationTasks[maThreadID] = Task { [weak self] in
             guard let self else { return }
             do {
                 let completedTask = try await orchestrator.run(
-                    taskID: thread.id,
+                    taskID: maThreadID,
                     message: message,
                     intent: intent,
                     connector: connector,
@@ -1587,39 +1470,42 @@ public final class AppStore: ObservableObject {
                     plan: plan,
                     onStep: { [weak self] step in
                         guard let self else { return }
-                        self.appendTaskStep(step, to: thread.id)
+                        self.appendTaskStep(step, to: maThreadID)
                     },
                     onStreamDelta: { [weak self] delta in
                         guard let self else { return }
-                        self.appendStreamDelta(delta, to: thread.id)
+                        self.appendStreamDelta(delta, to: maThreadID)
                     },
                     onPlanUpdate: { [weak self] updatedPlan in
                         guard let self else { return }
-                        self.updateMultiAgentPlan(updatedPlan, for: thread.id)
+                        self.updateMultiAgentPlan(updatedPlan, for: maThreadID)
                     }
                 )
 
                 guard !Task.isCancelled else { return }
-                self.flushStreamBuffer(for: thread.id)
-                self.mergeCompletedTask(completedTask, into: thread.id)
-                self.persistThreads()
+                self.flushStreamBuffer(for: maThreadID)
+                self.mergeCompletedTask(completedTask, into: maThreadID)
+                self.persistThreadsNow()
             } catch {
                 guard !Task.isCancelled else { return }
-                self.flushStreamBuffer(for: thread.id)
-                if let idx = self.state.threads.firstIndex(where: { $0.id == thread.id }) {
+                self.flushStreamBuffer(for: maThreadID)
+                if let idx = self.state.threads.firstIndex(where: { $0.id == maThreadID }) {
                     self.state.threads[idx].steps.append(
                         TaskStep(kind: .error, text: "多Agent执行失败：\(error.localizedDescription)", isFailure: true, recoverable: true)
                     )
                     self.state.threads[idx].status = .failed
                     self.state.threads[idx].updatedAt = .now
-                    self.persistThreads()
+                    self.persistThreadsNow()
                 }
             }
-            self.state.isGenerating = false
-            self.state.liveActivity = ""
-            self.generationTask = nil
-            self.streamBuffers.removeValue(forKey: thread.id)
-            self.streamLastFlushAt.removeValue(forKey: thread.id)
+            self.generationTasks.removeValue(forKey: maThreadID)
+            self.streamBuffers.removeValue(forKey: maThreadID)
+            self.streamLastFlushAt.removeValue(forKey: maThreadID)
+            if self.generationTasks.isEmpty {
+                self.state.isGenerating = false
+                self.state.generationStartedAt = nil
+                self.state.liveActivity = ""
+            }
         }
     }
 
@@ -1647,7 +1533,9 @@ public final class AppStore: ObservableObject {
         guard let connector = state.activeConnector else { return }
 
         state.isGenerating = true
-        generationTask = Task { [weak self] in
+        state.generationStartedAt = Date()
+        let epThreadID = thread.id
+        generationTasks[epThreadID] = Task { [weak self] in
             guard let self else { return }
             let orchestrator = MultiAgentOrchestrator(
                 config: .init(
@@ -1658,7 +1546,7 @@ public final class AppStore: ObservableObject {
             )
             do {
                 let completedTask = try await orchestrator.run(
-                    taskID: thread.id,
+                    taskID: epThreadID,
                     message: message,
                     intent: .task,
                     connector: connector,
@@ -1666,36 +1554,39 @@ public final class AppStore: ObservableObject {
                     context: thread.context,
                     plan: plan,
                     onStep: { [weak self] step in
-                        self?.appendTaskStep(step, to: thread.id)
+                        self?.appendTaskStep(step, to: epThreadID)
                     },
                     onStreamDelta: { [weak self] delta in
-                        self?.appendStreamDelta(delta, to: thread.id)
+                        self?.appendStreamDelta(delta, to: epThreadID)
                     },
                     onPlanUpdate: { [weak self] updatedPlan in
-                        self?.updateMultiAgentPlan(updatedPlan, for: thread.id)
+                        self?.updateMultiAgentPlan(updatedPlan, for: epThreadID)
                     }
                 )
                 guard !Task.isCancelled else { return }
-                self.flushStreamBuffer(for: thread.id)
-                self.mergeCompletedTask(completedTask, into: thread.id)
-                self.persistThreads()
+                self.flushStreamBuffer(for: epThreadID)
+                self.mergeCompletedTask(completedTask, into: epThreadID)
+                self.persistThreadsNow()
             } catch {
                 guard !Task.isCancelled else { return }
-                self.flushStreamBuffer(for: thread.id)
-                if let idx = self.state.threads.firstIndex(where: { $0.id == thread.id }) {
+                self.flushStreamBuffer(for: epThreadID)
+                if let idx = self.state.threads.firstIndex(where: { $0.id == epThreadID }) {
                     self.state.threads[idx].steps.append(
                         TaskStep(kind: .error, text: "多Agent执行失败：\(error.localizedDescription)", isFailure: true, recoverable: true)
                     )
                     self.state.threads[idx].status = .failed
                     self.state.threads[idx].updatedAt = .now
-                    self.persistThreads()
+                    self.persistThreadsNow()
                 }
             }
-            self.state.isGenerating = false
-            self.state.liveActivity = ""
-            self.generationTask = nil
-            self.streamBuffers.removeValue(forKey: thread.id)
-            self.streamLastFlushAt.removeValue(forKey: thread.id)
+            self.generationTasks.removeValue(forKey: epThreadID)
+            self.streamBuffers.removeValue(forKey: epThreadID)
+            self.streamLastFlushAt.removeValue(forKey: epThreadID)
+            if self.generationTasks.isEmpty {
+                self.state.isGenerating = false
+                self.state.generationStartedAt = nil
+                self.state.liveActivity = ""
+            }
         }
     }
 
@@ -1733,7 +1624,9 @@ public final class AppStore: ObservableObject {
         guard let connector = state.activeConnector else { return }
 
         state.isGenerating = true
-        generationTask = Task { [weak self] in
+        state.generationStartedAt = Date()
+        let rpThreadID = thread.id
+        generationTasks[rpThreadID] = Task { [weak self] in
             guard let self else { return }
             let orchestrator = MultiAgentOrchestrator(
                 config: .init(
@@ -1744,7 +1637,7 @@ public final class AppStore: ObservableObject {
             )
             do {
                 let completedTask = try await orchestrator.run(
-                    taskID: thread.id,
+                    taskID: rpThreadID,
                     message: message,
                     intent: .task,
                     connector: connector,
@@ -1752,36 +1645,39 @@ public final class AppStore: ObservableObject {
                     context: thread.context,
                     plan: plan,
                     onStep: { [weak self] step in
-                        self?.appendTaskStep(step, to: thread.id)
+                        self?.appendTaskStep(step, to: rpThreadID)
                     },
                     onStreamDelta: { [weak self] delta in
-                        self?.appendStreamDelta(delta, to: thread.id)
+                        self?.appendStreamDelta(delta, to: rpThreadID)
                     },
                     onPlanUpdate: { [weak self] updatedPlan in
-                        self?.updateMultiAgentPlan(updatedPlan, for: thread.id)
+                        self?.updateMultiAgentPlan(updatedPlan, for: rpThreadID)
                     }
                 )
                 guard !Task.isCancelled else { return }
-                self.flushStreamBuffer(for: thread.id)
-                self.mergeCompletedTask(completedTask, into: thread.id)
-                self.persistThreads()
+                self.flushStreamBuffer(for: rpThreadID)
+                self.mergeCompletedTask(completedTask, into: rpThreadID)
+                self.persistThreadsNow()
             } catch {
                 guard !Task.isCancelled else { return }
-                self.flushStreamBuffer(for: thread.id)
-                if let idx = self.state.threads.firstIndex(where: { $0.id == thread.id }) {
+                self.flushStreamBuffer(for: rpThreadID)
+                if let idx = self.state.threads.firstIndex(where: { $0.id == rpThreadID }) {
                     self.state.threads[idx].steps.append(
                         TaskStep(kind: .error, text: "多Agent恢复执行失败：\(error.localizedDescription)", isFailure: true, recoverable: true)
                     )
                     self.state.threads[idx].status = .failed
                     self.state.threads[idx].updatedAt = .now
-                    self.persistThreads()
+                    self.persistThreadsNow()
                 }
             }
-            self.state.isGenerating = false
-            self.state.liveActivity = ""
-            self.generationTask = nil
-            self.streamBuffers.removeValue(forKey: thread.id)
-            self.streamLastFlushAt.removeValue(forKey: thread.id)
+            self.generationTasks.removeValue(forKey: rpThreadID)
+            self.streamBuffers.removeValue(forKey: rpThreadID)
+            self.streamLastFlushAt.removeValue(forKey: rpThreadID)
+            if self.generationTasks.isEmpty {
+                self.state.isGenerating = false
+                self.state.generationStartedAt = nil
+                self.state.liveActivity = ""
+            }
         }
     }
 
@@ -2093,7 +1989,7 @@ public final class AppStore: ObservableObject {
                     )
                     self.state.threads[ti].steps.append(summaryStep)
                     self.state.threads[ti].updatedAt = .now
-                    self.persistThreads()
+                    self.persistThreadsNow()
                 }
             } catch {
                 Task { @MainActor [weak self] in
@@ -2105,7 +2001,7 @@ public final class AppStore: ObservableObject {
                         isFailure: true
                     ))
                     self.state.threads[ti].updatedAt = .now
-                    self.persistThreads()
+                    self.persistThreadsNow()
                 }
             }
         }
@@ -2495,14 +2391,13 @@ public final class AppStore: ObservableObject {
     }
 
     public func updateWorkspacePath(_ value: String) {
+        if WorkspaceSandbox.isOverlyBroadWorkspace(value) {
+            notify("工作区不能设为 home 目录或根目录，请选择一个具体的项目文件夹。", style: .error)
+            return
+        }
         state.settings.workspacePath = value
         state.workspaceName = URL(fileURLWithPath: value).lastPathComponent
         WorkspaceSandbox.shared.workspaceRoot = value
-        // Update agentLoop config
-        agentLoop = AgentLoop(
-            config: Self.agentLoopConfig(settings: state.settings, connector: state.activeConnector),
-            runtime: environment.runtimeClient
-        )
         initializeEngines(workspaceRoot: value)
         persistSettings()
     }
@@ -2512,10 +2407,6 @@ public final class AppStore: ObservableObject {
         state.settings.switchWorkspace(to: path)
         state.workspaceName = URL(fileURLWithPath: path).lastPathComponent
         WorkspaceSandbox.shared.workspaceRoot = path
-        agentLoop = AgentLoop(
-            config: Self.agentLoopConfig(settings: state.settings, connector: state.activeConnector),
-            runtime: environment.runtimeClient
-        )
         initializeEngines(workspaceRoot: path)
         persistSettings()
     }
@@ -2541,10 +2432,6 @@ public final class AppStore: ObservableObject {
     }
     public func updateContextMode(_ mode: ContextMode) {
         state.settings.contextMode = mode
-        agentLoop = AgentLoop(
-            config: Self.agentLoopConfig(settings: state.settings, connector: state.activeConnector),
-            runtime: environment.runtimeClient
-        )
         persistSettings()
     }
 
@@ -2597,1358 +2484,5 @@ public final class AppStore: ObservableObject {
         state.threads[threadIndex].preview = ""
         state.threads[threadIndex].updatedAt = .now
         persistThreads()
-    }
-
-    // MARK: - Private Helpers
-
-    private func composedDraftMessage() -> String {
-        var text = state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // G8: Expand @-mention file references (e.g. @src/main.swift or @/absolute/path)
-        var mentionedPaths: [String] = []
-        let mentionPattern = #"@((?:/[\w./-]+)|(?:[\w./-]+\.[\w]+))"#
-        if let regex = try? NSRegularExpression(pattern: mentionPattern) {
-            let ns = text as NSString
-            let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
-            for match in matches.reversed() {
-                let pathRange = match.range(at: 1)
-                var path = ns.substring(with: pathRange)
-                if !path.hasPrefix("/") {
-                    let fullPath = (state.settings.workspacePath as NSString).appendingPathComponent(path)
-                    if FileManager.default.fileExists(atPath: fullPath) {
-                        path = fullPath
-                    }
-                }
-                if FileManager.default.fileExists(atPath: path) {
-                    mentionedPaths.append(path)
-                }
-            }
-        }
-
-        // Add mentioned files to attachments
-        var allAttachments = state.draftAttachments + mentionedPaths
-        allAttachments = Array(Set(allAttachments))
-
-        guard !allAttachments.isEmpty else { return text }
-        let attachmentText: String
-        if allAttachments.count == 1, let path = allAttachments.first {
-            attachmentText = "请读取这个附件：\(path)"
-        } else {
-            attachmentText = "请读取这些附件：\n" + allAttachments.joined(separator: "\n")
-        }
-        return text.isEmpty ? attachmentText : "\(text)\n\(attachmentText)"
-    }
-
-    private func promoteSelectedSessionToTaskIfNeeded() {
-        guard let sessionID = state.selectedSessionID,
-              let threadIndex = state.threads.firstIndex(where: { $0.id == sessionID }) else { return }
-        let thread = state.threads[threadIndex]
-        guard thread.source == .session && !thread.steps.isEmpty else { return }
-        // Session already has steps as TaskStep; just add context to promote to task
-        state.threads[threadIndex].context = TaskContext(workspaceRoot: state.settings.workspacePath, vaultRoot: cleanVaultPath())
-        state.threads[threadIndex].connectorID = state.activeConnectorID
-        // Source will automatically become .task now that context is non-empty
-        persistThreads()
-    }
-
-    private func taskStepKind(for role: ChatRole) -> TaskStepKind {
-        switch role {
-        case .user: return .userInput
-        case .assistant: return .textOutput
-        case .tool: return .toolResult
-        case .system: return .aiThinking
-        }
-    }
-
-    private func cleanVaultPath() -> String? {
-        let trimmed = state.settings.vaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private func normalizedConnector(_ connector: ConnectorProfile, previous: ConnectorProfile? = nil) -> ConnectorProfile {
-        var normalized = connector
-        normalized.name = connector.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        normalized.kind = connector.kind.trimmingCharacters(in: .whitespacesAndNewlines)
-        normalized.endpoint = connector.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        normalized.modelName = connector.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
-        normalized.note = connector.note.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let previous,
-           Self.toolCallingIdentityChanged(from: previous, to: normalized) {
-            normalized.toolCallingCapability = nil
-            normalized.toolCallingCapabilitySource = nil
-            normalized.toolCallingCapabilityLearnedAt = nil
-        }
-        if let previous, Self.connectorConfigurationChanged(from: previous, to: normalized) {
-            normalized.health = .attention
-        }
-        return normalized
-    }
-
-    private func scheduleConnectorHealthRefreshIfNeeded(for connector: ConnectorProfile, force: Bool = false) {
-        guard canAutoCheckConnectorHealth(connector) else { return }
-        guard force || connector.health != .ready else { return }
-        checkConnectorHealth(id: connector.id, showsToast: false, probeToolCalling: false)
-    }
-
-    private func canAutoCheckConnectorHealth(_ connector: ConnectorProfile) -> Bool {
-        !connector.endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !connector.modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private func recordToolActivity(name: String, summary: String, statusLine: String, isFailure: Bool) {
-        recordToolActivity(ToolActivity(name: name, summary: summary, statusLine: statusLine, isFailure: isFailure))
-    }
-
-    private func recordToolActivity(_ activity: ToolActivity) {
-        if let first = state.toolActivities.first,
-           first.name == activity.name,
-           first.summary == activity.summary,
-           first.statusLine == activity.statusLine,
-           first.isFailure == activity.isFailure {
-            return
-        }
-        state.toolActivities.removeAll {
-            $0.name == activity.name
-                && $0.summary == activity.summary
-                && $0.statusLine == activity.statusLine
-                && $0.isFailure == activity.isFailure
-        }
-        state.toolActivities.insert(activity, at: 0)
-        if state.toolActivities.count > 12 { state.toolActivities = Array(state.toolActivities.prefix(12)) }
-    }
-
-    private func appendTaskStep(_ step: TaskStep, to taskID: UUID) {
-        guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
-        if let existingIndex = state.threads[threadIndex].steps.firstIndex(where: { $0.id == step.id }) {
-            if step.kind == .toolResult {
-                state.threads[threadIndex].steps[existingIndex] = step
-                state.threads[threadIndex].updatedAt = Date()
-                persistThreads()
-            }
-            return
-        }
-        if shouldCollapseDuplicateStep(step, in: state.threads[threadIndex].steps) { return }
-        if step.kind == .textOutput,
-           let streamingIndex = state.threads[threadIndex].steps.lastIndex(where: { $0.kind == .textOutput && $0.toolCallId == Self.streamingOutputID }) {
-            streamBuffers.removeValue(forKey: taskID)
-            streamLastFlushAt.removeValue(forKey: taskID)
-            var finalStep = step
-            finalStep.toolCallId = nil
-            state.threads[threadIndex].steps[streamingIndex] = finalStep
-            state.threads[threadIndex].updatedAt = Date()
-            persistThreads()
-            return
-        }
-        guard !state.threads[threadIndex].steps.contains(where: { $0.kind == step.kind && $0.text == step.text }) else { return }
-        state.threads[threadIndex].steps.append(step)
-        state.threads[threadIndex].updatedAt = Date()
-        persistThreads()
-    }
-
-    private func appendStreamDelta(_ delta: String, to taskID: UUID) {
-        guard !delta.isEmpty else { return }
-        streamBuffers[taskID, default: ""] += delta
-        let now = Date()
-        let pending = streamBuffers[taskID] ?? ""
-        let lastFlush = streamLastFlushAt[taskID] ?? .distantPast
-        guard pending.count >= streamFlushCharacterThreshold || now.timeIntervalSince(lastFlush) >= streamFlushInterval else {
-            return
-        }
-        flushStreamBuffer(for: taskID)
-    }
-
-    private func flushStreamBuffer(for taskID: UUID) {
-        guard let pending = streamBuffers[taskID], !pending.isEmpty else { return }
-        streamBuffers[taskID] = ""
-        streamLastFlushAt[taskID] = Date()
-        guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
-        state.liveActivity = "正在生成回复…"
-        if let streamIndex = state.threads[threadIndex].steps.lastIndex(where: { $0.kind == .textOutput && $0.toolCallId == Self.streamingOutputID }) {
-            state.threads[threadIndex].steps[streamIndex].text += pending
-        } else {
-            state.threads[threadIndex].steps.append(TaskStep(
-                kind: .textOutput,
-                text: pending,
-                toolCallId: Self.streamingOutputID,
-                isCollapsible: false,
-                isCollapsed: false
-            ))
-        }
-        state.threads[threadIndex].updatedAt = Date()
-    }
-
-    private func mergeCompletedTask(_ completedTask: AgentTask, into taskID: UUID) {
-        guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
-        for step in completedTask.steps {
-            if shouldCollapseDuplicateStep(step, in: state.threads[threadIndex].steps) { continue }
-            let alreadyExists = state.threads[threadIndex].steps.contains {
-                $0.id == step.id || ($0.kind == step.kind && $0.text == step.text)
-            }
-            if !alreadyExists {
-                state.threads[threadIndex].steps.append(step)
-                updateLiveActivity(from: step)
-            }
-        }
-        state.threads[threadIndex].status = completedTask.status
-        state.liveActivity = ""
-        state.threads[threadIndex].context = completedTask.context
-        state.threads[threadIndex].context.memory = Self.taskMemory(from: state.threads[threadIndex])
-        if let plan = completedTask.multiAgentPlan {
-            state.threads[threadIndex].multiAgentPlan = plan
-        }
-        state.threads[threadIndex].updatedAt = completedTask.updatedAt
-        Self.ensureCheckpointIfNeeded(&state.threads[threadIndex])
-        state.selectThread(id: taskID)
-
-        // System notification when app is in background
-        let appIsActive = NSApplication.shared.isActive
-        if !appIsActive {
-            let threadTitle = state.threads[threadIndex].title
-            let noteTitle: String
-            switch completedTask.status {
-            case .completed: noteTitle = "任务完成"
-            case .failed: noteTitle = "任务失败"
-            default: noteTitle = "任务状态更新"
-            }
-            NotificationManager.shared.post(
-                title: noteTitle,
-                body: threadTitle,
-                threadID: taskID.uuidString
-            )
-        }
-    }
-
-    private func shouldCollapseDuplicateStep(_ step: TaskStep, in steps: [TaskStep]) -> Bool {
-        switch step.kind {
-        case .userInput, .aiThinking:
-            return steps.contains { $0.kind == step.kind && $0.text == step.text }
-        default:
-            return false
-        }
-    }
-
-    private func appendAssistantStep(_ text: String, to sessionID: UUID, connectorName: String, metrics: ResponseMetrics? = nil) {
-        guard let threadIndex = state.threads.firstIndex(where: { $0.id == sessionID }) else { return }
-        let assistantText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        state.threads[threadIndex].steps.append(TaskStep(kind: .textOutput, text: assistantText, isCollapsible: false, isCollapsed: false, metrics: metrics))
-        state.threads[threadIndex].preview = normalizedSessionPreview(assistantText)
-        state.threads[threadIndex].modelName = connectorName
-        state.threads[threadIndex].updatedAt = .now
-        state.selectThread(id: sessionID)
-        persistThreads()
-    }
-
-    private func appendAssistantDelta(_ delta: String, stepID: UUID, in sessionID: UUID, connectorName: String) {
-        guard !delta.isEmpty else { return }
-        chatStreamBuffers[stepID, default: ""] += delta
-        let now = Date()
-        let pending = chatStreamBuffers[stepID] ?? ""
-        let lastFlush = chatStreamLastFlushAt[stepID] ?? .distantPast
-        guard pending.count >= chatStreamFlushCharacterThreshold || now.timeIntervalSince(lastFlush) >= chatStreamFlushInterval else {
-            return
-        }
-        flushAssistantBuffer(stepID: stepID, in: sessionID, connectorName: connectorName)
-    }
-
-    private func flushAssistantBuffer(stepID: UUID, in sessionID: UUID, connectorName: String) {
-        guard let pending = chatStreamBuffers[stepID], !pending.isEmpty else { return }
-        chatStreamBuffers[stepID] = ""
-        chatStreamLastFlushAt[stepID] = Date()
-        updateAssistantStep(stepID, in: sessionID, delta: pending, connectorName: connectorName, persist: false)
-    }
-
-    private func updateAssistantStep(
-        _ stepID: UUID,
-        in sessionID: UUID,
-        delta: String? = nil,
-        finalText: String? = nil,
-        metrics: ResponseMetrics? = nil,
-        connectorName: String,
-        persist shouldPersist: Bool = true
-    ) {
-        guard let threadIndex = state.threads.firstIndex(where: { $0.id == sessionID }) else { return }
-        guard let stepIndex = state.threads[threadIndex].steps.firstIndex(where: { $0.id == stepID }) else {
-            appendAssistantStep(finalText ?? delta ?? "", to: sessionID, connectorName: connectorName, metrics: metrics)
-            return
-        }
-
-        if let finalText {
-            state.threads[threadIndex].steps[stepIndex].text = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
-        } else if let delta, !delta.isEmpty {
-            state.threads[threadIndex].steps[stepIndex].text += delta
-        }
-        if let metrics {
-            state.threads[threadIndex].steps[stepIndex].metrics = metrics
-        }
-
-        let text = state.threads[threadIndex].steps[stepIndex].text
-        state.threads[threadIndex].preview = normalizedSessionPreview(text)
-        state.threads[threadIndex].modelName = connectorName
-        state.threads[threadIndex].updatedAt = .now
-        state.selectThread(id: sessionID)
-        if shouldPersist {
-            chatStreamBuffers.removeValue(forKey: stepID)
-            chatStreamLastFlushAt.removeValue(forKey: stepID)
-            persistThreads()
-        }
-    }
-
-    private func directSessionTitle(for message: String) -> String {
-        let normalized = message
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return "新会话" }
-        if Self.isTinyFollowUp(normalized), let title = state.selectedThread?.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return title
-        }
-        return String(normalized.prefix(32))
-    }
-
-    private func reconcileSelectedRunningTaskIfIdle() {
-        guard !state.isGenerating,
-              let taskID = state.selectedTaskID,
-              let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }),
-              state.threads[threadIndex].status == .running else { return }
-
-        state.threads[threadIndex].status = .cancelled
-        state.threads[threadIndex].updatedAt = .now
-        state.threads[threadIndex].steps.append(TaskStep(
-            kind: .error,
-            text: "上次执行没有正常结束，已转为可继续状态。本轮会沿着这条任务继续。",
-            isCollapsible: true,
-            isCollapsed: true,
-            isFailure: false,
-            recoverable: true,
-            retryAction: "继续"
-        ))
-        persistThreads()
-    }
-
-    private func answerSelectedTaskStatusQuestion(_ message: String) -> Bool {
-        guard let taskID = state.selectedTaskID,
-              let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }),
-              state.threads[threadIndex].status != .running,
-              Self.isTaskStatusQuestion(message) else { return false }
-
-        let answer = Self.taskStatusAnswer(for: AgentTask(thread: state.threads[threadIndex]), question: message)
-        state.threads[threadIndex].steps.append(TaskStep(kind: .userInput, text: message, isCollapsible: false, isCollapsed: false))
-        state.threads[threadIndex].steps.append(TaskStep(kind: .textOutput, text: answer, isCollapsible: false, isCollapsed: false))
-        state.threads[threadIndex].updatedAt = .now
-        state.selectThread(id: taskID)
-        state.modeLabel = state.threads[threadIndex].workflowName == nil ? "任务" : "工作流"
-        state.draftMessage = ""
-        persistThreads()
-        return true
-    }
-
-    private func appendReviewResult(to threadIndex: Int, approved: Bool, text: String) {
-        let result = TaskStep(
-            kind: .reviewResult,
-            text: text,
-            isCollapsible: false,
-            isCollapsed: false,
-            isFailure: !approved,
-            approved: approved
-        )
-        state.threads[threadIndex].steps.append(result)
-    }
-
-    private func markConnectorReady(_ id: UUID) {
-        updateConnectorHealth(id, to: .ready)
-    }
-
-    private func updateConnectorHealth(_ id: UUID, to health: ConnectorHealth) {
-        guard let index = state.connectors.firstIndex(where: { $0.id == id }) else { return }
-        state.connectors[index].health = health
-        state.connectors[index].lastCheckedAt = .now
-        persistConnectors()
-    }
-
-    private func recordConnectorOutcome(_ response: SendMessageResponse, connectorID: UUID) {
-        if let health = Self.connectorFailureHealth(from: response) {
-            updateConnectorHealth(connectorID, to: health)
-            return
-        }
-        markConnectorReady(connectorID)
-    }
-
-    private func recordConnectorOutcome(_ task: AgentTask, connectorID: UUID, attemptedToolCalling: Bool) {
-        rememberToolCallingCapabilityIfNeeded(from: task, connectorID: connectorID, attemptedToolCalling: attemptedToolCalling)
-        if let health = Self.connectorFailureHealth(from: task) {
-            updateConnectorHealth(connectorID, to: health)
-            return
-        }
-        markConnectorReady(connectorID)
-    }
-
-    private static func connectorConfigurationChanged(from previous: ConnectorProfile, to next: ConnectorProfile) -> Bool {
-        previous.kind.trimmingCharacters(in: .whitespacesAndNewlines) != next.kind.trimmingCharacters(in: .whitespacesAndNewlines)
-            || previous.endpoint.trimmingCharacters(in: .whitespacesAndNewlines) != next.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-            || previous.modelName.trimmingCharacters(in: .whitespacesAndNewlines) != next.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
-            || previous.note.trimmingCharacters(in: .whitespacesAndNewlines) != next.note.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func toolCallingIdentityChanged(from previous: ConnectorProfile, to next: ConnectorProfile) -> Bool {
-        previous.kind.trimmingCharacters(in: .whitespacesAndNewlines) != next.kind.trimmingCharacters(in: .whitespacesAndNewlines)
-            || previous.endpoint.trimmingCharacters(in: .whitespacesAndNewlines) != next.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-            || previous.modelName.trimmingCharacters(in: .whitespacesAndNewlines) != next.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func rememberToolCallingCapabilityIfNeeded(from task: AgentTask, connectorID: UUID, attemptedToolCalling: Bool) {
-        guard attemptedToolCalling else { return }
-        let fallbackDetected = task.steps.contains(where: { $0.retryAction == AgentLoop.toolCompatibilityFallbackAction })
-        let producedAgentContent = task.steps.contains {
-            $0.kind == .textOutput || $0.kind == .toolCall || $0.kind == .toolResult || $0.kind == .reviewResult
-        }
-        let nextCapability: ConnectorToolCallingCapability?
-        if fallbackDetected {
-            nextCapability = .unsupported
-        } else if producedAgentContent {
-            nextCapability = .supported
-        } else {
-            nextCapability = nil
-        }
-        if rememberToolCallingCapability(nextCapability, connectorID: connectorID, activitySource: .taskRun) {
-            persistConnectors()
-        }
-    }
-
-    @discardableResult
-    private func rememberToolCallingCapability(
-        _ capability: ConnectorToolCallingCapability?,
-        connectorID: UUID,
-        activitySource: ConnectorToolCallingCapabilityObservationSource?
-    ) -> Bool {
-        guard let capability,
-              let index = state.connectors.firstIndex(where: { $0.id == connectorID }) else { return false }
-        let previousCapability = state.connectors[index].toolCallingCapability
-        let previousSource = state.connectors[index].toolCallingCapabilitySource
-        let capabilityChanged = previousCapability != capability
-        let sourceChanged = activitySource != nil && previousSource != activitySource
-        let observedAgain = activitySource != nil
-        guard capabilityChanged || observedAgain else { return false }
-        state.connectors[index].toolCallingCapability = capability
-        if capabilityChanged {
-            refreshActiveAgentLoopIfNeeded(for: connectorID)
-        }
-        if let activitySource {
-            state.connectors[index].toolCallingCapabilitySource = activitySource
-            state.connectors[index].toolCallingCapabilityLearnedAt = .now
-        } else if capabilityChanged {
-            state.connectors[index].toolCallingCapabilitySource = nil
-            state.connectors[index].toolCallingCapabilityLearnedAt = nil
-        }
-        guard let activitySource,
-              capabilityChanged || sourceChanged else { return true }
-        let statusLine: String
-        switch (activitySource, capability) {
-        case (.connectorProbe, .supported):
-            statusLine = "已通过连接测试验证 tools 请求兼容，automatic 模式会继续保留工具调用。"
-        case (.connectorProbe, .unsupported):
-            statusLine = "已通过连接测试验证 tools 请求不兼容，automatic 模式后续将默认不再发送 tools。"
-        case (.taskRun, .supported):
-            statusLine = "本次任务已成功携带 tools 请求，automatic 模式后续会继续保留工具调用。"
-        case (.taskRun, .unsupported):
-            statusLine = "检测到请求格式不兼容，automatic 模式后续将默认不再发送 tools。"
-        }
-        recordToolActivity(
-            name: "connector.capability",
-            summary: capability == .supported
-                ? "已验证 \(state.connectors[index].name) 支持工具调用"
-                : "已验证 \(state.connectors[index].name) 不兼容工具调用",
-            statusLine: statusLine,
-            isFailure: false
-        )
-        return true
-    }
-
-    private func refreshActiveAgentLoopIfNeeded(for connectorID: UUID) {
-        guard state.activeConnectorID == connectorID,
-              let connector = state.connectors.first(where: { $0.id == connectorID }) else { return }
-        agentLoop = AgentLoop(
-            config: Self.agentLoopConfig(settings: state.settings, connector: connector),
-            runtime: environment.runtimeClient
-        )
-    }
-
-    private static func connectorFailureHealth(from response: SendMessageResponse) -> ConnectorHealth? {
-        let text = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.hasPrefix("无法连接") || text.hasPrefix("请求失败：") || text.hasPrefix("模型请求失败：") {
-            return .offline
-        }
-        if response.toolActivities.contains(where: { $0.isFailure }) || looksLikeConnectorFailure(text) {
-            return .attention
-        }
-        return nil
-    }
-
-    private static func connectorFailureHealth(from task: AgentTask) -> ConnectorHealth? {
-        guard let errorStep = task.steps.reversed().first(where: { $0.kind == .error && $0.isFailure }) else { return nil }
-        if errorStep.retryAction == "检查端点、模型名和请求兼容性后重试" {
-            return .attention
-        }
-        let text = errorStep.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.hasPrefix("模型请求失败：") || text.hasPrefix("请求失败：") || text.hasPrefix("无法连接") {
-            return .offline
-        }
-        return nil
-    }
-
-    private static func looksLikeConnectorFailure(_ text: String) -> Bool {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        let preview = normalizedSessionPreview(text)
-        return preview == "未找到接口，请检查端点地址是否正确。"
-            || preview == "鉴权失败，请检查 API 密钥是否正确。"
-            || preview == "请求失败，请检查连接器配置。"
-            || text.contains("HTTP 400")
-            || text.contains("HTTP 401")
-            || text.contains("HTTP 404")
-    }
-
-    private static func taskMemory(from thread: Thread) -> TaskMemory {
-        let readFiles = uniqueMemoryValues(thread.steps
-            .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] })
-        let searchedQueries = uniqueMemoryValues(thread.steps
-            .filter { $0.kind == .toolCall && $0.toolName == "code.search" }
-            .compactMap { $0.toolParams?["query"] })
-        let failedTools = uniqueMemoryValues(Dictionary(grouping: thread.steps.filter { $0.kind == .toolResult && $0.isFailure }, by: { $0.toolName ?? "tool" })
-            .map { "\($0.key) ×\($0.value.count)" }
-            .sorted())
-        let conclusions = thread.steps
-            .filter { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .suffix(3)
-            .map { compactMemoryText($0.text, limit: 240) }
-        let checkpoints = thread.steps
-            .filter { $0.kind == .aiThinking && ($0.text.hasPrefix("任务检查点") || $0.text.hasPrefix("阶段总结")) }
-            .suffix(2)
-            .map { compactMemoryText($0.text, limit: 360) }
-        let verification: String?
-        if thread.status == .completed {
-            verification = "已形成最终回复，需以后续验证命令为准。"
-        } else if thread.status == .failed {
-            verification = "任务失败或未完成，继续时优先恢复失败工具或补齐证据。"
-        } else if thread.status == .cancelled {
-            verification = "任务被取消，继续时沿用已读上下文并从未完成处推进。"
-        } else {
-            verification = nil
-        }
-
-        return TaskMemory(
-            readFiles: readFiles,
-            searchedQueries: searchedQueries,
-            failedTools: failedTools,
-            stageConclusions: uniqueMemoryValues(conclusions),
-            checkpoints: uniqueMemoryValues(checkpoints),
-            verificationStatus: verification,
-            pendingFiles: pendingFileCandidates(from: thread.steps, alreadyRead: Set(readFiles)),
-            userDecisions: thread.steps
-                .filter { $0.kind == .reviewResult }
-                .suffix(5)
-                .map { compactMemoryText($0.text, limit: 160) },
-            updatedAt: .now
-        )
-    }
-
-    /// Extract unread file candidates from search/index results that haven't been read yet.
-    private static func pendingFileCandidates(from steps: [TaskStep], alreadyRead: Set<String>) -> [String] {
-        var candidates: [String] = []
-        // From code.search results: extract file paths mentioned
-        for step in steps where step.kind == .toolResult && step.toolName == "code.search" && !step.isFailure {
-            let lines = step.text.components(separatedBy: "\n")
-            for line in lines {
-                // Search results typically show "path:line: content"
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("/") || trimmed.hasPrefix("./") || trimmed.hasPrefix("src/") || trimmed.hasPrefix("Sources/") {
-                    let path = trimmed.components(separatedBy: ":").first ?? trimmed
-                    let cleanPath = path.hasPrefix("./") ? String(path.dropFirst(2)) : path
-                    if !alreadyRead.contains(cleanPath) && !cleanPath.isEmpty {
-                        candidates.append(cleanPath)
-                    }
-                }
-            }
-        }
-        // From workspace.index results: extract key file paths
-        for step in steps where step.kind == .toolResult && step.toolName == "workspace.index" && !step.isFailure {
-            let lines = step.text.components(separatedBy: "\n")
-            for line in lines {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("入口") || trimmed.hasPrefix("测试") || trimmed.hasPrefix("配置") {
-                    // Extract path after colon
-                    if let colonRange = trimmed.range(of: "：") ?? trimmed.range(of: ":") {
-                        let afterColon = trimmed[colonRange.upperBound...].trimmingCharacters(in: .whitespaces)
-                        if !afterColon.isEmpty && !alreadyRead.contains(afterColon) {
-                            candidates.append(afterColon)
-                        }
-                    }
-                }
-            }
-        }
-        return Array(uniqueMemoryValues(candidates).prefix(12))
-    }
-
-    private static func uniqueMemoryValues(_ values: [String]) -> [String] {
-        var seen: Set<String> = []
-        var result: [String] = []
-        for value in values {
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, !seen.contains(trimmed) else { continue }
-            seen.insert(trimmed)
-            result.append(trimmed)
-        }
-        return result
-    }
-
-    private static func compactMemoryText(_ text: String, limit: Int) -> String {
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard cleaned.count > limit else { return cleaned }
-        return "\(cleaned.prefix(limit))…"
-    }
-
-    private func absolutePath(for path: String, workspaceRoot: String) -> String {
-        if path.hasPrefix("/") { return path }
-        return (workspaceRoot as NSString).appendingPathComponent(path)
-    }
-
-    private func notify(_ message: String, style: AppNoticeStyle = .info) {
-        state.notice = AppNotice(message: message, style: style)
-    }
-
-    private static func agentLoopConfig(settings: AppSettings, connector: ConnectorProfile? = nil) -> AgentLoop.Config {
-        let profile = ConnectorCapabilityProfile.infer(for: connector, mode: settings.contextMode)
-        return AgentLoop.Config(
-            maxIterations: profile.maxIterations,
-            maxTokensPerTurn: profile.maxTokensPerTurn,
-            workspaceRoot: settings.workspacePath,
-            supportsToolCalling: profile.supportsToolCalling,
-            contextMode: settings.contextMode,
-            contextWindow: profile.contextWindow,
-            modelName: connector?.modelName ?? ""
-        )
-    }
-
-    private static func agentLoopConfig(settings: AppSettings, connector: ConnectorProfile? = nil, decision: PlannerDecision) -> AgentLoop.Config {
-        var config = agentLoopConfig(settings: settings, connector: connector)
-        let needsProjectDepth = decision.expectedCapabilities.contains("读取工作区")
-            || decision.expectedCapabilities.contains("提出文件修改")
-            || {
-                if case .workflow = decision.intent { return true }
-                return false
-            }()
-        if needsProjectDepth {
-            // Ensure at least the mode's iteration budget — profile already handles local vs remote caps
-            config.maxIterations = max(config.maxIterations, settings.contextMode.maxIterations)
-        }
-        return config
-    }
-
-    private static func plannerStepText(for decision: PlannerDecision) -> String {
-        var lines = [
-            "规划：\(decision.routeLabel) · 置信度 \(Int((decision.confidence * 100).rounded()))%",
-            decision.reason
-        ]
-        if !decision.expectedCapabilities.isEmpty {
-            lines.append("预计使用：\(decision.expectedCapabilities.joined(separator: "、"))")
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    private static func workflowCompletionCheckStep(steps: [TaskStep], hasError: Bool) -> TaskStep {
-        let toolFailures = steps.filter { $0.kind == .toolResult && $0.isFailure }.count
-        let text = hasError
-            ? "完成检查：工作流发现 \(toolFailures) 个失败步骤，建议展开失败项后重试或调整目标。"
-            : "完成检查：工作流已完成，未发现失败步骤。"
-        return TaskStep(
-            kind: .aiThinking,
-            text: text,
-            isCollapsible: true,
-            isCollapsed: true,
-            isFailure: hasError
-        )
-    }
-
-    private static func prepareThreadForContinuation(_ thread: inout Thread, message: String) {
-        let checkpoint = latestCheckpoint(in: thread)
-        thread.steps.removeAll { step in
-            if step.kind == .textOutput,
-               step.toolCallId == streamingOutputID,
-               step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return true
-            }
-            guard step.kind == .error else { return false }
-            let text = step.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if step.recoverable && !step.isFailure { return true }
-            if text.contains("已达到最大迭代次数") { return true }
-            if text.contains("上次运行被中断") || text.contains("已自动标记为已暂停") || text.contains("已自动标记为已取消") { return true }
-            return false
-        }
-
-        guard (isContinuationCommand(message) || isLikelyTaskFollowUp(message)),
-              !thread.steps.contains(where: { $0.kind == .aiThinking && $0.text.contains("继续策略") }) else { return }
-        let checkpointText = checkpoint.map { "\n\n最近检查点：\($0)" } ?? ""
-        thread.steps.append(TaskStep(
-            kind: .aiThinking,
-            text: "继续策略：沿用这条任务里已经读取到的结果，从未完成处继续；只有证据不足时再补充搜索或读取。\(checkpointText)",
-            isCollapsible: true,
-            isCollapsed: true
-        ))
-    }
-
-    private static func ensureCheckpointIfNeeded(_ thread: inout Thread) {
-        guard thread.status == .failed || thread.status == .cancelled || thread.steps.contains(where: { $0.text.contains("已达到最大迭代次数") }) else { return }
-        guard latestCheckpoint(in: thread) == nil else { return }
-        thread.steps.append(makeCheckpointStep(for: thread))
-    }
-
-    private static func makeCheckpointStep(for thread: Thread) -> TaskStep {
-        let toolCalls = thread.steps.filter { $0.kind == .toolCall }.count
-        let failedTools = thread.steps.filter { $0.kind == .toolResult && $0.isFailure }
-        let readFiles = thread.steps
-            .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] }
-        let lastOutput = thread.steps.reversed().first {
-            $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }?.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lastFailure = thread.steps.reversed().first {
-            $0.kind == .error || $0.isFailure
-        }?.text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        var lines = ["任务检查点"]
-        lines.append("状态：\(thread.status.title)")
-        lines.append("已执行：\(toolCalls) 次工具调用")
-        if !readFiles.isEmpty {
-            lines.append("已读取：\(Array(Set(readFiles)).sorted().prefix(8).joined(separator: "、"))")
-        }
-        if !failedTools.isEmpty {
-            let grouped = Dictionary(grouping: failedTools, by: { $0.toolName ?? "tool" })
-                .map { "\($0.key) ×\($0.value.count)" }
-                .sorted()
-                .joined(separator: "、")
-            lines.append("失败：\(grouped)")
-        }
-        if let lastFailure, !lastFailure.isEmpty {
-            lines.append("最近失败：\(String(lastFailure.prefix(220)))")
-        }
-        if let lastOutput, !lastOutput.isEmpty {
-            lines.append("阶段输出：\(String(lastOutput.prefix(260)))")
-        }
-        lines.append("建议下一步：基于已读结果继续，优先补齐未读关键文件；如果是整项目任务，先使用 workspace.index 或已有索引，不要重复低效 shell 遍历。")
-        return TaskStep(
-            kind: .aiThinking,
-            text: lines.joined(separator: "\n"),
-            isCollapsible: true,
-            isCollapsed: true,
-            isFailure: thread.status == .failed
-        )
-    }
-
-    private static func latestCheckpoint(in thread: Thread) -> String? {
-        thread.steps.reversed().first {
-            $0.kind == .aiThinking && $0.text.hasPrefix("任务检查点")
-        }?.text
-    }
-
-    private static func retryMessage(for thread: Thread, lastUserMessage: String) -> String {
-        let original = lastUserMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Don't wrap the message — prepareThreadForContinuation already injects
-        // the continuation strategy as an aiThinking step. Wrapping the message
-        // causes the bootstrap to search for the wrapper text in the codebase.
-        return original
-    }
-
-    private static func taskHasUsefulProgress(_ thread: Thread) -> Bool {
-        thread.steps.contains { step in
-            switch step.kind {
-            case .toolCall, .toolResult, .textOutput, .reviewRequest, .reviewResult:
-                return !step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            case .userInput, .aiThinking, .error:
-                return false
-            }
-        }
-    }
-
-    private static func relevantFileLimit(settings: AppSettings, connector: ConnectorProfile) -> Int {
-        ConnectorCapabilityProfile.infer(for: connector, mode: settings.contextMode).relevantFileLimit
-    }
-
-    private static func directOutputLimit(for connector: ConnectorProfile) -> Int? {
-        ConnectorCapabilityProfile.infer(for: connector, mode: .balanced).directOutputLimit
-    }
-
-    private static func chatPrompt(context: TaskContext, message: String) -> String {
-        var prompt = PromptComposer.composeChatPrompt(context: context)
-        if UserFrustrationDetector.isFrustrated(message) {
-            prompt += "\n\n## 用户纠错/挫败信号\n\(UserFrustrationDetector.guidance)"
-        }
-        return prompt
-    }
-
-    private static func isLocalConnector(_ connector: ConnectorProfile) -> Bool {
-        ConnectorCapabilityProfile.isLocalConnector(connector)
-    }
-
-    private static func directHistory(for steps: [TaskStep], message: String) -> [TaskStep] {
-        // Always carry history in chat sessions — losing context is the #1 complaint.
-        // The runtime layer (compactHistory) will handle truncation if history is too long.
-        return steps
-            .filter { step in
-                !step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    && step.kind != .aiThinking
-                    && step.kind != .reviewRequest
-                    && step.kind != .reviewResult
-            }
-            .suffix(20)
-    }
-
-    private static func isTinyFollowUp(_ message: String) -> Bool {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        return ["?", "？", "??", "？？"].contains(normalized)
-            || normalized.count <= 4 && ["然后", "继续", "接着", "为啥", "为什么"].contains(where: { normalized.contains($0) })
-    }
-
-    private static func isEmptySessionPlaceholder(_ session: ChatSession) -> Bool {
-        let title = session.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return session.turns.isEmpty && (title.isEmpty || title == "新会话" || title == "新对话")
-    }
-
-    private static func isContinuationCommand(_ message: String) -> Bool {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return false }
-        return normalized.contains("继续")
-            || normalized.contains("接着")
-            || normalized.contains("续跑")
-            || normalized.contains("未完成")
-            || normalized.localizedCaseInsensitiveContains("continue")
-    }
-
-    private static func isContextualTaskReference(_ message: String) -> Bool {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return false }
-        let threadMarkers = [
-            "这个会话", "那个会话", "当前会话", "这轮对话", "那轮对话", "这条对话",
-            "新会话", "上下文", "丢了", "丢失", "没上下文"
-        ]
-        let taskMarkers = [
-            "这个任务", "那个任务", "刚才的任务", "上个任务", "读取本地项目",
-            "本地项目", "输出没结束", "被截断", "截断了", "没发完", "没写完", "没说完"
-        ]
-        return threadMarkers.contains { normalized.contains($0) }
-            || taskMarkers.contains { normalized.contains($0) }
-    }
-
-    /// Detects messages that are likely follow-ups to a recent task even without explicit task references.
-    private static func isLikelyTaskFollowUp(_ message: String) -> Bool {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return false }
-        // Standalone capability/concept questions are NOT task follow-ups
-        if isStandaloneCapabilityOrConceptQuestion(normalized) { return false }
-        // Standalone fresh-info questions are NOT task follow-ups
-        if isStandaloneInfoQuestion(normalized) { return false }
-        // Very short messages are almost always follow-ups
-        if normalized.count <= 12 { return true }
-        // Common follow-up action patterns
-        let actionMarkers = [
-            "下一步", "接着", "然后", "继续", "再", "还", "另外", "也", "帮我", "改一下", "修一下",
-            "优化", "调整", "补充", "完善", "修复", "修改", "改进", "重构", "测试", "运行",
-            "确认", "验证", "检查", "看看", "核对", "对比", "比较", "分析一下", "总结一下",
-            "刚才", "之前", "上面的", "这样", "那样", "把它", "把这个", "把那个"
-        ]
-        if actionMarkers.contains(where: { normalized.contains($0) }) { return true }
-        // Short questions are usually follow-ups
-        if (normalized.hasSuffix("？") || normalized.hasSuffix("?")) && normalized.count <= 24 {
-            return true
-        }
-        return false
-    }
-
-    private static func shouldRouteChatFollowUpIntoSelectedTask(message: String, task: AgentTask) -> Bool {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return false }
-        if isStandaloneCapabilityOrConceptQuestion(normalized) {
-            return false
-        }
-        if taskHasTruncatedOutput(task), isTruncationContinuation(normalized) {
-            return true
-        }
-        if UserFrustrationDetector.shouldRecoverRecentTask(normalized) {
-            return true
-        }
-        if isTinyFollowUp(normalized) || isContinuationCommand(normalized) || isTaskStatusQuestion(normalized) || isLikelyTaskFollowUp(normalized) {
-            return true
-        }
-
-        let explicitTaskMarkers = ["这个任务", "那个任务", "这个会话", "那个会话", "当前会话", "这轮对话", "这条任务", "刚才", "最近的", "最近这个", "上个", "上一轮", "前面", "上面", "上下文", "新会话", "丢失", "接着这个", "继续这个"]
-        if explicitTaskMarkers.contains(where: { normalized.contains($0) }) {
-            return true
-        }
-
-        let taskActionMarkers = ["再读", "补读", "继续读", "总结", "列出", "修复", "修改", "优化", "跑一下", "测试一下", "重新跑", "重试", "按这个", "基于这个", "把它"]
-        if taskActionMarkers.contains(where: { normalized.contains($0) }) {
-            return true
-        }
-
-        let pronounOnlyMarkers = ["这个", "那个", "它", "这里", "上面的"]
-        if normalized.count <= 16, pronounOnlyMarkers.contains(where: { normalized.contains($0) }) {
-            return true
-        }
-
-        let lastUserInput = task.steps.reversed().first { $0.kind == .userInput }?.text ?? task.title
-        let sharedKeywords = semanticOverlapKeywords(in: normalized).intersection(semanticOverlapKeywords(in: lastUserInput))
-        return sharedKeywords.count >= 2
-    }
-
-    private static func isStandaloneInfoQuestion(_ message: String) -> Bool {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard normalized.hasSuffix("？") || normalized.hasSuffix("?") else { return false }
-        let infoStarts = ["今天", "最近", "最新", "现在", "有什么新", "有哪些新"]
-        let infoTopics = ["新闻", "消息", "动态", "进展", "更新", "发布"]
-        let startsLike = infoStarts.contains { normalized.hasPrefix($0) }
-        let hasTopic = infoTopics.contains { normalized.contains($0) }
-        return startsLike && hasTopic
-    }
-
-    private static func isStandaloneCapabilityOrConceptQuestion(_ message: String) -> Bool {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard normalized.hasSuffix("？") || normalized.hasSuffix("?") || normalized.contains("吗") else { return false }
-        let capabilityStarts = [
-            "你能", "你现在能", "你可以", "你会", "能不能", "能否", "是否可以",
-            "可不可以", "会不会", "你支持", "你是什么", "你是谁"
-        ]
-        let conceptStarts = ["什么是", "为什么", "怎么理解", "如何理解"]
-        let startsLikeStandalone = capabilityStarts.contains { normalized.hasPrefix($0) }
-            || conceptStarts.contains { normalized.hasPrefix($0) }
-        guard startsLikeStandalone else { return false }
-        let taskAnchors = [
-            "这个任务", "这条任务", "刚才", "上面", "前面", "继续", "接着", "被截断",
-            "没发完", "文件", "代码", "项目", "报错", "工具失败"
-        ]
-        return !taskAnchors.contains { normalized.contains($0) }
-    }
-
-    private static func taskHasTruncatedOutput(_ task: AgentTask) -> Bool {
-        task.steps.contains { step in
-            step.text.contains("输出达到当前上限")
-                || step.text.contains("回复已被截断")
-                || step.text.contains("输出上限截断")
-                || step.text.contains("内容可能被截断")
-        }
-    }
-
-    private static func isTruncationContinuation(_ message: String) -> Bool {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return false }
-        let markers = [
-            "接着说", "继续输出", "继续说", "接着输出", "没发完", "没写完",
-            "没说完", "没结束", "被截断", "截断了", "断了", "后面呢",
-            "剩下的", "接上", "继续"
-        ]
-        return markers.contains { normalized.contains($0) }
-    }
-
-    private static func semanticOverlapKeywords(in text: String) -> Set<String> {
-        let normalized = text.lowercased()
-        let stopwords: Set<String> = ["这个", "那个", "一下", "为什么", "怎么", "什么", "可以", "是不是", "我", "你", "帮我", "请", "的", "了", "吧", "吗", "呢"]
-        var tokens: [String] = []
-        var current = ""
-        for scalar in normalized.unicodeScalars {
-            let isAsciiToken = CharacterSet.alphanumerics.contains(scalar) || scalar == "_" || scalar == "." || scalar == "-"
-            let isHan = scalar.value >= 0x4E00 && scalar.value <= 0x9FFF
-            if isAsciiToken || isHan {
-                current.unicodeScalars.append(scalar)
-            } else if !current.isEmpty {
-                tokens.append(current)
-                current = ""
-            }
-        }
-        if !current.isEmpty {
-            tokens.append(current)
-        }
-        return Set(tokens.filter { $0.count >= 2 && !stopwords.contains($0) })
-    }
-
-    private static func isTaskStatusQuestion(_ message: String) -> Bool {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return false }
-        let statusMarkers = ["什么情况", "怎么了", "哪里失败", "失败原因", "几个工具失败", "工具失败", "没完成", "卡住", "还在执行", "执行中", "进度", "状态"]
-        let whyAboutCurrentTask = (normalized.contains("为什么") || normalized.contains("为啥"))
-            && ["失败", "没完成", "卡住", "中断", "新会话", "上下文", "任务", "工具"].contains { normalized.contains($0) }
-        let asksStatus = statusMarkers.contains { normalized.contains($0) }
-            || whyAboutCurrentTask
-            || ["?", "？"].contains(normalized)
-        guard asksStatus else { return false }
-        let actionMarkers = ["继续执行", "继续做", "继续任务", "重试", "重新跑", "改", "修复", "写入", "读取", "搜索", "联网", "跑测试", "接着说", "继续输出", "没发完", "没写完", "没说完", "被截断"]
-        return !actionMarkers.contains { normalized.contains($0) }
-    }
-
-    private static func taskStatusAnswer(for task: AgentTask, question: String) -> String {
-        let toolCalls = task.steps.filter { $0.kind == .toolCall }.count
-        let failures = task.steps.filter { $0.isFailure || $0.kind == .error }
-        let failedTools = task.steps.filter { $0.kind == .toolResult && $0.isFailure }
-        let lastOutput = task.steps.reversed().first {
-            $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }?.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lastFailure = failures.last?.text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        var lines: [String] = []
-        lines.append("这条任务当前是“\(task.status.title)”。")
-        if toolCalls > 0 {
-            lines.append("已经调用过 \(toolCalls) 次工具，其中失败 \(failedTools.count) 次。")
-        }
-        if !failedTools.isEmpty {
-            let grouped = Dictionary(grouping: failedTools, by: { $0.toolName ?? "tool" })
-                .map { "\($0.key) ×\($0.value.count)" }
-                .sorted()
-                .joined(separator: "、")
-            lines.append("失败主要来自：\(grouped)。")
-        }
-        if let lastFailure, !lastFailure.isEmpty {
-            lines.append("最近的失败信息是：\(String(lastFailure.prefix(180)))")
-        }
-        if let lastOutput, !lastOutput.isEmpty {
-            lines.append("已经形成过阶段性输出：\(String(lastOutput.prefix(220)))")
-        }
-
-        let hasShellFailure = failedTools.contains { $0.toolName == "shell.exec" }
-        if hasShellFailure {
-            lines.append("判断：它不是单纯“模型不会做”，而是执行路径不稳。模型多次尝试 shell 命令列项目文件，其中部分命令被安全策略或系统退出码拦住。更好的下一步是走受控的项目索引/文件读取，而不是继续让模型自由拼 shell。")
-        } else if !failedTools.isEmpty {
-            lines.append("判断：任务有工具失败，需要换执行路径或补充目标后续跑。")
-        } else if task.status == .completed {
-            lines.append("判断：任务已完成。如果你追问细节，我会基于这条任务已有上下文解释，不再重复调用工具。")
-        } else {
-            lines.append("判断：任务没有检测到明确工具失败，但还需要补充下一步目标。")
-        }
-        lines.append("建议下一步：先让来财总结已读到的项目结构，再按关键模块继续读取；需要改代码时再进入审查写入。")
-        return lines.joined(separator: "\n")
-    }
-
-    private static func markStaleRunningTasks(in state: inout AppState, now: Date = .now) {
-        let timeout: TimeInterval = 20 * 60
-        for index in state.threads.indices where state.threads[index].source == .task {
-            let shouldCancelRunning = state.threads[index].status == .running
-            let shouldCancelStaleReview = state.threads[index].status == .waitingReview
-                && now.timeIntervalSince(state.threads[index].updatedAt) > timeout
-            guard shouldCancelRunning || shouldCancelStaleReview else { continue }
-            state.threads[index].status = .cancelled
-            state.threads[index].updatedAt = now
-            if state.threads[index].steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) {
-                continue
-            }
-            state.threads[index].steps.append(TaskStep(
-                kind: .error,
-                text: "上次运行被中断，已自动标记为已暂停。可以从这条任务继续或重新发送。",
-                isFailure: false,
-                recoverable: true,
-                retryAction: "继续"
-            ))
-            ensureCheckpointIfNeeded(&state.threads[index])
-        }
-    }
-
-    nonisolated static func mergePersistedThreads(_ incoming: [Thread], into state: inout AppState) {
-        guard !incoming.isEmpty else { return }
-
-        for thread in incoming {
-            if let index = state.threads.firstIndex(where: { $0.id == thread.id }) {
-                if thread.updatedAt >= state.threads[index].updatedAt {
-                    state.threads[index] = thread
-                }
-            } else {
-                state.threads.append(thread)
-            }
-        }
-
-        state.threads.sort { $0.updatedAt > $1.updatedAt }
-
-        if let selectedID = state.selectedThreadID,
-           !state.threads.contains(where: { $0.id == selectedID }) {
-            state.selectThread(id: nil)
-        }
-    }
-
-    private func persistThreads() {
-        updateSummaryCaches()
-        do { try environment.threadRepository.saveThreads(state.threads) }
-        catch { recordToolActivity(name: "threads.save", summary: "会话持久化失败", statusLine: error.localizedDescription, isFailure: true) }
-    }
-
-    /// For threads with >20 steps, generate a summary cache of early steps
-    /// so that continuation runs don't need to re-compress the full history.
-    private func updateSummaryCaches() {
-        let summaryThreshold = 20
-        for index in state.threads.indices {
-            let thread = state.threads[index]
-            guard thread.steps.count > summaryThreshold else { continue }
-            // Only regenerate if cache is stale (fewer steps cached than current - recent)
-            let recentStepCount = min(14, thread.steps.count)
-            let earlyStepsCount = thread.steps.count - recentStepCount
-            let needsUpdate: Bool
-            if let cache = thread.summaryCache {
-                // Regenerate if cache doesn't mention enough early steps
-                needsUpdate = !cache.contains("\(earlyStepsCount) 条早期步骤")
-            } else {
-                needsUpdate = true
-            }
-            guard needsUpdate else { continue }
-            state.threads[index].summaryCache = Self.generateSummaryCache(for: thread)
-        }
-    }
-
-    nonisolated static func generateSummaryCache(for thread: Thread) -> String {
-        let recentStepCount = min(14, thread.steps.count)
-        let earlySteps = thread.steps.dropLast(recentStepCount)
-        guard !earlySteps.isEmpty else { return "" }
-
-        var lines = ["\(earlySteps.count) 条早期步骤摘要"]
-        // Collect key info from early steps
-        let readFiles = uniqueValues(
-            earlySteps.filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
-                .compactMap { $0.toolParams?["path"] }
-        )
-        let searchedQueries = uniqueValues(
-            earlySteps.filter { $0.kind == .toolCall && $0.toolName == "code.search" }
-                .compactMap { $0.toolParams?["query"] }
-        )
-        let failedTools = earlySteps.filter { $0.kind == .toolResult && $0.isFailure }
-            .map { "\($0.toolName ?? "工具") 失败" }
-        let conclusions = earlySteps.filter { $0.kind == .textOutput }
-            .suffix(3)
-            .map { compactSummaryText($0.text, limit: 260) }
-
-        if !readFiles.isEmpty {
-            lines.append("- 已读文件：\(readFiles.prefix(12).joined(separator: "、"))")
-        }
-        if !searchedQueries.isEmpty {
-            lines.append("- 已搜索：\(searchedQueries.prefix(8).joined(separator: "、"))")
-        }
-        if !failedTools.isEmpty {
-            lines.append("- 失败工具：\(uniqueValues(failedTools).prefix(6).joined(separator: "、"))")
-        }
-        if !conclusions.isEmpty {
-            lines.append("- 早期结论：\(conclusions.joined(separator: " / "))")
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    nonisolated private static func uniqueValues(_ values: [String]) -> [String] {
-        var seen: Set<String> = []
-        var result: [String] = []
-        for value in values {
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, !seen.contains(trimmed) else { continue }
-            seen.insert(trimmed)
-            result.append(trimmed)
-        }
-        return result
-    }
-
-    nonisolated private static func compactSummaryText(_ text: String, limit: Int = 260) -> String {
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard cleaned.count > limit else { return cleaned }
-        return String(cleaned.prefix(max(0, limit - 1))) + "…"
-    }
-
-    private func persistConnectors() {
-        do { try environment.connectorRepository.saveConnectors(state.connectors, activeConnectorID: state.activeConnectorID) }
-        catch { recordToolActivity(name: "connectors.save", summary: "连接器持久化失败", statusLine: error.localizedDescription, isFailure: true) }
-    }
-
-    private func persistSettings() {
-        AppSettingsStorage.save(state.settings)
-    }
-
-    // MARK: - Engine Initialization (Hooks, Scheduler, Goals, Gateway)
-
-    private func initializeEngines(workspaceRoot: String) {
-        let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !root.isEmpty else { return }
-
-        HookEngine.shared.loadHooks(workspaceRoot: root)
-
-        // Persistent memory engine
-        MemoryEngine.shared.open()
-
-        SchedulerEngine.shared.onExecuteTask = { [weak self] message, workflowName in
-            guard let self else { return "未初始化" }
-            if let wfName = workflowName {
-                self.startWorkflow(named: wfName, goal: message)
-            } else {
-                self.state.draftMessage = message
-                self.sendDraft()
-            }
-            return "已触发"
-        }
-        SchedulerEngine.shared.start(workspaceRoot: root)
-
-        GoalEngine.shared.onExecuteStep = { [weak self] message, threadID in
-            guard let self else { return (false, "未初始化") }
-            self.state.draftMessage = message
-            self.sendDraft()
-            return (true, "已发送")
-        }
-
-        MessagingGateway.shared.onProcessMessage = { [weak self] message in
-            guard let self else { return "来财未初始化" }
-            self.state.draftMessage = message.text
-            self.sendDraft()
-            return "已处理"
-        }
-
-        // Skill composition callbacks
-        SkillCompositionEngine.shared.onExecuteStep = { [weak self] message, skillName in
-            guard let self else { return ("", false) }
-            await MainActor.run {
-                self.state.draftMessage = message
-                self.sendDraft()
-            }
-            return (message, true)
-        }
-        SkillCompositionEngine.shared.onExpandGlob = { glob, wsRoot in
-            let dir = URL(fileURLWithPath: wsRoot)
-            guard let enumerator = FileManager.default.enumerator(
-                at: dir, includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            ) else { return [] }
-            let ext = glob.replacingOccurrences(of: "*.", with: "")
-            var files: [String] = []
-            while let url = enumerator.nextObject() as? URL {
-                if url.pathExtension == ext { files.append(url.path) }
-                if files.count >= 100 { break }
-            }
-            return files
-        }
-
-        // Load workflow chains
-        WorkflowChainRegistry.shared.load(workspaceRoot: root)
-    }
-
-    // MARK: - Background Agent Support
-
-    public func sendToBackground(threadID: UUID) {
-        guard let index = state.threads.firstIndex(where: { $0.id == threadID }),
-              state.threads[index].status == .running else { return }
-        let title = state.threads[index].title
-        let bgTaskID = BackgroundTaskManager.shared.startTask(title: title)
-        state.threads[index].context.metadata["backgroundTaskID"] = bgTaskID.uuidString
-        state.threads[index].context.metadata["isBackground"] = "true"
-        notify("任务已转入后台：\(title)", style: .info)
-    }
-
-    public func isBackgroundThread(_ threadID: UUID) -> Bool {
-        guard let thread = state.threads.first(where: { $0.id == threadID }) else { return false }
-        return thread.context.metadata["isBackground"] == "true"
-    }
-
-    // MARK: - Goal Management Shortcuts
-
-    public func createGoal(title: String, message: String, steps: [GoalStep] = []) {
-        let goal = GoalEngine.shared.createGoal(title: title, message: message, steps: steps)
-        notify("目标已创建：\(goal.title)", style: .success)
-    }
-
-    public func pauseGoal(id: UUID) { GoalEngine.shared.pauseGoal(id: id) }
-    public func resumeGoal(id: UUID) { GoalEngine.shared.resumeGoal(id: id) }
-    public func cancelGoal(id: UUID) { GoalEngine.shared.cancelGoal(id: id) }
-
-    // MARK: - Messaging Gateway Shortcuts
-
-    public func startGateway(port: Int = 18789) {
-        MessagingGateway.shared.start(workspaceRoot: state.settings.workspacePath, port: port)
-        notify("消息网关已启动（端口 \(port)）", style: .success)
-    }
-
-    public func stopGateway() {
-        MessagingGateway.shared.stop()
-        notify("消息网关已停止", style: .info)
-    }
-}
-
-private enum AppSettingsStorage {
-    private static let key = "laicai.appSettings.v1"
-
-    static func load() -> AppSettings? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(AppSettings.self, from: data)
-    }
-
-    static func save(_ settings: AppSettings) {
-        guard let data = try? JSONEncoder().encode(settings) else { return }
-        UserDefaults.standard.set(data, forKey: key)
-    }
-}
-
-// MARK: - Bootstrap
-
-private func migrateFromPythonConnectorCatalog(workspacePath: String) -> ConnectorCatalog? {
-    let path = (workspacePath as NSString).appendingPathComponent("desktop-connectors.json")
-    guard FileManager.default.fileExists(atPath: path),
-          let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-    let activeID = UUID(uuidString: json["active_id"] as? String ?? "")
-    let items = json["items"] as? [[String: Any]] ?? []
-    let connectors: [ConnectorProfile] = items.compactMap { item in
-        guard let id = UUID(uuidString: item["id"] as? String ?? ""),
-              let name = item["name"] as? String,
-              let endpoint = item["endpoint"] as? String else { return nil }
-        return ConnectorProfile(
-            id: id, name: name,
-            kind: item["kind"] as? String ?? "openai-compatible",
-            endpoint: endpoint,
-            modelName: item["model"] as? String ?? "",
-            note: item["api_key"] as? String ?? "",
-            toolCallingPolicy: (item["tool_calling_policy"] as? String).flatMap(ConnectorToolCallingPolicy.init(rawValue:)),
-            toolCallingCapability: (item["tool_calling_capability"] as? String).flatMap(ConnectorToolCallingCapability.init(rawValue:)),
-            health: .attention, lastCheckedAt: .now
-        )
-    }
-    guard !connectors.isEmpty else { return nil }
-    return ConnectorCatalog(connectors: connectors, activeConnectorID: activeID)
-}
-
-public extension AppState {
-    static var preview: AppState { SampleData.appState }
-
-    static func bootstrap(environment: AppEnvironment) -> AppState {
-        var state = SampleData.appState
-        if let settings = AppSettingsStorage.load() {
-            state.settings = settings
-            let last = URL(fileURLWithPath: settings.workspacePath).lastPathComponent
-            if !last.isEmpty { state.workspaceName = last }
-        }
-
-        // Load unified threads (auto-migrates from legacy session/task tables if needed)
-        if let savedThreads = try? environment.threadRepository.loadThreads(), !savedThreads.isEmpty {
-            state.threads = savedThreads
-        }
-
-        if let catalog = try? environment.connectorRepository.loadConnectorCatalog(), !catalog.connectors.isEmpty {
-            state.connectors = catalog.connectors
-            state.activeConnectorID = catalog.activeConnectorID ?? catalog.connectors.first?.id
-            state.settings.defaultConnectorName = state.activeConnector?.name ?? catalog.connectors.first?.name ?? state.settings.defaultConnectorName
-        } else if let migrated = migrateFromPythonConnectorCatalog(workspacePath: state.settings.workspacePath) {
-            state.connectors = migrated.connectors
-            state.activeConnectorID = migrated.activeConnectorID ?? migrated.connectors.first?.id
-            state.settings.defaultConnectorName = state.activeConnector?.name ?? migrated.connectors.first?.name ?? state.settings.defaultConnectorName
-        }
-
-        if state.workspaceName == "来采原生版" { state.workspaceName = "来财原生版" }
-        DispatchQueue.main.async { WorkspaceSandbox.shared.workspaceRoot = state.settings.workspacePath }
-
-        // Migrate session titles from first user step
-        for index in state.threads.indices where state.threads[index].source == .session {
-            if state.threads[index].title.isEmpty || state.threads[index].title == "新对话" || state.threads[index].title == "新会话" {
-                let firstMsg = state.threads[index].steps.first(where: { $0.kind == .userInput })?.text ?? ""
-                let title = String(firstMsg.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
-                if !title.isEmpty { state.threads[index].title = title }
-            }
-            state.threads[index].preview = normalizedSessionPreview(state.threads[index].preview)
-        }
-
-        // Select latest thread
-        if let latest = state.threads.first {
-            state.selectThread(id: latest.id)
-        }
-
-        return state
     }
 }

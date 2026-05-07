@@ -46,7 +46,7 @@ public struct MemoryTool: LaicaiTool {
             return ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params")
         }
 
-        let engine = await MemoryEngine.shared
+        let engine = MemoryEngine.shared
 
         switch params.action {
         case "store":

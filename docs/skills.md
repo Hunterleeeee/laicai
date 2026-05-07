@@ -9,16 +9,17 @@ laicai skill exec skill-review --goal "审查 https://example.com/skill 这个 s
 ```
 
 审查五步：
-1. **来源审查** — 检查来源是否可信（仓库/网页/文件/粘贴）
-2. **权限审查** — 检查是否会读文件、写 Obsidian、联网、执行命令
-3. **逻辑审查** — 判断核心目标是否合理、有无过度复杂或隐藏行为
-4. **改写判断** — 默认不照搬，提炼核心思路改写为来财自有 skill
-5. **用户确认** — 审查报告输出后必须等用户确认才能安装
+1. **来源审查**：检查来源是否可信（仓库/网页/文件/粘贴）
+2. **权限审查**：检查是否会读文件、写 Obsidian、联网、执行命令
+3. **逻辑审查**：判断核心目标是否合理、有无过度复杂或隐藏行为
+4. **改写判断**：默认不照搬，提炼核心思路改写为来财自有 skill
+5. **用户确认**：审查报告输出后必须等用户确认才能安装
 
 改写原则：
 - 只保留必要能力，删除危险能力
 - prompt、配置、文件结构按来财规范重写
 - 任何包含 shell 命令或文件写入的 skill 默认标记为高风险
+- 任何绕过登录、付费、风控或服务条款的 skill 必须拒绝安装或改写为合规方案
 
 ---
 
@@ -118,14 +119,38 @@ Open the generated folder and adjust:
 
 If `steps` is omitted, 来财 will build a simple default flow from `vault_context`, `web_fetch`, and `output`.
 
+## Compatibility
+
+Current loaders accept the canonical `steps` schema above and older manifests with:
+
+- `parameters` or `arguments` for user-facing inputs
+- `requires.tools` for required tool names
+- `promptFile` pointing to `prompt.md`
+
+New skills should use the canonical `tools` + `steps` shape. Legacy manifests are read for compatibility only.
+
+When a capability appears both in top-level config and in `steps`, `steps` is authoritative for execution order. Top-level `vault_context`, `web_fetch`, and `output` provide defaults used only when no matching step is present.
+
 ## Prompt template
 
 Use these placeholders:
 
 - `{{goal}}`
+- `{{target}}`
+- `{{query}}`
+- `{{url}}`
+- `{{mode}}`
+- `{{command}}`
 - `{{extra_context}}`
 - `{{fetched_url}}`
 - `{{fetched_text}}`
+
+Prompt guidance:
+
+- Define input boundaries first, then execution steps, then output format.
+- Say which tool results are required before claiming completion.
+- For save/write skills, only say “saved” after `save_note`, `wiki_build`, `file_write`, or `file_edit` succeeds.
+- Keep long-form research and wiki skills at 900-1400 output tokens; tiny memory skills still need enough room for evidence and next-action fields.
 
 ## Suggested first custom skills
 

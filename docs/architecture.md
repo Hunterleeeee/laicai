@@ -10,9 +10,9 @@ That gives us a system that stays useful even when no background agents are runn
 
 ## Main building blocks
 
-### CLI
+### App and CLI
 
-The CLI is the single entrypoint:
+The macOS app is the primary daily interface. The CLI is the scriptable entrypoint:
 
 - inspect environment health
 - run lightweight tasks
@@ -20,13 +20,16 @@ The CLI is the single entrypoint:
 - load skills
 - write artifacts back into the vault
 
+Both entrypoints share the Swift domain and foundation layers.
+
 ### Vault adapter
 
 The Obsidian vault is the human-facing memory layer:
 
 - imported source material lands there
 - generated notes land there
-- future skills and workflows can also live there
+- wiki notes use `02 Atomic/` for one-concept pages and `03 MOC/` for index pages
+- skills and workflows can also live there when the user wants local, versioned automation
 - users can edit notes by hand without breaking the system
 
 ### Skill loader
@@ -45,22 +48,24 @@ SQLite is enough for the first phase:
 
 - run tracking
 - note tracking
-- future workflow checkpoints
-- future memory summaries
+- workflow checkpoints
+- memory summaries
 
-### Ingest
+### Wiki and ingest
 
-The ingest pipeline is where MinerU belongs:
+Wiki generation is source-first:
 
-- copy or stage incoming source files
-- extract or summarize into Markdown
-- write stable source notes into the vault
+- search existing Vault notes before writing new pages
+- create atomic notes for individual concepts
+- create MOC pages for navigation across related concepts
+- keep web sources visible in generated Markdown
+- sanitize topic names before using them as file paths
 
-The current implementation only scaffolds this path so the project can grow without changing shape later.
+Document ingest should follow the same rule: extract stable source notes first, then synthesize wiki pages from those notes.
 
 ## Resource strategy
 
-This scaffold is designed for a personal machine:
+This application is designed for a personal machine:
 
 - few always-on components
 - low idle footprint

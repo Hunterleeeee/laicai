@@ -1,24 +1,36 @@
 {
   "name": "vault-query",
-  "version": "1.0.0",
   "description": "查询 Obsidian Vault 中的相关笔记，提取匹配内容并整理为可引用的上下文。",
-  "author": "Laicai Agent",
-  "tags": ["obsidian", "vault", "knowledge", "search"],
-  "arguments": [
+  "tools": [
+    "vault.search",
+    "code.search",
+    "file.read",
+    "wiki.build"
+  ],
+  "steps": [
     {
-      "name": "query",
-      "type": "string",
-      "required": true,
-      "description": "要在知识库中查询的关键词、主题或问题"
+      "kind": "vault_context",
+      "name": "vault-context",
+      "query_from": "query",
+      "limit": 8
     },
     {
-      "name": "top_k",
-      "type": "integer",
-      "required": false,
-      "description": "最多返回的相关笔记数量，默认 8"
+      "kind": "prompt",
+      "name": "prompt",
+      "max_tokens": 900
     }
   ],
-  "requires": {
-    "tools": ["code_search", "file_read", "wiki_build"]
+  "vault_context": {
+    "enabled": true,
+    "query_from": "query",
+    "limit": 8
+  },
+  "web_fetch": {
+    "enabled": false
+  },
+  "output": {
+    "save_by_default": false,
+    "folder": "03 Wiki",
+    "title_template": "Vault Query - {{query}}"
   }
 }

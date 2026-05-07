@@ -1,6 +1,6 @@
 {
   "name": "website-research",
-  "description": "先查 Obsidian 再抓网页",
+  "description": "先查 Obsidian 相关笔记，再读取网页内容，输出轻量研究结论。",
   "tools": [
     "web.fetch",
     "vault.search"
@@ -16,12 +16,12 @@
       "kind": "web_fetch",
       "name": "web-fetch",
       "url_from": "manual",
-      "chars": 1600
+      "chars": 4000
     },
     {
       "kind": "prompt",
       "name": "prompt",
-      "max_tokens": 160
+      "max_tokens": 1000
     },
     {
       "kind": "save_note",

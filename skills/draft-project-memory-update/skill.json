@@ -14,7 +14,7 @@
     {
       "kind": "prompt",
       "name": "prompt",
-      "max_tokens": 160
+      "max_tokens": 700
     },
     {
       "kind": "save_note",

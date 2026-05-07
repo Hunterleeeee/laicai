@@ -252,8 +252,14 @@ public final class SchedulerEngine: ObservableObject {
             // Try up to 1 year of minutes (525600)
             for _ in 0..<525600 {
                 let c = cal.dateComponents([.minute, .hour, .day, .month, .weekday], from: candidate)
-                let minute = c.minute!, hour = c.hour!, day = c.day!, month = c.month!
-                let weekday = c.weekday! // 1=Sun, 2=Mon, ..., 7=Sat
+                guard let minute = c.minute,
+                      let hour = c.hour,
+                      let day = c.day,
+                      let month = c.month,
+                      let weekday = c.weekday else {
+                    candidate = cal.date(byAdding: .minute, value: 1, to: candidate) ?? candidate.addingTimeInterval(60)
+                    continue
+                }
 
                 if matches(field: fields[0], value: minute, range: 0...59) &&
                    matches(field: fields[1], value: hour, range: 0...23) &&

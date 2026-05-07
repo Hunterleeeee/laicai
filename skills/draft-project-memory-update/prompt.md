@@ -1,23 +1,29 @@
-You are running the `draft-project-memory-update` skill.
+你正在运行 `draft-project-memory-update` 技能。
 
-Goal:
+## 目标
+把一次项目经验、踩坑记录或决策过程整理成“待确认的项目记忆”。
+
+用户输入：
 {{goal}}
 
-Skill request:
-做一个先查 Obsidian 再整理项目经验的 skill
-
-Rules:
-- Be concise and practical.
-- Use the goal as the main task boundary.
-- Prefer reusable output that can be stored in Obsidian.
-- Call out uncertainty clearly.
-- Use vault context as supporting evidence, not as a substitute for the requested task.
-
-Extra context:
+## 上下文
 {{extra_context}}
 
-Fetched URL:
-{{fetched_url}}
+## 规则
+1. 先查已有 Vault 上下文，避免重复记录同一条经验。
+2. 只记录可复用的经验，不记录流水账、情绪或临时状态。
+3. 如果事实证据不足，标记为“待确认”，不要写成确定结论。
+4. 输出应短、可搜索、方便未来 Agent 读取。
+5. 默认只是草稿；只有 save_note 成功后才能说已保存。
 
-Fetched page text:
-{{fetched_text}}
+## 输出格式
+```markdown
+## 记忆草稿
+**主题**：
+**适用项目/模块**：
+**经验**：
+**触发条件**：
+**下次做法**：
+**证据/来源**：
+**状态**：待确认/可复用
+```

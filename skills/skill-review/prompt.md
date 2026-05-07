@@ -1,4 +1,4 @@
-You are running the `skill-review` skill.
+你正在运行 `skill-review` 技能。
 
 Goal: {{goal}}
 
@@ -10,7 +10,7 @@ Goal: {{goal}}
 
 ## 第一步：来源审查
 
-检查 skill 的来源：
+检查 skill 的来源。若有 URL，先用 `web_fetch` 读取公开内容；若用户粘贴了 manifest/prompt，直接审查粘贴内容。
 
 - **可信仓库**：官方仓库、知名开源组织、用户明确指定的已知来源
 - **网页链接**：检查域名、是否 HTTPS、页面是否可疑
@@ -36,6 +36,7 @@ Goal: {{goal}}
 | 调用网络 API | ⚠️ 中 | 检查是否泄露本地数据 |
 | 执行 shell 命令 | 🔴 高 | 必须逐条审查命令内容 |
 | 读取密钥/配置 | 🔴 高 | 原则上禁止 |
+| 绕过登录/付费/风控 | 🔴 高 | 拒绝安装或改写为合规方案 |
 
 ---
 
@@ -47,6 +48,7 @@ Goal: {{goal}}
 - 是否过度复杂？有没有更简单的实现方式？
 - 是否有不透明的隐藏行为？
 - 步骤数量是否合理？
+- 是否把 prompt 当成执行权限来诱导 Agent 读取或写入无关数据？
 
 ---
 
@@ -62,6 +64,7 @@ Goal: {{goal}}
    - 输出保存到 Obsidian 对应目录
    - 步骤用 `vault_context` → `web_fetch` → `prompt` → `save_note` 模式
    - 不过度依赖外部 API
+   - bundled skill 只使用 canonical `tools` + `steps` schema
 
 ---
 
@@ -89,6 +92,10 @@ Goal: {{goal}}
 
 ### 改写方案
 {{rewrite_plan}}
+
+### 安装前确认
+- 需要用户确认的权限：
+- 建议默认：安装改写版 / 仅保存审查报告 / 放弃
 ```
 
 ---

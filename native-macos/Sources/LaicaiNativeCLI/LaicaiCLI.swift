@@ -503,7 +503,7 @@ func resolveConnector(config: CLIConfig) -> ConnectorProfile? {
         kind: kind,
         endpoint: endpoint,
         modelName: model,
-        note: "CLI connector",
+        note: apiKey ?? "",
         health: .ready
     )
 }

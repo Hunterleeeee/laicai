@@ -422,8 +422,8 @@ private struct ToolsSettingsTab: View {
                                 serverStatus = "连接中…"
                                 do {
                                     var request = URLRequest(url: URL(string: "\(url)/system_stats")!)
-                                    request.timeoutInterval = 3
-                                    let (_, response) = try await URLSession.shared.data(for: request)
+                                    request.timeoutInterval = NetworkDefaults.quickProbe
+                                    let (_, response) = try await NetworkDefaults.ephemeralSession.data(for: request)
                                     if (response as? HTTPURLResponse)?.statusCode == 200 {
                                         serverStatus = "✅ 已连接"
                                     } else {
@@ -552,6 +552,7 @@ private struct InputSettingsTab: View {
 // MARK: - Gateway Settings
 
 private struct GatewaySettingsTab: View {
+    @EnvironmentObject private var store: AppStore
     @ObservedObject private var gateway = MessagingGateway.shared
     @State private var showingAddChannel = false
     @State private var editingChannel: ChannelConfig?
@@ -572,6 +573,17 @@ private struct GatewaySettingsTab: View {
                         Text("端口 18789")
                             .font(AppFont.tiny)
                             .foregroundStyle(TextGrade.ghost)
+
+                        Button(gateway.isRunning ? "停止" : "启动") {
+                            if gateway.isRunning {
+                                gateway.stop()
+                            } else {
+                                store.startGateway()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(gateway.isRunning ? Semantic.error : Semantic.success)
+                        .controlSize(.small)
                     }
                 }
 
@@ -772,8 +784,9 @@ private struct ChannelEditSheet: View {
                     case .feishu:
                         configField("App ID", text: $appID, placeholder: "cli_xxxxx")
                         configField("App Secret", text: $appSecret, placeholder: "飞书开放平台 App Secret", isSecure: true)
-                        configField("Verification Token", text: $verificationToken, placeholder: "事件订阅验证令牌")
-                        configField("Encrypt Key", text: $encryptKey, placeholder: "事件加密密钥（可选）")
+                        Text("飞书使用 WebSocket 长连接，无需公网 IP。请在飞书开放平台 > 事件与回调 > 回调配置中选择「使用长连接接收事件」。")
+                            .font(AppFont.tiny)
+                            .foregroundStyle(TextGrade.ghost)
 
                     case .telegram:
                         configField("Bot Token", text: $botToken, placeholder: "从 @BotFather 获取", isSecure: true)

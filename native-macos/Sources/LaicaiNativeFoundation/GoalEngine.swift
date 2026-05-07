@@ -194,7 +194,7 @@ public final class GoalEngine: ObservableObject {
         let sql = "DELETE FROM goals WHERE id = ?;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-        sqlite3_bind_text(stmt, 1, (id.uuidString as NSString).utf8String, -1, nil)
+        sqlite3_bind_text_safe(stmt, 1, id.uuidString)
         sqlite3_step(stmt)
         sqlite3_finalize(stmt)
     }
@@ -264,9 +264,9 @@ public final class GoalEngine: ObservableObject {
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-        sqlite3_bind_text(stmt, 1, (goal.id.uuidString as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 2, (json as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 3, (goal.status.rawValue as NSString).utf8String, -1, nil)
+        sqlite3_bind_text_safe(stmt, 1, goal.id.uuidString)
+        sqlite3_bind_text_safe(stmt, 2, json)
+        sqlite3_bind_text_safe(stmt, 3, goal.status.rawValue)
         sqlite3_bind_double(stmt, 4, goal.createdAt.timeIntervalSince1970)
         sqlite3_bind_double(stmt, 5, goal.updatedAt.timeIntervalSince1970)
         sqlite3_step(stmt)

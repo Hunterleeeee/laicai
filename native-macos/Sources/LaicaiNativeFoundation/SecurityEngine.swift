@@ -4,6 +4,16 @@ import LaicaiNativeDomain
 import SQLite3
 #endif
 
+// MARK: - SQLite Helpers
+
+/// Safe text binding that copies the string immediately (SQLITE_TRANSIENT).
+/// Prevents use-after-free when Swift temporaries are freed before sqlite3_step.
+@discardableResult
+func sqlite3_bind_text_safe(_ stmt: OpaquePointer?, _ index: Int32, _ value: String) -> Int32 {
+    let SQLITE_TRANSIENT = unsafeBitCast(OpaquePointer(bitPattern: -1), to: sqlite3_destructor_type.self)
+    return sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT)
+}
+
 // MARK: - Audit Log
 
 public struct AuditEntry: Identifiable, Equatable, Codable, Sendable {
@@ -98,18 +108,23 @@ public final class AuditLog: ObservableObject {
         guard let db else { return }
         var insertStmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO audit_log (id, timestamp, action, tool, input, output, success, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", -1, &insertStmt, nil) == SQLITE_OK else { return }
-        sqlite3_bind_text(insertStmt, 1, entry.id.uuidString, -1, nil)
+        sqlite3_bind_text_safe(insertStmt, 1, entry.id.uuidString)
         sqlite3_bind_double(insertStmt, 2, entry.timestamp.timeIntervalSince1970)
-        sqlite3_bind_text(insertStmt, 3, entry.action, -1, nil)
-        sqlite3_bind_text(insertStmt, 4, entry.tool, -1, nil)
-        sqlite3_bind_text(insertStmt, 5, entry.input, -1, nil)
-        sqlite3_bind_text(insertStmt, 6, entry.output, -1, nil)
+        sqlite3_bind_text_safe(insertStmt, 3, entry.action)
+        sqlite3_bind_text_safe(insertStmt, 4, entry.tool)
+        sqlite3_bind_text_safe(insertStmt, 5, entry.input)
+        sqlite3_bind_text_safe(insertStmt, 6, entry.output)
         sqlite3_bind_int(insertStmt, 7, entry.success ? 1 : 0)
-        sqlite3_bind_text(insertStmt, 8, entry.userID, -1, nil)
+        sqlite3_bind_text_safe(insertStmt, 8, entry.userID)
         sqlite3_step(insertStmt)
         sqlite3_finalize(insertStmt)
         // Prune old entries
-        sqlite3_exec(db, "DELETE FROM audit_log WHERE id NOT IN (SELECT id FROM audit_log ORDER BY timestamp DESC LIMIT \(maxEntries))", nil, nil, nil)
+        var pruneStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM audit_log WHERE id NOT IN (SELECT id FROM audit_log ORDER BY timestamp DESC LIMIT ?)", -1, &pruneStmt, nil) == SQLITE_OK {
+            sqlite3_bind_int(pruneStmt, 1, Int32(maxEntries))
+            sqlite3_step(pruneStmt)
+        }
+        sqlite3_finalize(pruneStmt)
     }
 
     private func clearDB() {
@@ -260,13 +275,14 @@ public final class SecurityManager: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
+        // Only block unbounded traversals. Allow find with -maxdepth or find -type d.
+        let hasBoundedFind = normalized.contains("-maxdepth")
         let projectTraversalPatterns = [
-            #"(^|[;&|]\s*)find\s+\.($|\s)"#,
-            #"(^|[;&|]\s*)find\s+\S+\s+-type\s+f"#,
-            #"(^|[;&|]\s*)ls\s+(-[a-z]*r[a-z]*|-r)"#,
-            #"(^|[;&|]\s*)tree(\s|$)"#
+            #"(^|[;&|]\s*)find\s+\.($|\s)"#,             // find . (unbounded from cwd)
+            #"(^|[;&|]\s*)ls\s+(-[a-z]*r[a-z]*|-r)"#,    // ls -R
+            #"(^|[;&|]\s*)tree(\s|$)"#                     // tree
         ]
-        if projectTraversalPatterns.contains(where: { normalized.range(of: $0, options: .regularExpression) != nil }) {
+        if !hasBoundedFind && projectTraversalPatterns.contains(where: { normalized.range(of: $0, options: .regularExpression) != nil }) {
             return "工具策略拦截：不要用 shell 遍历项目结构。请先使用 workspace.index 建立项目地图，再用 file.read 或 code.search 精确读取。"
         }
 
@@ -317,7 +333,7 @@ public enum PermissionLevel: String, Codable, Sendable, CaseIterable {
     case review = "review"
     /// Always denied: destructive operations
     case denied = "denied"
-    
+
     public var title: String {
         switch self {
         case .automatic: return "自动"
@@ -332,12 +348,25 @@ public enum PermissionLevel: String, Codable, Sendable, CaseIterable {
 @MainActor
 public final class WorkspaceSandbox: ObservableObject {
     public static let shared = WorkspaceSandbox()
-    
+
     @Published public var workspaceRoot: String = ""
     @Published public var permissionOverrides: [String: PermissionLevel] = [:]
+    /// Additional paths allowed for the current task (e.g. user-specified target directories)
+    @Published public var allowedPaths: Set<String> = []
     
     private init() {}
     
+    /// Grant write access to a specific path for the current task
+    public func addAllowedPath(_ path: String) {
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        allowedPaths.insert(standardized)
+    }
+
+    /// Clear task-specific allowed paths (call when task ends)
+    public func clearAllowedPaths() {
+        allowedPaths.removeAll()
+    }
+
     /// Default permission for a tool action
     public func defaultPermission(for action: SandboxAction) -> PermissionLevel {
         switch action {
@@ -358,7 +387,7 @@ public final class WorkspaceSandbox: ObservableObject {
         return defaultPermission(for: action)
     }
     
-    /// Check if a path is within the workspace sandbox
+    /// Check if a path is within the workspace sandbox or in allowed paths
     public func isWithinWorkspace(_ path: String) -> Bool {
         guard !workspaceRoot.isEmpty else { return true }
         let absolute: String
@@ -369,7 +398,16 @@ public final class WorkspaceSandbox: ObservableObject {
         }
         let standardized = URL(fileURLWithPath: absolute).standardizedFileURL.path
         let rootStandardized = URL(fileURLWithPath: workspaceRoot).standardizedFileURL.path
-        return standardized.hasPrefix(rootStandardized + "/") || standardized == rootStandardized
+        if standardized.hasPrefix(rootStandardized + "/") || standardized == rootStandardized {
+            return true
+        }
+        // Check task-specific allowed paths
+        for allowed in allowedPaths {
+            if standardized.hasPrefix(allowed + "/") || standardized == allowed {
+                return true
+            }
+        }
+        return false
     }
     
     /// Enforce workspace boundary: returns error if path is outside workspace
@@ -379,6 +417,16 @@ public final class WorkspaceSandbox: ObservableObject {
             return "路径超出工作区范围：\(path) 不在 \(workspaceRoot) 内"
         }
         return nil
+    }
+
+    /// Check if a workspace root is dangerously broad (home dir, /Users, / etc.)
+    public nonisolated static func isOverlyBroadWorkspace(_ path: String) -> Bool {
+        let cleaned = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return true }
+        let standardized = URL(fileURLWithPath: cleaned).standardizedFileURL.path
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        let dangerousPaths: Set<String> = ["/", "/Users", "/var", "/tmp", "/private", home]
+        return dangerousPaths.contains(standardized)
     }
     
     /// Set permission override for a specific action

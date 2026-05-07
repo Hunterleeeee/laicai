@@ -305,8 +305,8 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             let metrics: ResponseMetrics
             if isOllamaNative,
                let ollama = try? JSONDecoder().decode(OllamaChatChunk.self, from: data) {
-                text = Self.finalAssistantText(fromVisible: Self.visibleAnswer(from: ollama.message?.content ?? ""), reasoningCount: ollama.message?.thinking?.count ?? 0)
                 reasoningContent = ollama.message?.thinking
+                text = Self.finalAssistantText(fromVisible: Self.visibleAnswer(from: ollama.message?.content ?? ""), reasoningContent: reasoningContent)
                 toolCalls = ollama.message?.toolCalls ?? []
                 finishReason = nil
                 metrics = Self.metrics(
@@ -323,7 +323,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 reasoningContent = choice?.message.reasoningContent ?? choice?.message.reasoning
                 text = Self.finalAssistantText(
                     fromVisible: Self.visibleAnswer(from: choice?.message.content ?? ""),
-                    reasoningCount: reasoningContent?.count ?? 0
+                    reasoningContent: reasoningContent
                 )
                 toolCalls = choice?.message.toolCalls ?? []
                 finishReason = choice?.finishReason
@@ -407,6 +407,13 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         var finalOllamaChunk: OllamaChatChunk?
         let decoder = JSONDecoder()
 
+        // H6: Micro-batch stream deltas to reduce MainActor hops.
+        // Instead of one await per SSE token, batch small deltas.
+        var pendingDelta = ""
+        var lastChunkAt = CFAbsoluteTimeGetCurrent()
+        let chunkFlushThreshold = 80  // chars
+        let chunkFlushInterval = 0.15 // seconds
+
         for try await line in bytes.lines {
             if isOllamaNative {
                 // Ollama native NDJSON (no tool calling support in native format)
@@ -435,7 +442,15 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                             let delta = String(nextVisible.dropFirst(visibleText.count))
                             visibleText = nextVisible
                             if firstVisibleAt == nil { firstVisibleAt = Date() }
-                            await onChunk(delta)
+                            // H6: batch deltas
+                            pendingDelta += delta
+                            let now = CFAbsoluteTimeGetCurrent()
+                            if pendingDelta.count >= chunkFlushThreshold || (now - lastChunkAt) >= chunkFlushInterval {
+                                let batch = pendingDelta
+                                pendingDelta = ""
+                                lastChunkAt = now
+                                await onChunk(batch)
+                            }
                         }
                     }
                 }
@@ -461,7 +476,15 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                             let visibleDelta = String(nextVisible.dropFirst(visibleText.count))
                             visibleText = nextVisible
                             if firstVisibleAt == nil { firstVisibleAt = Date() }
-                            await onChunk(visibleDelta)
+                            // H6: batch deltas
+                            pendingDelta += visibleDelta
+                            let now = CFAbsoluteTimeGetCurrent()
+                            if pendingDelta.count >= chunkFlushThreshold || (now - lastChunkAt) >= chunkFlushInterval {
+                                let batch = pendingDelta
+                                pendingDelta = ""
+                                lastChunkAt = now
+                                await onChunk(batch)
+                            }
                         }
                     }
                     if let toolCallDeltas = chunk.choices.first?.delta.toolCalls {
@@ -481,6 +504,13 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             }
         }
 
+        // H6: Flush remaining batched delta
+        if !pendingDelta.isEmpty {
+            let batch = pendingDelta
+            pendingDelta = ""
+            await onChunk(batch)
+        }
+
         // Convert accumulated tool calls to final format
         let toolCalls = accumulatedToolCalls.sorted { $0.key < $1.key }.compactMap { (_, acc) -> FunctionCallResponse? in
             guard !acc.name.isEmpty else { return nil }
@@ -491,7 +521,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             )
         }
 
-        let finalText = Self.finalAssistantText(fromVisible: visibleText, reasoningCount: reasoningCount)
+        let finalText = Self.finalAssistantText(fromVisible: visibleText, reasoningContent: reasoningText.isEmpty ? nil : reasoningText)
         let metrics = Self.metrics(
             startedAt: startedAt,
             firstVisibleAt: firstVisibleAt,
@@ -544,7 +574,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         if !apiKey.isEmpty && !isOllama {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
-        request.timeoutInterval = 15
+        request.timeoutInterval = NetworkDefaults.modelList
 
         do {
             let (data, response) = try await session.data(for: request)
@@ -683,36 +713,22 @@ public struct LiveChatRuntime: ChatRuntimeClient {
 
     public static func normalizedEndpoint(_ endpoint: String, kind: String) -> String {
         let cleaned = baseEndpoint(from: endpoint)
-        guard let url = URL(string: cleaned), let host = url.host?.lowercased() else {
+        guard let url = URL(string: cleaned), url.host != nil else {
             return cleaned
         }
 
         let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if kind == "ollama" || isOllamaEndpoint(cleaned, kind: kind) {
-            if path == "api/chat" || path == "v1/chat/completions" {
-                return cleaned
-            }
-            if path == "api" {
-                return appendPath("chat", to: cleaned)
-            }
-            if path == "v1" {
-                return appendPath("chat/completions", to: cleaned)
-            }
-            if path.isEmpty {
-                return appendPath("api/chat", to: cleaned)
-            }
+
+        // Ollama native (local only): auto-append /api/chat
+        if isOllamaEndpoint(cleaned, kind: kind) {
+            if path.isEmpty { return appendPath("api/chat", to: cleaned) }
+            if path == "api" { return appendPath("chat", to: cleaned) }
             return cleaned
         }
 
-        if path == "v1" || path.hasSuffix("/v1") {
-            return appendPath("chat/completions", to: cleaned)
-        }
-        if path == "chat/completions" || path.hasSuffix("/chat/completions") {
-            return cleaned
-        }
-        if host == "api.openai.com", path.isEmpty {
-            return appendPath("v1/chat/completions", to: cleaned)
-        }
+        // OpenAI-compatible: auto-append /v1/chat/completions
+        if path.isEmpty { return appendPath("v1/chat/completions", to: cleaned) }
+        if path == "v1" || path.hasSuffix("/v1") { return appendPath("chat/completions", to: cleaned) }
         return cleaned
     }
 
@@ -745,16 +761,20 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             return kind == "ollama"
         }
         let host = url.host?.lowercased() ?? ""
-        if host == "api.deepseek.com" || host.hasSuffix(".deepseek.com") {
-            return false
-        }
+        let scheme = url.scheme?.lowercased() ?? ""
+        // Port 11434 is definitively Ollama
         if cleaned.hasSuffix(":11434") || cleaned.contains(":11434/") {
             return true
         }
+        // HTTPS remote endpoints are never Ollama native (even if user picked wrong kind)
+        if scheme == "https" && host != "localhost" && host != "127.0.0.1" && host != "::1" {
+            return false
+        }
+        // Local endpoints: respect user's kind selection
         if host == "localhost" || host == "127.0.0.1" || host == "::1" {
             return kind == "ollama"
         }
-        return kind == "ollama"
+        return false
     }
 
     private static func userFacingErrorMessage(statusCode: Int, bodyText: String, connectorName: String) -> String {
@@ -769,7 +789,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         case 403:
             return "请求被拒绝，请检查当前密钥或服务权限。"
         case 404:
-            return "未找到接口，请检查端点地址是否正确。"
+            return "未找到接口，请检查端点地址是否正确。\n提示：OpenAI 兼容接口通常以 /v1/chat/completions 结尾，Ollama 以 /api/chat 结尾。"
         case 429:
             return "请求过于频繁，请稍后再试。"
         case 500...599:
@@ -976,7 +996,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         request.httpBody = try? JSONEncoder().encode(AnyEncodable(body))
-        request.timeoutInterval = isLocal ? 45 : 120
+        request.timeoutInterval = isLocal ? NetworkDefaults.localChat : NetworkDefaults.remoteChat
         return request
     }
 
@@ -1038,13 +1058,36 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func finalAssistantText(fromVisible visible: String, reasoningCount: Int) -> String {
+    private static func finalAssistantText(fromVisible visible: String, reasoningContent: String?) -> String {
         let text = visible.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty { return text }
-        if reasoningCount > 0 {
-            return "模型只返回了思考内容，没有给出最终答案。已隐藏思考过程以降低本机负载，请重试一个更短的问题，或换用非思考模型。"
+        // Thinking model: content is empty but reasoning_content has substance.
+        // Extract a usable conclusion instead of discarding it.
+        if let reasoning = reasoningContent, !reasoning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let extracted = extractConclusionFromReasoning(reasoning)
+            if !extracted.isEmpty { return extracted }
+            // Fallback: return the last portion of reasoning as the answer
+            let trimmed = reasoning.trimmingCharacters(in: .whitespacesAndNewlines)
+            let tail = String(trimmed.suffix(2000))
+            return tail
         }
         return "模型没有返回可显示内容。请检查模型是否可用，或换一个模型重试。"
+    }
+
+    /// Try to extract a conclusion section from reasoning text.
+    /// Many thinking models end their reasoning with a summary/conclusion block.
+    private static func extractConclusionFromReasoning(_ reasoning: String) -> String {
+        let lines = reasoning.components(separatedBy: .newlines)
+        // Look for common conclusion markers from the end
+        let markers = ["结论", "总结", "最终", "综上", "因此", "所以", "答案", "建议", "方案"]
+        for i in stride(from: lines.count - 1, through: max(0, lines.count - 40), by: -1) {
+            let line = lines[i].trimmingCharacters(in: .whitespacesAndNewlines)
+            if markers.contains(where: { line.hasPrefix($0) || line.hasPrefix("# ") && line.contains($0) || line.hasPrefix("## ") }) {
+                let conclusion = lines[i...].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                if conclusion.count > 20 { return conclusion }
+            }
+        }
+        return ""
     }
 
     private static func responseStatusLine(finalText: String, reasoningCount: Int) -> String {

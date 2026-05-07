@@ -5,25 +5,71 @@ import SQLite3
 // Allows 来财 to detect its own weaknesses, modify its own source code,
 // build, and hot-restart — fully autonomous self-evolution.
 
-public final class SelfImprovementEngine: @unchecked Sendable {
+public final class SelfImprovementEngine: Sendable {
     public static let shared = SelfImprovementEngine()
 
-    // The harness project root — where source code lives
-    public var harnessRoot: String = "/Users/lifenghe/Documents/troe_projects/harness"
+    // The harness project root — where source code lives.
+    // Prefer an explicit override, then derive from the current checkout/app cwd.
+    public var harnessRoot: String {
+        get { state.withValue { $0.harnessRoot } }
+        set { state.withValue { $0.harnessRoot = newValue } }
+    }
     public var nativeMacosRoot: String { harnessRoot + "/native-macos" }
     public var sourcesRoot: String { nativeMacosRoot + "/Sources/LaicaiNativeFoundation" }
     public var buildScript: String { nativeMacosRoot + "/build.sh" }
     public var appPath: String { nativeMacosRoot + "/dist/Laicai.app" }
 
     // Cooldown: don't trigger more than once per hour
-    private var lastTriggerTime: Date = .distantPast
     private let cooldownSeconds: TimeInterval = 3600
 
     // Track consecutive improvement attempts to prevent infinite loops
-    private var consecutiveAttempts = 0
     private let maxConsecutiveAttempts = 3
 
+    private struct State {
+        var harnessRoot = SelfImprovementEngine.resolveHarnessRoot()
+        var lastTriggerTime: Date = .distantPast
+        var consecutiveAttempts = 0
+    }
+
+    private let state = Locked(State())
+    private let database = Locked(SelfImprovementEngine.openDatabase())
+
     private init() {}
+
+    private static func resolveHarnessRoot() -> String {
+        let environment = ProcessInfo.processInfo.environment
+        let candidates = [
+            environment["LAICAI_HARNESS_ROOT"],
+            environment["HARNESS_ROOT"],
+            findAncestor(named: "native-macos", from: FileManager.default.currentDirectoryPath),
+            findAncestor(named: "native-macos", from: Bundle.main.bundleURL.path),
+            findAncestor(named: "native-macos", from: CommandLine.arguments.first ?? "")
+        ].compactMap { $0 }
+
+        for candidate in candidates {
+            let normalized = URL(fileURLWithPath: candidate).standardizedFileURL.path
+            if FileManager.default.fileExists(atPath: normalized + "/native-macos/Package.swift") {
+                return normalized
+            }
+        }
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath).standardizedFileURL.path
+    }
+
+    private static func findAncestor(named marker: String, from startPath: String) -> String? {
+        guard !startPath.isEmpty else { return nil }
+        var url = URL(fileURLWithPath: startPath).standardizedFileURL
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue {
+            url.deleteLastPathComponent()
+        }
+        while url.path != "/" {
+            if FileManager.default.fileExists(atPath: url.appendingPathComponent(marker).path) {
+                return url.path
+            }
+            url.deleteLastPathComponent()
+        }
+        return nil
+    }
 
     // MARK: - Diagnosis
 
@@ -55,8 +101,11 @@ public final class SelfImprovementEngine: @unchecked Sendable {
     /// Returns a diagnosis if improvement is warranted, nil otherwise.
     public func shouldTrigger() -> Diagnosis? {
         // Cooldown check
-        guard Date().timeIntervalSince(lastTriggerTime) > cooldownSeconds else { return nil }
-        guard consecutiveAttempts < maxConsecutiveAttempts else { return nil }
+        let canAttempt = state.withValue { state in
+            Date().timeIntervalSince(state.lastTriggerTime) > cooldownSeconds
+                && state.consecutiveAttempts < maxConsecutiveAttempts
+        }
+        guard canAttempt else { return nil }
 
         let stats = TaskOutcomeRecorder.shared.stats(days: 3)
         guard !stats.isEmpty else { return nil }
@@ -139,13 +188,142 @@ public final class SelfImprovementEngine: @unchecked Sendable {
         return nil
     }
 
+    // MARK: - Session Replay & Precise Locator
+
+    /// Extract the critical failure sequence from a thread's steps.
+    /// Returns a compact timeline showing: what was attempted → what failed → user complaints.
+    public func extractFailureTimeline(steps: [TaskStep]) -> String {
+        var timeline: [String] = []
+        for (i, step) in steps.enumerated() {
+            let tag: String?
+            switch step.kind {
+            case .toolCall:
+                tag = "🔧 [\(i)] \(step.toolName ?? "tool"): \(String(step.text.prefix(100)))"
+            case .toolResult where step.isFailure:
+                tag = "❌ [\(i)] \(step.toolName ?? "tool"): \(String(step.text.prefix(120)))"
+            case .reviewRequest:
+                let empty = (step.diffNewContent ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                tag = empty
+                    ? "⚠️ [\(i)] reviewRequest: \(step.diffFilePath ?? "?") — diffNew为空!"
+                    : "✅ [\(i)] reviewRequest: \(step.diffFilePath ?? "?") — \((step.diffNewContent ?? "").count)字符"
+            case .error:
+                tag = "🔴 [\(i)] error: \(String(step.text.prefix(100)))"
+            case .userInput:
+                let lower = step.text.lowercased()
+                if lower.contains("空") || lower.contains("没") || lower.contains("错") || lower.contains("幻觉") || lower.contains("还是") {
+                    tag = "👤 [\(i)] 用户投诉: \(String(step.text.prefix(80)))"
+                } else {
+                    tag = nil
+                }
+            default:
+                tag = nil
+            }
+            if let tag { timeline.append(tag) }
+        }
+        return timeline.joined(separator: "\n")
+    }
+
+    /// Read source code around a specific file:line reference.
+    /// Returns the code snippet with context lines, or nil if file not found.
+    public func readSourceContext(fileRef: String, contextLines: Int = 15) -> String? {
+        // Parse "FileName.swift:123" format
+        let parts = fileRef.split(separator: ":", maxSplits: 1)
+        let fileName = String(parts[0])
+        let lineNumber = parts.count > 1 ? Int(parts[1]) : nil
+
+        // Find file in sources
+        let fullPath: String
+        if fileName.hasPrefix("/") {
+            fullPath = fileName
+        } else {
+            fullPath = sourcesRoot + "/" + fileName
+        }
+        guard FileManager.default.fileExists(atPath: fullPath) else { return nil }
+        guard let content = try? String(contentsOfFile: fullPath, encoding: .utf8) else { return nil }
+
+        let lines = content.components(separatedBy: "\n")
+        guard let target = lineNumber, target > 0, target <= lines.count else {
+            // No line number — return first 50 lines
+            return lines.prefix(50).enumerated().map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n")
+        }
+
+        let start = max(0, target - contextLines - 1)
+        let end = min(lines.count, target + contextLines)
+        return lines[start..<end].enumerated().map { i, line in
+            let lineNum = start + i + 1
+            let marker = lineNum == target ? ">>>" : "   "
+            return "\(marker) \(lineNum): \(line)"
+        }.joined(separator: "\n")
+    }
+
+    /// Generate a precise fix prompt from PostMortem findings with actual source code context.
+    public func generatePreciseFixPrompt(from report: SessionPostMortem.Report, steps: [TaskStep]) -> String {
+        markAttemptStarted()
+
+        var prompt = """
+        # 自我修复任务（精准模式）
+
+        你是来财AI系统。会话后检模块检测到以下问题，需要修改自己的源代码来修复。
+
+        ## 失败会话回放
+        以下是出问题会话的关键步骤时间线：
+        ```
+        \(extractFailureTimeline(steps: steps))
+        ```
+
+        ## 检测到的问题
+        """
+
+        for (i, finding) in report.findings.enumerated() where finding.severity >= .warning {
+            prompt += "\n### 问题 \(i + 1): \(finding.pattern.rawValue) [\(finding.severity.rawValue)]\n"
+            prompt += "**描述**: \(finding.description)\n"
+            prompt += "**修复方向**: \(finding.suggestedFix.fixDescription)\n"
+
+            // Inject actual source code context for each suggested file
+            for fileRef in finding.suggestedFix.sourceFiles {
+                if let code = readSourceContext(fileRef: fileRef) {
+                    prompt += "\n**源码上下文** `\(fileRef)`:\n```swift\n\(code)\n```\n"
+                }
+            }
+        }
+
+        // Include past improvement history to avoid repeating
+        let history = recentImprovements(limit: 5)
+        if !history.isEmpty {
+            prompt += "\n## 历史修复（避免重复）\n"
+            for h in history {
+                prompt += "- [\(h.buildSuccess ? "成功" : "失败")] \(h.category): \(h.description) → \(h.filesChanged)\n"
+            }
+        }
+
+        prompt += """
+
+        ## 源代码位置
+        - 项目根目录：\(harnessRoot)
+        - 主要源码：\(sourcesRoot)/
+
+        ## 执行步骤
+        1. 根据上面的源码上下文和问题描述，直接定位并修复代码（最小化修改）
+        2. 运行 `bash \(buildScript)` 验证编译通过
+        3. 编译通过后：先运行 `git status --short`，只 `git add -- <本轮修改文件>`，再 `git commit -m "self-fix: \(report.findings.first?.pattern.rawValue ?? "postmortem")"`
+        4. 重启应用
+
+        ## 限制
+        - 只修改 LaicaiNativeFoundation 目录下的 .swift 文件
+        - 不要修改 Models.swift 的 struct 定义
+        - 每次最多修改 3 个文件
+        - 必须编译通过
+        """
+
+        return prompt
+    }
+
     // MARK: - Improvement Execution
 
     /// Generate the full improvement task message that will be sent to the agent loop.
     /// The agent will read its own source, diagnose, edit, build, and restart.
     public func generateImprovementTask(diagnosis: Diagnosis) -> String {
-        lastTriggerTime = Date()
-        consecutiveAttempts += 1
+        markAttemptStarted()
 
         return """
         # 自我改进任务
@@ -174,7 +352,7 @@ public final class SelfImprovementEngine: @unchecked Sendable {
         3. 用 file_edit 修改代码（最小化修改，只改必要的部分）
         4. 修改后运行 `bash \(buildScript)` 验证编译通过
         5. 如果编译失败，修复编译错误后重新验证
-        6. 编译通过后，运行 `cd \(harnessRoot) && git add -A && git commit -m "self-improve: \(diagnosis.category.rawValue) - \(diagnosis.description.prefix(60))"` 提交更改
+        6. 编译通过后，运行 `git status --short`，只 `git add -- <本轮修改文件>`，再提交 `self-improve: \(diagnosis.category.rawValue) - \(diagnosis.description.prefix(60))`
         7. 重启应用：先运行 `osascript -e 'quit app \"Laicai\"'`，等待1秒，再运行 `open \(appPath)`
 
         ### 限制
@@ -190,7 +368,7 @@ public final class SelfImprovementEngine: @unchecked Sendable {
 
     /// Called after a successful self-improvement task to reset the consecutive counter.
     public func onImprovementSuccess() {
-        consecutiveAttempts = 0
+        state.withValue { $0.consecutiveAttempts = 0 }
     }
 
     /// Called after a failed self-improvement to track attempts.
@@ -224,6 +402,10 @@ public final class SelfImprovementEngine: @unchecked Sendable {
 
     /// Git rollback the last commit if the build failed.
     public func rollbackLastCommit() {
+        guard ProcessInfo.processInfo.environment["LAICAI_ALLOW_DESTRUCTIVE_ROLLBACK"] == "1" else {
+            LaicaiLog.warning("Self-improvement rollback skipped; set LAICAI_ALLOW_DESTRUCTIVE_ROLLBACK=1 to enable git reset --hard.")
+            return
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "reset", "--hard", "HEAD~1"]
@@ -236,7 +418,8 @@ public final class SelfImprovementEngine: @unchecked Sendable {
 
     /// Restart the app by quitting and reopening.
     public func restartApp() {
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [appPath] in
+        Task.detached { [appPath] in
+            try? await Task.sleep(for: .milliseconds(500))
             // Quit
             let quit = Process()
             quit.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -247,7 +430,7 @@ public final class SelfImprovementEngine: @unchecked Sendable {
             quit.waitUntilExit()
 
             // Wait for clean exit
-            Foundation.Thread.sleep(forTimeInterval: 1.5)
+            try? await Task.sleep(for: .milliseconds(1_500))
 
             // Reopen
             let open = Process()
@@ -271,7 +454,7 @@ public final class SelfImprovementEngine: @unchecked Sendable {
         public let createdAt: Date
     }
 
-    private var db: OpaquePointer? = {
+    private static func openDatabase() -> OpaquePointer? {
         let dir = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true).first! + "/Laicai"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let path = dir + "/self_improvement.sqlite3"
@@ -290,7 +473,7 @@ public final class SelfImprovementEngine: @unchecked Sendable {
         );
         """, nil, nil, nil)
         return db
-    }()
+    }
 
     public func recordAttempt(
         category: String,
@@ -299,44 +482,48 @@ public final class SelfImprovementEngine: @unchecked Sendable {
         buildSuccess: Bool,
         commitHash: String?
     ) {
-        guard let db else { return }
-        let sql = "INSERT INTO improvements (category, description, files_changed, build_success, commit_hash, created_at) VALUES (?, ?, ?, ?, ?, ?);"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-        sqlite3_bind_text(stmt, 1, (category as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 2, (description as NSString).utf8String, -1, nil)
-        sqlite3_bind_text(stmt, 3, (filesChanged.joined(separator: ",") as NSString).utf8String, -1, nil)
-        sqlite3_bind_int(stmt, 4, buildSuccess ? 1 : 0)
-        if let hash = commitHash {
-            sqlite3_bind_text(stmt, 5, (hash as NSString).utf8String, -1, nil)
-        } else {
-            sqlite3_bind_null(stmt, 5)
+        database.withValue { db in
+            guard let db else { return }
+            let sql = "INSERT INTO improvements (category, description, files_changed, build_success, commit_hash, created_at) VALUES (?, ?, ?, ?, ?, ?);"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            sqlite3_bind_text_safe(stmt, 1, category)
+            sqlite3_bind_text_safe(stmt, 2, description)
+            sqlite3_bind_text_safe(stmt, 3, filesChanged.joined(separator: ","))
+            sqlite3_bind_int(stmt, 4, buildSuccess ? 1 : 0)
+            if let hash = commitHash {
+                sqlite3_bind_text_safe(stmt, 5, hash)
+            } else {
+                sqlite3_bind_null(stmt, 5)
+            }
+            sqlite3_bind_double(stmt, 6, Date().timeIntervalSince1970)
+            sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
         }
-        sqlite3_bind_double(stmt, 6, Date().timeIntervalSince1970)
-        sqlite3_step(stmt)
-        sqlite3_finalize(stmt)
     }
 
     public func recentImprovements(limit: Int = 10) -> [ImprovementRecord] {
-        guard let db else { return [] }
-        let sql = "SELECT id, category, description, files_changed, build_success, commit_hash, created_at FROM improvements ORDER BY created_at DESC LIMIT ?;"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_int(stmt, 1, Int32(limit))
-        var results: [ImprovementRecord] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            results.append(ImprovementRecord(
-                id: Int(sqlite3_column_int(stmt, 0)),
-                category: String(cString: sqlite3_column_text(stmt, 1)),
-                description: String(cString: sqlite3_column_text(stmt, 2)),
-                filesChanged: String(cString: sqlite3_column_text(stmt, 3)),
-                buildSuccess: sqlite3_column_int(stmt, 4) != 0,
-                commitHash: sqlite3_column_type(stmt, 5) != SQLITE_NULL ? String(cString: sqlite3_column_text(stmt, 5)) : nil,
-                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
-            ))
+        database.withValue { db in
+            guard let db else { return [] }
+            let sql = "SELECT id, category, description, files_changed, build_success, commit_hash, created_at FROM improvements ORDER BY created_at DESC LIMIT ?;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            sqlite3_bind_int(stmt, 1, Int32(limit))
+            var results: [ImprovementRecord] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                results.append(ImprovementRecord(
+                    id: Int(sqlite3_column_int(stmt, 0)),
+                    category: String(cString: sqlite3_column_text(stmt, 1)),
+                    description: String(cString: sqlite3_column_text(stmt, 2)),
+                    filesChanged: String(cString: sqlite3_column_text(stmt, 3)),
+                    buildSuccess: sqlite3_column_int(stmt, 4) != 0,
+                    commitHash: sqlite3_column_type(stmt, 5) != SQLITE_NULL ? String(cString: sqlite3_column_text(stmt, 5)) : nil,
+                    createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
+                ))
+            }
+            sqlite3_finalize(stmt)
+            return results
         }
-        sqlite3_finalize(stmt)
-        return results
     }
 
     // MARK: - Helpers
@@ -345,6 +532,13 @@ public final class SelfImprovementEngine: @unchecked Sendable {
         stats.map { row in
             "intent=\(row.intent) route=\(row.routeLabel) total=\(row.total) completed=\(row.completed) cancelled=\(row.cancelled) avgIter=\(String(format: "%.1f", row.avgIterations))"
         }.joined(separator: "\n")
+    }
+
+    private func markAttemptStarted() {
+        state.withValue {
+            $0.lastTriggerTime = Date()
+            $0.consecutiveAttempts += 1
+        }
     }
 
     private func buildImprovementPrompt(for category: Diagnosis.Category, evidence: String) -> String {

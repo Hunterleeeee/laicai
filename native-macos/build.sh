@@ -1,20 +1,23 @@
 #!/bin/bash
 set -e
-B=/tmp/laicai-native-build
-ROOT=/Users/lifenghe/Documents/troe_projects/harness
-NATIVE_ROOT=$ROOT/native-macos
-S=$NATIVE_ROOT/Sources
-K=$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)
-DIST=$NATIVE_ROOT/dist
-APP=$DIST/Laicai.app
-ICON=$ROOT/assets/laicai.icns
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NATIVE_ROOT="$SCRIPT_DIR"
+ROOT="$(cd "$NATIVE_ROOT/.." && pwd)"
+B="${TMPDIR:-/tmp}/laicai-native-build"
+S="$NATIVE_ROOT/Sources"
+K="$(xcrun --sdk macosx --show-sdk-path)"
+DIST="$NATIVE_ROOT/dist"
+APP="$DIST/Laicai.app"
+ICON="$ROOT/assets/laicai.icns"
+MIN_MACOS_VERSION="${LAICAI_MIN_MACOS_VERSION:-14.0}"
+ARCHS="${LAICAI_ARCHS:-arm64 x86_64}"
 
 # Auto version: YYYY.MM.DD for display, HHmm for build number
 VER=$(date +%Y.%-m.%-d)
 BUILD_NUM=$(date +%-H%M)
 echo "=== Version $VER (build $BUILD_NUM) ==="
 
-rm -rf $B && mkdir -p $B/src
+rm -rf "$B" && mkdir -p "$B/src"
 rm -rf "$APP"
 mkdir -p "$DIST"
 
@@ -25,23 +28,33 @@ while IFS= read -r f; do
 done < <(find "$S" -type f -name '*.swift' -not -path '*/LaicaiNativeCLI/*' | sort)
 
 echo "=== Compile App ==="
-swiftc -target arm64-apple-macos13.3 -sdk $K \
-  -parse-as-library \
-  -o $B/LaicaiNativeApp \
-  $B/src/*.swift \
-  -framework SwiftUI -framework AppKit -framework Foundation -framework WebKit
+APP_BINARIES=()
+for ARCH in $ARCHS; do
+  echo "  arch: $ARCH"
+  swiftc -target "$ARCH-apple-macos$MIN_MACOS_VERSION" -sdk "$K" \
+    -parse-as-library \
+    -o "$B/LaicaiNativeApp-$ARCH" \
+    "$B"/src/*.swift \
+    -framework SwiftUI -framework AppKit -framework Foundation -framework WebKit
+  APP_BINARIES+=("$B/LaicaiNativeApp-$ARCH")
+done
+if [ "${#APP_BINARIES[@]}" -gt 1 ]; then
+  lipo -create "${APP_BINARIES[@]}" -output "$B/LaicaiNativeApp"
+else
+  cp "${APP_BINARIES[0]}" "$B/LaicaiNativeApp"
+fi
 
 echo "=== Compile CLI ==="
 # CLI shares all Foundation/Domain code, excludes UI/App entry, adds CLI entry
-CLI_SRC=$NATIVE_ROOT/Sources/LaicaiNativeCLI
-mkdir -p $B/cli_src
+CLI_SRC="$NATIVE_ROOT/Sources/LaicaiNativeCLI"
+mkdir -p "$B/cli_src"
 # Copy non-UI, non-App sources for CLI
 # Exclude any file that imports SwiftUI, AppKit, or is the app entry point
 for f in $B/src/*.swift; do
   bn=$(basename "$f")
   # Always skip explicit UI/App files
   case "$bn" in
-    LaicaiNativeApp.swift|AppStore.swift|HeadlessRunner.swift|SampleData.swift) continue ;;
+    LaicaiNativeApp.swift|AppStore.swift|AppStateBootstrap.swift|TaskStateHelpers.swift|RuntimeHelpers.swift|HeadlessRunner.swift|SampleData.swift|BackgroundIntelligence.swift) continue ;;
   esac
   # Skip any file that imports SwiftUI or AppKit (UI file)
   if grep -qE '^import (SwiftUI|AppKit)' "$f"; then
@@ -51,36 +64,37 @@ for f in $B/src/*.swift; do
 done
 # Add CLI source
 sed -E 's/^import LaicaiNative(Domain|Foundation|UI)$/\/\/ flat-build/' "$CLI_SRC/LaicaiCLI.swift" > "$B/cli_src/LaicaiCLI.swift"
-# CLI needs a @main or top-level entry; add shim
-cat > "$B/cli_src/CLIMain.swift" << 'CLIMAIN'
-// CLI entry point
-@main struct LaicaiCLIEntry {
-    static func main() async {
-        await LaicaiCLI.main()
-    }
-}
-CLIMAIN
+cp "$CLI_SRC/CLIMain.swift" "$B/cli_src/CLIMain.swift"
 
 # Stubs for types that live in excluded UI/AppKit files
 cat > "$B/cli_src/CLIStubs.swift" << 'STUBS'
 import Foundation
 // Stub for NotificationManager (lives in BackgroundIntelligence which imports AppKit)
-final class NotificationManager: @unchecked Sendable {
+final class NotificationManager {
     static let shared = NotificationManager()
     func post(title: String, body: String) {}
     func requestPermission() {}
 }
 STUBS
-swiftc -target arm64-apple-macos13.3 -sdk $K \
-  -parse-as-library \
-  -o $B/laicai \
-  $B/cli_src/*.swift \
-  -framework Foundation -framework WebKit \
-  2>/dev/null || echo "  (CLI build skipped — UI-free compilation needs refinement)"
+CLI_BINARIES=()
+for ARCH in $ARCHS; do
+  echo "  arch: $ARCH"
+  swiftc -target "$ARCH-apple-macos$MIN_MACOS_VERSION" -sdk "$K" \
+    -parse-as-library \
+    -o "$B/laicai-$ARCH" \
+    "$B"/cli_src/*.swift \
+    -framework Foundation -framework WebKit
+  CLI_BINARIES+=("$B/laicai-$ARCH")
+done
+if [ "${#CLI_BINARIES[@]}" -gt 1 ]; then
+  lipo -create "${CLI_BINARIES[@]}" -output "$B/laicai"
+else
+  cp "${CLI_BINARIES[0]}" "$B/laicai"
+fi
 
 echo "=== Create .app bundle ==="
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp $B/LaicaiNativeApp "$APP/Contents/MacOS/"
+cp "$B/LaicaiNativeApp" "$APP/Contents/MacOS/"
 if [ -f "$ICON" ]; then
   cp "$ICON" "$APP/Contents/Resources/laicai.icns"
 fi
@@ -107,7 +121,7 @@ cat > "$APP/Contents/Info.plist" << EOF
     <key>CFBundleVersion</key>
     <string>${BUILD_NUM}</string>
     <key>LSMinimumSystemVersion</key>
-    <string>13.3</string>
+    <string>${MIN_MACOS_VERSION}</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticTermination</key>
@@ -120,16 +134,28 @@ EOF
 
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 
-# Copy CLI binary if built
-if [ -f "$B/laicai" ]; then
-  cp "$B/laicai" "$DIST/laicai"
-  chmod +x "$DIST/laicai"
-fi
+cp "$B/laicai" "$DIST/laicai"
+chmod +x "$DIST/laicai"
 
-if [ -f "$ROOT/packaging/macos/install_laicai.command" ]; then
-  cp "$ROOT/packaging/macos/install_laicai.command" "$DIST/install_laicai.command"
-  chmod +x "$DIST/install_laicai.command"
+cat > "$DIST/install_laicai.command" << 'INSTALLER'
+#!/bin/bash
+set -e
+DIR="$(cd "$(dirname "$0")" && pwd)"
+SRC="$DIR/Laicai.app"
+if [ ! -d "$SRC" ]; then
+  echo "未找到 Laicai.app：$SRC"
+  exit 1
 fi
+DEST="/Applications/Laicai.app"
+if [ ! -w "/Applications" ]; then
+  mkdir -p "$HOME/Applications"
+  DEST="$HOME/Applications/Laicai.app"
+fi
+rm -rf "$DEST"
+cp -R "$SRC" "$DEST"
+echo "已安装到 $DEST"
+INSTALLER
+chmod +x "$DIST/install_laicai.command"
 
 cat > "$DIST/INSTALL.txt" << 'EOF'
 来财原生版安装说明
@@ -158,4 +184,4 @@ echo "  App:       $APP"
 echo "  CLI:       $DIST/laicai"
 echo "  Installer: $DIST/install_laicai.command"
 ls -la "$B/LaicaiNativeApp"
-[ -f "$B/laicai" ] && ls -la "$B/laicai"
+ls -la "$B/laicai"

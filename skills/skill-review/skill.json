@@ -1,1 +1,47 @@
-{"description":"安装 skill 前的安全审查：来源审查、权限审查、逻辑审查、改写判断。不直接安装，先审查后改写。","name":"skill-review","output":{"folder":"03 Reviews","save_by_default":false,"title_template":"Skill Review - {{goal}}"},"steps":[{"kind":"vault_context","limit":4,"name":"vault-context","query_from":"goal"},{"chars":2000,"kind":"web_fetch","name":"web-fetch","url_from":"manual"},{"kind":"prompt","max_tokens":400,"name":"prompt"},{"folder":"03 Reviews","kind":"save_note","name":"save-note","save_by_default":false}],"tools":["vault.search","web.fetch"],"vault_context":{"enabled":true,"limit":4,"query_from":"goal"},"web_fetch":{"enabled":true,"url_from":"manual"}}
+{
+  "name": "skill-review",
+  "description": "安装 skill 前的安全审查：来源审查、权限审查、逻辑审查、改写判断。不直接安装，先审查后改写。",
+  "tools": [
+    "vault.search",
+    "web.fetch"
+  ],
+  "steps": [
+    {
+      "kind": "vault_context",
+      "name": "vault-context",
+      "query_from": "goal",
+      "limit": 4
+    },
+    {
+      "kind": "web_fetch",
+      "name": "web-fetch",
+      "url_from": "manual",
+      "chars": 3000
+    },
+    {
+      "kind": "prompt",
+      "name": "prompt",
+      "max_tokens": 1000
+    },
+    {
+      "kind": "save_note",
+      "name": "save-note",
+      "folder": "03 Reviews",
+      "save_by_default": false
+    }
+  ],
+  "vault_context": {
+    "enabled": true,
+    "query_from": "goal",
+    "limit": 4
+  },
+  "web_fetch": {
+    "enabled": true,
+    "url_from": "manual"
+  },
+  "output": {
+    "save_by_default": false,
+    "folder": "03 Reviews",
+    "title_template": "Skill Review - {{goal}}"
+  }
+}

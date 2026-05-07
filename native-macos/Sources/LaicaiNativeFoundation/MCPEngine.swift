@@ -113,19 +113,25 @@ public struct MCPServerConfig: Codable, Sendable, Identifiable, Equatable {
 
 // MARK: - MCP Server (stdio transport)
 
-public final class MCPServer: @unchecked Sendable {
+public final class MCPServer: Sendable {
     public let config: MCPServerConfig
-    public private(set) var tools: [MCPToolInfo] = []
-    public private(set) var resources: [MCPResourceInfo] = []
-    public private(set) var isRunning = false
+    public var tools: [MCPToolInfo] { state.withValue { $0.tools } }
+    public var resources: [MCPResourceInfo] { state.withValue { $0.resources } }
+    public var isRunning: Bool { state.withValue { $0.isRunning } }
 
-    private var process: Process?
-    private var stdin: FileHandle?
-    private var stdoutPipe: Pipe?
-    private var pendingRequests: [Int: CheckedContinuation<MCPResponse, Error>] = [:]
-    private var nextID = 1
-    private let lock = NSLock()
-    private var readBuffer = Data()
+    private struct State {
+        var tools: [MCPToolInfo] = []
+        var resources: [MCPResourceInfo] = []
+        var isRunning = false
+        var process: Process?
+        var stdin: FileHandle?
+        var stdoutPipe: Pipe?
+        var pendingRequests: [Int: CheckedContinuation<MCPResponse, Error>] = [:]
+        var nextID = 1
+        var readBuffer = Data()
+    }
+
+    private let state = Locked(State())
 
     public init(config: MCPServerConfig) {
         self.config = config
@@ -134,7 +140,7 @@ public final class MCPServer: @unchecked Sendable {
     // MARK: - Lifecycle
 
     public func start() async throws {
-        guard !isRunning else { return }
+        guard state.withValue({ !$0.isRunning }) else { return }
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -153,12 +159,23 @@ public final class MCPServer: @unchecked Sendable {
         proc.standardOutput = outPipe
         proc.standardError = errPipe
 
-        self.stdin = stdinPipe.fileHandleForWriting
-        self.stdoutPipe = outPipe
-        self.process = proc
+        state.withValue {
+            $0.stdin = stdinPipe.fileHandleForWriting
+            $0.stdoutPipe = outPipe
+            $0.process = proc
+        }
 
-        try proc.run()
-        isRunning = true
+        do {
+            try proc.run()
+            state.withValue { $0.isRunning = true }
+        } catch {
+            state.withValue {
+                $0.process = nil
+                $0.stdin = nil
+                $0.stdoutPipe = nil
+            }
+            throw error
+        }
 
         // Start reading stdout in background
         Task.detached { [weak self] in
@@ -182,15 +199,18 @@ public final class MCPServer: @unchecked Sendable {
     }
 
     public func stop() {
-        isRunning = false
+        let (process, pending) = state.withValue { state in
+            state.isRunning = false
+            let process = state.process
+            state.process = nil
+            state.stdin = nil
+            state.stdoutPipe = nil
+            let pending = state.pendingRequests
+            state.pendingRequests.removeAll()
+            state.readBuffer.removeAll()
+            return (process, pending)
+        }
         process?.terminate()
-        process = nil
-        stdin = nil
-        stdoutPipe = nil
-        lock.lock()
-        let pending = pendingRequests
-        pendingRequests.removeAll()
-        lock.unlock()
         for (_, continuation) in pending {
             continuation.resume(throwing: MCPError(code: -1, message: "Server stopped"))
         }
@@ -201,14 +221,15 @@ public final class MCPServer: @unchecked Sendable {
     public func refreshTools() async {
         do {
             let response = try await sendRequest(method: "tools/list")
-            if let result = response.result?.value as? [String: Any],
+            if let result = response.result?.objectValue,
                let toolsArray = result["tools"] as? [[String: Any]] {
                 let data = try JSONSerialization.data(withJSONObject: toolsArray)
-                self.tools = (try? JSONDecoder().decode([MCPToolInfo].self, from: data)) ?? []
+                let decoded = (try? JSONDecoder().decode([MCPToolInfo].self, from: data)) ?? []
+                state.withValue { $0.tools = decoded }
             }
         } catch {
             // Tools list failed — server may not support tools
-            self.tools = []
+            state.withValue { $0.tools = [] }
         }
     }
 
@@ -223,7 +244,7 @@ public final class MCPServer: @unchecked Sendable {
             return ToolResult(output: "MCP Error: \(error.message)", success: false)
         }
 
-        if let result = response.result?.value as? [String: Any] {
+        if let result = response.result?.objectValue {
             // MCP tool results have "content" array with text/image parts
             if let contentArray = result["content"] as? [[String: Any]] {
                 let texts = contentArray.compactMap { part -> String? in
@@ -237,7 +258,7 @@ public final class MCPServer: @unchecked Sendable {
             }
         }
 
-        let jsonData = try JSONSerialization.data(withJSONObject: response.result?.value ?? [:])
+        let jsonData = try JSONSerialization.data(withJSONObject: response.result?.untypedValue ?? [String: Any]())
         return ToolResult(output: String(data: jsonData, encoding: .utf8) ?? "", success: true)
     }
 
@@ -245,19 +266,20 @@ public final class MCPServer: @unchecked Sendable {
 
     public func listResources() async throws -> [MCPResourceInfo] {
         let response = try await sendRequest(method: "resources/list")
-        if let result = response.result?.value as? [String: Any],
+        if let result = response.result?.objectValue,
            let array = result["resources"] as? [[String: Any]] {
             let data = try JSONSerialization.data(withJSONObject: array)
-            self.resources = (try? JSONDecoder().decode([MCPResourceInfo].self, from: data)) ?? []
+            let decoded = (try? JSONDecoder().decode([MCPResourceInfo].self, from: data)) ?? []
+            state.withValue { $0.resources = decoded }
         }
-        return self.resources
+        return resources
     }
 
     public func readResource(uri: String) async throws -> String {
         let response = try await sendRequest(method: "resources/read", params: [
             "uri": AnyCodable(uri)
         ])
-        if let result = response.result?.value as? [String: Any],
+        if let result = response.result?.objectValue,
            let contents = result["contents"] as? [[String: Any]],
            let first = contents.first {
             return first["text"] as? String ?? ""
@@ -269,20 +291,27 @@ public final class MCPServer: @unchecked Sendable {
 
     private func sendRequest(method: String, params: [String: AnyCodable]? = nil) async throws -> MCPResponse {
         let reqID: Int
-        lock.lock()
-        reqID = nextID
-        nextID += 1
-        lock.unlock()
+        reqID = state.withValue {
+            let id = $0.nextID
+            $0.nextID += 1
+            return id
+        }
 
         let request = MCPRequest(id: reqID, method: method, params: params)
         let data = try JSONEncoder().encode(request)
         let line = data + Data("\n".utf8)
 
         return try await withCheckedThrowingContinuation { continuation in
-            lock.lock()
-            pendingRequests[reqID] = continuation
-            lock.unlock()
-            stdin?.write(line)
+            let stdin: FileHandle? = state.withValue { state in
+                guard state.isRunning, let stdin = state.stdin else { return nil }
+                state.pendingRequests[reqID] = continuation
+                return stdin
+            }
+            guard let stdin else {
+                continuation.resume(throwing: MCPError(code: -1, message: "Server is not running"))
+                return
+            }
+            stdin.write(line)
         }
     }
 
@@ -290,6 +319,7 @@ public final class MCPServer: @unchecked Sendable {
         let notification = MCPNotification(method: method, params: params)
         if let data = try? JSONEncoder().encode(notification) {
             let line = data + Data("\n".utf8)
+            let stdin = state.withValue { $0.stdin }
             stdin?.write(line)
         }
     }
@@ -299,25 +329,29 @@ public final class MCPServer: @unchecked Sendable {
         while isRunning {
             let chunk = handle.availableData
             if chunk.isEmpty { break }
-            readBuffer.append(chunk)
 
             // Process complete lines
-            while let newlineIndex = readBuffer.firstIndex(of: UInt8(ascii: "\n")) {
-                let lineData = readBuffer[readBuffer.startIndex..<newlineIndex]
-                readBuffer = Data(readBuffer[readBuffer.index(after: newlineIndex)...])
-
-                guard !lineData.isEmpty else { continue }
-
-                if let response = try? JSONDecoder().decode(MCPResponse.self, from: lineData),
-                   let id = response.id {
-                    lock.lock()
-                    let continuation = pendingRequests.removeValue(forKey: id)
-                    lock.unlock()
-                    if let error = response.error {
-                        continuation?.resume(throwing: error)
-                    } else {
-                        continuation?.resume(returning: response)
+            let lines = state.withValue { state in
+                state.readBuffer.append(chunk)
+                var completeLines: [Data] = []
+                while let newlineIndex = state.readBuffer.firstIndex(of: UInt8(ascii: "\n")) {
+                    let lineData = state.readBuffer[state.readBuffer.startIndex..<newlineIndex]
+                    state.readBuffer = Data(state.readBuffer[state.readBuffer.index(after: newlineIndex)...])
+                    if !lineData.isEmpty {
+                        completeLines.append(Data(lineData))
                     }
+                }
+                return completeLines
+            }
+
+            for lineData in lines {
+                guard let response = try? JSONDecoder().decode(MCPResponse.self, from: lineData),
+                      let id = response.id else { continue }
+                let continuation = state.withValue { $0.pendingRequests.removeValue(forKey: id) }
+                if let error = response.error {
+                    continuation?.resume(throwing: error)
+                } else {
+                    continuation?.resume(returning: response)
                 }
                 // Notifications from server are currently ignored
             }
@@ -327,7 +361,7 @@ public final class MCPServer: @unchecked Sendable {
 
 // MARK: - MCP Tool Adapter (bridges MCPServer tools to LaicaiTool)
 
-public struct MCPToolAdapter: LaicaiTool, @unchecked Sendable {
+public struct MCPToolAdapter: LaicaiTool {
     public let name: String
     public let description: String
     public let functionDefinition: FunctionDefinition
@@ -345,7 +379,7 @@ public struct MCPToolAdapter: LaicaiTool, @unchecked Sendable {
         // Convert MCP inputSchema to FunctionDefinition
         var params = FunctionParameters()
         if let schema = toolInfo.inputSchema {
-            if let props = schema["properties"]?.value as? [String: Any] {
+            if let props = schema["properties"]?.objectValue {
                 var converted: [String: FunctionProperty] = [:]
                 for (key, val) in props {
                     if let dict = val as? [String: Any] {
@@ -358,7 +392,7 @@ public struct MCPToolAdapter: LaicaiTool, @unchecked Sendable {
                 }
                 params.properties = converted
             }
-            if let required = schema["required"]?.value as? [String] {
+            if let required = schema["required"]?.stringArrayValue {
                 params.required = required
             }
         }
@@ -451,7 +485,7 @@ public final class MCPManager: ObservableObject {
             try await server.start()
             servers.append(server)
         } catch {
-            print("⚠ MCP server '\(config.name)' 启动失败: \(error.localizedDescription)")
+            LaicaiLog.error("MCP server '\(config.name)' 启动失败: \(error.localizedDescription)")
         }
     }
 
@@ -489,46 +523,107 @@ public final class MCPManager: ObservableObject {
 // MARK: - AnyCodable (lightweight type-erased Codable)
 
 public struct AnyCodable: Codable, Sendable, Equatable {
-    public let value: Any
+    public let value: JSONValue
 
     public init(_ value: Any) {
-        self.value = value
+        self.value = Self.jsonValue(from: value)
     }
 
     public static func == (lhs: AnyCodable, rhs: AnyCodable) -> Bool {
-        // Simplified equality for common types
-        if let l = lhs.value as? String, let r = rhs.value as? String { return l == r }
-        if let l = lhs.value as? Int, let r = rhs.value as? Int { return l == r }
-        if let l = lhs.value as? Double, let r = rhs.value as? Double { return l == r }
-        if let l = lhs.value as? Bool, let r = rhs.value as? Bool { return l == r }
-        return false
+        lhs.value == rhs.value
     }
 
     public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let v = try? container.decode(String.self) { value = v }
-        else if let v = try? container.decode(Int.self) { value = v }
-        else if let v = try? container.decode(Double.self) { value = v }
-        else if let v = try? container.decode(Bool.self) { value = v }
-        else if let v = try? container.decode([String: AnyCodable].self) { value = v.mapValues(\.value) }
-        else if let v = try? container.decode([AnyCodable].self) { value = v.map(\.value) }
-        else if container.decodeNil() { value = NSNull() }
-        else { value = "" }
+        value = try JSONValue(from: decoder)
     }
 
     public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
+        try value.encode(to: encoder)
+    }
+
+    public var objectValue: [String: Any]? {
+        guard case .object(let object) = value else { return nil }
+        return object.mapValues(Self.anyValue(from:))
+    }
+
+    public var arrayValue: [Any]? {
+        guard case .array(let array) = value else { return nil }
+        return array.map(Self.anyValue(from:))
+    }
+
+    public var stringArrayValue: [String]? {
         switch value {
-        case let v as String: try container.encode(v)
-        case let v as Int: try container.encode(v)
-        case let v as Double: try container.encode(v)
-        case let v as Bool: try container.encode(v)
-        case let v as [String: Any]:
-            try container.encode(v.mapValues { AnyCodable($0) })
-        case let v as [Any]:
-            try container.encode(v.map { AnyCodable($0) })
+        case .array(let array):
+            return array.compactMap { item in
+                guard case .string(let value) = item else { return nil }
+                return value
+            }
         default:
-            try container.encodeNil()
+            return nil
+        }
+    }
+
+    public var untypedValue: Any {
+        Self.anyValue(from: value)
+    }
+
+    private static func jsonValue(from value: Any) -> JSONValue {
+        switch value {
+        case let value as JSONValue:
+            return value
+        case let value as AnyCodable:
+            return value.value
+        case let value as String:
+            return .string(value)
+        case let value as Int:
+            return .number(Double(value))
+        case let value as Int64:
+            return .number(Double(value))
+        case let value as UInt:
+            return .number(Double(value))
+        case let value as UInt64:
+            return .number(Double(value))
+        case let value as Float:
+            return .number(Double(value))
+        case let value as Double:
+            return .number(value)
+        case let value as Decimal:
+            return .number(NSDecimalNumber(decimal: value).doubleValue)
+        case let value as Bool:
+            return .bool(value)
+        case _ as NSNull:
+            return .null
+        case let value as [String: AnyCodable]:
+            return .object(value.mapValues(\.value))
+        case let value as [String: JSONValue]:
+            return .object(value)
+        case let value as [String: Any]:
+            return .object(value.mapValues(Self.jsonValue(from:)))
+        case let value as [AnyCodable]:
+            return .array(value.map(\.value))
+        case let value as [JSONValue]:
+            return .array(value)
+        case let value as [Any]:
+            return .array(value.map(Self.jsonValue(from:)))
+        default:
+            return .null
+        }
+    }
+
+    private static func anyValue(from value: JSONValue) -> Any {
+        switch value {
+        case .string(let value):
+            return value
+        case .number(let value):
+            return value
+        case .bool(let value):
+            return value
+        case .object(let value):
+            return value.mapValues(Self.anyValue(from:))
+        case .array(let value):
+            return value.map(Self.anyValue(from:))
+        case .null:
+            return NSNull()
         }
     }
 }

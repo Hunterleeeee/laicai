@@ -113,33 +113,8 @@ struct SidebarView: View {
     @State private var brandRingAngle: Double = 0
 
     private var brandCircle: some View {
-        ZStack {
-            // Animated outer glow ring
-            Circle()
-                .strokeBorder(
-                    AngularGradient(
-                        colors: [Brand.primary, Brand.purple, Brand.teal, Brand.primary],
-                        center: .center
-                    ),
-                    lineWidth: 1.5
-                )
-                .frame(width: 38, height: 38)
-                .rotationEffect(.degrees(brandRingAngle))
-                .opacity(0.7)
-
-            Circle()
-                .fill(Brand.premiumGradient)
-                .frame(width: 30, height: 30)
-            Text("财")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-        }
-        .shadow(color: Brand.primary.opacity(0.4), radius: 12, y: 0)
-        .onAppear {
-            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-                brandRingAngle = 360
-            }
-        }
+        BrandLogo(size: 30)
+            .shadow(color: Brand.primary.opacity(0.4), radius: 8, y: 0)
     }
 
     // MARK: - Compact Rail (60px mode)
@@ -415,32 +390,32 @@ private struct ExpandedThreadRow: View {
                     .foregroundStyle(isSelected ? TextGrade.primary : TextGrade.secondary)
                     .lineLimit(1)
 
-                HStack(spacing: AppSpace.xs) {
-                    if isRunning {
-                        if !liveActivity.isEmpty {
-                            Text(liveActivity)
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(Brand.primary)
-                                .lineLimit(1)
-                        } else {
-                            Text("进行中")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(Brand.primary)
-                        }
-                    } else {
-                        Text(sanitizedPreview(item.preview))
-                            .font(AppFont.tiny)
-                            .foregroundStyle(TextGrade.ghost)
-                            .lineLimit(1)
-                    }
+                if isRunning {
+                    Text(!liveActivity.isEmpty ? liveActivity : "进行中")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Brand.primary)
+                        .lineLimit(1)
+                } else if item.status == .cancelled {
+                    Text("已暂停")
+                        .font(AppFont.tiny)
+                        .foregroundStyle(Semantic.warning)
+                } else if item.status == .failed {
+                    Text("执行失败")
+                        .font(AppFont.tiny)
+                        .foregroundStyle(Semantic.error)
                 }
             }
 
             Spacer(minLength: 0)
 
-            Text(RelativeTimeFormatter.string(for: item.updatedAt))
-                .font(AppFont.tiny)
-                .foregroundStyle(TextGrade.ghost)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(item.shortID)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(TextGrade.ghost)
+                Text(RelativeTimeFormatter.string(for: item.updatedAt))
+                    .font(AppFont.tiny)
+                    .foregroundStyle(TextGrade.ghost)
+            }
         }
         .padding(.horizontal, AppSpace.sm)
         .padding(.vertical, AppSpace.sm)
@@ -453,13 +428,6 @@ private struct ExpandedThreadRow: View {
         }
     }
 
-    private func sanitizedPreview(_ text: String) -> String {
-        if item.status == .cancelled { return "已暂停" }
-        if item.status == .failed { return "执行失败" }
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if t.count > 50 { return String(t.prefix(47)) + "…" }
-        return t.isEmpty ? "暂无内容" : t
-    }
 }
 
 // MARK: - Compact Rail Button

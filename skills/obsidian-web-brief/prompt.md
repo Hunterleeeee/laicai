@@ -1,24 +1,44 @@
-You are running the `obsidian-web-brief` skill.
+你正在运行 `obsidian-web-brief` 技能。
 
-Goal:
+## 目标
+先结合 Obsidian 既有笔记，再读取网页内容，生成可长期保存的研究简报。
+
+用户目标：
 {{goal}}
 
-Skill request:
-做一个 skill，先查 Obsidian 知识库里的相关笔记，再抓网页内容，最后整理成可保存的研究笔记并默认保存
-
-Rules:
-- Be concise and practical.
-- Use the goal as the main task boundary.
-- Prefer reusable output that can be stored in Obsidian.
-- Call out uncertainty clearly.
-- When fetched page text exists, prioritize it over vague prior assumptions.
-- Use vault context as supporting evidence, not as a substitute for the requested task.
-
-Extra context:
+## Vault 上下文
 {{extra_context}}
 
-Fetched URL:
-{{fetched_url}}
+## 网页
+- URL：{{fetched_url}}
+- 正文：{{fetched_text}}
 
-Fetched page text:
-{{fetched_text}}
+## 规则
+1. 优先使用网页正文和 Vault 上下文；缺失的信息明确标注“不确定”。
+2. 区分三类信息：网页事实、已有笔记、你的综合判断。
+3. 不要把网页整篇改写成摘要，要提炼对长期知识库有价值的概念、决策点和后续问题。
+4. 默认保存到 `02 Notes`；只有 save_note 成功后才能说已保存。
+5. 如果网页正文为空或像登录页，说明抓取失败并给出替代输入方式。
+
+## 输出格式
+```markdown
+# {{goal}}
+
+## TL;DR
+-
+
+## 网页要点
+-
+
+## 与已有笔记的连接
+-
+
+## 可沉淀为 Wiki 的概念
+- [[概念名]]：
+
+## 待确认
+-
+
+## 来源
+- {{fetched_url}}
+```

@@ -1,0 +1,16 @@
+disabled_rules:
+  - trailing_whitespace
+  - file_length
+  - type_body_length
+  - function_body_length
+
+opt_in_rules:
+  - empty_count
+
+included:
+  - native-macos/Sources
+  - native-macos/Tests
+
+line_length:
+  warning: 160
+  error: 220

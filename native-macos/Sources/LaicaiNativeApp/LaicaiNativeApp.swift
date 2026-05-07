@@ -10,17 +10,19 @@ struct LaicaiNativeApp: App {
     init() {
         let store = AppStore.live()
         _store = StateObject(wrappedValue: store)
-        Task { @MainActor in
-            store.checkAllConnectorsHealth()
-            // G17: Headless/CI mode — run task and exit if requested
-            if HeadlessRunner.shared.runIfNeeded(store: store) {
-                return
-            }
+    }
+
+    private func startRuntimeServices() async {
+        let isHeadless = HeadlessRunner.shared.isHeadless
+        if isHeadless {
+            _ = HeadlessRunner.shared.runIfNeeded(store: store)
+            return
         }
-        // Install menu bar agent and global shortcuts
+
         MenuBarAgent.shared.install()
         GlobalShortcutManager.shared.install()
         NotificationManager.shared.requestPermission()
+        store.checkAllConnectorsHealth()
     }
 
     var body: some Scene {
@@ -28,6 +30,9 @@ struct LaicaiNativeApp: App {
             RootView()
                 .environmentObject(store)
                 .frame(minWidth: 900, minHeight: 600)
+                .task {
+                    await startRuntimeServices()
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1200, height: 760)

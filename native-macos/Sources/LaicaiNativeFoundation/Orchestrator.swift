@@ -347,10 +347,14 @@ private struct IntentSignals {
     }
 
     var isQuestion: Bool {
-        let prefixes = ["什么", "为什么", "怎么", "如何", "是否", "哪里", "哪个", "多少", "能介绍", "请问"]
-        let suffixes = ["吗", "么", "呢", "？", "?"]
+        let prefixes = ["什么", "为什么", "怎么", "如何", "是否", "哪里", "哪个", "多少", "能介绍", "请问", "你是", "你能", "你有", "你会"]
+        let suffixes = ["吗", "么", "呢", "？", "?", "模型", "啥"]
+        let contains = ["是什么", "什么是", "怎么样", "是谁", "多少", "几个", "几种", "能不能", "可不可以", "有没有"]
         return prefixes.contains(where: { input.hasPrefix($0) })
             || suffixes.contains(where: { input.hasSuffix($0) })
+            || contains.contains(where: { input.contains($0) })
+            // Short inputs without action markers are likely questions
+            || (input.count <= 15 && !requestsAction && !requestsMutation && !requestsShellExecution)
     }
 
     var workflow: String? {
@@ -454,8 +458,13 @@ private struct IntentSignals {
     }
 
     private var requestsWebResearch: Bool {
-        ["联网", "上网", "网页", "官网", "搜索", "搜一下", "搜搜", "查一下", "查查"].contains { input.contains($0) }
-            && !capabilityOnly
+        let markers = ["联网", "上网", "网页", "官网", "搜一下", "搜搜", "查一下", "查查"]
+        // "搜索" alone is too broad — "你搜索到的" refers to past results, not a web search request.
+        // Only count "搜索" if it's NOT preceded by backward-referencing context.
+        let hasSearchMarker = markers.contains { input.contains($0) }
+        let hasPlainSearch = input.contains("搜索")
+            && !["搜索到的", "搜索结果", "你搜索", "已搜索", "刚搜索"].contains(where: { input.contains($0) })
+        return (hasSearchMarker || hasPlainSearch) && !capabilityOnly
     }
 
     private var requestsModelCurrentInfo: Bool {
@@ -1044,17 +1053,59 @@ public struct PromptComposer {
             parts.append("""
             ## 核心准则 — 高效行动
             你必须用工具行动，不能只说不做。
-            1. **速度第一**：每轮必须调用工具或给出最终结果。禁止返回"我建议你…"。
-            2. **最少探索**：读 1-2 个关键文件后立即开始执行。禁止把所有文件都读一遍。
-            3. **并行调用**：同一轮可以同时调用多个只读工具（file_read、code_search、web_search），减少轮次。
-            4. **失败换路**：工具失败→立即换另一种，不要重试相同参数。file.read 404→code_search 找路径。3 次失败后才能说做不到。
-            5. **直接执行**：用户说安装/配置/实现→shell_exec+file_write 真正做。不给建议。
-            6. **精准编辑**：已有文件用 file_edit（search/replace），不要 file_write 全量覆盖。
-            7. **写后验证**：file_edit → verify_build → 失败则修复 → 再验证。不跳过。
-            8. **联网优先**：不认识的概念→web_search 先搜再做。需要实时信息→web_search。有 URL→web_fetch。
+
+            ### 第一轮：探索 + 计划 + 首步执行
+            1. 先调 workspace_index 或 code_search 了解项目结构（如果已有索引或明确文件路径，不要重复索引）
+            2. 用1句话写出执行计划（做什么、改哪些文件）
+            3. 立即在同一轮开始执行第一步
+            禁止：第一轮只输出计划不行动。
+
+            ### 执行纪律
+            4. **每轮必须行动**：调用工具或给出最终结果。禁止返回"我建议你…"。
+            5. **证据优先**：修改、结论和验证必须来自工具结果；没有读过的文件不要判断其内容。
+            6. **并行调用**：同一轮可同时调多个只读工具（workspace_index、file_read、code_search、web_search、web_fetch）。
+            7. **失败立刻换路**：工具失败→换另一种工具或参数。不要用相同参数重试。
+               - file_read 找不到 → code_search 搜路径
+               - code_search 无结果 → shell_exec find/grep
+               - shell_exec 超时 → 缩小范围或换命令
+            8. **精准编辑**：已有文件用 file_edit（search/replace），新文件才用 file_write；不要无理由全量覆盖。
+            9. **写后验证**：file_write/file_edit 后用 file_read 或 verify_build 确认结果。不跳过。
+            10. **联网优先**：不认识的概念、版本、价格、新闻、规则或推荐→web_search。有 URL→web_fetch。
+            11. **直接执行**：用户说安装/配置/实现→实际运行命令或编辑文件；需要权限或上下文不足时才说明阻塞点。
+            12. **收口清晰**：最终回复只说改了什么、验证了什么、还剩什么风险；不要把内部步骤流水账贴给用户。
+
+            ### ⚠️ 严禁幻觉
+            - **禁止声称已完成未做的操作**：只有工具返回成功后才能说"已完成"。没调过 file_write 就不能说"已写入"。
+            - **禁止编造文件内容**：file_read 返回空或0字符 = 文件为空，不要假装读到了内容。
+            - **禁止无限重试**：同一操作失败2次后必须换方法或报告用户。
+            - **禁止把用户原话当搜索词**：code_search 的 query 必须是具体关键词（文件名、函数名、错误消息），不是自然语言。
+            - **用户追问之前的结果时**：直接根据会话历史回答，不要再次搜索。
+
+            ### ⚠️ 输出格式禁令
+            你的回答直接呈现给用户。**严禁**输出以下内部推理格式：
+            - 禁止输出「阶段总结」「执行路径」「证据清单」「完成检查」等自我审计框架
+            - 禁止输出「Plan:」「Execute:」「Verify:」「Summarize:」等流程标签
+            - 禁止输出「已运行命令：xxx」「失败工具：xxx」「状态：仅需继续」等元信息
+            - 禁止把 shell 命令的拼接过程展示给用户
+            只输出：结论、关键发现、操作结果。用简洁自然语言回答，不要暴露内部工作流程。
+
+            ### 整理/知识库类任务
+            当用户要求整理文件夹、创建知识库或 Wiki 时：
+            1. 先用 workspace_index 获取完整文件列表（一次即可）
+            2. 按文件类型分批读取：先读 .md/.txt，再处理 .docx/.pdf/.html
+            3. .docx 用 shell_exec python3 提取文本（注意检查输出是否为空）
+            4. 对每个源文件，提取核心内容后写入对应 Wiki 页面
+            5. **覆盖率要求**：不能只处理几个文件就收工，要覆盖用户给的所有文件
+            6. 每写完一批文件，用 file_read 验证内容确实写入
             """)
         } else {
             parts.append("直接回答问题。")
+        }
+
+        // Inject skill summary so LLM knows about available skills
+        let skillSummary = SkillRegistry.skillSummary()
+        if !skillSummary.isEmpty {
+            parts.append("\n## 可用技能\n\(skillSummary)。用 skill_manage(action=\"list\") 可查看完整列表。")
         }
 
         if let claudeMD = context.claudeMD {
@@ -1063,6 +1114,11 @@ public struct PromptComposer {
 
         if let branch = context.gitBranch {
             parts.append("\n## 当前分支\n\(branch)")
+        } else if !context.workspaceRoot.isEmpty {
+            let isGit = FileManager.default.fileExists(atPath: (context.workspaceRoot as NSString).appendingPathComponent(".git"))
+            if !isGit {
+                parts.append("\n## ⚠️ 非 Git 工作区\n当前工作区不是 git 仓库，不要调用 git 工具。")
+            }
         }
 
         if let diff = context.gitDiff {
@@ -1071,7 +1127,15 @@ public struct PromptComposer {
 
         if let vaultRoot = context.vaultRoot, !vaultRoot.isEmpty {
             parts.append("\n## Vault\n\(vaultRoot)")
-            parts.append("用户要求整理长期主题、Wiki、知识库或 Obsidian 页面时，优先使用 wiki_build；预览时 save=false，明确要求保存时 save=true。")
+            parts.append("""
+            用户要求整理知识库或 Wiki 时，使用 wiki_build 工具：
+            - **原子笔记**（默认）：mode=atomic，一个概念/实体/产品一个文件，存入 02 Atomic/
+            - **索引页**：mode=moc，按领域汇总所有相关概念，用 [[双链]] 做导航，存入 03 MOC/
+            - 先拆分为多个独立概念，每个概念调一次 wiki_build(mode=atomic)
+            - 拆分完后，为该领域创建一个 wiki_build(mode=moc) 索引页
+            - save=true 时系统会自动添加双链和更新 MOC
+            - 禁止把多个概念塞进一个大文件
+            """)
         }
 
         if !context.relevantFiles.isEmpty {
@@ -1100,8 +1164,8 @@ public struct PromptComposer {
         case .task:
             parts.append("""
             ## 任务模式
-            流程：读关键文件(1-2个) → 执行(file_edit/shell_exec) → verify_build验证 → 失败则修复循环 → git commit
-            规则：file_edit精准编辑已有文件，file_write仅用于新建。URL→web_fetch，实时信息→web_search。失败不编造。
+            流程：搜索/索引 → 读关键文件 → 执行(file_edit/file_write/shell_exec) → 验证(verify_build或项目命令) → 总结。
+            规则：file_edit精准编辑已有文件，file_write仅用于新建。URL→web_fetch，实时信息→web_search。失败不编造；除非用户明确要求，不要自行提交 git commit。
             """)
             if let verifyCmd = ValidationEngine.suggestVerificationCommand(workspaceRoot: context.workspaceRoot) {
                 parts.append("验证命令：`\(verifyCmd)`")
@@ -1133,6 +1197,7 @@ public struct PromptComposer {
         - 用户追问时，基于之前的会话内容回答，不要要求重复
         - 你是运行在本机的 Agent，拥有文件读写、代码搜索、命令执行、联网搜索等工具能力
         - 你是来财，不是 ChatGPT/Qwen/DeepSeek
+        - **输出禁令**：禁止输出「阶段总结」「Plan/Execute/Verify/Summarize」「证据清单」「完成检查」等内部推理格式。只用自然语言回答。
         """)
 
         if let claudeMD = context.claudeMD {

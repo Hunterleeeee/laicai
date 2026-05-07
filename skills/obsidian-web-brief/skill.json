@@ -17,12 +17,12 @@
       "kind": "web_fetch",
       "name": "web-fetch",
       "url_from": "manual",
-      "chars": 1600
+      "chars": 4000
     },
     {
       "kind": "prompt",
       "name": "prompt",
-      "max_tokens": 160
+      "max_tokens": 1200
     },
     {
       "kind": "save_note",

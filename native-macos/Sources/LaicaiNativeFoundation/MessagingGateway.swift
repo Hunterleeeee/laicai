@@ -222,7 +222,7 @@ public final class MessagingGateway: ObservableObject {
             connectedChannels.insert(id)
         } catch {
             // Log connection failure
-            print("[Gateway] Failed to connect \(config.type.displayName): \(error)")
+            LaicaiLog.error("Gateway failed to connect \(config.type.displayName): \(error)")
         }
     }
 
@@ -277,15 +277,23 @@ public final class MessagingGateway: ObservableObject {
 
 // MARK: - Telegram Channel
 
-public final class TelegramChannel: MessagingChannel, @unchecked Sendable {
+public final class TelegramChannel: MessagingChannel, Sendable {
     public let channelType: ChannelType = .telegram
-    public private(set) var isConnected: Bool = false
-    public var onMessageReceived: (@Sendable (IncomingMessage) -> Void)?
+    public var isConnected: Bool { state.withValue { $0.isConnected } }
+    public var onMessageReceived: (@Sendable (IncomingMessage) -> Void)? {
+        get { state.withValue { $0.onMessageReceived } }
+        set { state.withValue { $0.onMessageReceived = newValue } }
+    }
 
     private let botToken: String
     private let allowedChatIDs: [String]
-    private var pollingTask: Task<Void, Never>?
-    private var lastUpdateID: Int = 0
+    private struct State {
+        var isConnected = false
+        var onMessageReceived: (@Sendable (IncomingMessage) -> Void)?
+        var pollingTask: Task<Void, Never>?
+        var lastUpdateID: Int = 0
+    }
+    private let state = Locked(State())
 
     init(config: ChannelConfig) {
         self.botToken = config.config["bot_token"] ?? ""
@@ -297,19 +305,24 @@ public final class TelegramChannel: MessagingChannel, @unchecked Sendable {
             throw GatewayError.missingConfig("Telegram bot_token 未配置")
         }
 
-        isConnected = true
-        pollingTask = Task { [weak self] in
+        state.withValue { $0.isConnected = true }
+        let task = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pollUpdates()
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+        state.withValue { $0.pollingTask = task }
     }
 
     public func disconnect() async {
-        pollingTask?.cancel()
-        pollingTask = nil
-        isConnected = false
+        let task = state.withValue { state in
+            let task = state.pollingTask
+            state.pollingTask = nil
+            state.isConnected = false
+            return task
+        }
+        task?.cancel()
     }
 
     public func sendMessage(_ text: String, to recipient: String) async throws {
@@ -325,23 +338,24 @@ public final class TelegramChannel: MessagingChannel, @unchecked Sendable {
             "parse_mode": "Markdown"
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        _ = try await URLSession.shared.data(for: request)
+        _ = try await NetworkDefaults.ephemeralSession.data(for: request)
     }
 
     private func pollUpdates() async {
         guard !botToken.isEmpty else { return }
-        let urlStr = "https://api.telegram.org/bot\(botToken)/getUpdates?offset=\(lastUpdateID + 1)&timeout=10"
+        let offset = state.withValue { $0.lastUpdateID + 1 }
+        let urlStr = "https://api.telegram.org/bot\(botToken)/getUpdates?offset=\(offset)&timeout=10"
         guard let url = URL(string: urlStr) else { return }
 
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            let (data, _) = try await NetworkDefaults.ephemeralSession.data(from: url)
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let ok = json["ok"] as? Bool, ok,
                   let results = json["result"] as? [[String: Any]] else { return }
 
             for update in results {
                 if let updateID = update["update_id"] as? Int {
-                    lastUpdateID = max(lastUpdateID, updateID)
+                    state.withValue { $0.lastUpdateID = max($0.lastUpdateID, updateID) }
                 }
                 guard let msg = update["message"] as? [String: Any],
                       let text = msg["text"] as? String,
@@ -368,171 +382,321 @@ public final class TelegramChannel: MessagingChannel, @unchecked Sendable {
     }
 }
 
-// MARK: - Feishu Channel
+// MARK: - Feishu Channel (WebSocket Long Connection)
 
-public final class FeishuChannel: MessagingChannel, @unchecked Sendable {
+/// Feishu channel using WebSocket long connection mode.
+/// No public IP or webhook callback required — the client connects outbound to Feishu's WSS server.
+/// Protocol reference: larksuite/oapi-sdk-go ws package (pbbp2 binary frames).
+public final class FeishuChannel: MessagingChannel, Sendable {
     public let channelType: ChannelType = .feishu
-    public private(set) var isConnected: Bool = false
-    public var onMessageReceived: (@Sendable (IncomingMessage) -> Void)?
+    public var isConnected: Bool { state.withValue { $0.isConnected } }
+    public var onMessageReceived: (@Sendable (IncomingMessage) -> Void)? {
+        get { state.withValue { $0.onMessageReceived } }
+        set { state.withValue { $0.onMessageReceived = newValue } }
+    }
 
     private let appID: String
     private let appSecret: String
-    private let verificationToken: String
-    private let encryptKey: String
-    private var accessToken: String = ""
-    private var tokenExpiresAt: Date = .distantPast
-    private var refreshTask: Task<Void, Never>?
-    private var processedEventIDs: Set<String> = []
+    private struct State {
+        var isConnected = false
+        var onMessageReceived: (@Sendable (IncomingMessage) -> Void)?
+        var accessToken: String = ""
+        var tokenExpiresAt: Date = .distantPast
+        var wsTask: URLSessionWebSocketTask?
+        var pingTask: Task<Void, Never>?
+        var receiveTask: Task<Void, Never>?
+        var tokenRefreshTask: Task<Void, Never>?
+        var serviceID: Int32 = 0
+        var pingInterval: TimeInterval = 120 // default 2 min
+        var autoReconnect = true
+        var processedEventIDs: Set<String> = []
+        var fragmentCache: [String: (total: Int, parts: [Int: Data])] = [:]
+    }
+    private let state = Locked(State())
+
+    private static let wsEndpoint = "https://open.feishu.cn/callback/ws/endpoint"
+    private static let tokenEndpoint = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+    private static let sendMessageEndpoint = "https://open.feishu.cn/open-apis/im/v1/messages"
 
     init(config: ChannelConfig) {
         self.appID = config.config["app_id"] ?? ""
         self.appSecret = config.config["app_secret"] ?? ""
-        self.verificationToken = config.config["verification_token"] ?? ""
-        self.encryptKey = config.config["encrypt_key"] ?? ""
     }
+
+    // MARK: - Lifecycle
 
     public func connect() async throws {
         guard !appID.isEmpty, !appSecret.isEmpty else {
             throw GatewayError.missingConfig("飞书 app_id 或 app_secret 未配置")
         }
-        try await refreshToken()
-        isConnected = true
 
-        // Auto-refresh token every 90 minutes (token expires in 2 hours)
-        refreshTask = Task.detached { [weak self] in
+        try await refreshToken()
+
+        // Get WebSocket endpoint URL
+        let wssURL = try await getWSEndpoint()
+        LaicaiLog.info("Feishu connecting to \(wssURL)")
+
+        // Extract serviceID from URL query
+        if let components = URLComponents(string: wssURL),
+           let sid = components.queryItems?.first(where: { $0.name == "service_id" })?.value,
+           let sidInt = Int32(sid) {
+            state.withValue { $0.serviceID = sidInt }
+        }
+
+        // Connect WebSocket
+        let session = NetworkDefaults.webSocketSession
+        guard let url = URL(string: wssURL) else {
+            throw GatewayError.missingConfig("无效的 WebSocket URL")
+        }
+        let ws = session.webSocketTask(with: url)
+        ws.resume()
+        state.withValue {
+            $0.wsTask = ws
+            $0.isConnected = true
+            $0.autoReconnect = true
+        }
+        LaicaiLog.info("Feishu WebSocket connected")
+
+        // Start receive loop
+        let receiveTask = Task.detached { [weak self] in
+            await self?.receiveLoop()
+            return
+        }
+        state.withValue { $0.receiveTask = receiveTask }
+
+        // Start ping loop
+        let pingTask = Task.detached { [weak self] in
+            guard let self else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5400)) // 90 min
+                let interval = self.state.withValue { $0.pingInterval }
+                try? await Task.sleep(for: .seconds(interval))
+                await self.sendPing()
+            }
+        }
+        state.withValue { $0.pingTask = pingTask }
+
+        // Auto-refresh token every 90 minutes
+        let tokenRefreshTask = Task.detached { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5400))
                 try? await self?.refreshToken()
             }
         }
+        state.withValue { $0.tokenRefreshTask = tokenRefreshTask }
     }
 
     public func disconnect() async {
-        refreshTask?.cancel()
-        refreshTask = nil
-        isConnected = false
-        accessToken = ""
+        let tasks = state.withValue { state in
+            state.autoReconnect = false
+            let tasks = (state.pingTask, state.receiveTask, state.tokenRefreshTask, state.wsTask)
+            state.pingTask = nil
+            state.receiveTask = nil
+            state.tokenRefreshTask = nil
+            state.wsTask = nil
+            state.isConnected = false
+            state.accessToken = ""
+            state.tokenExpiresAt = .distantPast
+            state.fragmentCache.removeAll()
+            return tasks
+        }
+        tasks.0?.cancel()
+        tasks.1?.cancel()
+        tasks.2?.cancel()
+        tasks.3?.cancel(with: .goingAway, reason: nil)
+        LaicaiLog.info("Feishu disconnected")
     }
 
+    // MARK: - Token Management
+
     private func refreshToken() async throws {
-        let url = URL(string: "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal")!
+        let url = URL(string: Self.tokenEndpoint)!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         let body = ["app_id": appID, "app_secret": appSecret]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, _) = try await NetworkDefaults.ephemeralSession.data(for: request)
         if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
            let token = json["tenant_access_token"] as? String,
            let expire = json["expire"] as? Int {
-            accessToken = token
-            tokenExpiresAt = Date().addingTimeInterval(Double(expire))
+            state.withValue {
+                $0.accessToken = token
+                $0.tokenExpiresAt = Date().addingTimeInterval(Double(expire))
+            }
+            LaicaiLog.info("Feishu token refreshed, expires in \(expire)s")
+        } else {
+            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["msg"] as? String ?? "unknown"
+            throw GatewayError.missingConfig("获取飞书 token 失败: \(msg)")
         }
     }
 
     private func ensureToken() async {
-        if Date() >= tokenExpiresAt.addingTimeInterval(-120) {
+        let shouldRefresh = state.withValue { Date() >= $0.tokenExpiresAt.addingTimeInterval(-120) }
+        if shouldRefresh {
             try? await refreshToken()
         }
     }
 
-    public func sendMessage(_ text: String, to recipient: String) async throws {
-        await ensureToken()
-        guard !accessToken.isEmpty else { return }
+    // MARK: - WebSocket Endpoint
 
-        // Determine receive_id_type: chat_id for groups, open_id for DMs
-        let idType = recipient.hasPrefix("oc_") ? "chat_id" : "open_id"
-        let url = URL(string: "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=\(idType)")!
+    private func getWSEndpoint() async throws -> String {
+        let url = URL(string: Self.wsEndpoint)!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-
-        // Use rich text for long messages, plain text for short
-        let msgType: String
-        let contentStr: String
-        if text.count > 200 || text.contains("\n") {
-            // Post (rich text)
-            let lines = text.components(separatedBy: "\n")
-            var elements: [[Any]] = []
-            for line in lines {
-                elements.append([["tag": "text", "text": line]])
-            }
-            let post: [String: Any] = [
-                "zh_cn": [
-                    "title": "",
-                    "content": elements
-                ]
-            ]
-            msgType = "post"
-            contentStr = (try? JSONSerialization.data(withJSONObject: post)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        } else {
-            msgType = "text"
-            let content: [String: Any] = ["text": text]
-            contentStr = (try? JSONSerialization.data(withJSONObject: content)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        }
-
-        let body: [String: Any] = [
-            "receive_id": recipient,
-            "msg_type": msgType,
-            "content": contentStr
-        ]
+        let body = ["AppID": appID, "AppSecret": appSecret]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (respData, resp) = try await URLSession.shared.data(for: request)
-        // Retry once on token expiry
-        if let httpResp = resp as? HTTPURLResponse, httpResp.statusCode == 401 || httpResp.statusCode == 99991663 {
-            try await refreshToken()
-            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-            _ = try await URLSession.shared.data(for: request)
+        let (data, _) = try await NetworkDefaults.ephemeralSession.data(for: request)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let code = json["code"] as? Int, code == 0,
+              let dataObj = json["data"] as? [String: Any],
+              let wssURL = dataObj["URL"] as? String, !wssURL.isEmpty else {
+            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["msg"] as? String ?? "unknown"
+            throw GatewayError.missingConfig("获取飞书 WebSocket 地址失败: \(msg)")
         }
-        // Check for error in response
-        if let json = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
-           let code = json["code"] as? Int, code != 0 {
-            let msg = json["msg"] as? String ?? "未知错误"
-            print("[Feishu] 发送消息失败: code=\(code) msg=\(msg)")
+
+        // Apply server-pushed client config
+        if let clientConfig = dataObj["ClientConfig"] as? [String: Any] {
+            if let pi = clientConfig["PingInterval"] as? Int, pi > 0 {
+                state.withValue { $0.pingInterval = TimeInterval(pi) }
+            }
+        }
+
+        return wssURL
+    }
+
+    // MARK: - WebSocket Receive Loop
+
+    private func receiveLoop() async {
+        guard let ws = state.withValue({ $0.wsTask }) else { return }
+        while !Task.isCancelled {
+            do {
+                let message = try await ws.receive()
+                switch message {
+                case .data(let data):
+                    handleBinaryFrame(data)
+                case .string(let text):
+                    // Feishu normally sends binary, but handle text as fallback
+                    if let data = text.data(using: .utf8) {
+                        handleTextMessage(data)
+                    }
+                @unknown default:
+                    break
+                }
+            } catch {
+                LaicaiLog.error("Feishu receive error: \(error)")
+                let shouldReconnect = state.withValue { state in
+                    state.isConnected = false
+                    return state.autoReconnect
+                }
+                if shouldReconnect {
+                    LaicaiLog.info("Feishu attempting reconnect in 5s")
+                    try? await Task.sleep(for: .seconds(5))
+                    do {
+                        try await connect()
+                    } catch {
+                        LaicaiLog.error("Feishu reconnect failed: \(error)")
+                    }
+                }
+                return
+            }
         }
     }
 
-    /// Handle incoming webhook event from Feishu
-    public func handleWebhookEvent(_ body: [String: Any]) -> String? {
-        // URL verification challenge
-        if let challenge = body["challenge"] as? String {
-            return "{\"challenge\":\"\(challenge)\"}"
-        }
+    // MARK: - Protobuf Frame Codec (pbbp2)
 
-        // Verify token if configured
-        if !verificationToken.isEmpty {
-            if let token = body["token"] as? String, token != verificationToken {
-                return nil // reject
-            }
-        }
+    /// Minimal protobuf frame: field 1=method(varint), 2=service(varint), 3=headers(repeated LDel), 4=payload(bytes)
+    /// Header: field 1=key(string), 2=value(string)
 
-        // Event callback v2.0
-        guard let header = body["header"] as? [String: Any],
-              let eventType = header["event_type"] as? String else {
-            // Try v1.0 format
-            return handleV1Event(body)
-        }
+    private func handleBinaryFrame(_ data: Data) {
+        let frame = FeishuFrame.decode(data)
 
-        let eventID = header["event_id"] as? String ?? UUID().uuidString
-
-        // Deduplicate
-        if processedEventIDs.contains(eventID) { return "{\"ok\":true}" }
-        processedEventIDs.insert(eventID)
-        if processedEventIDs.count > 500 { processedEventIDs.removeFirst() }
-
-        guard let event = body["event"] as? [String: Any] else { return "{\"ok\":true}" }
-
-        switch eventType {
-        case "im.message.receive_v1":
-            handleMessageEvent(event, eventID: eventID)
+        switch frame.method {
+        case 0: // Control
+            handleControlFrame(frame)
+        case 1: // Data
+            handleDataFrame(frame)
         default:
             break
         }
+    }
 
-        return "{\"ok\":true}"
+    private func handleControlFrame(_ frame: FeishuFrame) {
+        let type_ = frame.headerValue(for: "type")
+        if type_ == "pong" {
+            // May contain updated client config in payload
+            if !frame.payload.isEmpty,
+               let json = try? JSONSerialization.jsonObject(with: frame.payload) as? [String: Any],
+               let pi = json["PingInterval"] as? Int, pi > 0 {
+                state.withValue { $0.pingInterval = TimeInterval(pi) }
+            }
+        }
+    }
+
+    private func handleDataFrame(_ frame: FeishuFrame) {
+        let sum = Int(frame.headerValue(for: "sum") ?? "1") ?? 1
+        let seq = Int(frame.headerValue(for: "seq") ?? "0") ?? 0
+        let msgID = frame.headerValue(for: "message_id") ?? UUID().uuidString
+        let type_ = frame.headerValue(for: "type") ?? ""
+
+        var payload = frame.payload
+
+        // Fragment reassembly
+        if sum > 1 {
+            guard let assembled = state.withValue({ state -> Data? in
+                if state.fragmentCache[msgID] == nil {
+                    state.fragmentCache[msgID] = (total: sum, parts: [:])
+                }
+                state.fragmentCache[msgID]?.parts[seq] = payload
+
+                guard let cached = state.fragmentCache[msgID],
+                      cached.parts.count == sum else { return nil }
+
+                var assembled = Data()
+                for i in 0..<sum {
+                    if let part = cached.parts[i] {
+                        assembled.append(part)
+                    }
+                }
+                state.fragmentCache.removeValue(forKey: msgID)
+                return assembled
+            }) else {
+                return
+            }
+            payload = assembled
+        }
+
+        // Send ACK response
+        sendAck(frame: frame)
+
+        // Parse event
+        if type_ == "event" {
+            handleEvent(payload, eventID: msgID)
+        }
+    }
+
+    private func handleEvent(_ payload: Data, eventID: String) {
+        guard let json = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] else { return }
+
+        // Deduplicate
+        let eid = (json["header"] as? [String: Any])?["event_id"] as? String ?? eventID
+        let shouldProcess = state.withValue { state in
+            if state.processedEventIDs.contains(eid) { return false }
+            state.processedEventIDs.insert(eid)
+            if state.processedEventIDs.count > 500 { state.processedEventIDs.removeFirst() }
+            return true
+        }
+        guard shouldProcess else { return }
+
+        // Check event type
+        guard let header = json["header"] as? [String: Any],
+              let eventType = header["event_type"] as? String,
+              eventType == "im.message.receive_v1",
+              let event = json["event"] as? [String: Any] else { return }
+
+        handleMessageEvent(event, eventID: eid)
     }
 
     private func handleMessageEvent(_ event: [String: Any], eventID: String) {
@@ -543,19 +707,17 @@ public final class FeishuChannel: MessagingChannel, @unchecked Sendable {
         // Only handle text messages for now
         guard msgType == "text" else { return }
 
-        // Parse content JSON
         guard let contentData = content.data(using: .utf8),
               let contentJSON = try? JSONSerialization.jsonObject(with: contentData) as? [String: Any],
               let text = contentJSON["text"] as? String else { return }
 
-        // Extract sender info
         let sender = event["sender"] as? [String: Any]
         let senderID = (sender?["sender_id"] as? [String: Any])?["open_id"] as? String ?? ""
         let chatID = message["chat_id"] as? String ?? senderID
 
         // Strip @bot mentions
         var cleanText = text
-        if let mentionRange = cleanText.range(of: "@\\w+", options: .regularExpression) {
+        if let mentionRange = cleanText.range(of: "@_all|@_user_\\d+", options: .regularExpression) {
             cleanText.removeSubrange(mentionRange)
         }
         cleanText = cleanText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -572,35 +734,274 @@ public final class FeishuChannel: MessagingChannel, @unchecked Sendable {
         onMessageReceived?(incoming)
     }
 
-    private func handleV1Event(_ body: [String: Any]) -> String? {
-        guard let event = body["event"] as? [String: Any],
-              let msgType = event["msg_type"] as? String, msgType == "text",
-              let text = (event["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !text.isEmpty else { return "{\"ok\":true}" }
+    // MARK: - Send Messages (via REST API)
 
-        let chatID = event["open_chat_id"] as? String ?? event["open_id"] as? String ?? ""
-        let incoming = IncomingMessage(
-            channel: .feishu,
-            sender: chatID,
-            senderName: event["user_open_id"] as? String ?? "",
-            text: text
-        )
-        onMessageReceived?(incoming)
-        return "{\"ok\":true}"
+    public func sendMessage(_ text: String, to recipient: String) async throws {
+        await ensureToken()
+        var token = state.withValue { $0.accessToken }
+        guard !token.isEmpty else { return }
+
+        let idType = recipient.hasPrefix("oc_") ? "chat_id" : "open_id"
+        let url = URL(string: "\(Self.sendMessageEndpoint)?receive_id_type=\(idType)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let msgType: String
+        let contentStr: String
+        if text.count > 200 || text.contains("\n") {
+            let lines = text.components(separatedBy: "\n")
+            var elements: [[Any]] = []
+            for line in lines {
+                elements.append([["tag": "text", "text": line]])
+            }
+            let post: [String: Any] = ["zh_cn": ["title": "", "content": elements] as [String: Any]]
+            msgType = "post"
+            contentStr = (try? JSONSerialization.data(withJSONObject: post)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        } else {
+            msgType = "text"
+            let content: [String: Any] = ["text": text]
+            contentStr = (try? JSONSerialization.data(withJSONObject: content)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        }
+
+        let body: [String: Any] = ["receive_id": recipient, "msg_type": msgType, "content": contentStr]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (respData, resp) = try await NetworkDefaults.ephemeralSession.data(for: request)
+        if let httpResp = resp as? HTTPURLResponse, httpResp.statusCode == 401 {
+            try await refreshToken()
+            token = state.withValue { $0.accessToken }
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            _ = try await NetworkDefaults.ephemeralSession.data(for: request)
+            return
+        }
+        if let json = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
+           let code = json["code"] as? Int, code != 0 {
+            let msg = json["msg"] as? String ?? "未知错误"
+            LaicaiLog.error("Feishu 发送消息失败: code=\(code) msg=\(msg)")
+        }
+    }
+
+    // MARK: - Ping / ACK
+
+    private func sendPing() async {
+        let (serviceID, wsTask) = state.withValue { ($0.serviceID, $0.wsTask) }
+        let frame = FeishuFrame(method: 0, service: serviceID, headers: [("type", "ping")], payload: Data())
+        let data = frame.encode()
+        try? await wsTask?.send(.data(data))
+    }
+
+    private func sendAck(frame: FeishuFrame) {
+        let response: [String: Any] = ["code": 200]
+        let payload = (try? JSONSerialization.data(withJSONObject: response)) ?? Data()
+        let ackFrame = FeishuFrame(method: frame.method, service: frame.service, headers: frame.headers, payload: payload)
+        let data = ackFrame.encode()
+        let wsTask = state.withValue { $0.wsTask }
+        Task { try? await wsTask?.send(.data(data)) }
+    }
+
+    // MARK: - Fallback: handle text/JSON WebSocket messages
+
+    private func handleTextMessage(_ data: Data) {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        // Some Feishu SDK versions may send JSON directly
+        if let header = json["header"] as? [String: Any],
+           let eventType = header["event_type"] as? String,
+           eventType == "im.message.receive_v1",
+           let event = json["event"] as? [String: Any] {
+            let eid = (header["event_id"] as? String) ?? UUID().uuidString
+            handleMessageEvent(event, eventID: eid)
+        }
+    }
+}
+
+// MARK: - Feishu Protobuf Frame (pbbp2)
+
+/// Minimal protobuf wire format encoder/decoder for Feishu WebSocket frames.
+/// Field layout: 1=method(varint), 2=service(varint), 3=headers(repeated LDel of Header), 4=payload(bytes)
+/// Header sub-message: 1=key(string), 2=value(string)
+private struct FeishuFrame {
+    var method: Int32 = 0   // 0=control, 1=data
+    var service: Int32 = 0
+    var headers: [(String, String)] = []
+    var payload: Data = Data()
+
+    func headerValue(for key: String) -> String? {
+        headers.first(where: { $0.0 == key })?.1
+    }
+
+    // MARK: Encode
+
+    func encode() -> Data {
+        var buf = Data()
+        // Field 1: method (varint)
+        if method != 0 {
+            buf.appendVarintField(fieldNumber: 1, value: UInt64(method))
+        }
+        // Field 2: service (varint)
+        if service != 0 {
+            buf.appendVarintField(fieldNumber: 2, value: UInt64(service))
+        }
+        // Field 3: headers (repeated length-delimited)
+        for (key, value) in headers {
+            var headerBuf = Data()
+            headerBuf.appendStringField(fieldNumber: 1, value: key)
+            headerBuf.appendStringField(fieldNumber: 2, value: value)
+            buf.appendLDelField(fieldNumber: 3, value: headerBuf)
+        }
+        // Field 4: payload (bytes)
+        if !payload.isEmpty {
+            buf.appendLDelField(fieldNumber: 4, value: payload)
+        }
+        return buf
+    }
+
+    // MARK: Decode
+
+    static func decode(_ data: Data) -> FeishuFrame {
+        var frame = FeishuFrame()
+        var offset = 0
+        let bytes = [UInt8](data)
+
+        while offset < bytes.count {
+            guard let (fieldNumber, wireType, newOffset) = readTag(bytes, offset: offset) else { break }
+            offset = newOffset
+
+            switch (fieldNumber, wireType) {
+            case (1, 0): // method: varint
+                guard let (val, newOff) = readVarint(bytes, offset: offset) else { break }
+                frame.method = Int32(val)
+                offset = newOff
+            case (2, 0): // service: varint
+                guard let (val, newOff) = readVarint(bytes, offset: offset) else { break }
+                frame.service = Int32(val)
+                offset = newOff
+            case (3, 2): // header: length-delimited
+                guard let (headerData, newOff) = readLDel(bytes, offset: offset) else { break }
+                offset = newOff
+                let h = decodeHeader(headerData)
+                frame.headers.append(h)
+            case (4, 2): // payload: length-delimited
+                guard let (payloadData, newOff) = readLDel(bytes, offset: offset) else { break }
+                frame.payload = Data(payloadData)
+                offset = newOff
+            default:
+                // Skip unknown field
+                if wireType == 0 {
+                    guard let (_, newOff) = readVarint(bytes, offset: offset) else { break }
+                    offset = newOff
+                } else if wireType == 2 {
+                    guard let (_, newOff) = readLDel(bytes, offset: offset) else { break }
+                    offset = newOff
+                } else if wireType == 5 {
+                    offset += 4
+                } else if wireType == 1 {
+                    offset += 8
+                } else {
+                    break // can't skip
+                }
+            }
+        }
+        return frame
+    }
+
+    private static func decodeHeader(_ bytes: [UInt8]) -> (String, String) {
+        var key = ""
+        var value = ""
+        var offset = 0
+        while offset < bytes.count {
+            guard let (fieldNumber, wireType, newOffset) = readTag(bytes, offset: offset), wireType == 2 else { break }
+            offset = newOffset
+            guard let (strBytes, newOff) = readLDel(bytes, offset: offset) else { break }
+            offset = newOff
+            let str = String(bytes: strBytes, encoding: .utf8) ?? ""
+            if fieldNumber == 1 { key = str }
+            else if fieldNumber == 2 { value = str }
+        }
+        return (key, value)
+    }
+
+    // MARK: Protobuf primitives
+
+    private static func readTag(_ bytes: [UInt8], offset: Int) -> (fieldNumber: Int, wireType: Int, newOffset: Int)? {
+        guard let (val, newOff) = readVarint(bytes, offset: offset) else { return nil }
+        let wireType = Int(val & 0x07)
+        let fieldNumber = Int(val >> 3)
+        return (fieldNumber, wireType, newOff)
+    }
+
+    private static func readVarint(_ bytes: [UInt8], offset: Int) -> (UInt64, Int)? {
+        var result: UInt64 = 0
+        var shift: UInt64 = 0
+        var i = offset
+        while i < bytes.count {
+            let b = UInt64(bytes[i])
+            result |= (b & 0x7F) << shift
+            i += 1
+            if b & 0x80 == 0 { return (result, i) }
+            shift += 7
+            if shift >= 64 { return nil }
+        }
+        return nil
+    }
+
+    private static func readLDel(_ bytes: [UInt8], offset: Int) -> ([UInt8], Int)? {
+        guard let (len, dataStart) = readVarint(bytes, offset: offset) else { return nil }
+        let length = Int(len)
+        guard dataStart + length <= bytes.count else { return nil }
+        return (Array(bytes[dataStart..<(dataStart + length)]), dataStart + length)
+    }
+}
+
+// MARK: - Data+Protobuf helpers
+
+private extension Data {
+    mutating func appendVarint(_ value: UInt64) {
+        var v = value
+        while v > 0x7F {
+            append(UInt8(v & 0x7F) | 0x80)
+            v >>= 7
+        }
+        append(UInt8(v))
+    }
+
+    mutating func appendVarintField(fieldNumber: Int, value: UInt64) {
+        appendVarint(UInt64(fieldNumber << 3 | 0)) // wire type 0
+        appendVarint(value)
+    }
+
+    mutating func appendLDelField(fieldNumber: Int, value: Data) {
+        appendVarint(UInt64(fieldNumber << 3 | 2)) // wire type 2
+        appendVarint(UInt64(value.count))
+        append(value)
+    }
+
+    mutating func appendStringField(fieldNumber: Int, value: String) {
+        let bytes = Data(value.utf8)
+        appendLDelField(fieldNumber: fieldNumber, value: bytes)
     }
 }
 
 // MARK: - WeCom Channel
 
-public final class WeComChannel: MessagingChannel, @unchecked Sendable {
+public final class WeComChannel: MessagingChannel, Sendable {
     public let channelType: ChannelType = .wecom
-    public private(set) var isConnected: Bool = false
-    public var onMessageReceived: (@Sendable (IncomingMessage) -> Void)?
+    public var isConnected: Bool { state.withValue { $0.isConnected } }
+    public var onMessageReceived: (@Sendable (IncomingMessage) -> Void)? {
+        get { state.withValue { $0.onMessageReceived } }
+        set { state.withValue { $0.onMessageReceived = newValue } }
+    }
 
     private let corpID: String
     private let secret: String
     private let agentID: String
-    private var accessToken: String = ""
+    private struct State {
+        var isConnected = false
+        var onMessageReceived: (@Sendable (IncomingMessage) -> Void)?
+        var accessToken: String = ""
+    }
+    private let state = Locked(State())
 
     init(config: ChannelConfig) {
         self.corpID = config.config["corp_id"] ?? ""
@@ -614,22 +1015,27 @@ public final class WeComChannel: MessagingChannel, @unchecked Sendable {
         }
         let urlStr = "https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=\(corpID)&corpsecret=\(secret)"
         guard let url = URL(string: urlStr) else { throw GatewayError.missingConfig("URL无效") }
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let (data, _) = try await NetworkDefaults.ephemeralSession.data(from: url)
         if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
            let token = json["access_token"] as? String {
-            accessToken = token
-            isConnected = true
+            state.withValue {
+                $0.accessToken = token
+                $0.isConnected = true
+            }
         }
     }
 
     public func disconnect() async {
-        isConnected = false
-        accessToken = ""
+        state.withValue {
+            $0.isConnected = false
+            $0.accessToken = ""
+        }
     }
 
     public func sendMessage(_ text: String, to recipient: String) async throws {
-        guard !accessToken.isEmpty else { return }
-        let url = URL(string: "https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=\(accessToken)")!
+        let token = state.withValue { $0.accessToken }
+        guard !token.isEmpty else { return }
+        let url = URL(string: "https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=\(token)")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -640,18 +1046,26 @@ public final class WeComChannel: MessagingChannel, @unchecked Sendable {
             "text": ["content": text]
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        _ = try await URLSession.shared.data(for: request)
+        _ = try await NetworkDefaults.ephemeralSession.data(for: request)
     }
 }
 
 // MARK: - Slack Channel
 
-public final class SlackChannel: MessagingChannel, @unchecked Sendable {
+public final class SlackChannel: MessagingChannel, Sendable {
     public let channelType: ChannelType = .slack
-    public private(set) var isConnected: Bool = false
-    public var onMessageReceived: (@Sendable (IncomingMessage) -> Void)?
+    public var isConnected: Bool { state.withValue { $0.isConnected } }
+    public var onMessageReceived: (@Sendable (IncomingMessage) -> Void)? {
+        get { state.withValue { $0.onMessageReceived } }
+        set { state.withValue { $0.onMessageReceived = newValue } }
+    }
 
     private let botToken: String
+    private struct State {
+        var isConnected = false
+        var onMessageReceived: (@Sendable (IncomingMessage) -> Void)?
+    }
+    private let state = Locked(State())
 
     init(config: ChannelConfig) {
         self.botToken = config.config["bot_token"] ?? ""
@@ -661,11 +1075,11 @@ public final class SlackChannel: MessagingChannel, @unchecked Sendable {
         guard !botToken.isEmpty else {
             throw GatewayError.missingConfig("Slack bot_token 未配置")
         }
-        isConnected = true
+        state.withValue { $0.isConnected = true }
     }
 
     public func disconnect() async {
-        isConnected = false
+        state.withValue { $0.isConnected = false }
     }
 
     public func sendMessage(_ text: String, to recipient: String) async throws {
@@ -677,17 +1091,20 @@ public final class SlackChannel: MessagingChannel, @unchecked Sendable {
         request.setValue("Bearer \(botToken)", forHTTPHeaderField: "Authorization")
         let body: [String: Any] = ["channel": recipient, "text": text]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        _ = try await URLSession.shared.data(for: request)
+        _ = try await NetworkDefaults.ephemeralSession.data(for: request)
     }
 }
 
 // MARK: - Gateway HTTP Server (Webhook receiver)
 
-public final class GatewayHTTPServer: @unchecked Sendable {
+public final class GatewayHTTPServer: Sendable {
     private let port: Int
     private let handler: @Sendable (IncomingMessage) async -> Void
-    private var serverSocket: Int32 = -1
-    private var listenTask: Task<Void, Never>?
+    private struct State {
+        var serverSocket: Int32 = -1
+        var listenTask: Task<Void, Never>?
+    }
+    private let state = Locked(State())
 
     init(port: Int, handler: @escaping @Sendable (IncomingMessage) async -> Void) {
         self.port = port
@@ -695,11 +1112,12 @@ public final class GatewayHTTPServer: @unchecked Sendable {
     }
 
     func start() {
-        serverSocket = socket(AF_INET, SOCK_STREAM, 0)
-        guard serverSocket >= 0 else { return }
+        let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+        guard socketFD >= 0 else { return }
+        state.withValue { $0.serverSocket = socketFD }
 
         var yes: Int32 = 1
-        setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
 
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
@@ -708,25 +1126,27 @@ public final class GatewayHTTPServer: @unchecked Sendable {
 
         let bindResult = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(serverSocket, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
         guard bindResult == 0 else {
-            close(serverSocket)
-            serverSocket = -1
+            close(socketFD)
+            state.withValue { $0.serverSocket = -1 }
             return
         }
 
-        listen(serverSocket, 5)
+        listen(socketFD, 5)
 
-        listenTask = Task.detached { [weak self] in
+        let task = Task.detached { [weak self] in
             guard let self else { return }
-            while !Task.isCancelled && self.serverSocket >= 0 {
+            while !Task.isCancelled {
+                let currentSocket = self.state.withValue { $0.serverSocket }
+                guard currentSocket >= 0 else { break }
                 var clientAddr = sockaddr_in()
                 var clientAddrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
                 let clientSocket = withUnsafeMutablePointer(to: &clientAddr) {
                     $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                        accept(self.serverSocket, $0, &clientAddrLen)
+                        accept(currentSocket, $0, &clientAddrLen)
                     }
                 }
                 guard clientSocket >= 0 else { continue }
@@ -736,14 +1156,19 @@ public final class GatewayHTTPServer: @unchecked Sendable {
                 }
             }
         }
+        state.withValue { $0.listenTask = task }
     }
 
     func stop() {
-        listenTask?.cancel()
-        listenTask = nil
-        if serverSocket >= 0 {
-            close(serverSocket)
-            serverSocket = -1
+        let snapshot = state.withValue { state in
+            let snapshot = (state.listenTask, state.serverSocket)
+            state.listenTask = nil
+            state.serverSocket = -1
+            return snapshot
+        }
+        snapshot.0?.cancel()
+        if snapshot.1 >= 0 {
+            close(snapshot.1)
         }
     }
 
@@ -756,12 +1181,11 @@ public final class GatewayHTTPServer: @unchecked Sendable {
 
         let requestStr = String(bytes: buffer[0..<bytesRead], encoding: .utf8) ?? ""
 
-        // Route: POST /feishu/event — Feishu event subscription callback
-        let isFeishuEvent = requestStr.hasPrefix("POST /feishu")
         // Route: POST /webhook or /message — generic webhook
+        // Note: Feishu now uses WebSocket long connection, no webhook needed
         let isGenericWebhook = requestStr.hasPrefix("POST /webhook") || requestStr.hasPrefix("POST /message")
 
-        guard isFeishuEvent || isGenericWebhook else {
+        guard isGenericWebhook else {
             let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
             _ = response.withCString { send(socket, $0, strlen($0), 0) }
             return
@@ -773,41 +1197,26 @@ public final class GatewayHTTPServer: @unchecked Sendable {
             if let data = body.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
 
-                if isFeishuEvent {
-                    // Delegate to FeishuChannel for event parsing + challenge response
-                    let gateway = await MessagingGateway.shared
-                    let feishuConfig = await gateway.channels.first { $0.type == .feishu }
-                    if let config = feishuConfig,
-                       let channel = await gateway.activeChannelForID(config.id) as? FeishuChannel {
-                        if let challengeResp = channel.handleWebhookEvent(json) {
-                            let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n\(challengeResp)"
-                            _ = response.withCString { send(socket, $0, strlen($0), 0) }
-                            return
-                        }
+                let text = json["text"] as? String ?? json["message"] as? String ?? ""
+                let sender = json["sender"] as? String ?? json["from"] as? String ?? "webhook"
+                let channel = json["channel"] as? String
+
+                let channelType: ChannelType = {
+                    switch channel {
+                    case "telegram": return .telegram
+                    case "feishu": return .feishu
+                    case "wecom": return .wecom
+                    case "slack": return .slack
+                    default: return .webhook
                     }
-                } else {
-                    // Generic webhook
-                    let text = json["text"] as? String ?? json["message"] as? String ?? ""
-                    let sender = json["sender"] as? String ?? json["from"] as? String ?? "webhook"
-                    let channel = json["channel"] as? String
+                }()
 
-                    let channelType: ChannelType = {
-                        switch channel {
-                        case "telegram": return .telegram
-                        case "feishu": return .feishu
-                        case "wecom": return .wecom
-                        case "slack": return .slack
-                        default: return .webhook
-                        }
-                    }()
-
-                    let message = IncomingMessage(
-                        channel: channelType,
-                        sender: sender,
-                        text: text
-                    )
-                    await handler(message)
-                }
+                let message = IncomingMessage(
+                    channel: channelType,
+                    sender: sender,
+                    text: text
+                )
+                await handler(message)
             }
         }
 

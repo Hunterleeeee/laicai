@@ -557,7 +557,7 @@ public struct StepExecutor {
             isCollapsible: false
         )
         taskSteps.append(startStep)
-        await onStepProgress(StepProgress(stepIndex: 0, totalSteps: workflow.steps.count, stepName: "初始化", taskStep: startStep))
+        onStepProgress(StepProgress(stepIndex: 0, totalSteps: workflow.steps.count, stepName: "初始化", taskStep: startStep))
 
         for (index, step) in workflow.steps.enumerated() {
             if !shouldRun(step: step, previousSuccess: previousSuccess) {
@@ -568,7 +568,7 @@ public struct StepExecutor {
                     isCollapsed: true
                 )
                 taskSteps.append(skipStep)
-                await onStepProgress(StepProgress(stepIndex: index, totalSteps: workflow.steps.count, stepName: step.name, taskStep: skipStep))
+                onStepProgress(StepProgress(stepIndex: index, totalSteps: workflow.steps.count, stepName: step.name, taskStep: skipStep))
                 continue
             }
 
@@ -581,7 +581,7 @@ public struct StepExecutor {
                 isCollapsed: false
             )
             taskSteps.append(toolCallStep)
-            await onStepProgress(StepProgress(stepIndex: index, totalSteps: workflow.steps.count, stepName: step.name, taskStep: toolCallStep))
+            onStepProgress(StepProgress(stepIndex: index, totalSteps: workflow.steps.count, stepName: step.name, taskStep: toolCallStep))
 
             let result = await executeStep(
                 step,

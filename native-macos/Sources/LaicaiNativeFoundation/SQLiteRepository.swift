@@ -8,6 +8,8 @@ public final class SQLiteRepository {
     private var db: OpaquePointer?
     private let queue = DispatchQueue(label: "laicai.sqlite", qos: .utility)
     private let path: String
+    /// H3: Track last-saved timestamps to enable incremental saves
+    private var lastSavedTimestamps: [UUID: TimeInterval] = [:]
 
     public init(path: String? = nil) {
         let base = path ?? (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory())
@@ -101,6 +103,7 @@ public final class SQLiteRepository {
         """)
         exec("CREATE INDEX IF NOT EXISTS idx_pm_workspace ON persistent_memory(workspace);")
         exec("CREATE INDEX IF NOT EXISTS idx_pm_category ON persistent_memory(category);")
+        refreshThreadSaveCache()
     }
 
     // MARK: - Persistent Memory (G1)
@@ -123,13 +126,25 @@ public final class SQLiteRepository {
     }
 
     public func loadMemories(workspace: String, category: String? = nil, limit: Int = 50) -> [(id: String, category: String, key: String, value: String)] {
+        let boundedLimit = max(1, min(limit, 500))
         let sql: String
         if let category {
-            sql = "SELECT id, category, key, value FROM persistent_memory WHERE workspace = '\(workspace)' AND category = '\(category)' ORDER BY updated_at DESC LIMIT \(limit)"
+            sql = "SELECT id, category, key, value FROM persistent_memory WHERE workspace = ? AND category = ? ORDER BY updated_at DESC LIMIT ?"
+            guard let stmt = prepare(sql) else { return [] }
+            bindText(stmt, index: 1, value: workspace)
+            bindText(stmt, index: 2, value: category)
+            sqlite3_bind_int(stmt, 3, Int32(boundedLimit))
+            return readMemoryRows(from: stmt)
         } else {
-            sql = "SELECT id, category, key, value FROM persistent_memory WHERE workspace = '\(workspace)' ORDER BY updated_at DESC LIMIT \(limit)"
+            sql = "SELECT id, category, key, value FROM persistent_memory WHERE workspace = ? ORDER BY updated_at DESC LIMIT ?"
+            guard let stmt = prepare(sql) else { return [] }
+            bindText(stmt, index: 1, value: workspace)
+            sqlite3_bind_int(stmt, 2, Int32(boundedLimit))
+            return readMemoryRows(from: stmt)
         }
-        guard let stmt = prepare(sql) else { return [] }
+    }
+
+    private func readMemoryRows(from stmt: OpaquePointer?) -> [(id: String, category: String, key: String, value: String)] {
         var results: [(String, String, String, String)] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let id = String(cString: sqlite3_column_text(stmt, 0))
@@ -143,7 +158,9 @@ public final class SQLiteRepository {
     }
 
     public func deleteMemory(id: String) {
-        exec("DELETE FROM persistent_memory WHERE id = '\(id)'")
+        guard let stmt = prepare("DELETE FROM persistent_memory WHERE id = ?") else { return }
+        bindText(stmt, index: 1, value: id)
+        _ = step(stmt)
     }
 
     private func exec(_ sql: String) {
@@ -167,6 +184,17 @@ public final class SQLiteRepository {
         sqlite3_finalize(stmt)
         return rc == SQLITE_DONE
     }
+
+    private func refreshThreadSaveCache() {
+        lastSavedTimestamps.removeAll()
+        guard let stmt = prepare("SELECT id, updated_at FROM threads") else { return }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let idText = String(cString: sqlite3_column_text(stmt, 0))
+            guard let id = UUID(uuidString: idText) else { continue }
+            lastSavedTimestamps[id] = sqlite3_column_double(stmt, 1)
+        }
+        sqlite3_finalize(stmt)
+    }
 }
 
 extension SQLiteRepository: ThreadRepository {
@@ -176,14 +204,17 @@ extension SQLiteRepository: ThreadRepository {
         }
         var threads: [Thread] = []
         let decoder = JSONDecoder()
+        var decodedIDs: Set<UUID> = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let recordJSON = String(cString: sqlite3_column_text(stmt, 0))
             if let data = recordJSON.data(using: .utf8),
                let thread = try? decoder.decode(Thread.self, from: data) {
                 threads.append(thread)
+                decodedIDs.insert(thread.id)
             }
         }
         sqlite3_finalize(stmt)
+        lastSavedTimestamps = lastSavedTimestamps.filter { decodedIDs.contains($0.key) }
         // If no threads in unified table, try migrating from legacy session/task tables
         if threads.isEmpty {
             return try migrateLegacyToThreads()
@@ -204,17 +235,47 @@ extension SQLiteRepository: ThreadRepository {
                 }
             }
         }
-        exec("BEGIN")
-        exec("DELETE FROM threads")
+
         let encoder = JSONEncoder()
+        let currentIDs = Set(threads.map { $0.id })
+
+        // H3: Incremental save — only serialize and write threads that changed
+        var dirtyThreads: [Thread] = []
         for thread in threads {
-            guard let stmt = prepare("INSERT INTO threads (id, updated_at, record_json) VALUES (?, ?, ?)") else { continue }
+            let ts = thread.updatedAt.timeIntervalSince1970
+            if lastSavedTimestamps[thread.id] != ts {
+                dirtyThreads.append(thread)
+            }
+        }
+
+        // Detect deleted threads (present in DB but not in current list)
+        let deletedIDs = Set(lastSavedTimestamps.keys).subtracting(currentIDs)
+
+        guard !dirtyThreads.isEmpty || !deletedIDs.isEmpty else { return }
+
+        exec("BEGIN")
+
+        // Delete removed threads
+        for id in deletedIDs {
+            if let stmt = prepare("DELETE FROM threads WHERE id = ?") {
+                bindText(stmt, index: 1, value: id.uuidString)
+                _ = step(stmt)
+            }
+            lastSavedTimestamps.removeValue(forKey: id)
+        }
+
+        // Upsert dirty threads
+        for thread in dirtyThreads {
+            guard let stmt = prepare("INSERT OR REPLACE INTO threads (id, updated_at, record_json) VALUES (?, ?, ?)") else { continue }
             bindText(stmt, index: 1, value: thread.id.uuidString)
-            sqlite3_bind_double(stmt, 2, thread.updatedAt.timeIntervalSince1970)
+            let ts = thread.updatedAt.timeIntervalSince1970
+            sqlite3_bind_double(stmt, 2, ts)
             let data = (try? encoder.encode(thread)) ?? Data()
             bindText(stmt, index: 3, value: String(data: data, encoding: .utf8) ?? "{}")
             _ = step(stmt)
+            lastSavedTimestamps[thread.id] = ts
         }
+
         exec("COMMIT")
     }
 
