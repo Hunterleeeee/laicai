@@ -112,11 +112,12 @@ public final class AgentLoop: ObservableObject {
             modelName: config.modelName
         )
         // Inject learned skill guidance if available
-        if intent != .chat, let learnedSkill = SkillEvolutionEngine.shared.bestSkill(intent: intentString, modelName: config.modelName) {
+        if intent != .chat, let learnedSkill = SkillEvolutionEngine.shared.bestSkill(intent: intentString, modelName: config.modelName, message: message) {
+            let toolSequence = learnedSkill.toolSequence.map { ToolNameCodec.canonicalName($0) }.joined(separator: " → ")
             let skillInjection = """
 
 ## 已学技能提示
-此类任务曾成功使用策略「\(learnedSkill.strategy)」，推荐工具序列：\(learnedSkill.toolSequence.joined(separator: " → "))
+此类任务曾成功使用策略「\(learnedSkill.strategy)」，推荐工具序列：\(toolSequence)
 （成功率 \(Int(learnedSkill.successRate * 100))%，Q值 \(String(format: "%.2f", learnedSkill.qValue))）
 """
             systemPrompt += skillInjection
@@ -1238,11 +1239,22 @@ public final class AgentLoop: ObservableObject {
                                     // retries with adjusted parameters before giving control back to model.
                                     if !toolResult.success {
                                         if toolName == "file.read",
-                                           (toolResult.error == "file_not_found" || toolResult.output.contains("不存在")),
                                            let path = callStep.toolParams?["path"] {
-                                            // Auto-search for similar filename
-                                            let filename = (path as NSString).lastPathComponent
-                                            if let searchTool = self.toolRegistry.tool(named: "code_search") {
+                                            if toolResult.error == "unsupported_binary_file",
+                                               let extractTool = self.toolRegistry.tool(named: "file_extract") ?? self.toolRegistry.tool(named: "file.extract") {
+                                                if let er = await Self.autoExtractUnsupportedRead(path: path, extractTool: extractTool, context: taskContext) {
+                                                    toolResult = ToolResult(
+                                                        output: "file.read 检测到表格/文档，编排层自动改用 file.extract 提取成功：\n\(er.output)",
+                                                        data: er.data,
+                                                        success: true
+                                                    )
+                                                    taskContext.memory.readFiles.append(path)
+                                                    taskContext.memory.fileContentCache[path] = er.output
+                                                }
+                                            } else if (toolResult.error == "file_not_found" || toolResult.output.contains("不存在")),
+                                                      let searchTool = self.toolRegistry.tool(named: "code_search") {
+                                                // Auto-search for similar filename
+                                                let filename = (path as NSString).lastPathComponent
                                                 let searchJSON = "{\"query\":\"\(filename)\"}"
                                                 let searchResult = try? await searchTool.execute(argumentsJSON: searchJSON, context: taskContext)
                                                 if let sr = searchResult, sr.success, !sr.output.hasPrefix("未找到") {
@@ -1629,7 +1641,7 @@ public final class AgentLoop: ObservableObject {
                     // Update task memory
                     if toolResult.success {
                         switch toolName {
-                        case "file.read":
+                        case "file.read", "file.extract":
                             if let path = callStep.toolParams?["path"] {
                                 if !taskContext.memory.readFiles.contains(path) {
                                     taskContext.memory.readFiles.append(path)
@@ -1990,7 +2002,6 @@ public final class AgentLoop: ObservableObject {
                     messages.append(ChatMessage(role: "user", content: nudgeText))
                     continue
                 }
-                // Reset empty counter on non-empty response
                 consecutiveEmptyResponses = 0
 
                 let toolCallCount = task.steps.filter({ $0.kind == .toolCall }).count
@@ -2016,10 +2027,7 @@ public final class AgentLoop: ObservableObject {
                     onStep(nudgeStep)
                     continue
                 }
-                // Only file.write/file.edit count as real writes — shell.exec is often
-                // used for read-like ops (npm view, pwd, ls) and must NOT disable nudge
-                let writeTools: Set<String> = ["file.write", "file.edit"]
-                let hasWritten = task.steps.contains(where: { $0.kind == .toolCall && writeTools.contains($0.toolName ?? "") })
+                let hasWritten = Self.hasSuccessfulWrite(in: task)
 
                 // Detect model malfunction: outputting "I will call: tool, tool, tool..." × 10+
                 if Self.looksLikeToolSpam(text) {
@@ -2031,16 +2039,11 @@ public final class AgentLoop: ObservableObject {
                     )
                     task.steps.append(spamStep)
                     onStep(spamStep)
-                    // Don't mark as complete — this is a malfunction, not success
                     break
                 }
-                // C2: Plan-only response interception — detect when model outputs a plan
-                // but doesn't take action on early turns. Force it to use tools.
-                // Case 1: zero tool calls + plan text
-                // Case 2: only read-only calls + plan text (model read a file then stopped)
                 let isEarlyTurn = iteration < 3 && !toolDefs.isEmpty
                 let onlyDidReads = toolCallCount > 0 && !hasWritten
-                    && !task.steps.contains(where: { $0.kind == .toolCall && ["shell.exec", "wiki.build", "web.fetch"].contains($0.toolName ?? "") })
+                    && !task.steps.contains(where: { $0.kind == .toolCall && ["shell.exec", "wiki.build", "web.fetch", "file.extract"].contains($0.toolName ?? "") })
                 let isPlanOnly = isEarlyTurn && intent != .chat && !isReadOnlyRun
                     && (toolCallCount == 0 || onlyDidReads)
                     && Self.looksLikePlanOnly(text)
@@ -2050,7 +2053,7 @@ public final class AgentLoop: ObservableObject {
                     messages.append(ChatMessage(role: "assistant", content: text))
                     let nudgeMsg = toolCallCount == 0
                         ? "你刚才只输出了计划/分析，没有调用任何工具。禁止只说不做。立即调用工具执行第一步。"
-                        : "你已经读取了文件但停了下来。不要只说计划，立即继续执行下一步：调用 wiki_build / file_write / shell_exec 等工具产出结果。"
+                        : "你已经读取了资料但停了下来。不要只说计划，立即继续执行下一步：整理到 Wiki 就调用 wiki_build(save=true)，表格/文档先用 file_extract，其他交付用 file_write / shell_exec。"
                     messages.append(ChatMessage(role: "system", content: nudgeMsg))
                     let planStep = TaskStep(
                         kind: .aiThinking,
@@ -2063,8 +2066,6 @@ public final class AgentLoop: ObservableObject {
                     continue
                 }
 
-                // Nudge logic (minimal): Claude Code never nudges — model gives text = done.
-                // We only nudge as last resort: 5+ reads, 0 writes, past half budget, in act mode.
                 let isActMode = !isReadOnlyRun && isToolAllowed("shell.exec") && isToolAllowed("file.write")
                 let allReadNoWrite = isActMode && toolCallCount >= 5 && !hasWritten
                 let pastHalfBudget = iteration > effectiveMaxIterations / 2
@@ -2081,7 +2082,6 @@ public final class AgentLoop: ObservableObject {
                     continue
                 }
 
-                // If model is writing fake tool calls, it can't do real function calling — warn user
                 if hasFakeToolCalls && !usedToolCompatibilityFallback {
                     let warningStep = TaskStep(
                         kind: .aiThinking,
@@ -2116,6 +2116,22 @@ public final class AgentLoop: ObservableObject {
                 )
                 task.steps.append(outputStep)
                 onStep(outputStep)
+                if Self.needsWikiSaveNudge(message: message, task: task, isReadOnlyRun: isReadOnlyRun, hasWritten: hasWritten),
+                   iteration < effectiveMaxIterations - 1 && nudgeCount < maxNudges {
+                    nudgeCount += 1
+                    let gateStep = TaskStep(
+                        kind: .aiThinking,
+                        text: "完成质量门：Wiki 任务尚未保存任何笔记，继续执行 wiki_build。",
+                        isCollapsible: true,
+                        isCollapsed: true
+                    )
+                    task.steps.append(gateStep)
+                    onStep(gateStep)
+                    messages.append(ChatMessage(role: "assistant", content: text))
+                    messages.append(ChatMessage(role: "system", content: "用户要求整理到 Wiki/知识库，但当前没有任何 wiki_build(save=true) 或文件写入成功记录。不要输出计划或道歉，立即基于已读材料调用 wiki_build 保存原子笔记；材料不足就先用 file_read/file_extract 继续读取。"))
+                    didComplete = false
+                    continue
+                }
                 if response.finishReason == "length" {
                     wasTruncated = true
                     let limitStep = TaskStep(
@@ -2157,39 +2173,24 @@ public final class AgentLoop: ObservableObject {
                 }
                 didComplete = !wasTruncated
 
-                // E5: Completion quality gate — verify claimed work before accepting "done"
                 if didComplete && intent == .task && !isReadOnlyRun && iteration < effectiveMaxIterations - 1 {
-                    let claimedWrite = hasWritten
-                    let failedWrites = task.steps.filter { $0.kind == .toolResult && $0.isFailure == true && ["file.write", "file.edit"].contains($0.toolName ?? "") }
-                    let hadVerify = task.steps.contains { $0.kind == .toolCall && $0.toolName == "verify.build" }
-                    let hasBuildSystem = ValidationEngine.suggestVerificationCommand(workspaceRoot: taskContext.workspaceRoot) != nil
-                    let codeExts: Set<String> = ["swift", "py", "js", "ts", "tsx", "jsx", "rs", "go", "java", "c", "cpp", "h", "m", "mm"]
-                    let wroteCode = task.steps.contains { step in
-                        guard step.kind == .toolCall, ["file.write", "file.edit"].contains(step.toolName ?? "") else { return false }
-                        return codeExts.contains(((step.toolParams?["path"] ?? "") as NSString).pathExtension.lowercased())
-                    }
-
-                    var qualityIssues: [String] = []
-                    // Check: all writes succeeded
-                    if !failedWrites.isEmpty {
-                        qualityIssues.append("有 \(failedWrites.count) 次文件写入失败")
-                    }
-                    // Check: code was written but not verified
-                    if wroteCode && !hadVerify && hasBuildSystem {
-                        qualityIssues.append("写了代码但没有 verify_build 验证编译")
-                    }
-                    // Check: task mentions creating a file but no writes were attempted
-                    let lMsg = message.lowercased()
-                    let expectsWrite = lMsg.contains("创建") || lMsg.contains("写入") || lMsg.contains("新建") || lMsg.contains("修改") || lMsg.contains("修复")
-                    if expectsWrite && !claimedWrite {
-                        qualityIssues.append("用户要求创建/修改文件，但没有任何写入操作")
-                    }
+                    let expectsWiki = Self.expectsWikiOutput(message)
+                    let qualityIssues = Self.completionQualityIssues(
+                        task: task,
+                        message: message,
+                        workspaceRoot: taskContext.workspaceRoot,
+                        hasWritten: hasWritten,
+                        expectsWiki: expectsWiki
+                    )
 
                     if !qualityIssues.isEmpty && nudgeCount < maxNudges {
                         nudgeCount += 1
                         didComplete = false
                         messages.append(ChatMessage(role: "assistant", content: text))
-                        messages.append(ChatMessage(role: "system", content: "⚠️ 完成质量检查未通过：\n" + qualityIssues.map { "- \($0)" }.joined(separator: "\n") + "\n\n请立即修复以上问题后再输出最终总结。"))
+                        let wikiInstruction = expectsWiki
+                            ? "\n\nWiki 任务必须调用 wiki_build(mode=\"atomic\", save=true) 保存原子笔记，并在需要时调用 wiki_build(mode=\"moc\", save=true) 保存索引页。"
+                            : ""
+                        messages.append(ChatMessage(role: "system", content: "⚠️ 完成质量检查未通过：\n" + qualityIssues.map { "- \($0)" }.joined(separator: "\n") + "\(wikiInstruction)\n\n请立即修复以上问题后再输出最终总结。"))
                         let gateStep = TaskStep(
                             kind: .aiThinking,
                             text: "完成质量门：\(qualityIssues.joined(separator: "；"))",
@@ -2202,19 +2203,15 @@ public final class AgentLoop: ObservableObject {
                     }
                 }
 
-                // Completion check is emitted at loop end — no need to duplicate here
                 break
             }
         }
 
-        // Auto-continuation: if task not done, auto-extend with a fresh round
         if !didComplete && !hadFailure && !wasTruncated && !Task.isCancelled && autoRound < maxAutoRounds && intent != .chat {
             autoRound += 1
-            iteration = 0  // reset iteration counter for the new round
-            // Inject a progress summary so the model knows what's been done
+            iteration = 0
             let progressSummary = Self.compactProgressSummary(task: task)
             messages.append(ChatMessage(role: "system", content: "已完成第 \(autoRound) 段处理。以下是目前进展，请继续完成剩余工作，不要重复已成功的操作：\n\(progressSummary)"))
-            // Reset per-round counters but keep cumulative state
             consecutiveEmptyResponses = 0
             transientRetryCount = 0
             didInjectWorkingSet = false

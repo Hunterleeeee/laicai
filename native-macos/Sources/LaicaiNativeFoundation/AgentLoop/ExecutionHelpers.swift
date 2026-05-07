@@ -108,8 +108,23 @@ extension AgentLoop {
         let successfulResults = task.steps.filter { $0.kind == .toolResult && !$0.isFailure }
         let failedResults = task.steps.filter { $0.kind == .toolResult && $0.isFailure }
         let hasFinalOutput = task.steps.contains { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let hasWrite = task.steps.contains { $0.kind == .toolCall && ["file.write", "file.edit"].contains($0.toolName ?? "") }
+        let message = task.steps.filter { $0.kind == .userInput }.map(\.text).joined(separator: "\n").lowercased()
+        let hasWrite = Self.hasSuccessfulWrite(in: task)
+        let hasSavedWiki = Self.hasSavedWiki(in: task)
+        let expectsWikiOutput = message.contains("wiki")
+            || message.contains("知识库")
+            || message.contains("整理到")
+            || message.contains("整理成笔记")
+            || message.contains("obsidian")
+        let hasUnrecoveredFailure = !failedResults.isEmpty && !Self.hasRecoveryAfterLastFailure(task)
         let hasVerificationFailure = task.steps.contains { $0.toolName == "verify.build" && $0.isFailure }
+
+        if expectsWikiOutput && !isReadOnlyRun {
+            return hasFinalOutput && (hasSavedWiki || hasWrite) && !hasUnrecoveredFailure
+        }
+        if hasUnrecoveredFailure && !isReadOnlyRun {
+            return false
+        }
 
         switch intent {
         case .chat:
@@ -129,6 +144,90 @@ extension AgentLoop {
             }
             return hasFinalOutput && (!hadFailure || successfulResults.count >= 2)
         }
+    }
+
+    static func hasRecoveryAfterLastFailure(_ task: AgentTask) -> Bool {
+        guard let lastFailureIndex = task.steps.lastIndex(where: { $0.kind == .toolResult && $0.isFailure }) else {
+            return false
+        }
+        let later = task.steps.dropFirst(lastFailureIndex + 1)
+        return later.contains { step in
+            if step.kind == .toolResult, !step.isFailure {
+                let recoveryTools: Set<String> = ["file.extract", "file.read", "wiki.build", "file.write", "file.edit", "workspace.index", "code.search", "shell.exec", "web.fetch", "web.search"]
+                return recoveryTools.contains(step.toolName ?? "")
+            }
+            if step.kind == .reviewRequest, step.approved == true {
+                return true
+            }
+            return false
+        }
+    }
+
+    static func hasSuccessfulWrite(in task: AgentTask) -> Bool {
+        let writeTools: Set<String> = ["file.write", "file.edit"]
+        return task.steps.contains { step in
+            guard writeTools.contains(step.toolName ?? "") else { return false }
+            if step.kind == .reviewRequest, step.approved == true { return true }
+            return step.kind == .toolResult && !step.isFailure
+        }
+    }
+
+    static func hasSavedWiki(in task: AgentTask) -> Bool {
+        task.steps.contains { step in
+            step.kind == .toolResult
+                && step.toolName == "wiki.build"
+                && !step.isFailure
+                && (step.toolParams?["save"] == "true" || step.text.contains("已保存 Wiki"))
+        }
+    }
+
+    static func needsWikiSaveNudge(message: String, task: AgentTask, isReadOnlyRun: Bool, hasWritten: Bool) -> Bool {
+        expectsWikiOutput(message)
+            && !isReadOnlyRun
+            && !hasSavedWiki(in: task)
+            && !hasWritten
+    }
+
+    static func completionQualityIssues(
+        task: AgentTask,
+        message: String,
+        workspaceRoot: String,
+        hasWritten: Bool,
+        expectsWiki: Bool
+    ) -> [String] {
+        var issues: [String] = []
+        let failedWrites = task.steps.filter { $0.kind == .toolResult && $0.isFailure == true && ["file.write", "file.edit"].contains($0.toolName ?? "") }
+        if !failedWrites.isEmpty {
+            issues.append("有 \(failedWrites.count) 次文件写入失败")
+        }
+
+        let wroteCode = task.steps.contains { step in
+            guard step.kind == .toolCall, ["file.write", "file.edit"].contains(step.toolName ?? "") else { return false }
+            let codeExts: Set<String> = ["swift", "py", "js", "ts", "tsx", "jsx", "rs", "go", "java", "c", "cpp", "h", "m", "mm"]
+            return codeExts.contains(((step.toolParams?["path"] ?? "") as NSString).pathExtension.lowercased())
+        }
+        let hadVerify = task.steps.contains { $0.kind == .toolCall && $0.toolName == "verify.build" }
+        if wroteCode && !hadVerify && ValidationEngine.suggestVerificationCommand(workspaceRoot: workspaceRoot) != nil {
+            issues.append("写了代码但没有 verify_build 验证编译")
+        }
+
+        let lower = message.lowercased()
+        let expectsWrite = lower.contains("创建") || lower.contains("写入") || lower.contains("新建") || lower.contains("修改") || lower.contains("修复")
+        if expectsWrite && !hasWritten {
+            issues.append("用户要求创建/修改文件，但没有任何写入操作")
+        }
+        if expectsWiki && !hasSavedWiki(in: task) && !hasWritten {
+            issues.append("用户要求整理到 Wiki/知识库，但没有保存任何 Wiki 笔记")
+        }
+        return issues
+    }
+
+    static func autoExtractUnsupportedRead(path: String, extractTool: any LaicaiTool, context: TaskContext) async -> ToolResult? {
+        let extractArgs: [String: Any] = ["path": path, "limit": 60_000]
+        let extractJSON = (try? JSONSerialization.data(withJSONObject: extractArgs)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let extractResult = try? await extractTool.execute(argumentsJSON: extractJSON, context: context)
+        guard let extractResult, extractResult.success else { return nil }
+        return extractResult
     }
 
     /// Send a lightweight no-tools LLM call to produce an execution plan.
@@ -749,16 +848,18 @@ extension AgentLoop {
                 "web.search": 0,
                 "web.fetch": 1,
                 "file.read": 2,
-                "code.search": 3,
-                "workspace.index": 4
+                "file.extract": 3,
+                "code.search": 4,
+                "workspace.index": 5
             ][canonical] ?? 20
         case .chat:
             return [
                 "file.read": 0,
-                "code.search": 1,
-                "web.search": 2,
-                "web.fetch": 3,
-                "workspace.index": 4
+                "file.extract": 1,
+                "code.search": 2,
+                "web.search": 3,
+                "web.fetch": 4,
+                "workspace.index": 5
             ][canonical] ?? 20
         case .task, .workflow:
             let base: [String: Int]
@@ -768,9 +869,10 @@ extension AgentLoop {
                     "workspace.index": 0,
                     "code.search": 1,
                     "file.read": 2,
-                    "web.search": 3,
-                    "web.fetch": 4,
-                    "wiki.build": 5
+                    "file.extract": 3,
+                    "web.search": 4,
+                    "web.fetch": 5,
+                    "wiki.build": 6
                 ]
             case .execute:
                 base = [
@@ -778,26 +880,29 @@ extension AgentLoop {
                     "file.write": 1,
                     "shell.exec": 2,
                     "file.read": 3,
-                    "code.search": 4,
-                    "wiki.build": 5,
-                    "web.fetch": 6,
-                    "web.search": 7
+                    "file.extract": 4,
+                    "code.search": 5,
+                    "wiki.build": 6,
+                    "web.fetch": 7,
+                    "web.search": 8
                 ]
             case .verify:
                 base = [
                     "verify.build": 0,
                     "shell.exec": 1,
                     "file.read": 2,
-                    "code.search": 3,
-                    "file.edit": 4,
-                    "git": 5
+                    "file.extract": 3,
+                    "code.search": 4,
+                    "file.edit": 5,
+                    "git": 6
                 ]
             case .summarize:
                 base = [
                     "git": 0,
                     "file.read": 1,
-                    "verify.build": 2,
-                    "code.search": 3
+                    "file.extract": 2,
+                    "verify.build": 3,
+                    "code.search": 4
                 ]
             }
             return base[canonical] ?? 20
@@ -1209,6 +1314,72 @@ extension AgentLoop {
         let lowerMsg = message.lowercased()
         let mentionedPaths = extractAbsolutePaths(from: message)
         let hasPaths = !mentionedPaths.isEmpty
+        let isWikiTask = expectsWikiOutput(message)
+
+        if isWikiTask && hasPaths {
+            result.templateName = "整理到 Wiki"
+            var collected: [String] = []
+            if let extractTool = toolRegistry.tool(named: "file_extract") ?? toolRegistry.tool(named: "file.extract"),
+               let readTool = toolRegistry.tool(named: "file_read") ?? toolRegistry.tool(named: "file.read") {
+                for path in mentionedPaths.prefix(5) {
+                    var isDirectory: ObjCBool = false
+                    FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                    let ext = (path as NSString).pathExtension.lowercased()
+                    let useExtract = ["xlsx", "xlsm", "csv", "tsv"].contains(ext)
+                    let tool = useExtract ? extractTool : readTool
+                    let canonicalName = useExtract ? "file.extract" : "file.read"
+                    let args: [String: Any] = ["path": path, "limit": useExtract ? 60_000 : 500]
+                    let json = (try? JSONSerialization.data(withJSONObject: args)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                    let params = ["path": path, "limit": "\(args["limit"] ?? "")"]
+                    let callId = "call_template_\(ToolNameCodec.apiName(canonicalName))_\(result.executedSteps)"
+                    let callStep = TaskStep(
+                        kind: .toolCall,
+                        text: ToolStepFormatter.callText(toolName: canonicalName, arguments: params),
+                        toolName: canonicalName,
+                        toolParams: params,
+                        toolCallId: callId,
+                        isCollapsible: true,
+                        isCollapsed: true
+                    )
+                    task.steps.append(callStep)
+                    onStep(callStep)
+                    let extracted = try? await tool.execute(argumentsJSON: json, context: taskContext)
+                    if let extracted {
+                        let display = ToolResultFormatter.displayText(toolName: canonicalName, arguments: params, result: extracted)
+                        let resultStep = TaskStep(
+                            kind: .toolResult,
+                            text: display,
+                            toolName: canonicalName,
+                            toolParams: params,
+                            toolCallId: callId,
+                            isCollapsible: true,
+                            isCollapsed: true,
+                            isFailure: !extracted.success
+                        )
+                        task.steps.append(resultStep)
+                        onStep(resultStep)
+                        if extracted.success {
+                            taskContext.memory.readFiles.append(path)
+                            taskContext.memory.fileContentCache[path] = extracted.output
+                            collected.append("### \(URL(fileURLWithPath: path).lastPathComponent)\n\(String(extracted.output.prefix(12000)))")
+                            result.executedSteps += 1
+                        } else if isDirectory.boolValue {
+                            collected.append("### \(URL(fileURLWithPath: path).lastPathComponent)\n\(extracted.output)")
+                        }
+                    }
+                }
+            }
+            if !collected.isEmpty {
+                result.directive = """
+                编排层已为 Wiki 任务预读/提取附件内容：
+
+                \(collected.joined(separator: "\n\n"))
+
+                用户目标是整理到 Wiki/知识库。禁止只输出计划。请基于上面的真实材料拆出 2-6 个独立主题，逐个调用 wiki_build(mode="atomic", save=true)，最后调用一次 wiki_build(mode="moc", save=true) 创建索引。只有 wiki_build 保存成功后，才能说任务完成。
+                """
+            }
+            return result
+        }
 
         // Template 1: "修改/修复/改 文件X 做Y" — search, read, then let LLM edit
         let isModifyTask = (lowerMsg.contains("修改") || lowerMsg.contains("修复") || lowerMsg.contains("改一下") || lowerMsg.contains("fix") || lowerMsg.contains("修") || lowerMsg.contains("改"))
@@ -1348,6 +1519,15 @@ extension AgentLoop {
         }
 
         return result
+    }
+
+    static func expectsWikiOutput(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("wiki")
+            || lower.contains("知识库")
+            || lower.contains("整理到")
+            || lower.contains("整理成笔记")
+            || lower.contains("obsidian")
     }
 
     /// F2: Rewrite tool arguments to fix common model mistakes before execution

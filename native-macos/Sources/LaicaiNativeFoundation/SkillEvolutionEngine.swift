@@ -188,7 +188,7 @@ public final class SkillEvolutionEngine {
 
     /// Find the best matching learned skill for a given intent and model.
     /// Uses exact intent match plus token similarity for fuzzy matching.
-    public func bestSkill(intent: String, modelName: String = "", minQ: Double = 0.3) -> LearnedSkill? {
+    public func bestSkill(intent: String, modelName: String = "", message: String = "", minQ: Double = 0.3) -> LearnedSkill? {
         guard let db else { return nil }
         let sql = """
         SELECT id, name, intent_pattern, tool_sequence, strategy, model_name,
@@ -197,7 +197,7 @@ public final class SkillEvolutionEngine {
         WHERE intent_pattern = ? AND q_value >= ?
               AND (model_name = '' OR model_name = ?)
         ORDER BY CASE WHEN model_name = ? THEN 0 ELSE 1 END, q_value DESC
-        LIMIT 1;
+        LIMIT 20;
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
@@ -206,9 +206,9 @@ public final class SkillEvolutionEngine {
         sqlite3_bind_text_safe(stmt, 3, modelName)
         sqlite3_bind_text_safe(stmt, 4, modelName)
 
-        var result: LearnedSkill?
-        if sqlite3_step(stmt) == SQLITE_ROW {
-            result = LearnedSkill(
+        var candidates: [LearnedSkill] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            candidates.append(LearnedSkill(
                 id: Int(sqlite3_column_int(stmt, 0)),
                 name: String(cString: sqlite3_column_text(stmt, 1)),
                 intentPattern: String(cString: sqlite3_column_text(stmt, 2)),
@@ -220,10 +220,33 @@ public final class SkillEvolutionEngine {
                 successCount: Int(sqlite3_column_int(stmt, 8)),
                 lastUsed: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 9)),
                 createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 10))
-            )
+            ))
         }
         sqlite3_finalize(stmt)
-        return result
+        guard !candidates.isEmpty else { return nil }
+
+        let messageTokens = Self.matchTokens(in: message)
+        if messageTokens.isEmpty {
+            return candidates.first { $0.successRate >= 0.65 && $0.usageCount >= 2 }
+        }
+        return candidates
+            .map { skill -> (LearnedSkill, Double) in
+                let skillTokens = Self.matchTokens(in: [skill.name, skill.strategy, skill.toolSequence.joined(separator: " ")].joined(separator: " "))
+                let overlap = Double(messageTokens.intersection(skillTokens).count)
+                let denominator = Double(max(1, min(messageTokens.count, 8)))
+                let semanticScore = overlap / denominator
+                let toolBonus = Self.toolIntentBonus(skill: skill, message: message)
+                let score = semanticScore + toolBonus + min(skill.qValue, 2.0) * 0.05
+                return (skill, score)
+            }
+            .filter { pair in
+                pair.1 >= 0.28 || Self.toolIntentBonus(skill: pair.0, message: message) >= 0.35
+            }
+            .sorted { lhs, rhs in
+                if lhs.1 == rhs.1 { return lhs.0.qValue > rhs.0.qValue }
+                return lhs.1 > rhs.1
+            }
+            .first?.0
     }
 
     // MARK: - Q-Value Update (feedback loop)
@@ -318,6 +341,39 @@ public final class SkillEvolutionEngine {
         let toolPart = tools.prefix(3).joined(separator: "+")
         let titlePart = String(title.prefix(20))
         return "\(titlePart)[\(toolPart)]"
+    }
+
+    private static func matchTokens(in text: String) -> Set<String> {
+        let lower = text.lowercased()
+        var tokens = Set<String>()
+        let separators = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-.")).inverted
+        for token in lower.components(separatedBy: separators) where token.count >= 2 {
+            tokens.insert(token)
+        }
+        let phraseTokens = ["wiki", "知识库", "整理", "整理到", "笔记", "附件", "读取", "表格", "xlsx", "excel", "搜索", "修改", "创建", "修复", "代码", "文件"]
+        for token in phraseTokens where lower.contains(token) {
+            tokens.insert(token)
+        }
+        return tokens
+    }
+
+    private static func toolIntentBonus(skill: LearnedSkill, message: String) -> Double {
+        let lower = message.lowercased()
+        let tools = Set(skill.toolSequence.map { ToolNameCodec.canonicalName($0) })
+        var bonus = 0.0
+        if (lower.contains("wiki") || lower.contains("知识库") || lower.contains("整理到")) && tools.contains("wiki.build") {
+            bonus += 0.45
+        }
+        if (lower.contains("xlsx") || lower.contains("excel") || lower.contains("表格")) && tools.contains("file.extract") {
+            bonus += 0.35
+        }
+        if (lower.contains("搜索") || lower.contains("查找") || lower.contains("search")) && tools.contains("code.search") {
+            bonus += 0.20
+        }
+        if (lower.contains("修改") || lower.contains("修复") || lower.contains("改")) && (tools.contains("file.edit") || tools.contains("file.write")) {
+            bonus += 0.25
+        }
+        return bonus
     }
 
     private func pruneIfNeeded() {

@@ -15,6 +15,12 @@ enum ToolResultFormatter {
             let suffix = result.output.contains("已截断") ? "，内容已截断" : ""
             return "已读取 \(path) · \(lines) 行 · \(size) 字符\(suffix)"
 
+        case "file.extract":
+            let path = result.data?["path"] ?? arguments["path"] ?? "文件"
+            let size = result.data?["size"].flatMap(Int.init) ?? result.output.count
+            let lines = result.output.components(separatedBy: .newlines).count
+            return "已提取 \(path) · \(lines) 行 · \(size) 字符"
+
         case "code.search":
             let query = result.data?["query"] ?? arguments["query"] ?? ""
             let count = result.data?["count"].flatMap(Int.init) ?? nonEmptyLines(result.output).count
@@ -94,6 +100,8 @@ enum ToolResultFormatter {
             var errorContent = compact("Error: \(result.error ?? result.output)", limit: max(500, limit))
             if toolName == "code.search" {
                 errorContent += "\n\n提示：本地搜索未找到结果。如果这是一个外部工具、库或概念，请调用 web_search 联网搜索了解它是什么。"
+            } else if toolName == "file.read", result.error == "unsupported_binary_file" {
+                errorContent += "\n\n提示：这是表格/文档类文件。请立即改用 file_extract 提取文本，不要把这个失败当作任务完成。"
             }
             return errorContent
         }
@@ -108,7 +116,7 @@ enum ToolResultFormatter {
             return result.output
         }
 
-        if toolName == "file.read" {
+        if toolName == "file.read" || toolName == "file.extract" {
             let smartResult = smartTruncateCode(result.output, limit: boundedLimit)
             if !smartResult.isEmpty { return smartResult }
         }
@@ -198,6 +206,8 @@ enum ToolStepFormatter {
         switch toolName {
         case "file.read":
             return "正在读取文件：\(arguments["path"] ?? "目标文件")"
+        case "file.extract":
+            return "正在提取文件文本：\(arguments["path"] ?? "目标文件")"
         case "code.search":
             let query = arguments["query"] ?? "相关内容"
             let scope = arguments["scope"] == "content" ? "内容" : "文件"

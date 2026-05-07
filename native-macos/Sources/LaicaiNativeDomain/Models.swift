@@ -1135,6 +1135,7 @@ public enum TaskPhase: String, Sendable, Equatable, CaseIterable {
     public var allowedTools: Set<String> {
         return [
             "file.read", "file.write", "file.edit",
+            "file.extract",
             "code.search", "workspace.index",
             "shell.exec", "verify.build",
             "web.search", "web.fetch",
@@ -1178,15 +1179,15 @@ public enum AgentRole: String, Codable, Sendable, CaseIterable, Identifiable {
     public var allowedTools: Set<String> {
         switch self {
         case .planner:
-            return ["file.read", "code.search", "workspace.index"]
+            return ["file.read", "file.extract", "code.search", "workspace.index"]
         case .coder:
-            return ["file.read", "code.search", "workspace.index", "file.write", "shell.exec", "git", "image.generate"]
+            return ["file.read", "file.extract", "code.search", "workspace.index", "file.write", "shell.exec", "git", "image.generate"]
         case .reviewer:
-            return ["file.read", "code.search", "git"]
+            return ["file.read", "file.extract", "code.search", "git"]
         case .researcher:
-            return ["file.read", "code.search", "web.search", "web.fetch", "workspace.index"]
+            return ["file.read", "file.extract", "code.search", "web.search", "web.fetch", "workspace.index"]
         case .tester:
-            return ["file.read", "code.search", "shell.exec", "git"]
+            return ["file.read", "file.extract", "code.search", "shell.exec", "git"]
         }
     }
 }

@@ -5,7 +5,7 @@ extension AgentLoop {
     /// Build a compact progress summary for auto-continuation rounds
     static func compactProgressSummary(task: AgentTask) -> String {
         var lines: [String] = []
-        let reads = task.steps.filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
+        let reads = task.steps.filter { $0.kind == .toolResult && ["file.read", "file.extract"].contains($0.toolName ?? "") && !$0.isFailure }
         if !reads.isEmpty { lines.append("- 已读取 \(reads.count) 个文件") }
         let writes = task.steps.filter { $0.kind == .toolResult && ["file.write", "file.edit"].contains($0.toolName ?? "") && !$0.isFailure }
         if !writes.isEmpty { lines.append("- 已修改 \(writes.count) 个文件") }
@@ -43,6 +43,9 @@ extension AgentLoop {
             return "你还没有调用任何工具。请立即使用工具开始执行任务。先调 workspace_index 了解项目，然后用 file_read 读取关键文件。"
         }
         if !failures.isEmpty, let lastFail = failures.last {
+            if lastFail.toolName == "file.read", lastFail.text.contains("unsupported_binary_file") || lastFail.text.contains("文档/表格") || lastFail.text.contains("file_extract") {
+                return "上一步用 file_read 读取表格/文档失败。请立即改用 file_extract 读取同一路径；提取成功后继续完成用户目标，不要把失败当作最终答案。"
+            }
             return "上一步失败了：\(String(lastFail.text.prefix(100)))。请换一种方法继续。不要用相同参数重试。"
         }
         if writes > 0 && lastUserMsg.contains("空") {

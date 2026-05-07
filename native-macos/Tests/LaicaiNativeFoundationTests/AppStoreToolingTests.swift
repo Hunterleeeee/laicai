@@ -52,7 +52,9 @@ final class AppStoreToolingTests: LaicaiNativeFoundationTestCase {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         try FileManager.default.createDirectory(at: workspace.appendingPathComponent("Sources"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: workspace.appendingPathComponent("Sources/App"), withIntermediateDirectories: true)
         try "hello".write(to: workspace.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try "let value = 1".write(to: workspace.appendingPathComponent("Sources/App/main.swift"), atomically: true, encoding: .utf8)
 
         let result = try await ReadFileTool().execute(
             argumentsJSON: #"{"path":".","limit":10}"#,
@@ -62,7 +64,43 @@ final class AppStoreToolingTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(result.success)
         XCTAssertTrue(result.output.contains("README.md"))
         XCTAssertTrue(result.output.contains("Sources/"))
+        XCTAssertTrue(result.output.contains("Sources/App/main.swift"))
         XCTAssertEqual(result.data?["type"], "directory")
+        XCTAssertEqual(result.data?["recursive"], "true")
+    }
+
+    func testReadFileToolRejectsXLSXWithExtractHint() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let xlsx = workspace.appendingPathComponent("需求.xlsx")
+        try Data([0x50, 0x4b, 0x03, 0x04]).write(to: xlsx)
+
+        let result = try await ReadFileTool().execute(
+            argumentsJSON: #"{"path":"需求.xlsx"}"#,
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.error, "unsupported_binary_file")
+        XCTAssertEqual(result.data?["recommendedTool"], "file.extract")
+        XCTAssertTrue(result.output.contains("file_extract"))
+    }
+
+    func testExtractFileToolExtractsXLSXCells() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let xlsx = workspace.appendingPathComponent("需求.xlsx")
+        try makeMinimalXLSX(at: xlsx)
+
+        let result = try await ExtractFileTool().execute(
+            argumentsJSON: #"{"path":"需求.xlsx"}"#,
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+
+        XCTAssertTrue(result.success, result.output)
+        XCTAssertEqual(result.data?["extension"], "xlsx")
+        XCTAssertTrue(result.output.contains("会员系统"))
+        XCTAssertTrue(result.output.contains("替换需求"))
     }
 
     func testReadFileToolTruncatesLargeFile() async throws {
@@ -101,12 +139,14 @@ final class AppStoreToolingTests: LaicaiNativeFoundationTestCase {
         let names = ToolRegistry.shared.toolDefinitions.map(\.function.name)
 
         XCTAssertTrue(names.contains("file_read"))
+        XCTAssertTrue(names.contains("file_extract"))
         XCTAssertTrue(names.contains("code_search"))
         XCTAssertTrue(names.contains("workspace_index"))
         XCTAssertTrue(names.contains("web_search"))
         XCTAssertTrue(names.contains("web_fetch"))
         XCTAssertTrue(names.contains("wiki_build"))
         XCTAssertFalse(names.contains("file.read"))
+        XCTAssertFalse(names.contains("file.extract"))
         XCTAssertFalse(names.contains("code.search"))
     }
 
@@ -425,6 +465,45 @@ final class AppStoreToolingTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "file.read" })
         XCTAssertTrue(task.steps.contains { $0.kind == .toolResult && $0.toolName == "file.read" && $0.text.contains("attached") })
         XCTAssertFalse(task.steps.contains { $0.kind == .toolCall && $0.toolName == "code.search" })
+    }
+
+    func testAgentLoopDoesNotCompleteWikiTaskWithoutSavedWiki() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        try "迁移计划".write(to: workspace.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+        let runtime = CapturingToolsRuntime()
+        let loop = AgentLoop(
+            config: .init(maxIterations: 2, maxTokensPerTurn: 1024, workspaceRoot: workspace.path),
+            runtime: runtime
+        )
+
+        let task = try await loop.run(
+            message: "整理到 wiki\n请读取这个附件：\(workspace.appendingPathComponent("notes.txt").path)",
+            intent: .task,
+            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            context: TaskContext(workspaceRoot: workspace.path, vaultRoot: workspace.path)
+        )
+
+        XCTAssertEqual(task.status, .failed)
+        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.contains("Wiki 任务尚未保存") })
+        XCTAssertFalse(task.steps.contains { $0.toolName == "wiki.build" && !$0.isFailure })
+    }
+
+    func testLearnedSkillDoesNotReturnUnrelatedHighQSkill() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let engine = SkillEvolutionEngine(path: workspace.path)
+        engine.extractSkill(
+            taskTitle: "你是谁",
+            intent: "task",
+            toolsUsed: ["code.search"],
+            modelName: "test-model",
+            outcomeScore: 95,
+            strategy: "回答模型身份"
+        )
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertNil(engine.bestSkill(intent: "task", modelName: "test-model", message: "整理到 wiki\n请读取这个附件：/tmp/需求.xlsx"))
     }
 
     func testWorkspaceIndexToolSummarizesProjectStructure() async throws {
@@ -1126,6 +1205,26 @@ final class AppStoreToolingTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(saved.data?["path"], "02 Atomic/API - Token - 安全.md")
         XCTAssertTrue(FileManager.default.fileExists(atPath: vault.appendingPathComponent("02 Atomic/API - Token - 安全.md").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: vault.appendingPathComponent("02 Atomic/API/Token: 安全?.md").path))
+    }
+
+    func testCompletionCriteriaRequiresSavedWikiForWikiTasks() {
+        let task = AgentTask(
+            title: "整理到 wiki",
+            steps: [
+                TaskStep(kind: .userInput, text: "整理到 wiki\n请读取这个附件：/tmp/a.xlsx"),
+                TaskStep(kind: .toolCall, text: "读取", toolName: "file.read", toolParams: ["path": "/tmp/a.xlsx"]),
+                TaskStep(kind: .toolResult, text: "已读取目录", toolName: "file.read"),
+                TaskStep(kind: .textOutput, text: "我会整理成 Wiki。")
+            ]
+        )
+
+        XCTAssertFalse(AgentLoop.meetsCompletionCriteria(task: task, intent: .task, didComplete: true, hadFailure: false, wasTruncated: false))
+
+        var saved = task
+        saved.steps.append(TaskStep(kind: .toolCall, text: "保存 Wiki", toolName: "wiki.build", toolParams: ["topic": "迁移", "save": "true"]))
+        saved.steps.append(TaskStep(kind: .toolResult, text: "已保存 Wiki：迁移 → 02 Atomic/迁移.md", toolName: "wiki.build", toolParams: ["save": "true"]))
+
+        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(task: saved, intent: .task, didComplete: true, hadFailure: false, wasTruncated: false))
     }
 
     func testGitToolReturnsFriendlyResultOutsideRepository() async throws {

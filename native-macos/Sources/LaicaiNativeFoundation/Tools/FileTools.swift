@@ -5,7 +5,7 @@ import LaicaiNativeDomain
 
 public struct ReadFileTool: LaicaiTool {
     public var name: String { "file.read" }
-    public var description: String { "读取工作区中的文件内容" }
+    public var description: String { "读取工作区中的文本文件或目录清单。xlsx/docx/pdf 等文档请改用 file_extract。" }
 
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(
@@ -59,32 +59,31 @@ public struct ReadFileTool: LaicaiTool {
         }
 
         if isDirectory.boolValue {
-            do {
-                let entries = try FileManager.default.contentsOfDirectory(atPath: fullPath)
-                    .filter { !$0.hasPrefix(".") }
-                    .sorted()
-                    .prefix(max(1, params.limit ?? 200))
-                let lines = entries.map { entry -> String in
-                    let child = (fullPath as NSString).appendingPathComponent(entry)
-                    var childIsDirectory: ObjCBool = false
-                    FileManager.default.fileExists(atPath: child, isDirectory: &childIsDirectory)
-                    return childIsDirectory.boolValue ? "\(entry)/" : entry
-                }
-                let output = lines.isEmpty
-                    ? "目录为空：\(path)"
-                    : "目录：\(path)\n" + lines.joined(separator: "\n")
+            let maxEntries = max(1, min(params.limit ?? 300, 1_000))
+            let lines = Self.directoryListing(root: fullPath, maxEntries: maxEntries)
+            let output = lines.isEmpty
+                ? "目录为空：\(path)"
+                : "目录：\(path)\n" + lines.joined(separator: "\n")
+                    + (lines.count >= maxEntries ? "\n...（目录较大，已截断；可增大 limit 或读取更具体的子目录）" : "")
 
-                await AuditLog.shared.record(
-                    tool: name,
-                    input: argumentsJSON,
-                    output: "读取目录 \(path)，\(lines.count) 项",
-                    success: true
-                )
+            await AuditLog.shared.record(
+                tool: name,
+                input: argumentsJSON,
+                output: "读取目录 \(path)，\(lines.count) 项",
+                success: true
+            )
 
-                return ToolResult(output: output, data: ["path": path, "type": "directory", "count": "\(lines.count)"])
-            } catch {
-                return ToolResult(output: "读取目录失败：\(error.localizedDescription)", success: false, error: "read_error")
-            }
+            return ToolResult(output: output, data: ["path": path, "type": "directory", "count": "\(lines.count)", "recursive": "true"])
+        }
+
+        let ext = (fullPath as NSString).pathExtension.lowercased()
+        if Self.extractOnlyExtensions.contains(ext) {
+            return ToolResult(
+                output: "这是 \(ext.uppercased()) 文档/表格，不适合用 file.read 按文本读取。请改用 file_extract 提取文本后再整理；如果目标是整理到 Wiki，提取后继续调用 wiki_build(save=true)。",
+                data: ["path": path, "extension": ext, "recommendedTool": "file.extract"],
+                success: false,
+                error: "unsupported_binary_file"
+            )
         }
 
         do {
@@ -120,6 +119,190 @@ public struct ReadFileTool: LaicaiTool {
         } catch {
             return ToolResult(output: "读取文件失败：\(error.localizedDescription)", success: false, error: "read_error")
         }
+    }
+
+    private static let extractOnlyExtensions: Set<String> = [
+        "xlsx", "xlsm", "xls", "csv", "tsv", "docx", "doc", "pptx", "ppt", "pdf", "numbers", "pages", "key"
+    ]
+
+    private static func directoryListing(root: String, maxEntries: Int) -> [String] {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: URL(fileURLWithPath: root),
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+
+        var lines: [String] = []
+        for case let url as URL in enumerator {
+            guard lines.count < maxEntries else { break }
+            let relative = String(url.path.dropFirst(root.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard !relative.isEmpty else { continue }
+            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            lines.append(isDirectory ? "\(relative)/" : relative)
+        }
+        return lines.sorted()
+    }
+}
+
+// MARK: - Extract File Tool
+
+public struct ExtractFileTool: LaicaiTool {
+    public var name: String { "file.extract" }
+    public var description: String { "从表格/文档中提取可供模型阅读的文本。支持 xlsx/xlsm/csv/tsv；普通文本也可读取。" }
+
+    public var functionDefinition: FunctionDefinition {
+        FunctionDefinition(
+            name: name,
+            description: description,
+            parameters: FunctionParameters(
+                properties: [
+                    "path": FunctionProperty(type: "string", description: "文件路径（相对或绝对路径）"),
+                    "limit": FunctionProperty(type: "integer", description: "最大输出字符数（可选，默认 50000）")
+                ],
+                required: ["path"]
+            )
+        )
+    }
+
+    public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
+        struct Params: Codable {
+            var path: String
+            var limit: Int?
+        }
+
+        let params: Params
+        do {
+            let jsonData = argumentsJSON.data(using: .utf8) ?? Data()
+            params = try JSONDecoder().decode(Params.self, from: jsonData)
+        } catch {
+            return ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params")
+        }
+
+        let fullPath: String
+        if params.path.hasPrefix("/") {
+            fullPath = params.path
+        } else {
+            guard !context.workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return ToolResult(output: "请先设置工作区后再提取文件。", success: false, error: "workspace_missing")
+            }
+            fullPath = (context.workspaceRoot as NSString).appendingPathComponent(params.path)
+        }
+
+        if let securityError = await SecurityManager.shared.checkRead(path: fullPath) {
+            return ToolResult(output: securityError, success: false, error: "security_denied")
+        }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: fullPath, isDirectory: &isDirectory), !isDirectory.boolValue else {
+            return ToolResult(output: "文件不存在或不是普通文件：\(params.path)", success: false, error: "file_not_found")
+        }
+
+        let ext = (fullPath as NSString).pathExtension.lowercased()
+        let limit = max(1_000, min(params.limit ?? 50_000, 200_000))
+        do {
+            let extracted: String
+            switch ext {
+            case "xlsx", "xlsm":
+                extracted = try Self.extractXLSX(path: fullPath, limit: limit)
+            case "csv", "tsv":
+                extracted = try Self.extractDelimited(path: fullPath, separator: ext == "tsv" ? "\t" : ",", limit: limit)
+            case "txt", "md", "json", "yaml", "yml", "xml", "html", "htm", "log":
+                extracted = try String(contentsOfFile: fullPath, encoding: .utf8)
+            default:
+                return ToolResult(
+                    output: "暂不支持提取 .\(ext.isEmpty ? "unknown" : ext) 文件。可尝试用系统工具转换为 txt/csv/xlsx 后再读取。",
+                    data: ["path": params.path, "extension": ext],
+                    success: false,
+                    error: "unsupported_file_type"
+                )
+            }
+
+            let output = extracted.count > limit
+                ? String(extracted.prefix(limit)) + "\n...（已截断，共 \(extracted.count) 字符）"
+                : extracted
+            await AuditLog.shared.record(
+                tool: name,
+                input: argumentsJSON,
+                output: "提取 \(params.path)，\(output.count) 字符",
+                success: true
+            )
+            return ToolResult(output: output, data: ["path": params.path, "extension": ext, "size": "\(extracted.count)"])
+        } catch {
+            return ToolResult(output: "提取文件失败：\(error.localizedDescription)", success: false, error: "extract_error")
+        }
+    }
+
+    private static func extractDelimited(path: String, separator: String, limit: Int) throws -> String {
+        let content = try String(contentsOfFile: path, encoding: .utf8)
+        let rows = content.components(separatedBy: .newlines).prefix(300)
+        return rows.map { line in
+            line.components(separatedBy: separator)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .joined(separator: " | ")
+        }.joined(separator: "\n").prefixString(limit)
+    }
+
+    private static func extractXLSX(path: String, limit: Int) throws -> String {
+        let script = """
+        import sys, zipfile, re, html, xml.etree.ElementTree as ET
+        path = sys.argv[1]
+        ns = {'a': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+        with zipfile.ZipFile(path) as z:
+            shared = []
+            if 'xl/sharedStrings.xml' in z.namelist():
+                root = ET.fromstring(z.read('xl/sharedStrings.xml'))
+                for si in root.findall('a:si', ns):
+                    texts = [t.text or '' for t in si.findall('.//a:t', ns)]
+                    shared.append(''.join(texts))
+            sheets = sorted([n for n in z.namelist() if re.match(r'xl/worksheets/sheet\\d+\\.xml$', n)])
+            out = []
+            for sheet_index, name in enumerate(sheets[:8], 1):
+                out.append(f'## Sheet {sheet_index}')
+                root = ET.fromstring(z.read(name))
+                for row in root.findall('.//a:sheetData/a:row', ns):
+                    cells = []
+                    for c in row.findall('a:c', ns):
+                        v = c.find('a:v', ns)
+                        if v is None:
+                            cells.append('')
+                            continue
+                        text = v.text or ''
+                        if c.attrib.get('t') == 's':
+                            try:
+                                text = shared[int(text)]
+                            except Exception:
+                                pass
+                        cells.append(html.unescape(text))
+                    if any(cell.strip() for cell in cells):
+                        out.append(' | '.join(cells))
+            print('\\n'.join(out))
+        """
+        return try runPython(script: script, arguments: [path]).prefixString(limit)
+    }
+
+    private static func runPython(script: String, arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = ["-c", script] + arguments
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+        let out = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "ExtractFileTool", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: err.isEmpty ? "python3 提取失败" : err])
+        }
+        return out
+    }
+}
+
+private extension String {
+    func prefixString(_ limit: Int) -> String {
+        count > limit ? String(prefix(limit)) : self
     }
 }
 // MARK: - File Edit Tool (precise search/replace)

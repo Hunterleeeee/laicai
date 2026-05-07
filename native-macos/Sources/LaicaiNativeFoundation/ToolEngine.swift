@@ -10,6 +10,7 @@ public final class ToolRegistry {
 
     private init() {
         register(ReadFileTool())
+        register(ExtractFileTool())
         register(FileEditTool())
         register(WriteFileTool())
         register(ShellTool())
@@ -58,6 +59,7 @@ public enum ToolNameCodec {
     public static func canonicalName(_ name: String) -> String {
         switch name {
         case "file_read": return "file.read"
+        case "file_extract": return "file.extract"
         case "file_edit": return "file.edit"
         case "file_write": return "file.write"
         case "code_search": return "code.search"
