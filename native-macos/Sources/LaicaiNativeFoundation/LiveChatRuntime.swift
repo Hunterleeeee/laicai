@@ -562,7 +562,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         probeToolCalling: Bool = true
     ) async throws -> ConnectorProbeResult {
         let base = Self.serviceBaseEndpoint(from: Self.baseEndpoint(from: endpoint))
-        let isOllama = Self.isOllamaEndpoint(base, kind: kind)
+        let isOllama = Self.usesOllamaNativeProtocol(endpoint: endpoint, kind: kind)
         let urlString: String
         if isOllama {
             let ollamaBase = base.hasSuffix("/v1") ? String(base.dropLast(3)) : base
@@ -726,10 +726,12 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             return cleaned
         }
 
-        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let path = normalizedPath(for: url)
 
-        // Ollama native (local only): auto-append /api/chat
-        if isOllamaEndpoint(cleaned, kind: kind) {
+        // Ollama native: auto-append /api/chat. Explicit OpenAI-compatible
+        // paths such as /v1 remain OpenAI-compatible even if an old profile was
+        // saved with kind=ollama.
+        if usesOllamaNativeProtocol(endpoint: cleaned, kind: kind) {
             if path.isEmpty { return appendPath("api/chat", to: cleaned) }
             if path == "api" { return appendPath("chat", to: cleaned) }
             return cleaned
@@ -764,26 +766,57 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         endpoint
     }
 
-    private static func isOllamaEndpoint(_ endpoint: String, kind: String) -> Bool {
+    public static func normalizedConnectorKind(_ kind: String, endpoint: String) -> String {
+        usesOllamaNativeProtocol(endpoint: endpoint, kind: kind) ? "ollama" : "openai-compatible"
+    }
+
+    public static func usesOllamaNativeProtocol(endpoint: String, kind: String) -> Bool {
         let cleaned = baseEndpoint(from: endpoint)
         guard let url = URL(string: cleaned) else {
-            return kind == "ollama"
+            return normalizedKindValue(kind) == "ollama"
         }
+        let path = normalizedPath(for: url)
         let host = url.host?.lowercased() ?? ""
         let scheme = url.scheme?.lowercased() ?? ""
-        // Port 11434 is definitively Ollama
-        if cleaned.hasSuffix(":11434") || cleaned.contains(":11434/") {
+
+        // Explicit paths beat the saved kind. This fixes profiles that were
+        // accidentally saved as Ollama while pointing at /v1 OpenAI-compatible
+        // services.
+        if isOpenAICompatiblePath(path) { return false }
+        if path.hasSuffix("api/chat") { return true }
+
+        // Port 11434 is definitively Ollama when no OpenAI-compatible path was
+        // provided.
+        if url.port == 11434 || cleaned.hasSuffix(":11434") || cleaned.contains(":11434/") {
             return true
         }
         // HTTPS remote endpoints are never Ollama native (even if user picked wrong kind)
         if scheme == "https" && host != "localhost" && host != "127.0.0.1" && host != "::1" {
             return false
         }
-        // Local endpoints: respect user's kind selection
+        // Local endpoints: respect the user's kind selection unless the path
+        // already identified the service.
         if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-            return kind == "ollama"
+            return normalizedKindValue(kind) == "ollama"
         }
         return false
+    }
+
+    private static func normalizedKindValue(_ kind: String) -> String {
+        kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func normalizedPath(for url: URL) -> String {
+        url.path
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .lowercased()
+    }
+
+    private static func isOpenAICompatiblePath(_ path: String) -> Bool {
+        path == "v1"
+            || path.hasSuffix("/v1")
+            || path == "chat/completions"
+            || path.hasSuffix("/chat/completions")
     }
 
     private static func userFacingErrorMessage(statusCode: Int, bodyText: String, connectorName: String) -> String {

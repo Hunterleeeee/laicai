@@ -60,13 +60,19 @@ public extension AppState {
         }
 
         if let catalog = try? environment.connectorRepository.loadConnectorCatalog(), !catalog.connectors.isEmpty {
-            state.connectors = catalog.connectors
+            state.connectors = catalog.connectors.map(normalizedBootstrapConnector)
             state.activeConnectorID = catalog.activeConnectorID ?? catalog.connectors.first?.id
             state.settings.defaultConnectorName = state.activeConnector?.name ?? catalog.connectors.first?.name ?? state.settings.defaultConnectorName
+            if state.connectors != catalog.connectors {
+                try? environment.connectorRepository.saveConnectors(state.connectors, activeConnectorID: state.activeConnectorID)
+            }
         } else if let migrated = migrateFromPythonConnectorCatalog(workspacePath: state.settings.workspacePath) {
-            state.connectors = migrated.connectors
+            state.connectors = migrated.connectors.map(normalizedBootstrapConnector)
             state.activeConnectorID = migrated.activeConnectorID ?? migrated.connectors.first?.id
             state.settings.defaultConnectorName = state.activeConnector?.name ?? migrated.connectors.first?.name ?? state.settings.defaultConnectorName
+            if state.connectors != migrated.connectors {
+                try? environment.connectorRepository.saveConnectors(state.connectors, activeConnectorID: state.activeConnectorID)
+            }
         }
 
         if state.workspaceName == "来采原生版" { state.workspaceName = "来财原生版" }
@@ -90,4 +96,15 @@ public extension AppState {
 
         return state
     }
+}
+
+private func normalizedBootstrapConnector(_ connector: ConnectorProfile) -> ConnectorProfile {
+    var normalized = connector
+    normalized.name = connector.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    normalized.kind = connector.kind.trimmingCharacters(in: .whitespacesAndNewlines)
+    normalized.endpoint = connector.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+    normalized.modelName = connector.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+    normalized.note = connector.note.trimmingCharacters(in: .whitespacesAndNewlines)
+    normalized.kind = LiveChatRuntime.normalizedConnectorKind(normalized.kind, endpoint: normalized.endpoint)
+    return normalized
 }

@@ -568,6 +568,8 @@ struct TextOutputCard: View {
     var isRunning: Bool = false
     @State private var cursorVisible = true
     @State private var isHovered = false
+    @State private var showFullRunningOutput = false
+    private let runningPreviewLimit = 6_000
 
     var body: some View {
         HStack(alignment: .top, spacing: AppSpace.sm) {
@@ -594,8 +596,31 @@ struct TextOutputCard: View {
                     }
 
                     VStack(alignment: .leading, spacing: 0) {
-                        MarkdownText(text, fontSize: 14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if isRunning {
+                            Text(runningDisplayText)
+                                .font(.system(size: 14, weight: .regular))
+                                .foregroundStyle(TextGrade.primary)
+                                .lineSpacing(6)
+                                .textSelection(.disabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.vertical, 4)
+
+                            if isRunningLong {
+                                Button {
+                                    showFullRunningOutput.toggle()
+                                } label: {
+                                    Text(showFullRunningOutput ? "收起流式预览" : "展开更多")
+                                        .font(AppFont.captionMedium)
+                                        .foregroundStyle(Brand.primary)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.top, AppSpace.xs)
+                            }
+                        } else {
+                            MarkdownText(text, fontSize: 14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
 
                         if isRunning && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             RoundedRectangle(cornerRadius: 1)
@@ -704,6 +729,17 @@ struct TextOutputCard: View {
 
     private var trimmedText: String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isRunningLong: Bool {
+        trimmedText.count > runningPreviewLimit
+    }
+
+    private var runningDisplayText: String {
+        guard isRunningLong, !showFullRunningOutput else { return trimmedText }
+        let headCount = 1_800
+        let tailCount = max(1_800, runningPreviewLimit - headCount)
+        return "\(trimmedText.prefix(headCount))\n\n... 正在生成，已折叠中间内容以保持滚动流畅 ...\n\n\(trimmedText.suffix(tailCount))"
     }
 
     @MainActor private func saveToWiki(_ content: String) {

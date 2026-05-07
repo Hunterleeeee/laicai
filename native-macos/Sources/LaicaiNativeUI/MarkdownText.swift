@@ -5,12 +5,20 @@ import SwiftUI
 struct MarkdownText: View {
     let markdown: String
     let fontSize: CGFloat
+    let enablesTextSelection: Bool
+    let previewLimit: Int
     @State private var expanded = false
-    private let previewLimit = 12_000
 
-    init(_ markdown: String, fontSize: CGFloat = 14) {
+    init(
+        _ markdown: String,
+        fontSize: CGFloat = 14,
+        enablesTextSelection: Bool = true,
+        previewLimit: Int = 12_000
+    ) {
         self.markdown = markdown
         self.fontSize = fontSize
+        self.enablesTextSelection = enablesTextSelection
+        self.previewLimit = previewLimit
     }
 
     var body: some View {
@@ -66,7 +74,7 @@ struct MarkdownText: View {
                 Text(Self.inlineAttributed(text))
                     .font(.system(size: size, weight: weight))
                     .foregroundStyle(level <= 3 ? TextGrade.primary : TextGrade.secondary)
-                    .textSelection(.enabled)
+                    .selectableText(enablesTextSelection)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
                 if level <= 2 {
@@ -89,7 +97,7 @@ struct MarkdownText: View {
                 .font(.system(size: fontSize, weight: .regular))
                 .foregroundStyle(TextGrade.primary)
                 .lineSpacing(6)
-                .textSelection(.enabled)
+                .selectableText(enablesTextSelection)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.vertical, 4)
@@ -106,7 +114,7 @@ struct MarkdownText: View {
                     .font(.system(size: fontSize, weight: .regular))
                     .foregroundStyle(TextGrade.primary)
                     .lineSpacing(4)
-                    .textSelection(.enabled)
+                    .selectableText(enablesTextSelection)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -128,7 +136,7 @@ struct MarkdownText: View {
                     .foregroundStyle(TextGrade.secondary)
                     .italic()
                     .lineSpacing(5)
-                    .textSelection(.enabled)
+                    .selectableText(enablesTextSelection)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, 12)
             }
@@ -141,11 +149,11 @@ struct MarkdownText: View {
             )
 
         case .code(let lang, let code):
-            CodeBlockView(language: lang, code: code, fontSize: fontSize - 2)
+            CodeBlockView(language: lang, code: code, fontSize: fontSize - 2, enablesTextSelection: enablesTextSelection)
                 .padding(.vertical, 4)
 
         case .table(let headers, let rows):
-            TableBlockView(headers: headers, rows: rows, fontSize: fontSize - 1)
+            TableBlockView(headers: headers, rows: rows, fontSize: fontSize - 1, enablesTextSelection: enablesTextSelection)
                 .padding(.vertical, 6)
 
         case .divider:
@@ -162,6 +170,10 @@ struct MarkdownText: View {
     // MARK: - Inline formatting (bold, code, links)
 
     private static func inlineAttributed(_ text: String) -> AttributedString {
+        let key = NSString(string: String(text.prefix(64)) + "_\(text.count)_\(text.suffix(32).hashValue)")
+        if let cached = inlineCache.object(forKey: key) {
+            return cached.value
+        }
         var result: AttributedString
         if let attributed = try? AttributedString(
             markdown: text,
@@ -188,6 +200,8 @@ struct MarkdownText: View {
                 result[range].foregroundColor = Brand.primary
             }
         }
+        inlineCache.setObject(InlineCacheEntry(value: result), forKey: key)
+        inlineCache.countLimit = 400
         return result
     }
 
@@ -211,7 +225,13 @@ struct MarkdownText: View {
         init(blocks: [Block]) { self.blocks = blocks }
     }
 
+    private final class InlineCacheEntry {
+        let value: AttributedString
+        init(value: AttributedString) { self.value = value }
+    }
+
     private static let blockCache = NSCache<NSString, BlockCacheEntry>()
+    private static let inlineCache = NSCache<NSString, InlineCacheEntry>()
 
     private static func cachedParse(_ text: String) -> [Block] {
         let key = NSString(string: String(text.prefix(64)) + "_\(text.count)_\(text.suffix(32).hashValue)")
@@ -421,6 +441,7 @@ private struct CodeBlockView: View {
     let language: String
     let code: String
     let fontSize: CGFloat
+    let enablesTextSelection: Bool
     @State private var isHovered = false
     @State private var copied = false
 
@@ -473,7 +494,7 @@ private struct CodeBlockView: View {
                     .font(.system(size: fontSize, weight: .regular, design: .monospaced))
                     .foregroundStyle(Color(hex: "E0E0F0"))
                     .lineSpacing(4)
-                    .textSelection(.enabled)
+                    .selectableText(enablesTextSelection)
                     .padding(AppSpace.md)
             }
         }
@@ -496,6 +517,7 @@ private struct TableBlockView: View {
     let headers: [String]
     let rows: [[String]]
     let fontSize: CGFloat
+    let enablesTextSelection: Bool
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -506,7 +528,7 @@ private struct TableBlockView: View {
                         Text(header)
                             .font(.system(size: fontSize, weight: .semibold))
                             .foregroundStyle(TextGrade.primary)
-                            .textSelection(.enabled)
+                            .selectableText(enablesTextSelection)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
                             .frame(minWidth: columnWidth(idx), alignment: .leading)
@@ -523,7 +545,7 @@ private struct TableBlockView: View {
                             Text(cell)
                                 .font(.system(size: fontSize, weight: .regular))
                                 .foregroundStyle(TextGrade.secondary)
-                                .textSelection(.enabled)
+                                .selectableText(enablesTextSelection)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
                                 .frame(minWidth: columnWidth(colIdx), alignment: .leading)
@@ -558,5 +580,16 @@ private struct TableBlockView: View {
 private extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func selectableText(_ enabled: Bool) -> some View {
+        if enabled {
+            self.textSelection(.enabled)
+        } else {
+            self.textSelection(.disabled)
+        }
     }
 }

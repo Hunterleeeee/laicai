@@ -162,7 +162,9 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
     }
 
     public static func isLocalConnector(_ connector: ConnectorProfile) -> Bool {
-        if connector.kind.localizedCaseInsensitiveContains("ollama") { return true }
+        if LiveChatRuntime.usesOllamaNativeProtocol(endpoint: connector.endpoint, kind: connector.kind) {
+            return true
+        }
         if connector.name.localizedCaseInsensitiveContains("本地")
             || connector.name.localizedCaseInsensitiveContains("local")
             || connector.name.localizedCaseInsensitiveContains("ollama") {

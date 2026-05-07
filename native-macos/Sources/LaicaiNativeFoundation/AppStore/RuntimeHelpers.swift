@@ -111,6 +111,7 @@ extension AppStore {
         normalized.endpoint = connector.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         normalized.modelName = connector.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
         normalized.note = connector.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        normalized.kind = LiveChatRuntime.normalizedConnectorKind(normalized.kind, endpoint: normalized.endpoint)
         if let previous,
            Self.toolCallingIdentityChanged(from: previous, to: normalized) {
             normalized.toolCallingCapability = nil

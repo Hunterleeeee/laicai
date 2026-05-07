@@ -17,8 +17,8 @@ public final class AppStore: ObservableObject {
     var healthChecksInFlight: Set<UUID> = []
     let streamFlushCharacterThreshold = 200
     let streamFlushInterval: TimeInterval = 0.25
-    let chatStreamFlushCharacterThreshold = 240
-    let chatStreamFlushInterval: TimeInterval = 0.30
+    let chatStreamFlushCharacterThreshold = 900
+    let chatStreamFlushInterval: TimeInterval = 0.65
     private var shellStreamObserver: NSObjectProtocol?
 
     // H1: Debounced persistence — collapse rapid persist calls into one

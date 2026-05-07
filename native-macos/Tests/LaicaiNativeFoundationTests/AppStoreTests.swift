@@ -1924,14 +1924,31 @@ final class AppStoreTests: LaicaiNativeFoundationTestCase {
         let base = LiveChatRuntime.buildURL(from: "http://127.0.0.1:11434", kind: "ollama")
         let apiBase = LiveChatRuntime.buildURL(from: "http://127.0.0.1:11434/api", kind: "ollama")
         let compatBase = LiveChatRuntime.buildURL(from: "http://127.0.0.1:11434/v1", kind: "ollama")
+        let localCompatBase = LiveChatRuntime.buildURL(from: "http://127.0.0.1:53759/v1", kind: "ollama")
         let explicitNative = LiveChatRuntime.buildURL(from: "http://127.0.0.1:53759/api/chat", kind: "ollama")
         let explicitCompat = LiveChatRuntime.buildURL(from: "http://127.0.0.1:11434/v1/chat/completions", kind: "ollama")
 
         XCTAssertEqual(base.absoluteString, "http://127.0.0.1:11434/api/chat")
         XCTAssertEqual(apiBase.absoluteString, "http://127.0.0.1:11434/api/chat")
         XCTAssertEqual(compatBase.absoluteString, "http://127.0.0.1:11434/v1/chat/completions")
+        XCTAssertEqual(localCompatBase.absoluteString, "http://127.0.0.1:53759/v1/chat/completions")
         XCTAssertEqual(explicitNative.absoluteString, "http://127.0.0.1:53759/api/chat")
         XCTAssertEqual(explicitCompat.absoluteString, "http://127.0.0.1:11434/v1/chat/completions")
+    }
+
+    func testConnectorKindNormalizesExplicitV1EndpointsSavedAsOllama() {
+        XCTAssertEqual(
+            LiveChatRuntime.normalizedConnectorKind("ollama", endpoint: "https://ds2api.endpoint.oai.red/v1"),
+            "openai-compatible"
+        )
+        XCTAssertEqual(
+            LiveChatRuntime.normalizedConnectorKind("ollama", endpoint: "http://127.0.0.1:53759/v1"),
+            "openai-compatible"
+        )
+        XCTAssertEqual(
+            LiveChatRuntime.normalizedConnectorKind("ollama", endpoint: "http://127.0.0.1:11434"),
+            "ollama"
+        )
     }
 
     func testMalformedEndpointFallsBackWithoutCrashing() {
@@ -2081,5 +2098,41 @@ final class AppStoreTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertEqual(response.assistantText, "")
         XCTAssertFalse(response.assistantText.contains("模型没有返回可显示内容"))
+    }
+
+    func testLiveChatRuntimeTreatsLocalV1OllamaProfileAsOpenAICompatible() async throws {
+        var capturedURL: URL?
+        var capturedBody = ""
+        let session = makeStubbedSession { request in
+            capturedURL = request.url
+            capturedBody = request.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let response = HTTPURLResponse(
+                url: request.url ?? URL(string: "http://127.0.0.1")!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, #"{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"#.data(using: .utf8)!)
+        }
+        let runtime = LiveChatRuntime(session: session)
+
+        let response = try await runtime.sendMessage(SendMessageRequest(
+            sessionID: UUID(),
+            message: "ping",
+            connector: ConnectorProfile(
+                name: "本地",
+                kind: "ollama",
+                endpoint: "http://127.0.0.1:53759/v1",
+                modelName: "gpt-5.5",
+                note: "",
+                health: .ready
+            ),
+            modeLabel: "测试"
+        ))
+
+        XCTAssertEqual(response.assistantText, "ok")
+        XCTAssertEqual(capturedURL?.absoluteString, "http://127.0.0.1:53759/v1/chat/completions")
+        XCTAssertTrue(capturedBody.contains(#""max_tokens""#))
+        XCTAssertFalse(capturedBody.contains(#""keep_alive""#))
     }
 }

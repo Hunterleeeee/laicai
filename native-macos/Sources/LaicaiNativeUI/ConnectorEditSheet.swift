@@ -198,12 +198,14 @@ struct ConnectorEditSheet: View {
 
     private func buildConnector(lastCheckedAt: Date? = nil) -> ConnectorProfile {
         let policy: ConnectorToolCallingPolicy? = toolCallingPolicy == .automatic ? nil : toolCallingPolicy
+        let endpointValue = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedKind = LiveChatRuntime.normalizedConnectorKind(kind, endpoint: endpointValue)
         switch mode {
         case .add:
             return ConnectorProfile(
                 name: name.trimmingCharacters(in: .whitespaces),
-                kind: kind,
-                endpoint: endpoint.trimmingCharacters(in: .whitespaces),
+                kind: resolvedKind,
+                endpoint: endpointValue,
                 modelName: modelName.trimmingCharacters(in: .whitespaces),
                 note: apiKey,
                 toolCallingPolicy: policy,
@@ -214,8 +216,8 @@ struct ConnectorEditSheet: View {
             return ConnectorProfile(
                 id: existing.id,
                 name: name.trimmingCharacters(in: .whitespaces),
-                kind: kind,
-                endpoint: endpoint.trimmingCharacters(in: .whitespaces),
+                kind: resolvedKind,
+                endpoint: endpointValue,
                 modelName: modelName.trimmingCharacters(in: .whitespaces),
                 note: apiKey,
                 toolCallingPolicy: policy,

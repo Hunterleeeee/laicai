@@ -97,7 +97,7 @@ extension AgentLoop {
     }
 
     static func usesOllamaChat(_ connector: ConnectorProfile) -> Bool {
-        connector.kind == "ollama" || connector.endpoint.contains(":11434")
+        LiveChatRuntime.usesOllamaNativeProtocol(endpoint: connector.endpoint, kind: connector.kind)
     }
 
     static func meetsCompletionCriteria(
