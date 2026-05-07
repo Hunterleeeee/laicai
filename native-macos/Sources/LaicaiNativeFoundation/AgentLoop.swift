@@ -1236,7 +1236,6 @@ public final class AgentLoop: ObservableObject {
                                     }
                                     // C3: Automatic parameter mutation retry
                                     // When tools fail with fixable errors, orchestration layer
-                                    // retries with adjusted parameters before giving control back to model.
                                     if !toolResult.success {
                                         if toolName == "file.read",
                                            let path = callStep.toolParams?["path"] {
@@ -1250,6 +1249,13 @@ public final class AgentLoop: ObservableObject {
                                                     )
                                                     taskContext.memory.readFiles.append(path)
                                                     taskContext.memory.fileContentCache[path] = er.output
+                                                } else {
+                                                    recoveryPlan = ErrorRecoveryEngine.planRecoveryJSON(
+                                                        error: "unsupported_binary_file：\(toolResult.output)",
+                                                        toolName: toolName,
+                                                        argumentsJSON: argumentsJSON,
+                                                        attemptCount: validation.retryCount
+                                                    )
                                                 }
                                             } else if (toolResult.error == "file_not_found" || toolResult.output.contains("不存在")),
                                                       let searchTool = self.toolRegistry.tool(named: "code_search") {

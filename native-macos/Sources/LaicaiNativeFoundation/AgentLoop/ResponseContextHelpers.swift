@@ -13,8 +13,11 @@ extension AgentLoop {
         if !shells.isEmpty { lines.append("- 已执行 \(shells.count) 个命令") }
         let searches = task.steps.filter { $0.kind == .toolResult && ["code.search", "web.search"].contains($0.toolName ?? "") && !$0.isFailure }
         if !searches.isEmpty { lines.append("- 已搜索 \(searches.count) 次") }
-        let failures = task.steps.filter { $0.kind == .toolResult && $0.isFailure }
+        let failures = task.steps.filter { ($0.kind == .toolResult || $0.kind == .error || $0.kind == .aiThinking) && $0.isFailure }
         if !failures.isEmpty { lines.append("- \(failures.count) 次工具调用失败") }
+        if task.steps.contains(where: { $0.toolName == "file.read" && $0.isFailure && ($0.text.contains("unsupported_binary_file") || $0.text.contains("文档/表格")) }) {
+            lines.append("- 表格/文档读取失败：下一步必须使用 file_extract 提取同一路径")
+        }
         // Include last meaningful output
         if let lastOutput = task.steps.last(where: { $0.kind == .textOutput }) {
             let preview = compactSummaryText(lastOutput.text, limit: 300)

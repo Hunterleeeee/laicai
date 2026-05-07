@@ -1386,6 +1386,24 @@ final class AppStoreToolingTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(toolName, "workspace.index")
     }
 
+    func testUnsupportedBinaryReadRecoveryFallsBackToFileExtract() {
+        let plan = ErrorRecoveryEngine.planRecovery(
+            error: "unsupported_binary_file：这是 XLSX 文档/表格，请改用 file_extract",
+            toolName: "file.read",
+            params: ["path": "/tmp/需求.xlsx"],
+            attemptCount: 0
+        )
+
+        guard case let .fallbackTool(toolName, argumentsJSON) = plan.action else {
+            XCTFail("Expected file.extract fallback")
+            return
+        }
+
+        XCTAssertEqual(toolName, "file.extract")
+        XCTAssertTrue(argumentsJSON.contains("/tmp/需求.xlsx"))
+        XCTAssertTrue(argumentsJSON.contains("60000"))
+    }
+
     func testSensitivePathsAreBlocked() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }

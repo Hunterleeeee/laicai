@@ -81,7 +81,7 @@ public struct ValidationEngine {
     private static let deterministicErrors: Set<String> = [
         "invalid_params", "invalid_edits", "invalid_batch_edits", "empty_edits", "empty_batch_edits",
         "patch_not_found", "patch_ambiguous", "all_edits_failed",
-        "file_not_found", "security_denied", "unknown_tool"
+        "file_not_found", "unsupported_binary_file", "security_denied", "unknown_tool"
     ]
 
     /// Execute tool with JSON arguments (function calling style)
@@ -291,6 +291,17 @@ public struct ErrorRecoveryEngine {
             return RecoveryPlan(
                 action: .fallbackTool("workspace.index", "{\"maxFiles\":300,\"maxDepth\":5}"),
                 description: "搜索工具失败，回退到受控项目索引",
+                suppressOriginalFailure: true
+            )
+        }
+
+        if toolName == "file.read", error.contains("unsupported_binary_file") || error.contains("file_extract") {
+            let path = params["path"] ?? ""
+            let payload: [String: Any] = ["path": path, "limit": 60_000]
+            let json = (try? JSONSerialization.data(withJSONObject: payload)).flatMap { String(data: $0, encoding: .utf8) } ?? "{\"path\":\"\(path)\"}"
+            return RecoveryPlan(
+                action: .fallbackTool("file.extract", json),
+                description: "file.read 检测到表格/文档，改用 file.extract 提取文本",
                 suppressOriginalFailure: true
             )
         }
