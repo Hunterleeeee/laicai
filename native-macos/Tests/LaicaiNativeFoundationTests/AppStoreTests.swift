@@ -2065,4 +2065,21 @@ final class AppStoreTests: LaicaiNativeFoundationTestCase {
         XCTAssertNil(result.toolCallingCapability)
         XCTAssertEqual(requestMethods, ["GET"])
     }
+
+    func testLiveChatRuntimePreservesEmptyAssistantContentForOrchestratorRecovery() async throws {
+        let session = makeStubbedSession(
+            body: #"{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}"#.data(using: .utf8)!
+        )
+        let runtime = LiveChatRuntime(session: session)
+
+        let response = try await runtime.sendMessage(SendMessageRequest(
+            sessionID: UUID(),
+            message: "ping",
+            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://api.example.com/v1/chat/completions", modelName: "test", note: "", health: .ready),
+            modeLabel: "测试"
+        ))
+
+        XCTAssertEqual(response.assistantText, "")
+        XCTAssertFalse(response.assistantText.contains("模型没有返回可显示内容"))
+    }
 }

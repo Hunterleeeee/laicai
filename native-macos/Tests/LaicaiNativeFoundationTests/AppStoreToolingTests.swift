@@ -275,6 +275,28 @@ final class AppStoreToolingTests: LaicaiNativeFoundationTestCase {
         })
     }
 
+    func testAgentLoopRetriesEmptyResponsesWithoutSurfacingRuntimeFallbackText() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let runtime = EmptyThenFinalRuntime()
+        let loop = AgentLoop(
+            config: .init(maxIterations: 4, maxTokensPerTurn: 1024, workspaceRoot: workspace.path),
+            runtime: runtime
+        )
+
+        let task = try await loop.run(
+            message: "整理到 wiki",
+            intent: .task,
+            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            context: TaskContext(workspaceRoot: workspace.path, vaultRoot: workspace.path)
+        )
+
+        XCTAssertGreaterThanOrEqual(runtime.requests.count, 3)
+        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.contains("模型返回空内容，自动重试") })
+        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.contains("临时移除工具定义") })
+        XCTAssertFalse(task.steps.contains { $0.kind == .textOutput && $0.text.contains("模型没有返回可显示内容") })
+    }
+
     func testAgentLoopIncludesToolsForTasks() async throws {
         let runtime = CapturingToolsRuntime()
         let loop = AgentLoop(

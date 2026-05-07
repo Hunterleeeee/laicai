@@ -306,7 +306,11 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             if isOllamaNative,
                let ollama = try? JSONDecoder().decode(OllamaChatChunk.self, from: data) {
                 reasoningContent = ollama.message?.thinking
-                text = Self.finalAssistantText(fromVisible: Self.visibleAnswer(from: ollama.message?.content ?? ""), reasoningContent: reasoningContent)
+                text = Self.finalAssistantText(
+                    fromVisible: Self.visibleAnswer(from: ollama.message?.content ?? ""),
+                    reasoningContent: reasoningContent,
+                    fallbackForEmpty: false
+                )
                 toolCalls = ollama.message?.toolCalls ?? []
                 finishReason = nil
                 metrics = Self.metrics(
@@ -323,7 +327,8 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 reasoningContent = choice?.message.reasoningContent ?? choice?.message.reasoning
                 text = Self.finalAssistantText(
                     fromVisible: Self.visibleAnswer(from: choice?.message.content ?? ""),
-                    reasoningContent: reasoningContent
+                    reasoningContent: reasoningContent,
+                    fallbackForEmpty: false
                 )
                 toolCalls = choice?.message.toolCalls ?? []
                 finishReason = choice?.finishReason
@@ -521,7 +526,11 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             )
         }
 
-        let finalText = Self.finalAssistantText(fromVisible: visibleText, reasoningContent: reasoningText.isEmpty ? nil : reasoningText)
+        let finalText = Self.finalAssistantText(
+            fromVisible: visibleText,
+            reasoningContent: reasoningText.isEmpty ? nil : reasoningText,
+            fallbackForEmpty: false
+        )
         let metrics = Self.metrics(
             startedAt: startedAt,
             firstVisibleAt: firstVisibleAt,
@@ -1058,7 +1067,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func finalAssistantText(fromVisible visible: String, reasoningContent: String?) -> String {
+    private static func finalAssistantText(fromVisible visible: String, reasoningContent: String?, fallbackForEmpty: Bool) -> String {
         let text = visible.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty { return text }
         // Thinking model: content is empty but reasoning_content has substance.
@@ -1071,7 +1080,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             let tail = String(trimmed.suffix(2000))
             return tail
         }
-        return "模型没有返回可显示内容。请检查模型是否可用，或换一个模型重试。"
+        return fallbackForEmpty ? "模型没有返回可显示内容。请检查模型是否可用，或换一个模型重试。" : ""
     }
 
     /// Try to extract a conclusion section from reasoning text.
@@ -1093,6 +1102,9 @@ public struct LiveChatRuntime: ChatRuntimeClient {
     private static func responseStatusLine(finalText: String, reasoningCount: Int) -> String {
         if reasoningCount > 0 && finalText.hasPrefix("模型只返回了思考内容") {
             return "仅收到思考内容"
+        }
+        if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "空响应"
         }
         return "文本响应"
     }

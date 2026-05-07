@@ -673,7 +673,7 @@ public final class AgentLoop: ObservableObject {
         var nudgeCount = 0
         let maxNudges = 2
         var consecutiveEmptyResponses = 0
-        let maxConsecutiveEmpty = 2
+        let maxConsecutiveEmpty = 3
         var transientRetryCount = 0
         let maxTransientRetries = isReadOnlyRun ? 1 : 3
         var toolFailureCounts: [String: Int] = [:]  // "toolName:target" → count
@@ -1942,9 +1942,9 @@ public final class AgentLoop: ObservableObject {
                 let text = isEmptyResponse ? "（空响应）" : rawText
 
                 // Empty / thinking-only responses: retry with a counter to prevent infinite loops
-                if isEmptyResponse && !toolDefs.isEmpty && iteration < effectiveMaxIterations - 1 {
+                if isEmptyResponse && iteration < effectiveMaxIterations - 1 {
                     consecutiveEmptyResponses += 1
-                    if consecutiveEmptyResponses >= maxConsecutiveEmpty {
+                    if consecutiveEmptyResponses >= maxConsecutiveEmpty || (toolDefs.isEmpty && consecutiveEmptyResponses > 1) {
                         let stopStep = TaskStep(
                             kind: .aiThinking,
                             text: "模型连续 \(consecutiveEmptyResponses) 次返回空响应/纯思考内容，停止重试。建议换用非思考模型或简化任务描述。",
@@ -1956,7 +1956,7 @@ public final class AgentLoop: ObservableObject {
                         break
                     }
                     // D5: On 2nd empty response, strip tools — thinking models sometimes choke on schemas
-                    if consecutiveEmptyResponses == 2 {
+                    if consecutiveEmptyResponses == 2 && !toolDefs.isEmpty {
                         toolDefs = []
                         let stripStep = TaskStep(
                             kind: .aiThinking,
@@ -1966,9 +1966,11 @@ public final class AgentLoop: ObservableObject {
                         )
                         task.steps.append(stripStep)
                         onStep(stripStep)
+                        messages.append(ChatMessage(role: "system", content: "上一轮模型没有返回任何可见内容或工具调用。已临时移除工具 schema，请直接用文字给出基于已有材料的结论；如果用户要求保存/写入但工具不可用，请明确说明尚未保存。"))
+                        continue
                     }
                     // Auto-retry empty response once before giving up
-                    if consecutiveEmptyResponses == 1 && iteration < effectiveMaxIterations - 1 {
+                    if consecutiveEmptyResponses == 1 {
                         let retryStep = TaskStep(
                             kind: .aiThinking,
                             text: "模型返回空内容，自动重试中…",

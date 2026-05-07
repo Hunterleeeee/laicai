@@ -266,6 +266,19 @@ final class ShellTraversalThenFinalRuntime: ChatRuntimeClient {
 }
 
 @MainActor
+final class EmptyThenFinalRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        if requests.count <= 2 {
+            return SendMessageResponse(assistantText: "")
+        }
+        return SendMessageResponse(assistantText: "已基于已有材料给出结论。")
+    }
+}
+
+@MainActor
 final class StreamingRuntime: ChatRuntimeClient {
     func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
         SendMessageResponse(assistantText: "你好，世界")
