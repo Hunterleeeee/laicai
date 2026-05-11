@@ -1290,59 +1290,12 @@ public final class AgentLoop: ObservableObject {
                                     let cbTarget = callStep.toolParams?["path"] ?? callStep.toolParams?["query"] ?? ""
                                     let cbSig = "\(toolName):\(cbTarget.prefix(60))"
                                     if circuitBrokenTools.contains(cbSig) {
-                                        // Auto-repair: file.edit → read current content + file.write
-                                        if toolName == "file.edit",
-                                           let editPath = callStep.toolParams?["path"],
-                                           let readTool = self.toolRegistry.tool(named: "file_read"),
-                                           let writeTool = self.toolRegistry.tool(named: "file_write") {
-                                            // Step 1: read current file
-                                            let readJSON = (try? JSONSerialization.data(withJSONObject: ["path": editPath])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                                            let readResult = try? await readTool.execute(argumentsJSON: readJSON, context: taskContext)
-                                            if let rr = readResult, rr.success {
-                                                // Step 2: extract newText from edits param and append
-                                                let editsStr = callStep.toolParams?["edits"] ?? "[]"
-                                                let newTexts = Self.extractNewTexts(from: editsStr)
-                                                if !newTexts.isEmpty {
-                                                    let separator = rr.output.hasSuffix("\n") ? "" : "\n"
-                                                    let merged = rr.output + separator + newTexts.joined(separator: "\n")
-                                                    let writeDict: [String: Any] = ["path": editPath, "content": merged]
-                                                    let writeJSON = (try? JSONSerialization.data(withJSONObject: writeDict)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                                                    let writeResult = try? await writeTool.execute(argumentsJSON: writeJSON, context: taskContext)
-                                                    if let wr = writeResult, wr.success {
-                                                        toolResult = ToolResult(
-                                                            output: "🔴→✅ 熔断自动修复：file.edit 连续失败，编排层改用 file.read + file.write 完成。\n\(wr.output)",
-                                                            data: wr.data,
-                                                            success: true
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        // Auto-repair: code.search → shell grep
-                                        if toolResult == nil && toolName == "code.search",
-                                           let query = callStep.toolParams?["query"],
-                                           let shellTool = self.toolRegistry.tool(named: "shell_exec") {
-                                            let safeQuery = query.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\\", with: "")
-                                            let grepCmd = "grep -rn '\(safeQuery)' . --include='*.swift' --include='*.md' --include='*.py' --include='*.js' --include='*.ts' | head -30"
-                                            let shellDict: [String: Any] = ["command": grepCmd]
-                                            let shellJSON = (try? JSONSerialization.data(withJSONObject: shellDict)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                                            let shellResult = try? await shellTool.execute(argumentsJSON: shellJSON, context: taskContext)
-                                            if let sr = shellResult, sr.success {
-                                                toolResult = ToolResult(
-                                                    output: "🔴→✅ 熔断自动修复：code.search 连续失败，编排层改用 grep 搜索。\n\(sr.output)",
-                                                    data: sr.data,
-                                                    success: true
-                                                )
-                                            }
-                                        }
-                                        // Fallback: still return circuit_broken if auto-repair failed
-                                        if toolResult == nil {
-                                            toolResult = ToolResult(
-                                                output: "🔴 已熔断：`\(toolName)` 对该目标已连续失败多次且自动修复失败。请使用其他工具完成此操作。",
-                                                success: false,
-                                                error: "circuit_broken"
-                                            )
-                                        }
+                                        toolResult = await Self.attemptCircuitBreakerRepair(
+                                            toolName: toolName,
+                                            callStep: callStep,
+                                            taskContext: taskContext,
+                                            toolRegistry: self.toolRegistry
+                                        )
                                     }
                                 }
                                 if toolResult == nil, let tool = self.toolRegistry.tool(named: apiToolName) {
@@ -1394,187 +1347,17 @@ public final class AgentLoop: ObservableObject {
                                         // C3: Automatic parameter mutation retry
                                         // When tools fail with fixable errors, orchestration layer
                                         if !toolResult.success {
-                                            if toolName == "file.read",
-                                               let path = callStep.toolParams?["path"] {
-                                                if toolResult.error == "unsupported_binary_file",
-                                                   let extractTool = self.toolRegistry.tool(named: "file_extract") ?? self.toolRegistry.tool(named: "file.extract") {
-                                                    if let er = await Self.autoExtractUnsupportedRead(path: path, extractTool: extractTool, context: taskContext) {
-                                                        toolResult = ToolResult(
-                                                            output: "file.read 检测到表格/文档，编排层自动改用 file.extract 提取成功：\n\(er.output)",
-                                                            data: er.data,
-                                                            success: true
-                                                        )
-                                                        taskContext.memory.readFiles.append(path)
-                                                        taskContext.memory.fileContentCache[path] = er.output
-                                                    } else {
-                                                        recoveryPlan = ErrorRecoveryEngine.planRecoveryJSON(
-                                                            error: "unsupported_binary_file：\(toolResult.output)",
-                                                            toolName: toolName,
-                                                            argumentsJSON: argumentsJSON,
-                                                            attemptCount: validation.retryCount
-                                                        )
-                                                    }
-                                                } else if (toolResult.error == "file_not_found" || toolResult.output.contains("不存在")),
-                                                          let searchTool = self.toolRegistry.tool(named: "code_search") {
-                                                    // Auto-search for similar filename
-                                                    let filename = (path as NSString).lastPathComponent
-                                                    let searchJSON = "{\"query\":\"\(filename)\"}"
-                                                    let searchResult = try? await searchTool.execute(argumentsJSON: searchJSON, context: taskContext)
-                                                    if let sr = searchResult, sr.success, !sr.output.hasPrefix("未找到") {
-                                                        let suggestion = String(sr.output.prefix(500))
-                                                        toolResult = ToolResult(
-                                                            output: "\(toolResult.output)\n\n编排层自动搜索近似文件：\n\(suggestion)\n请从以上结果中选择正确的文件路径。",
-                                                            data: toolResult.data,
-                                                            success: false,
-                                                            error: toolResult.error
-                                                        )
-                                                    }
-                                                }
-                                            } else if toolName == "file.write" && toolResult.error == "security_denied" {
-                                                // E3: Auto-heal security_denied by adding path to allowed list and retrying
-                                                if let path = callStep.toolParams?["path"] {
-                                                    let dir = (path as NSString).deletingLastPathComponent
-                                                    if !dir.isEmpty && dir != "/" && !WorkspaceSandbox.isOverlyBroadWorkspace(dir) {
-                                                        WorkspaceSandbox.shared.addAllowedPath(dir)
-                                                        // Retry the write
-                                                        let retryResult = try? await tool.execute(argumentsJSON: argumentsJSON, context: taskContext)
-                                                        if let rr = retryResult, rr.success {
-                                                            toolResult = ToolResult(
-                                                                output: "编排层自动授权路径后重试成功：\(rr.output)",
-                                                                data: rr.data,
-                                                                success: true
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            } else if toolName == "file.edit" && !toolResult.success && toolResult.error != "file_not_found" && toolResult.error != "security_denied" {
-                                                // E3+: file.edit failed (all_edits_failed, invalid_edits, etc.)
-                                                // Auto-fallback: read current content + apply newText edits via file.write
-                                                if toolResult.error == "all_edits_failed",
-                                                   let editPath = callStep.toolParams?["path"],
-                                                   let editsJSON = callStep.toolParams?["edits"],
-                                                   let readTool = self.toolRegistry.tool(named: "file_read"),
-                                                   let writeTool = self.toolRegistry.tool(named: "file_write") {
-                                                    // Read current file content
-                                                    let readDict: [String: Any] = ["path": editPath]
-                                                    let readJSON = (try? JSONSerialization.data(withJSONObject: readDict)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                                                    if let readResult = try? await readTool.execute(argumentsJSON: readJSON, context: taskContext),
-                                                       readResult.success {
-                                                        // Extract newText from the first edit to use as the intended content
-                                                        // Parse edits to get all newText segments
-                                                        var fallbackContent = readResult.output
-                                                        if let editsData = editsJSON.data(using: .utf8),
-                                                           let editsArr = try? JSONSerialization.jsonObject(with: editsData) as? [[String: Any]] {
-                                                            for editItem in editsArr {
-                                                                if let oldText = editItem["oldText"] as? String,
-                                                                   let newText = editItem["newText"] as? String,
-                                                                   !oldText.isEmpty {
-                                                                    // Try fuzzy line-by-line matching for whitespace differences
-                                                                    let oldNorm = oldText.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: "\n")
-                                                                    let contentNorm = fallbackContent.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: "\n")
-                                                                    if contentNorm.contains(oldNorm) {
-                                                                        // Find the actual range using normalized comparison
-                                                                        let lines = fallbackContent.components(separatedBy: "\n")
-                                                                        let oldLines = oldText.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-                                                                        for startIdx in 0...(max(0, lines.count - oldLines.count)) {
-                                                                            let window = lines[startIdx..<min(startIdx + oldLines.count, lines.count)]
-                                                                            let windowNorm = window.map { $0.trimmingCharacters(in: .whitespaces) }
-                                                                            if Array(windowNorm) == oldLines {
-                                                                                var newLines = Array(lines[0..<startIdx])
-                                                                                newLines.append(contentsOf: newText.components(separatedBy: "\n"))
-                                                                                newLines.append(contentsOf: lines[(startIdx + oldLines.count)...])
-                                                                                fallbackContent = newLines.joined(separator: "\n")
-                                                                                break
-                                                                            }
-                                                                        }
-                                                                    } else if oldText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                                                        // Append mode
-                                                                        let sep = fallbackContent.hasSuffix("\n") ? "" : "\n"
-                                                                        fallbackContent += sep + newText
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                        // Write back via file.write
-                                                        if fallbackContent != readResult.output {
-                                                            let writeDict: [String: Any] = ["path": editPath, "content": fallbackContent]
-                                                            let writeJSON = (try? JSONSerialization.data(withJSONObject: writeDict)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                                                            if let wr = try? await writeTool.execute(argumentsJSON: writeJSON, context: taskContext), wr.success {
-                                                                toolResult = ToolResult(
-                                                                    output: "file.edit 匹配失败，编排层自动降级：读取文件 → 模糊匹配替换 → file.write 写回成功\n\(wr.output)",
-                                                                    data: wr.data,
-                                                                    success: true,
-                                                                    error: nil
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                // If auto-fallback didn't work, add hint
-                                                if !toolResult.success {
-                                                    let editFailCount = task.steps.filter { $0.toolName == "file.edit" && $0.isFailure }.count
-                                                    let hint = "\n\n⚠️ file.edit 失败 \(editFailCount + 1) 次，oldText 匹配不上文件内容。" +
-                                                        "\n请改用 file.write 全量写入（先 file.read 读取完整内容，修改后 file.write 写回）。"
-                                                    toolResult = ToolResult(
-                                                        output: toolResult.output + hint,
-                                                        data: toolResult.data,
-                                                        success: false,
-                                                        error: toolResult.error
-                                                    )
-                                                }
-                                            } else if toolName == "file.edit" && (toolResult.error == "file_not_found" || toolResult.output.contains("不存在")) {
-                                                // E3: file.edit on nonexistent → auto-downgrade to file.write
-                                                if let path = callStep.toolParams?["path"],
-                                                   let content = callStep.toolParams?["content"] ?? callStep.toolParams?["new_content"],
-                                                   let writeTool = self.toolRegistry.tool(named: "file_write") {
-                                                    let writeDict: [String: Any] = ["path": path, "content": content]
-                                                    let writeJSON = (try? JSONSerialization.data(withJSONObject: writeDict)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                                                    let writeResult = try? await writeTool.execute(argumentsJSON: writeJSON, context: taskContext)
-                                                    if let wr = writeResult, wr.success {
-                                                        toolResult = ToolResult(
-                                                            output: "文件不存在，编排层自动改用 file.write 创建：\(wr.output)",
-                                                            data: wr.data,
-                                                            success: true
-                                                        )
-                                                    }
-                                                }
-                                            } else if toolName == "verify.build" && !toolResult.success {
-                                                // E3: Extract actionable error info from build failures
-                                                let output = toolResult.output
-                                                // Extract "file:line: error:" patterns
-                                                let errorLines = output.components(separatedBy: .newlines).filter { line in
-                                                    let l = line.lowercased()
-                                                    return l.contains("error:") || l.contains("错误") || l.contains("fatal")
-                                                }.prefix(5)
-                                                if !errorLines.isEmpty {
-                                                    let errorSummary = errorLines.joined(separator: "\n")
-                                                    toolResult = ToolResult(
-                                                        output: toolResult.output + "\n\n编排层提取关键错误：\n\(errorSummary)\n\n请直接 file_edit 修复以上错误行，然后再次 verify_build。",
-                                                        data: toolResult.data,
-                                                        success: false,
-                                                        error: toolResult.error
-                                                    )
-                                                }
-                                            } else if toolName == "code.search",
-                                                      let query = callStep.toolParams?["query"],
-                                                      (toolResult.output.hasPrefix("未找到") || toolResult.output.contains("0 个匹配")),
-                                                      query.count > 4 {
-                                                // Auto-simplify: try with just the last meaningful word
-                                                let words = query.components(separatedBy: CharacterSet.alphanumerics.union(.init(charactersIn: "._")).inverted).filter { $0.count > 2 }
-                                                if let simpler = words.last, simpler != query,
-                                                   let searchTool = self.toolRegistry.tool(named: "code_search") {
-                                                    let retryJSON = "{\"query\":\"\(simpler)\"}"
-                                                    let retryResult = try? await searchTool.execute(argumentsJSON: retryJSON, context: taskContext)
-                                                    if let rr = retryResult, rr.success, !rr.output.hasPrefix("未找到") {
-                                                        toolResult = ToolResult(
-                                                            output: "原查询「\(query)」无结果，编排层自动简化为「\(simpler)」重搜：\n\(rr.output)",
-                                                            data: rr.data,
-                                                            success: true
-                                                        )
-                                                        taskContext.memory.searchedQueries.append(simpler)
-                                                    }
-                                                }
-                                            }
+                                            toolResult = await Self.attemptAutoRecovery(
+                                                toolName: toolName,
+                                                callStep: callStep,
+                                                argumentsJSON: argumentsJSON,
+                                                currentResult: toolResult,
+                                                recoveryPlan: &recoveryPlan,
+                                                validation: validation,
+                                                taskContext: taskContext,
+                                                config: self.config,
+                                                toolRegistry: self.toolRegistry
+                                            )
                                         }
                                     }
                                 } else {
