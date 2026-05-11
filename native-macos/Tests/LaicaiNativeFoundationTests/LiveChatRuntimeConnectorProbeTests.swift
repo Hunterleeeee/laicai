@@ -151,6 +151,12 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(response.toolActivities.first?.name, "chat.model_unsupported")
         XCTAssertEqual(response.toolActivities.first?.isFailure, true)
     }
+    func testImageOnlyModelMessagePointsToImageTool() async throws {
+        let message = ConnectorCapabilityProfile.imageOnlyModelChatMessage(modelName: "gpt-image-2")
+
+        XCTAssertTrue(message.contains("不能作为聊天/任务模型使用"))
+        XCTAssertTrue(message.contains("生成图片请直接发送“生成图片”"))
+    }
     func testLiveChatRuntimeRejectsImageOnlyStreamingBeforeNetworkRequest() async throws {
         let session = makeStubbedSession { request in
             XCTFail("Image-only models must not be streamed through chat completions: \(request.url?.absoluteString ?? "")")

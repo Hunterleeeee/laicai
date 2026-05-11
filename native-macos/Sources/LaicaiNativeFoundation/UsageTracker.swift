@@ -12,6 +12,7 @@ public final class UsageTracker {
 
     private var db: OpaquePointer?
     private let queue = DispatchQueue(label: "laicai.usage-tracker", qos: .utility)
+    private let queueKey = DispatchSpecificKey<Bool>()
     private let path: String
 
     public init(path: String? = nil) {
@@ -19,11 +20,16 @@ public final class UsageTracker {
         let dir = (base as NSString).appendingPathComponent("Laicai")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         self.path = (dir as NSString).appendingPathComponent("usage.sqlite3")
+        queue.setSpecific(key: queueKey, value: true)
         open()
         migrate()
     }
 
-    deinit { sqlite3_close(db) }
+    deinit {
+        withDatabase { db in
+            sqlite3_close(db)
+        }
+    }
 
     private func open() {
         if sqlite3_open(path, &db) != SQLITE_OK { db = nil }
@@ -32,6 +38,29 @@ public final class UsageTracker {
     private func exec(_ sql: String) {
         guard let db else { return }
         sqlite3_exec(db, sql, nil, nil, nil)
+    }
+
+    private func withDatabase<T>(_ fallback: T, _ body: (OpaquePointer) -> T) -> T {
+        if DispatchQueue.getSpecific(key: queueKey) == true {
+            guard let db else { return fallback }
+            return body(db)
+        }
+        return queue.sync {
+            guard let db else { return fallback }
+            return body(db)
+        }
+    }
+
+    private func withDatabase(_ body: (OpaquePointer) -> Void) {
+        if DispatchQueue.getSpecific(key: queueKey) == true {
+            guard let db else { return }
+            body(db)
+            return
+        }
+        queue.sync {
+            guard let db else { return }
+            body(db)
+        }
     }
 
     private func migrate() {
@@ -106,235 +135,244 @@ public final class UsageTracker {
 
     /// Daily usage for the last N days
     public func dailyUsage(days: Int = 30) -> [DailyUsageRow] {
-        guard let db else { return [] }
-        let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
-        let sql = """
-        SELECT date_key,
-               SUM(input_tokens) as total_input,
-               SUM(output_tokens) as total_output,
-               COUNT(*) as request_count,
-               AVG(duration_seconds) as avg_duration,
-               AVG(tokens_per_second) as avg_speed
-        FROM usage_records
-        WHERE timestamp > ?
-        GROUP BY date_key
-        ORDER BY date_key ASC;
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_double(stmt, 1, cutoff)
-        var rows: [DailyUsageRow] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            rows.append(DailyUsageRow(
-                dateKey: String(cString: sqlite3_column_text(stmt, 0)),
-                inputTokens: Int(sqlite3_column_int64(stmt, 1)),
-                outputTokens: Int(sqlite3_column_int64(stmt, 2)),
-                requestCount: Int(sqlite3_column_int(stmt, 3)),
-                avgDuration: sqlite3_column_double(stmt, 4),
-                avgSpeed: sqlite3_column_double(stmt, 5)
-            ))
+        withDatabase([]) { db in
+            let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
+            let sql = """
+            SELECT date_key,
+                   SUM(input_tokens) as total_input,
+                   SUM(output_tokens) as total_output,
+                   COUNT(*) as request_count,
+                   AVG(duration_seconds) as avg_duration,
+                   AVG(tokens_per_second) as avg_speed
+            FROM usage_records
+            WHERE timestamp > ?
+            GROUP BY date_key
+            ORDER BY date_key ASC;
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, cutoff)
+            var rows: [DailyUsageRow] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                rows.append(DailyUsageRow(
+                    dateKey: Self.columnString(stmt, 0),
+                    inputTokens: Int(sqlite3_column_int64(stmt, 1)),
+                    outputTokens: Int(sqlite3_column_int64(stmt, 2)),
+                    requestCount: Int(sqlite3_column_int(stmt, 3)),
+                    avgDuration: sqlite3_column_double(stmt, 4),
+                    avgSpeed: sqlite3_column_double(stmt, 5)
+                ))
+            }
+            return rows
         }
-        sqlite3_finalize(stmt)
-        return rows
     }
 
     /// Per-model usage breakdown
     public func modelBreakdown(days: Int = 30) -> [ModelUsageRow] {
-        guard let db else { return [] }
-        let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
-        let sql = """
-        SELECT model_name,
-               SUM(input_tokens) as total_input,
-               SUM(output_tokens) as total_output,
-               COUNT(*) as request_count,
-               AVG(tokens_per_second) as avg_speed
-        FROM usage_records
-        WHERE timestamp > ?
-        GROUP BY model_name
-        ORDER BY (total_input + total_output) DESC;
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_double(stmt, 1, cutoff)
-        var rows: [ModelUsageRow] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            rows.append(ModelUsageRow(
-                modelName: String(cString: sqlite3_column_text(stmt, 0)),
-                inputTokens: Int(sqlite3_column_int64(stmt, 1)),
-                outputTokens: Int(sqlite3_column_int64(stmt, 2)),
-                requestCount: Int(sqlite3_column_int(stmt, 3)),
-                avgSpeed: sqlite3_column_double(stmt, 4)
-            ))
+        withDatabase([]) { db in
+            let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
+            let sql = """
+            SELECT model_name,
+                   SUM(input_tokens) as total_input,
+                   SUM(output_tokens) as total_output,
+                   COUNT(*) as request_count,
+                   AVG(tokens_per_second) as avg_speed
+            FROM usage_records
+            WHERE timestamp > ?
+            GROUP BY model_name
+            ORDER BY (total_input + total_output) DESC;
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, cutoff)
+            var rows: [ModelUsageRow] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                rows.append(ModelUsageRow(
+                    modelName: Self.columnString(stmt, 0),
+                    inputTokens: Int(sqlite3_column_int64(stmt, 1)),
+                    outputTokens: Int(sqlite3_column_int64(stmt, 2)),
+                    requestCount: Int(sqlite3_column_int(stmt, 3)),
+                    avgSpeed: sqlite3_column_double(stmt, 4)
+                ))
+            }
+            return rows
         }
-        sqlite3_finalize(stmt)
-        return rows
     }
 
     /// Per-project usage breakdown
     public func projectBreakdown(days: Int = 30) -> [ProjectUsageRow] {
-        guard let db else { return [] }
-        let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
-        let sql = """
-        SELECT project_name,
-               SUM(input_tokens) as total_input,
-               SUM(output_tokens) as total_output,
-               COUNT(*) as request_count
-        FROM usage_records
-        WHERE timestamp > ? AND project_name != ''
-        GROUP BY project_name
-        ORDER BY (total_input + total_output) DESC;
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_double(stmt, 1, cutoff)
-        var rows: [ProjectUsageRow] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            rows.append(ProjectUsageRow(
-                projectName: String(cString: sqlite3_column_text(stmt, 0)),
-                inputTokens: Int(sqlite3_column_int64(stmt, 1)),
-                outputTokens: Int(sqlite3_column_int64(stmt, 2)),
-                requestCount: Int(sqlite3_column_int(stmt, 3))
-            ))
+        withDatabase([]) { db in
+            let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
+            let sql = """
+            SELECT project_name,
+                   SUM(input_tokens) as total_input,
+                   SUM(output_tokens) as total_output,
+                   COUNT(*) as request_count
+            FROM usage_records
+            WHERE timestamp > ? AND project_name != ''
+            GROUP BY project_name
+            ORDER BY (total_input + total_output) DESC;
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, cutoff)
+            var rows: [ProjectUsageRow] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                rows.append(ProjectUsageRow(
+                    projectName: Self.columnString(stmt, 0),
+                    inputTokens: Int(sqlite3_column_int64(stmt, 1)),
+                    outputTokens: Int(sqlite3_column_int64(stmt, 2)),
+                    requestCount: Int(sqlite3_column_int(stmt, 3))
+                ))
+            }
+            return rows
         }
-        sqlite3_finalize(stmt)
-        return rows
     }
 
     /// Totals for a period
     public func totals(days: Int = 30) -> UsageTotals {
-        guard let db else { return UsageTotals() }
-        let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
-        let sql = """
-        SELECT SUM(input_tokens), SUM(output_tokens), COUNT(*),
-               AVG(duration_seconds), AVG(tokens_per_second)
-        FROM usage_records WHERE timestamp > ?;
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return UsageTotals() }
-        sqlite3_bind_double(stmt, 1, cutoff)
-        var result = UsageTotals()
-        if sqlite3_step(stmt) == SQLITE_ROW {
-            result.inputTokens = Int(sqlite3_column_int64(stmt, 0))
-            result.outputTokens = Int(sqlite3_column_int64(stmt, 1))
-            result.requestCount = Int(sqlite3_column_int(stmt, 2))
-            result.avgDuration = sqlite3_column_double(stmt, 3)
-            result.avgSpeed = sqlite3_column_double(stmt, 4)
+        withDatabase(UsageTotals()) { db in
+            let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
+            let sql = """
+            SELECT SUM(input_tokens), SUM(output_tokens), COUNT(*),
+                   AVG(duration_seconds), AVG(tokens_per_second)
+            FROM usage_records WHERE timestamp > ?;
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return UsageTotals() }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, cutoff)
+            var result = UsageTotals()
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                result.inputTokens = Int(sqlite3_column_int64(stmt, 0))
+                result.outputTokens = Int(sqlite3_column_int64(stmt, 1))
+                result.requestCount = Int(sqlite3_column_int(stmt, 2))
+                result.avgDuration = sqlite3_column_double(stmt, 3)
+                result.avgSpeed = sqlite3_column_double(stmt, 4)
+            }
+            return result
         }
-        sqlite3_finalize(stmt)
-        return result
     }
 
     /// Hourly pattern for today
     public func hourlyToday() -> [HourlyUsageRow] {
-        guard let db else { return [] }
-        let startOfDay = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
-        let sql = """
-        SELECT CAST(strftime('%H', timestamp, 'unixepoch', 'localtime') AS INTEGER) as hour,
-               SUM(input_tokens) as total_input,
-               SUM(output_tokens) as total_output,
-               COUNT(*) as request_count
-        FROM usage_records
-        WHERE timestamp > ?
-        GROUP BY hour
-        ORDER BY hour;
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_double(stmt, 1, startOfDay)
-        var rows: [HourlyUsageRow] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            rows.append(HourlyUsageRow(
-                hour: Int(sqlite3_column_int(stmt, 0)),
-                inputTokens: Int(sqlite3_column_int64(stmt, 1)),
-                outputTokens: Int(sqlite3_column_int64(stmt, 2)),
-                requestCount: Int(sqlite3_column_int(stmt, 3))
-            ))
+        withDatabase([]) { db in
+            let startOfDay = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+            let sql = """
+            SELECT CAST(strftime('%H', timestamp, 'unixepoch', 'localtime') AS INTEGER) as hour,
+                   SUM(input_tokens) as total_input,
+                   SUM(output_tokens) as total_output,
+                   COUNT(*) as request_count
+            FROM usage_records
+            WHERE timestamp > ?
+            GROUP BY hour
+            ORDER BY hour;
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, startOfDay)
+            var rows: [HourlyUsageRow] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                rows.append(HourlyUsageRow(
+                    hour: Int(sqlite3_column_int(stmt, 0)),
+                    inputTokens: Int(sqlite3_column_int64(stmt, 1)),
+                    outputTokens: Int(sqlite3_column_int64(stmt, 2)),
+                    requestCount: Int(sqlite3_column_int(stmt, 3))
+                ))
+            }
+            return rows
         }
-        sqlite3_finalize(stmt)
-        return rows
     }
 
     /// Top threads by token usage (for session ranking)
     public func topThreads(days: Int = 30, limit: Int = 10) -> [ThreadUsageRow] {
-        guard let db else { return [] }
-        let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
-        let sql = """
-        SELECT thread_id,
-               SUM(input_tokens) as total_input,
-               SUM(output_tokens) as total_output,
-               COUNT(*) as request_count,
-               AVG(duration_seconds) as avg_duration,
-               SUM(input_tokens + output_tokens) as total_tokens
-        FROM usage_records
-        WHERE timestamp > ? AND thread_id != ''
-        GROUP BY thread_id
-        ORDER BY total_tokens DESC
-        LIMIT ?;
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_double(stmt, 1, cutoff)
-        sqlite3_bind_int(stmt, 2, Int32(limit))
-        var rows: [ThreadUsageRow] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            rows.append(ThreadUsageRow(
-                threadID: String(cString: sqlite3_column_text(stmt, 0)),
-                inputTokens: Int(sqlite3_column_int64(stmt, 1)),
-                outputTokens: Int(sqlite3_column_int64(stmt, 2)),
-                requestCount: Int(sqlite3_column_int(stmt, 3)),
-                avgDuration: sqlite3_column_double(stmt, 4)
-            ))
+        withDatabase([]) { db in
+            let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
+            let sql = """
+            SELECT thread_id,
+                   SUM(input_tokens) as total_input,
+                   SUM(output_tokens) as total_output,
+                   COUNT(*) as request_count,
+                   AVG(duration_seconds) as avg_duration,
+                   SUM(input_tokens + output_tokens) as total_tokens
+            FROM usage_records
+            WHERE timestamp > ? AND thread_id != ''
+            GROUP BY thread_id
+            ORDER BY total_tokens DESC
+            LIMIT ?;
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, cutoff)
+            sqlite3_bind_int(stmt, 2, Int32(limit))
+            var rows: [ThreadUsageRow] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                rows.append(ThreadUsageRow(
+                    threadID: Self.columnString(stmt, 0),
+                    inputTokens: Int(sqlite3_column_int64(stmt, 1)),
+                    outputTokens: Int(sqlite3_column_int64(stmt, 2)),
+                    requestCount: Int(sqlite3_column_int(stmt, 3)),
+                    avgDuration: sqlite3_column_double(stmt, 4)
+                ))
+            }
+            return rows
         }
-        sqlite3_finalize(stmt)
-        return rows
     }
 
     /// Intent breakdown (chat vs task vs research)
     public func intentBreakdown(days: Int = 30) -> [IntentUsageRow] {
-        guard let db else { return [] }
-        let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
-        let sql = """
-        SELECT CASE WHEN intent = '' THEN 'chat' ELSE intent END as intent_label,
-               SUM(input_tokens) as total_input,
-               SUM(output_tokens) as total_output,
-               COUNT(*) as request_count,
-               AVG(duration_seconds) as avg_duration
-        FROM usage_records
-        WHERE timestamp > ?
-        GROUP BY intent_label
-        ORDER BY request_count DESC;
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_double(stmt, 1, cutoff)
-        var rows: [IntentUsageRow] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            rows.append(IntentUsageRow(
-                intent: String(cString: sqlite3_column_text(stmt, 0)),
-                inputTokens: Int(sqlite3_column_int64(stmt, 1)),
-                outputTokens: Int(sqlite3_column_int64(stmt, 2)),
-                requestCount: Int(sqlite3_column_int(stmt, 3)),
-                avgDuration: sqlite3_column_double(stmt, 4)
-            ))
+        withDatabase([]) { db in
+            let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
+            let sql = """
+            SELECT CASE WHEN intent = '' THEN 'chat' ELSE intent END as intent_label,
+                   SUM(input_tokens) as total_input,
+                   SUM(output_tokens) as total_output,
+                   COUNT(*) as request_count,
+                   AVG(duration_seconds) as avg_duration
+            FROM usage_records
+            WHERE timestamp > ?
+            GROUP BY intent_label
+            ORDER BY request_count DESC;
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, cutoff)
+            var rows: [IntentUsageRow] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                rows.append(IntentUsageRow(
+                    intent: Self.columnString(stmt, 0),
+                    inputTokens: Int(sqlite3_column_int64(stmt, 1)),
+                    outputTokens: Int(sqlite3_column_int64(stmt, 2)),
+                    requestCount: Int(sqlite3_column_int(stmt, 3)),
+                    avgDuration: sqlite3_column_double(stmt, 4)
+                ))
+            }
+            return rows
         }
-        sqlite3_finalize(stmt)
-        return rows
     }
 
     /// Quick lookup: total tokens + cost for a single thread
     public func threadUsage(threadID: String) -> (inputTokens: Int, outputTokens: Int, requestCount: Int, estimatedCost: Double) {
-        guard let db, !threadID.isEmpty else { return (0, 0, 0, 0) }
-        let sql = "SELECT SUM(input_tokens), SUM(output_tokens), COUNT(*) FROM usage_records WHERE thread_id = ?;"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return (0, 0, 0, 0) }
-        Self.bindText(stmt, 1, threadID)
-        guard sqlite3_step(stmt) == SQLITE_ROW else { sqlite3_finalize(stmt); return (0, 0, 0, 0) }
-        let input = Int(sqlite3_column_int64(stmt, 0))
-        let output = Int(sqlite3_column_int64(stmt, 1))
-        let count = Int(sqlite3_column_int(stmt, 2))
-        sqlite3_finalize(stmt)
-        let cost = (Double(input) * 3.0 / 1_000_000.0) + (Double(output) * 15.0 / 1_000_000.0)
-        return (input, output, count, cost)
+        guard !threadID.isEmpty else { return (0, 0, 0, 0) }
+        return withDatabase((0, 0, 0, 0)) { db in
+            let sql = "SELECT SUM(input_tokens), SUM(output_tokens), COUNT(*) FROM usage_records WHERE thread_id = ?;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return (0, 0, 0, 0) }
+            defer { sqlite3_finalize(stmt) }
+            Self.bindText(stmt, 1, threadID)
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return (0, 0, 0, 0) }
+            let input = Int(sqlite3_column_int64(stmt, 0))
+            let output = Int(sqlite3_column_int64(stmt, 1))
+            let count = Int(sqlite3_column_int(stmt, 2))
+            let cost = (Double(input) * 3.0 / 1_000_000.0) + (Double(output) * 15.0 / 1_000_000.0)
+            return (input, output, count, cost)
+        }
     }
 
     // MARK: - Helpers
@@ -351,6 +389,11 @@ public final class UsageTracker {
 
     private static func bindText(_ stmt: OpaquePointer?, _ index: Int32, _ value: String) {
         sqlite3_bind_text(stmt, index, (value as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    }
+
+    private static func columnString(_ stmt: OpaquePointer?, _ index: Int32) -> String {
+        guard let text = sqlite3_column_text(stmt, index) else { return "" }
+        return String(cString: text)
     }
 }
 

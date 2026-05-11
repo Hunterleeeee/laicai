@@ -15,7 +15,12 @@ extension AppStore {
             notify("请先选择一个连接器", style: .error)
             return
         }
-        if ConnectorCapabilityProfile.isImageOnlyModel(connector.modelName) {
+        let allowImageOnlyConnector = decision.intent != .chat && Self.looksLikeImageGenerationRequest(message)
+        if ConnectorCapabilityProfile.isImageOnlyModel(connector.modelName), allowImageOnlyConnector {
+            sendImageGenerationDraft(message: message, decision: decision, connector: connector)
+            return
+        }
+        if ConnectorCapabilityProfile.isImageOnlyModel(connector.modelName), !allowImageOnlyConnector {
             notify(ConnectorCapabilityProfile.imageOnlyModelChatMessage(modelName: connector.modelName), style: .error)
             recordToolActivity(
                 name: "chat.model_unsupported",
@@ -45,6 +50,9 @@ extension AppStore {
             comfyUIServerURL: state.settings.comfyUIServerURL,
             comfyUIModelName: state.settings.comfyUIModelName
         )
+        context.imageGenerationEndpoint = connector.endpoint
+        context.imageGenerationModelName = connector.modelName
+        context.imageGenerationAPIKey = connector.note
 
         let intent = decision.intent
         let workflowName: String? = { if case .workflow(let name) = intent { return name } else { return nil } }()
@@ -251,5 +259,14 @@ extension AppStore {
             self.appendPendingFollowUp(to: targetTaskID)
             self.finishGenerationTask(targetTaskID)
         }
+    }
+
+    private static func looksLikeImageGenerationRequest(_ message: String) -> Bool {
+        let text = message.lowercased()
+        let keywords = [
+            "生成图片", "画一张", "画个", "画图", "出图", "图片生成", "生图",
+            "image", "generate an image", "draw", "illustration", "poster", "logo"
+        ]
+        return keywords.contains { text.contains($0) }
     }
 }

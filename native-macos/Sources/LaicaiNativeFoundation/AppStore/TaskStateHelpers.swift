@@ -21,6 +21,8 @@ extension AppStore {
             contextMode: settings.contextMode,
             contextWindow: profile.contextWindow,
             modelName: connector?.modelName ?? "",
+            connectorEndpoint: connector?.endpoint ?? "",
+            apiKey: connector?.note ?? "",
             usePipeline: settings.usePipeline
         )
     }

@@ -20,6 +20,9 @@ extension AgentLoop {
             )
         }
         taskContext.contextMode = config.contextMode
+        taskContext.imageGenerationEndpoint = taskContext.imageGenerationEndpoint ?? config.connectorEndpoint
+        taskContext.imageGenerationModelName = taskContext.imageGenerationModelName ?? config.modelName
+        taskContext.imageGenerationAPIKey = taskContext.imageGenerationAPIKey ?? config.apiKey
 
         if let vault = taskContext.vaultRoot, !vault.isEmpty, !WorkspaceSandbox.isOverlyBroadWorkspace(vault) {
             WorkspaceSandbox.shared.addAllowedPath(vault)

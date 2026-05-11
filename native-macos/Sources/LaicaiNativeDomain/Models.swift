@@ -296,6 +296,9 @@ public struct TaskContext: Equatable, Codable, Sendable {
     public var contextMode: ContextMode
     public var comfyUIServerURL: String?
     public var comfyUIModelName: String?
+    public var imageGenerationEndpoint: String?
+    public var imageGenerationModelName: String?
+    public var imageGenerationAPIKey: String?
     public var metadata: [String: String]
 
     public init(
@@ -309,6 +312,9 @@ public struct TaskContext: Equatable, Codable, Sendable {
         contextMode: ContextMode = .balanced,
         comfyUIServerURL: String? = nil,
         comfyUIModelName: String? = nil,
+        imageGenerationEndpoint: String? = nil,
+        imageGenerationModelName: String? = nil,
+        imageGenerationAPIKey: String? = nil,
         metadata: [String: String] = [:]
     ) {
         self.workspaceRoot = workspaceRoot
@@ -321,6 +327,9 @@ public struct TaskContext: Equatable, Codable, Sendable {
         self.contextMode = contextMode
         self.comfyUIServerURL = comfyUIServerURL
         self.comfyUIModelName = comfyUIModelName
+        self.imageGenerationEndpoint = imageGenerationEndpoint
+        self.imageGenerationModelName = imageGenerationModelName
+        self.imageGenerationAPIKey = imageGenerationAPIKey
         self.metadata = metadata
     }
 
@@ -336,6 +345,8 @@ public struct TaskContext: Equatable, Codable, Sendable {
         case contextMode
         case comfyUIServerURL
         case comfyUIModelName
+        case imageGenerationEndpoint
+        case imageGenerationModelName
     }
 
     public init(from decoder: Decoder) throws {
@@ -350,7 +361,27 @@ public struct TaskContext: Equatable, Codable, Sendable {
         contextMode = try container.decodeIfPresent(ContextMode.self, forKey: .contextMode) ?? .balanced
         comfyUIServerURL = try container.decodeIfPresent(String.self, forKey: .comfyUIServerURL)
         comfyUIModelName = try container.decodeIfPresent(String.self, forKey: .comfyUIModelName)
+        imageGenerationEndpoint = try container.decodeIfPresent(String.self, forKey: .imageGenerationEndpoint)
+        imageGenerationModelName = try container.decodeIfPresent(String.self, forKey: .imageGenerationModelName)
+        imageGenerationAPIKey = nil
         metadata = try container.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:]
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(workspaceRoot, forKey: .workspaceRoot)
+        try container.encodeIfPresent(vaultRoot, forKey: .vaultRoot)
+        try container.encode(relevantFiles, forKey: .relevantFiles)
+        try container.encodeIfPresent(claudeMD, forKey: .claudeMD)
+        try container.encodeIfPresent(gitBranch, forKey: .gitBranch)
+        try container.encodeIfPresent(gitDiff, forKey: .gitDiff)
+        try container.encode(memory, forKey: .memory)
+        try container.encode(contextMode, forKey: .contextMode)
+        try container.encodeIfPresent(comfyUIServerURL, forKey: .comfyUIServerURL)
+        try container.encodeIfPresent(comfyUIModelName, forKey: .comfyUIModelName)
+        try container.encodeIfPresent(imageGenerationEndpoint, forKey: .imageGenerationEndpoint)
+        try container.encodeIfPresent(imageGenerationModelName, forKey: .imageGenerationModelName)
+        try container.encode(metadata, forKey: .metadata)
     }
 }
 

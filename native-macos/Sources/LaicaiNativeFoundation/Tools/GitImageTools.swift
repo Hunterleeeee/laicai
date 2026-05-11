@@ -299,8 +299,14 @@ public struct GitTool: LaicaiTool {
 // MARK: - ComfyUI Image Generation Tool
 
 public struct ComfyUITool: LaicaiTool {
+    private let session: URLSession
+
+    public init(session: URLSession = NetworkDefaults.ephemeralSession) {
+        self.session = session
+    }
+
     public var name: String { "image.generate" }
-    public var description: String { "使用本地 ComfyUI 根据文字描述生成图片。需先启动 ComfyUI 服务。" }
+    public var description: String { "根据文字描述生成图片。优先使用当前图片模型连接器，否则使用本地 ComfyUI。" }
 
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(
@@ -328,6 +334,7 @@ public struct ComfyUITool: LaicaiTool {
             var height: Int?
             var steps: Int?
             var seed: Int?
+            var size: String?
         }
 
         let params: Params
@@ -338,15 +345,49 @@ public struct ComfyUITool: LaicaiTool {
             return ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params")
         }
 
+        let width = max(256, min(params.width ?? 1024, 2048))
+        let height = max(256, min(params.height ?? 1024, 2048))
+        let imageModel = (context.imageGenerationModelName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let imageEndpoint = (context.imageGenerationEndpoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if ConnectorCapabilityProfile.isImageOnlyModel(imageModel), !imageEndpoint.isEmpty {
+            do {
+                let imagePath = try await generateOpenAICompatibleImage(
+                    endpoint: imageEndpoint,
+                    apiKey: context.imageGenerationAPIKey ?? "",
+                    modelName: imageModel,
+                    prompt: params.prompt,
+                    size: params.size ?? Self.openAIImageSize(width: width, height: height),
+                    outputDir: context.workspaceRoot
+                )
+
+                await AuditLog.shared.record(
+                    tool: name,
+                    input: params.prompt,
+                    output: "生成图片：\(imagePath)",
+                    success: true
+                )
+
+                return ToolResult(
+                    output: "图片已生成：\(imagePath)",
+                    data: ["imagePath": imagePath, "prompt": params.prompt, "provider": "images_api", "model": imageModel],
+                    success: true
+                )
+            } catch {
+                return ToolResult(
+                    output: "图片生成失败：\(error.localizedDescription)",
+                    success: false,
+                    error: "images_api_error"
+                )
+            }
+        }
+
         let serverURL = context.comfyUIServerURL ?? "http://127.0.0.1:8188"
         let modelName = context.comfyUIModelName ?? ""
-
-        // Check if ComfyUI is running
         guard await isServerReachable(serverURL) else {
             return ToolResult(
-                output: "ComfyUI 服务未启动。请先启动 ComfyUI（默认地址 \(serverURL)），然后再生成图片。",
+                output: "没有可用的图片生成后端。请选择 gpt-image-2 / DALL-E 等图片模型连接器，或启动 ComfyUI（默认地址 \(serverURL)）后再生成图片。",
                 success: false,
-                error: "comfyui_offline"
+                error: "image_backend_missing"
             )
         }
 
@@ -364,8 +405,8 @@ public struct ComfyUITool: LaicaiTool {
                 modelName: modelName,
                 prompt: params.prompt,
                 negativePrompt: params.negativePrompt ?? "",
-                width: max(256, min(params.width ?? 1024, 2048)),
-                height: max(256, min(params.height ?? 1024, 2048)),
+                width: width,
+                height: height,
                 steps: max(1, min(params.steps ?? 20, 50)),
                 seed: params.seed ?? -1,
                 outputDir: context.workspaceRoot
@@ -397,11 +438,149 @@ public struct ComfyUITool: LaicaiTool {
         var request = URLRequest(url: url)
         request.timeoutInterval = NetworkDefaults.quickProbe
         do {
-            let (_, response) = try await NetworkDefaults.ephemeralSession.data(for: request)
+            let (_, response) = try await session.data(for: request)
             return (response as? HTTPURLResponse)?.statusCode == 200
         } catch {
             return false
         }
+    }
+
+    private struct ImagesAPIRequest: Encodable {
+        var model: String
+        var prompt: String
+        var n: Int
+        var size: String
+        var response_format: String
+    }
+
+    private struct ImagesAPIResponse: Decodable {
+        struct Item: Decodable {
+            var b64_json: String?
+            var url: String?
+        }
+        var data: [Item]
+    }
+
+    private func generateOpenAICompatibleImage(
+        endpoint: String,
+        apiKey: String,
+        modelName: String,
+        prompt: String,
+        size: String,
+        outputDir: String
+    ) async throws -> String {
+        let url = try Self.imagesGenerationURL(from: endpoint)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = try JSONEncoder().encode(ImagesAPIRequest(
+            model: modelName,
+            prompt: prompt,
+            n: 1,
+            size: size,
+            response_format: "b64_json"
+        ))
+        request.timeoutInterval = NetworkDefaults.imageRequest
+
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200...299).contains(status) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(
+                domain: "ImagesAPI",
+                code: status,
+                userInfo: [NSLocalizedDescriptionKey: Self.serverMessage(from: body, fallback: "图片服务返回 HTTP \(status)")]
+            )
+        }
+
+        let decoded = try JSONDecoder().decode(ImagesAPIResponse.self, from: data)
+        guard let first = decoded.data.first else {
+            throw NSError(domain: "ImagesAPI", code: 1, userInfo: [NSLocalizedDescriptionKey: "图片服务没有返回图片"])
+        }
+
+        let imageData: Data
+        if let b64 = first.b64_json, let decodedData = Data(base64Encoded: b64) {
+            imageData = decodedData
+        } else if let urlString = first.url, let url = URL(string: urlString) {
+            let (downloaded, downloadResponse) = try await session.data(from: url)
+            if let status = (downloadResponse as? HTTPURLResponse)?.statusCode,
+               !(200...299).contains(status) {
+                throw NSError(domain: "ImagesAPI", code: 2, userInfo: [NSLocalizedDescriptionKey: "图片下载失败"])
+            }
+            imageData = downloaded
+        } else {
+            throw NSError(domain: "ImagesAPI", code: 3, userInfo: [NSLocalizedDescriptionKey: "图片服务返回格式不兼容"])
+        }
+
+        return try Self.saveImageData(imageData, outputDir: outputDir, prefix: "laicai_image_api")
+    }
+
+    private static func imagesGenerationURL(from endpoint: String) throws -> URL {
+        let cleaned = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: cleaned), url.host != nil else { throw URLError(.badURL) }
+        let originalPath = url.path
+        var path = originalPath
+        if path.hasSuffix("/chat/completions") {
+            path = String(path.dropLast("/chat/completions".count))
+        }
+        if path.hasSuffix("/responses") {
+            path = String(path.dropLast("/responses".count))
+        }
+        if path.hasSuffix("/images/generations") {
+            return url
+        }
+        if path.isEmpty || path == "/" {
+            path = "/v1"
+        }
+        path = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let base = cleaned.hasSuffix("/") ? String(cleaned.dropLast()) : cleaned
+        let baseWithoutKnownPath: String
+        if let range = base.range(of: originalPath, options: .backwards), !originalPath.isEmpty {
+            baseWithoutKnownPath = String(base[..<range.lowerBound])
+        } else {
+            baseWithoutKnownPath = base
+        }
+        let joinedPath = path.hasSuffix("v1") ? "\(path)/images/generations" : "v1/images/generations"
+        guard let finalURL = URL(string: "\(baseWithoutKnownPath)/\(joinedPath)") else { throw URLError(.badURL) }
+        return finalURL
+    }
+
+    private static func openAIImageSize(width: Int, height: Int) -> String {
+        if width == height { return "1024x1024" }
+        return width > height ? "1536x1024" : "1024x1536"
+    }
+
+    private static func saveImageData(_ data: Data, outputDir: String, prefix: String) throws -> String {
+        let root = outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
+        let directory = root.isEmpty ? FileManager.default.temporaryDirectory.path : root
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let filename = "\(prefix)_\(Self.timestampString()).png"
+        let path = (directory as NSString).appendingPathComponent(filename)
+        try data.write(to: URL(fileURLWithPath: path))
+        return path
+    }
+
+    private static func timestampString() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd_HHmmss"
+        return formatter.string(from: Date())
+    }
+
+    private static func serverMessage(from body: String, fallback: String) -> String {
+        guard let data = body.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return body.isEmpty ? fallback : "\(fallback)：\(String(body.prefix(300)))"
+        }
+        if let error = json["error"] as? [String: Any], let message = error["message"] as? String {
+            return message
+        }
+        if let message = json["message"] as? String {
+            return message
+        }
+        return fallback
     }
 
     private func generateImage(
@@ -486,7 +665,7 @@ public struct ComfyUITool: LaicaiTool {
         submitRequest.httpBody = promptData
         submitRequest.timeoutInterval = NetworkDefaults.imageRequest
 
-        let (submitData, submitResponse) = try await NetworkDefaults.ephemeralSession.data(for: submitRequest)
+        let (submitData, submitResponse) = try await session.data(for: submitRequest)
         guard (submitResponse as? HTTPURLResponse)?.statusCode == 200 else {
             throw NSError(domain: "ComfyUI", code: 1, userInfo: [NSLocalizedDescriptionKey: "提交失败"])
         }
@@ -505,7 +684,7 @@ public struct ComfyUITool: LaicaiTool {
             pollRequest.timeoutInterval = 10
             let historyResult: (Data, URLResponse)?
             do {
-                historyResult = try await NetworkDefaults.ephemeralSession.data(for: pollRequest)
+                historyResult = try await session.data(for: pollRequest)
             } catch {
                 continue
             }
@@ -538,7 +717,7 @@ public struct ComfyUITool: LaicaiTool {
         let viewURL = URL(string: "\(serverURL)/view?filename=\(filename.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? filename)&type=output")!
         var viewRequest = URLRequest(url: viewURL)
         viewRequest.timeoutInterval = NetworkDefaults.imageRequest
-        let (imageData, viewResponse) = try await NetworkDefaults.ephemeralSession.data(for: viewRequest)
+        let (imageData, viewResponse) = try await session.data(for: viewRequest)
         guard (viewResponse as? HTTPURLResponse)?.statusCode == 200 else {
             throw NSError(domain: "ComfyUI", code: 5, userInfo: [NSLocalizedDescriptionKey: "下载图片失败"])
         }
