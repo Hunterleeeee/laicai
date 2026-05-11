@@ -15,6 +15,18 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(IntentRouter.classify("你能联网搜索吗？"), .chat)
         XCTAssertEqual(IntentRouter.classify("你支持运行测试吗？"), .chat)
     }
+    func testCapabilityQuestionDoesNotRecurseThroughActionSignals() {
+        let prompts = [
+            "你能生成视频吗？",
+            "你可以整理资料吗？",
+            "是否支持联网搜索？",
+            "能不能创建图片？"
+        ]
+
+        for prompt in prompts {
+            XCTAssertEqual(IntentRouter.plan(prompt).intent, .chat)
+        }
+    }
     func testConcreteGenerationRequestBecomesTask() {
         XCTAssertEqual(IntentRouter.classify("帮我生成一个 README"), .task)
     }

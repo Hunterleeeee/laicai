@@ -346,15 +346,31 @@ private struct IntentSignals {
         return s
     }
 
-    var isQuestion: Bool {
+    private var isDirectQuestion: Bool {
         let prefixes = ["什么", "为什么", "怎么", "如何", "是否", "哪里", "哪个", "多少", "能介绍", "请问", "你是", "你能", "你有", "你会"]
         let suffixes = ["吗", "么", "呢", "？", "?", "模型", "啥"]
         let contains = ["是什么", "什么是", "怎么样", "是谁", "多少", "几个", "几种", "能不能", "可不可以", "有没有"]
         return prefixes.contains(where: { input.hasPrefix($0) })
             || suffixes.contains(where: { input.hasSuffix($0) })
             || contains.contains(where: { input.contains($0) })
-            // Short inputs without action markers are likely questions
-            || (input.count <= 15 && !requestsAction && !requestsMutation && !requestsShellExecution)
+    }
+
+    var isQuestion: Bool {
+        isDirectQuestion
+            // Short inputs without action markers are likely questions.
+            || (input.count <= 15 && !hasDirectActionCue)
+    }
+
+    private var hasDirectActionCue: Bool {
+        containsExplicitURLAction
+            || requestsFreshInformation
+            || requestsLocalIO
+            || requestsShellExecution
+            || requestsMutation
+            || rawRequestsWebResearch
+            || requestsModelCurrentInfo
+            || rawRequestedDeliverable
+            || requestsPMDocument
     }
 
     var workflow: String? {
@@ -460,13 +476,17 @@ private struct IntentSignals {
     }
 
     private var requestsWebResearch: Bool {
+        rawRequestsWebResearch && !capabilityOnly
+    }
+
+    private var rawRequestsWebResearch: Bool {
         let markers = ["联网", "上网", "网页", "官网", "搜一下", "搜搜", "查一下", "查查"]
         // "搜索" alone is too broad — "你搜索到的" refers to past results, not a web search request.
         // Only count "搜索" if it's NOT preceded by backward-referencing context.
         let hasSearchMarker = markers.contains { input.contains($0) }
         let hasPlainSearch = input.contains("搜索")
             && !["搜索到的", "搜索结果", "你搜索", "已搜索", "刚搜索"].contains(where: { input.contains($0) })
-        return (hasSearchMarker || hasPlainSearch) && !capabilityOnly
+        return hasSearchMarker || hasPlainSearch
     }
 
     private var requestsModelCurrentInfo: Bool {
@@ -534,8 +554,11 @@ private struct IntentSignals {
     }
 
     private var requestedDeliverable: Bool {
+        rawRequestedDeliverable && !capabilityOnly
+    }
+
+    private var rawRequestedDeliverable: Bool {
         ["生成", "创建", "整理", "汇总", "给我一份", "写一个", "写一份", "做一个"].contains { input.contains($0) }
-            && !capabilityOnly
     }
 
     private var requestsPMDocument: Bool {
@@ -634,7 +657,7 @@ private struct IntentSignals {
 
     private var capabilityOnly: Bool {
         let capabilityPatterns = ["你能", "能不能", "可以", "会不会", "是否支持", "支持", "能否", "可不可以"]
-        guard isQuestion, capabilityPatterns.contains(where: { input.contains($0) }) else { return false }
+        guard isDirectQuestion, capabilityPatterns.contains(where: { input.contains($0) }) else { return false }
         return !input.contains("帮我") && !input.contains("给我") && !input.contains("现在") && !input.contains("一下")
     }
 
