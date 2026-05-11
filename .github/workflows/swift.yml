@@ -5,23 +5,15 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-test:
+  hygiene:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: Show Swift version
-        run: swift --version
-      - name: Install lint tools
-        run: |
-          brew list swift-format >/dev/null 2>&1 || brew install swift-format
-          brew list swiftlint >/dev/null 2>&1 || brew install swiftlint
-      - name: Build package
-        working-directory: native-macos
-        run: swift build
-      - name: Run tests
-        working-directory: native-macos
-        run: swift test
       - name: Check build script syntax
         run: bash -n native-macos/build.sh
       - name: Validate bundled skills
@@ -30,7 +22,25 @@ jobs:
         run: bash scripts/check_swift_file_sizes.sh
       - name: Check project hygiene
         run: bash scripts/check_project_hygiene.sh
+      - name: Install lint tools
+        run: |
+          brew list swift-format >/dev/null 2>&1 || brew install swift-format
+          brew list swiftlint >/dev/null 2>&1 || brew install swiftlint
       - name: Swift lint
         run: bash scripts/lint_swift.sh
       - name: Check formatting whitespace
         run: git diff --check
+
+  swiftpm:
+    runs-on: macos-14
+    needs: hygiene
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Swift version
+        run: swift --version
+      - name: Build package
+        working-directory: native-macos
+        run: swift build
+      - name: Run tests
+        working-directory: native-macos
+        run: swift test

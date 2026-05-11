@@ -3,4 +3,4 @@ import XCTest
 @testable import LaicaiNativeDomain
 
 @MainActor
-final class AppStoreToolingTests: LaicaiNativeFoundationTestCase {}
+final class AppStoreTaskContinuationTests: LaicaiNativeFoundationTestCase {}
