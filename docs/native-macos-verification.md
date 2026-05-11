@@ -41,6 +41,12 @@ Expected:
 - `xcrun --sdk macosx --show-sdk-platform-path` prints a platform path instead of an error.
 - `swift --version` reports Swift 5.9 or newer.
 
+Run the preflight first:
+
+```sh
+bash scripts/check_macos_toolchain.sh
+```
+
 Then run:
 
 ```sh
