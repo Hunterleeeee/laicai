@@ -163,7 +163,7 @@ public enum WikiEngine {
             "[\(i+1)] \(s.title)\n\(s.preview)"
         }.joined(separator: "\n\n")
 
-        let existingNote = previous.map { "\n\n已有内容（请在此基础上更新而非重写）：\n\($0.prefix(3000))" } ?? ""
+        let existingNote = previous.map { "\n\n已有内容（只补充新信息，保留原有要点和结构，不要删除或替换已有内容）：\n\($0.prefix(4000))" } ?? ""
 
         // Build backlink context: show existing pages that can be linked
         let relatedPages = existingPages
@@ -179,10 +179,11 @@ public enum WikiEngine {
 
             ## 规则
             - 一个文件只讲一个概念/实体/产品，不要把多个概念混在一起
-            - 用 Markdown 格式：# 标题 → ## 定义 → ## 核心要点 → ## 关联概念 → ## 来源
+            - 用 Markdown 格式：# 标题 → ## 定义（一段话精准定义） → ## 核心要点（每条信息密度高，禁止水话） → ## 实际应用/案例 → ## 关联概念 → ## 来源
             - **必须使用 [[双链]]** 引用已有知识库中的相关页面
-            - 内容精炼，信息密度高，每个要点用 1-2 句话
-            - 如果有已有内容，在其基础上补充更新而非完全重写
+            - **信息密度要求**：不写"众所周知"、"值得注意的是"等废话；每个要点必须包含具体事实、数字或技术细节
+            - **证据溯源**：每个要点尽量标注来源编号 [1][2]，来源不足时标注 [待验证]
+            - 如果有已有内容，只补充新信息和修正错误，保留原有结构和已有要点
             - 不要输出 frontmatter，系统会自动添加
             - 直接输出文章内容，不要包裹在代码块中
             """
@@ -193,7 +194,8 @@ public enum WikiEngine {
             ## 规则
             - 用 [[双链]] 列出该领域下所有相关原子笔记
             - 按子主题分组，每组用 ## 小标题
-            - 每个条目用一句话概括，后跟 [[页面名]]
+            - 每个条目用一句话概括核心价值，后跟 [[页面名]]
+            - 条目之间体现逻辑关系（上下游、包含、对比）
             - 不写具体内容，只做导航和索引
             - 不要输出 frontmatter，系统会自动添加
             - 直接输出文章内容，不要包裹在代码块中
@@ -231,8 +233,22 @@ public enum WikiEngine {
             } else {
                 response = try await runtime.sendMessage(request)
             }
-            let text = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
+            var text = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return render(topic: topic, sources: sources) }
+
+            // Strip code fences if LLM wrapped in ```markdown ... ```
+            if text.hasPrefix("```") {
+                let lines = text.components(separatedBy: .newlines)
+                if lines.count > 2 {
+                    let stripped = lines.dropFirst().dropLast().joined(separator: "\n")
+                    if !stripped.isEmpty { text = stripped }
+                }
+            }
+
+            // Incremental merge: if previous content exists, rescue any sections that were dropped
+            if let previous, !previous.isEmpty {
+                text = mergeWithPrevious(newText: text, previous: previous)
+            }
 
             // Prepend frontmatter
             let now = ISO8601DateFormatter().string(from: Date())
@@ -258,30 +274,80 @@ public enum WikiEngine {
             .lowercased()
             .split { !$0.isLetter && !$0.isNumber }
             .map(String.init)
+            .filter { $0.count >= 2 } // Skip single-char terms (noise)
         guard !terms.isEmpty else { return [] }
 
-        var ranked: [(score: Int, source: WikiSource)] = []
+        // Stopwords for Chinese/English common terms
+        let stopwords: Set<String> = ["的", "了", "和", "是", "在", "有", "与", "对", "及", "等",
+                                       "the", "and", "for", "with", "this", "that", "from", "are", "was"]
+
+        // Phase 1: collect all docs and compute document frequency per term
+        struct DocEntry {
+            var file: String
+            var text: String
+            var lower: String
+        }
+        var docs: [DocEntry] = []
         guard let enumerator = FileManager.default.enumerator(atPath: vaultRoot.path) else { return [] }
         while let file = enumerator.nextObject() as? String {
-            if file.contains("/.git/") || file.contains("/.obsidian/") || file.contains("/.laicai-cache/") {
+            let name = (file as NSString).lastPathComponent
+            if name.hasPrefix(".") {
                 enumerator.skipDescendants()
                 continue
             }
             guard file.hasSuffix(".md") else { continue }
             let full = vaultRoot.appendingPathComponent(file)
             guard let text = try? String(contentsOf: full, encoding: .utf8) else { continue }
-            let lower = (file + "\n" + text).lowercased()
-            let score = terms.reduce(0) { partial, term in
-                partial + (lower.contains(term) ? 1 : 0)
+            docs.append(DocEntry(file: file, text: text, lower: (file + "\n" + text).lowercased()))
+        }
+        guard !docs.isEmpty else { return [] }
+
+        let totalDocs = Double(docs.count)
+        // Document frequency: how many docs contain each term
+        var df: [String: Int] = [:]
+        for term in terms where !stopwords.contains(term) {
+            df[term] = docs.filter { $0.lower.contains(term) }.count
+        }
+
+        // Phase 2: score each doc using TF-IDF-like scoring
+        var ranked: [(score: Double, source: WikiSource)] = []
+        for doc in docs {
+            var score: Double = 0
+            for term in terms where !stopwords.contains(term) {
+                let termDF = df[term] ?? 0
+                guard termDF > 0 else { continue }
+
+                // TF: count occurrences, normalize by doc length
+                let occurrences = doc.lower.components(separatedBy: term).count - 1
+                guard occurrences > 0 else { continue }
+                let tf = Double(occurrences) / max(1, Double(doc.lower.count) / 500.0) // normalize per ~500 chars
+
+                // IDF: rarer terms get higher weight
+                let idf = log(totalDocs / Double(termDF) + 1)
+
+                score += tf * idf
+
+                // Bonus: term in filename (3x weight)
+                let fileName = (doc.file as NSString).lastPathComponent.lowercased()
+                if fileName.contains(term) {
+                    score += idf * 3.0
+                }
             }
-            guard score > 0 else { continue }
+
+            // Bonus: exact topic match in title
+            let title = extractTitle(doc.text, fallback: (doc.file as NSString).deletingPathExtension)
+            if title.lowercased().contains(topic.lowercased()) {
+                score += 10.0
+            }
+
+            guard score > 0.1 else { continue }
             ranked.append((
                 score,
-                WikiSource(path: file, title: extractTitle(text, fallback: full.deletingPathExtension().lastPathComponent), preview: snippet(text, terms: terms), kind: "vault")
+                WikiSource(path: doc.file, title: title, preview: snippet(doc.text, terms: terms), kind: "vault")
             ))
         }
         return ranked
-            .sorted { $0.score == $1.score ? $0.source.path < $1.source.path : $0.score > $1.score }
+            .sorted { $0.score > $1.score }
             .prefix(limit)
             .map(\.source)
     }
@@ -479,17 +545,84 @@ public enum WikiEngine {
         return fallback
     }
 
+    /// Incremental merge: check if the new LLM output dropped any ## sections from previous content.
+    /// If so, append them back at the end to avoid losing information.
+    private static func mergeWithPrevious(newText: String, previous: String) -> String {
+        // Strip frontmatter from previous
+        var prevBody = previous
+        if prevBody.hasPrefix("---") {
+            let parts = prevBody.components(separatedBy: "---")
+            if parts.count >= 3 {
+                prevBody = parts.dropFirst(2).joined(separator: "---").trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+
+        // Extract ## sections from previous
+        let prevSections = extractSections(prevBody)
+        let newSections = extractSections(newText)
+        let newSectionHeaders = Set(newSections.map { $0.header.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) })
+
+        // Find sections in previous that are missing from new
+        var rescued: [String] = []
+        for section in prevSections {
+            let headerNorm = section.header.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !headerNorm.isEmpty else { continue }
+            if !newSectionHeaders.contains(headerNorm) {
+                // This section was dropped — rescue it
+                let sectionText = section.header + "\n" + section.body
+                rescued.append(sectionText)
+            }
+        }
+
+        if rescued.isEmpty { return newText }
+        return newText.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + rescued.joined(separator: "\n\n")
+    }
+
+    private struct MarkdownSection {
+        var header: String  // e.g. "## 核心要点"
+        var body: String    // content under the header
+    }
+
+    private static func extractSections(_ text: String) -> [MarkdownSection] {
+        let lines = text.components(separatedBy: .newlines)
+        var sections: [MarkdownSection] = []
+        var currentHeader = ""
+        var currentBody: [String] = []
+
+        for line in lines {
+            if line.hasPrefix("## ") {
+                if !currentHeader.isEmpty {
+                    sections.append(MarkdownSection(header: currentHeader, body: currentBody.joined(separator: "\n")))
+                }
+                currentHeader = line
+                currentBody = []
+            } else if !currentHeader.isEmpty {
+                currentBody.append(line)
+            }
+        }
+        if !currentHeader.isEmpty {
+            sections.append(MarkdownSection(header: currentHeader, body: currentBody.joined(separator: "\n")))
+        }
+        return sections
+    }
+
     private static func snippet(_ text: String, terms: [String]) -> String {
         let lines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && !$0.hasPrefix("---") && !$0.hasPrefix("#") }
-        if let hit = lines.first(where: { line in
+        // Find the first line containing a search term, return it + 1-2 surrounding lines
+        if let hitIdx = lines.firstIndex(where: { line in
             let lower = line.lowercased()
             return terms.contains(where: { lower.contains($0) })
         }) {
-            return String(hit.prefix(220))
+            let start = max(0, hitIdx - 1)
+            let end = min(lines.count, hitIdx + 3)
+            let context = lines[start..<end].joined(separator: " ")
+            return String(context.prefix(400))
         }
-        return String((lines.first ?? "相关笔记").prefix(220))
+        // No term hit: return first 2 content lines
+        let fallback = lines.prefix(2).joined(separator: " ")
+        return String(fallback.isEmpty ? "相关笔记" : fallback.prefix(400))
     }
 }
 

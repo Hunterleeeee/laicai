@@ -44,6 +44,9 @@ extension AgentLoop {
         public var customSystemPrompt: String?
         public var allowedTools: Set<String>?
         public var modelName: String
+        /// Feature flag: when true, run() delegates to runPipeline().
+        /// Default false — flip to true after integration testing confirms parity.
+        public var usePipeline: Bool
 
         public init(
             maxIterations: Int = 50,
@@ -54,7 +57,8 @@ extension AgentLoop {
             contextWindow: Int = 200_000,
             customSystemPrompt: String? = nil,
             allowedTools: Set<String>? = nil,
-            modelName: String = ""
+            modelName: String = "",
+            usePipeline: Bool = false
         ) {
             self.maxIterations = maxIterations
             self.maxTokensPerTurn = maxTokensPerTurn
@@ -65,6 +69,7 @@ extension AgentLoop {
             self.customSystemPrompt = customSystemPrompt
             self.allowedTools = allowedTools
             self.modelName = modelName
+            self.usePipeline = usePipeline
         }
     }
 

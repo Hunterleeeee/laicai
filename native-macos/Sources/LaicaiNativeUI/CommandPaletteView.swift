@@ -179,6 +179,8 @@ struct CommandPaletteView: View {
         if store.state.selectedThread != nil {
             result.append(.init(kind: .copyMarkdown, icon: "doc.on.doc", title: "复制当前会话 Markdown", subtitle: "导出可读记录", keywords: ["copy", "export", "markdown"]))
             result.append(.init(kind: .exportJSON, icon: "square.and.arrow.up", title: "导出当前会话 JSON", subtitle: "导出完整结构化记录", keywords: ["export", "json"]))
+            result.append(.init(kind: .exportShellScript, icon: "terminal", title: "导出为 Shell 脚本", subtitle: "提取所有 shell 命令为可运行脚本", keywords: ["export", "shell", "bash", "script"]))
+            result.append(.init(kind: .exportWorkflowYAML, icon: "arrow.triangle.branch", title: "导出为工作流 YAML", subtitle: "将任务步骤转为可重放工作流", keywords: ["export", "workflow", "yaml"]))
             result.append(.init(kind: .archiveThread, icon: "archivebox", title: "归档当前会话", subtitle: "从侧栏隐藏", keywords: ["archive", "hide"]))
         }
         if store.state.selectedTask != nil {
@@ -200,6 +202,41 @@ struct CommandPaletteView: View {
                 title: "切换到 \(connector.name)",
                 subtitle: connector.kind,
                 keywords: ["connector", "model", connector.name]
+            ))
+        }
+
+        // Project switching
+        let projects = ProjectManager.shared.projects
+        if projects.count > 1 {
+            for project in projects.prefix(6) {
+                let isActive = project.id == ProjectManager.shared.activeProjectID
+                result.append(.init(
+                    kind: .switchProject(project.rootPath),
+                    icon: isActive ? "folder.fill" : "folder",
+                    title: "项目：\(project.name)",
+                    subtitle: project.techStack.prefix(3).joined(separator: ", "),
+                    keywords: ["project", "项目", project.name]
+                ))
+            }
+        }
+
+        // PM Agent shortcuts
+        let pmSkills: [(PMSkillType, String)] = [
+            (.prd, "写 PRD"),
+            (.userStories, "写用户故事"),
+            (.competitiveAnalysis, "竞品分析"),
+            (.experimentDesign, "实验设计"),
+            (.retrospective, "项目复盘"),
+            (.persona, "用户画像"),
+            (.okrWriter, "写 OKR"),
+        ]
+        for (skill, title) in pmSkills {
+            result.append(.init(
+                kind: .pmAgent(skill.rawValue),
+                icon: skill.icon,
+                title: "PM：\(title)",
+                subtitle: "[\(skill.phase)] \(skill.displayName)",
+                keywords: ["pm", "product", skill.rawValue, skill.displayName]
             ))
         }
 
@@ -277,6 +314,30 @@ struct CommandPaletteView: View {
                 NSPasteboard.general.setString(json, forType: .string)
                 ToastCenter.shared.success("已导出 JSON")
             }
+        case .exportShellScript:
+            if let script = store.exportSelectedThreadShellScript() {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(script, forType: .string)
+                ToastCenter.shared.success("已复制 Shell 脚本")
+            } else {
+                ToastCenter.shared.error("当前会话无 shell 命令")
+            }
+        case .exportWorkflowYAML:
+            if let yaml = store.exportSelectedThreadWorkflowYAML() {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(yaml, forType: .string)
+                ToastCenter.shared.success("已复制工作流 YAML")
+            } else {
+                ToastCenter.shared.error("当前会话无工具调用")
+            }
+        case .pmAgent(let skillName):
+            let skill = PMSkillType(rawValue: skillName) ?? .prd
+            store.updateDraft("帮我写一份\(skill.displayName)，主题：")
+            ToastCenter.shared.success("PM Agent：\(skill.displayName)")
+        case .switchProject(let path):
+            store.switchWorkspace(to: path)
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            ToastCenter.shared.success("已切换到项目：\(name)")
         }
         isPresented = false
     }
@@ -420,4 +481,8 @@ private enum CommandPaletteActionKind {
     case runSkill(String)
     case archiveThread
     case exportJSON
+    case exportShellScript
+    case exportWorkflowYAML
+    case pmAgent(String)  // PM skill name
+    case switchProject(String)  // project root path
 }

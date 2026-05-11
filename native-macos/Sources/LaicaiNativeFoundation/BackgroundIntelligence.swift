@@ -98,7 +98,9 @@ extension Notification.Name {
     public static let laicaiProactiveSuggestion = Notification.Name("laicai.proactiveSuggestion")
     public static let laicaiToggleCommandPalette = Notification.Name("laicai.toggleCommandPalette")
     public static let laicaiToggleSearch = Notification.Name("laicai.toggleSearch")
+    public static let laicaiGlobalSearch = Notification.Name("laicai.globalSearch")
     public static let laicaiPanelToggled = Notification.Name("laicai.panelToggled")
+    public static let laicaiScrollToBottom = Notification.Name("laicai.scrollToBottom")
 }
 
 // MARK: - Global Shortcut Manager
@@ -123,6 +125,16 @@ public final class GlobalShortcutManager {
             // Cmd+Shift+N: new thread
             if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) && event.keyCode == 45 {
                 NotificationCenter.default.post(name: .laicaiNewThread, object: nil)
+            }
+            // Cmd+Shift+Space: toggle command palette (Spotlight-style quick launch)
+            if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) && event.keyCode == 49 {
+                NSApp.activate(ignoringOtherApps: true)
+                NotificationCenter.default.post(name: .laicaiToggleCommandPalette, object: nil)
+            }
+            // Cmd+Shift+F: global search across conversations, wiki, skills
+            if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) && event.keyCode == 3 {
+                NSApp.activate(ignoringOtherApps: true)
+                NotificationCenter.default.post(name: .laicaiGlobalSearch, object: nil)
             }
         }
     }
@@ -785,6 +797,34 @@ public final class ProactiveSuggestionEngine: ObservableObject {
             }
         }
 
+        // TODO/FIXME scan
+        let todoCount = await Task.detached(priority: .utility) {
+            Self.scanTodos(root: root)
+        }.value
+        if todoCount > 10 {
+            currentSuggestion = Suggestion(
+                title: "\(todoCount) 个 TODO/FIXME 待处理",
+                description: "项目中有较多未完成的 TODO 和 FIXME 标记，建议逐一处理。",
+                action: .reviewChanges
+            )
+            return
+        }
+
+        // Build check: if recent changes exist, try a quick build verify
+        if FileManager.default.fileExists(atPath: gitDir) {
+            let buildFailed = await Task.detached(priority: .utility) {
+                Self.quickBuildCheck(root: root)
+            }.value
+            if buildFailed {
+                currentSuggestion = Suggestion(
+                    title: "构建可能已损坏",
+                    description: "检测到近期变更后构建失败，建议运行 verify.build 检查。",
+                    action: .runTests
+                )
+                return
+            }
+        }
+
         let testDir = (root as NSString).appendingPathComponent("Tests")
         if !FileManager.default.fileExists(atPath: testDir) {
             currentSuggestion = Suggestion(
@@ -796,6 +836,66 @@ public final class ProactiveSuggestionEngine: ObservableObject {
         }
 
         currentSuggestion = nil
+    }
+
+    private nonisolated static func scanTodos(root: String) -> Int {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["grep", "-rn", "--include=*.swift", "--include=*.ts", "--include=*.py",
+                             "-E", "TODO|FIXME|HACK|XXX", root]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch { return 0 }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: data, encoding: .utf8) ?? ""
+        return output.components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .count
+    }
+
+    private nonisolated static func quickBuildCheck(root: String) -> Bool {
+        // Only check if there's a Package.swift (Swift project)
+        let packageSwift = (root as NSString).appendingPathComponent("Package.swift")
+        guard FileManager.default.fileExists(atPath: packageSwift) else { return false }
+        // Check if there were changes in the last 10 minutes
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git", "-C", root, "diff", "--name-only", "HEAD~1"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch { return false }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: data, encoding: .utf8) ?? ""
+        let hasSwiftChanges = output.contains(".swift")
+        guard hasSwiftChanges else { return false }
+        // Quick build check
+        let buildProcess = Process()
+        buildProcess.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        buildProcess.arguments = ["-lc", "cd \(root) && swift build 2>&1 | tail -1"]
+        let buildPipe = Pipe()
+        buildProcess.standardOutput = buildPipe
+        buildProcess.standardError = FileHandle.nullDevice
+        do {
+            try buildProcess.run()
+            // Short timeout — just a quick check
+            let deadline = Date().addingTimeInterval(30)
+            while buildProcess.isRunning && Date() < deadline {
+                Foundation.Thread.sleep(forTimeInterval: 0.5)
+            }
+            if buildProcess.isRunning {
+                buildProcess.terminate()
+                return false // timed out, not necessarily broken
+            }
+        } catch { return false }
+        return buildProcess.terminationStatus != 0
     }
 
     private nonisolated static func gitModifiedFileCount(root: String) -> Int {

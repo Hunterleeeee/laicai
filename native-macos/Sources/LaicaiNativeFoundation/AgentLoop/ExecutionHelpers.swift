@@ -298,7 +298,7 @@ extension AgentLoop {
             return false
         }
 
-        taskContext.memory.userDecisions.append("已保存 Wiki：\(topic)")
+        taskContext.memory.appendDecision("已保存 Wiki：\(topic)")
 
         if let mocResult = await executeFallbackWikiBuild(
             tool: wikiTool,
@@ -310,7 +310,7 @@ extension AgentLoop {
             onStep: onStep,
             emitFailure: false
         ), mocResult.success {
-            taskContext.memory.userDecisions.append("已保存 Wiki 索引：\(topic)")
+            taskContext.memory.appendDecision("已保存 Wiki 索引：\(topic)")
         }
 
         let savedPath = atomicResult.data?["path"] ?? "02 Atomic/\(topic).md"
@@ -1166,9 +1166,16 @@ extension AgentLoop {
         let phaseDefs: [ToolDefinition]
         switch intent {
         case .chat:
-            // Plain chat should stay provider-friendly: no function schema for
-            // greetings or short follow-ups. Action requests are routed as task.
-            phaseDefs = []
+            // Chat still gets tools so the model can read files, search, or write
+            // when the user asks. Iteration cap keeps it from running away.
+            let chatAllowed: Set<String> = [
+                "file.read", "file.extract", "file.write", "file.edit",
+                "code.search", "web.search", "web.fetch",
+                "wiki.build", "memory", "shell.exec", "skill.manage"
+            ]
+            phaseDefs = allDefs.filter { def in
+                chatAllowed.contains(ToolNameCodec.canonicalName(def.function.name))
+            }
         case .research:
             let allowed: Set<String> = [
                 "web.search", "web.fetch", "file.read", "file.extract",
@@ -1280,6 +1287,63 @@ extension AgentLoop {
         let searchCount = steps.filter { $0.toolName == "code.search" && $0.kind == .toolCall }.count
         if readCount + searchCount >= 3 { return .execute }
         return .explore
+    }
+
+    // MARK: - Model-Specific Tool Schema Adaptation
+
+    /// Simplify tool definitions for models that struggle with complex schemas.
+    /// Some models (especially local Ollama models, older DeepSeek versions) have trouble
+    /// with too many tools or complex parameter descriptions.
+    static func adaptToolDefsForModel(_ defs: [ToolDefinition], modelName: String) -> [ToolDefinition] {
+        let model = modelName.lowercased()
+        let isLocalOllama = model.contains("ollama") || model.contains("local")
+        let isDeepSeek = model.contains("deepseek")
+        let isQwen = model.contains("qwen")
+
+        // Local models: limit to core tools, simplify descriptions
+        if isLocalOllama {
+            let coreTools: Set<String> = [
+                "file_read", "file_write", "file_edit", "code_search",
+                "shell_exec", "workspace_index"
+            ]
+            return defs
+                .filter { coreTools.contains($0.function.name) }
+                .map { simplifyDescription($0) }
+        }
+
+        // DeepSeek: keep all tools but shorten descriptions (sensitive to long schemas)
+        if isDeepSeek {
+            return defs.map { simplifyDescription($0) }
+        }
+
+        // Qwen: sometimes wraps tool calls in markdown — add strict formatting note
+        // (handled in system prompt, not schema)
+        if isQwen {
+            return defs
+        }
+
+        return defs
+    }
+
+    private static func simplifyDescription(_ def: ToolDefinition) -> ToolDefinition {
+        var d = def
+        // Truncate long descriptions to 100 chars
+        if d.function.description.count > 100 {
+            d.function.description = String(d.function.description.prefix(97)) + "..."
+        }
+        // Truncate parameter descriptions
+        var props = d.function.parameters.properties
+        for (key, prop) in props {
+            if let desc = prop.description, desc.count > 60 {
+                props[key] = FunctionProperty(
+                    type: prop.type,
+                    description: String(desc.prefix(57)) + "...",
+                    enumValues: prop.enumValues
+                )
+            }
+        }
+        d.function.parameters.properties = props
+        return d
     }
 
     static func shouldBootstrapWebSearch(for message: String, intent: UserIntent) -> Bool {
@@ -1638,6 +1702,51 @@ extension AgentLoop {
             }
         }
 
+        // After verify.build failure → pre-read files mentioned in error output
+        if let lastVerify = recentSteps.last(where: { $0.toolName == "verify.build" && $0.isFailure == true && $0.kind == .toolResult }) {
+            let errorPaths = lastVerify.text.components(separatedBy: .newlines)
+                .compactMap { line -> String? in
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    // Match "file.swift:123: error:" pattern
+                    guard let colonIdx = trimmed.firstIndex(of: ":") else { return nil }
+                    let candidate = String(trimmed[..<colonIdx])
+                    if candidate.hasPrefix("/") && FileManager.default.fileExists(atPath: candidate) { return candidate }
+                    let absolute = (taskContext.workspaceRoot as NSString).appendingPathComponent(candidate)
+                    if FileManager.default.fileExists(atPath: absolute) { return absolute }
+                    return nil
+                }
+            for path in Set(errorPaths).prefix(3) {
+                guard !Task.isCancelled else { return result }
+                if !taskContext.memory.readFiles.contains(path) && result.cachedFiles[path] == nil {
+                    if let content = try? String(contentsOfFile: path, encoding: .utf8), content.count < 100_000 {
+                        result.cachedFiles[path] = content
+                    }
+                }
+            }
+        }
+
+        // After file.edit success → pre-read nearby import/header files for verify context
+        if let lastEdit = recentSteps.last(where: { $0.toolName == "file.edit" && $0.kind == .toolResult && !$0.isFailure }),
+           let path = recentSteps.last(where: { $0.toolName == "file.edit" && $0.kind == .toolCall })?.toolParams?["path"] {
+            let ext = (path as NSString).pathExtension.lowercased()
+            let headerExts: [String: String] = ["swift": "swift", "c": "h", "cpp": "h", "m": "h", "mm": "h"]
+            if let headerExt = headerExts[ext], headerExt != ext {
+                let dir = (path as NSString).deletingLastPathComponent
+                if let siblings = try? FileManager.default.contentsOfDirectory(atPath: dir) {
+                    for sibling in siblings.filter({ ($0 as NSString).pathExtension == headerExt }).prefix(2) {
+                        guard !Task.isCancelled else { return result }
+                        let sibPath = (dir as NSString).appendingPathComponent(sibling)
+                        if !taskContext.memory.readFiles.contains(sibPath) && result.cachedFiles[sibPath] == nil {
+                            if let content = try? String(contentsOfFile: sibPath, encoding: .utf8), content.count < 50_000 {
+                                result.cachedFiles[sibPath] = content
+                            }
+                        }
+                    }
+                }
+            }
+            _ = lastEdit // silence unused warning
+        }
+
         return result
     }
 
@@ -1871,7 +1980,7 @@ extension AgentLoop {
                     onStep(idxStep)
                     let ir = try? await indexTool.execute(argumentsJSON: "{}", context: taskContext)
                     if let ir, ir.success {
-                        taskContext.memory.userDecisions.append("工作区索引：\(String(ir.output.prefix(2000)))")
+                        taskContext.memory.appendDecision("工作区索引：\(String(ir.output.prefix(2000)))")
                         result.executedSteps += 1
                     }
                 }
@@ -1895,6 +2004,35 @@ extension AgentLoop {
         }
 
         return result
+    }
+
+    /// User asked for a write/save/edit operation. Used by completion-claim guard.
+    static func expectsWriteOutput(_ message: String) -> Bool {
+        if expectsWikiOutput(message) { return true }
+        let writeMarkers = [
+            "写入", "写到", "保存", "存到", "落地", "记录到", "追加到",
+            "修改", "改一下", "改成", "更新", "替换", "重写", "插入",
+            "新建", "创建文件", "生成文件", "添加到",
+            "整理到", "归档到", "导出到"
+        ]
+        return writeMarkers.contains { message.contains($0) }
+    }
+
+    /// Detect if model output claims completion of a write/save action.
+    /// Used by the completion-claim guard to append a correction when no write actually succeeded.
+    static func containsFalseCompletionClaim(_ text: String) -> Bool {
+        let claims = [
+            "已修改", "已经修改", "修改完成", "改完了", "改好了",
+            "已写入", "已经写入", "写入完成",
+            "已保存", "已经保存", "保存完成", "保存好了",
+            "已落地", "已经落地",
+            "已更新", "已经更新", "更新完成",
+            "已添加", "已新增",
+            "已创建", "已经创建",
+            "已整理到", "已归档",
+            "已完成"
+        ]
+        return claims.contains { text.contains($0) }
     }
 
     static func expectsWikiOutput(_ message: String) -> Bool {

@@ -17,6 +17,13 @@ struct TaskStepCard: View {
             }
             stepContent
         }
+        .contextMenu {
+            Button {
+                store.forkThread(id: taskID, fromStepID: step.id)
+            } label: {
+                Label("从此处分支", systemImage: "arrow.triangle.branch")
+            }
+        }
     }
 
     @ViewBuilder
@@ -29,15 +36,34 @@ struct TaskStepCard: View {
                 UserInputCard(text: step.text)
             }
         case .aiThinking:
-            if step.isCollapsed && !isRunning {
-                EmptyView()
+            // Collapsed aiThinking = orchestration audit / internal label that the user
+            // should never see (continuation strategy, agent switch, completion check etc).
+            // True model reasoning surfaces through non-collapsed steps with reasoningContent.
+            if step.isCollapsed {
+                if store.state.settings.showDebugPanels {
+                    OrchestrationDebugCard(text: step.text, label: "编排")
+                } else {
+                    EmptyView()
+                }
             } else {
                 ThinkingCard(text: step.text, reasoningContent: step.reasoningContent, isRunning: isRunning)
             }
-        case .toolCall: ToolCallCard(step: step, taskID: taskID)
+        case .toolCall:
+            if isRecoveryStep(step) {
+                RecoveryCard(step: step)
+            } else {
+                ToolCallCard(step: step, taskID: taskID)
+            }
         case .toolResult:
-            if step.isCollapsed && !step.isFailure {
+            if isRecoveryStep(step) {
+                // Recovery results shown inline in RecoveryCard, skip duplicate
                 EmptyView()
+            } else if step.isCollapsed && !step.isFailure {
+                if store.state.settings.showDebugPanels {
+                    OrchestrationDebugCard(text: step.text, label: step.toolName ?? "工具结果")
+                } else {
+                    EmptyView()
+                }
             } else {
                 ToolResultCard(step: step)
             }
@@ -51,6 +77,10 @@ struct TaskStepCard: View {
         case .reviewRequest: ReviewCard(step: step, taskID: taskID)
         case .reviewResult: ReviewResultCard(step: step)
         }
+    }
+
+    private func isRecoveryStep(_ step: TaskStep) -> Bool {
+        (step.toolCallId ?? "").hasPrefix("call_recovery_") || step.text.hasPrefix("自动恢复")
     }
 
     private func agentRoleBadge(_ role: AgentRole) -> some View {
@@ -238,14 +268,19 @@ struct ThinkingCard: View {
                         Divider()
                             .background(Brand.purple.opacity(0.15))
 
-                        Text(reasoning)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(TextGrade.secondary.opacity(0.8))
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                            .padding(AppSpace.sm)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ScrollViewReader { proxy in
+                            ScrollView(.vertical, showsIndicators: true) {
+                                Text(reasoning)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(TextGrade.secondary.opacity(0.8))
+                                    .lineLimit(nil)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                                    .padding(AppSpace.sm)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .id("reasoning_bottom")
+                            }
+                            .frame(maxHeight: 300)
                             .background(
                                 RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                                     .fill(Brand.purple.opacity(0.04))
@@ -254,6 +289,14 @@ struct ThinkingCard: View {
                                 RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                                     .strokeBorder(Brand.purple.opacity(0.10), lineWidth: 0.5)
                             )
+                            .onChange(of: reasoning) { _ in
+                                if isRunning {
+                                    withAnimation(.easeOut(duration: 0.1)) {
+                                        proxy.scrollTo("reasoning_bottom", anchor: .bottom)
+                                    }
+                                }
+                            }
+                        }
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
@@ -494,6 +537,106 @@ struct ToolResultCard: View {
                 RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
                     .fill(SurfaceGrade.sunken.opacity(0.34))
             )
+    }
+}
+
+// MARK: - Recovery Card (auto-recovery visualization)
+
+struct RecoveryCard: View {
+    let step: TaskStep
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppSpace.sm) {
+            ZStack {
+                Circle()
+                    .fill(Semantic.warning.opacity(0.10))
+                    .frame(width: 26, height: 26)
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Semantic.warning)
+            }
+            .frame(width: 26)
+
+            VStack(alignment: .leading, spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.xs) {
+                    Text("编排层自动恢复")
+                        .font(AppFont.captionMedium)
+                        .foregroundStyle(Semantic.warning)
+
+                    if step.isFailure {
+                        Text("失败")
+                            .font(AppFont.tiny)
+                            .foregroundStyle(Semantic.error)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Semantic.errorMuted.opacity(0.4)))
+                    } else {
+                        Text("成功")
+                            .font(AppFont.tiny)
+                            .foregroundStyle(Semantic.success)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Semantic.success.opacity(0.12)))
+                    }
+                }
+
+                HStack(spacing: AppSpace.xs) {
+                    if let original = originalTool, let fallback = fallbackTool {
+                        Text(ToolCallCard.friendlyToolName(original))
+                            .font(AppFont.codeSmall)
+                            .foregroundStyle(Semantic.error.opacity(0.8))
+                            .strikethrough()
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(TextGrade.muted)
+                        Text(ToolCallCard.friendlyToolName(fallback))
+                            .font(AppFont.codeSmall)
+                            .foregroundStyle(Semantic.success)
+                    } else {
+                        Text(step.text)
+                            .font(AppFont.codeSmall)
+                            .foregroundStyle(TextGrade.secondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                if let path = step.toolParams?["path"] {
+                    Text(String(path.suffix(from: path.lastIndex(of: "/") ?? path.startIndex)))
+                        .font(AppFont.tiny)
+                        .foregroundStyle(TextGrade.ghost)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, AppSpace.md)
+        .padding(.vertical, AppSpace.sm)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .fill(Semantic.warningMuted.opacity(0.20))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .strokeBorder(Semantic.warning.opacity(0.12), lineWidth: 0.5)
+        )
+        .padding(.vertical, 2)
+    }
+
+    private var originalTool: String? {
+        let text = step.text
+        if text.contains("原工具") {
+            // "自动恢复：xxx" or "原工具 xxx 失败后自动降级"
+            if let range = text.range(of: "原工具 ") {
+                let after = text[range.upperBound...]
+                return String(after.prefix(while: { $0 != " " && $0 != "）" && $0 != ")" }))
+            }
+        }
+        return nil
+    }
+
+    private var fallbackTool: String? {
+        step.toolName
     }
 }
 
@@ -1781,4 +1924,55 @@ struct SideBySideLine {
     let newNum: Int?
     let newText: String?
     let newType: DiffLineType
+}
+
+// MARK: - Orchestration Debug Card
+
+struct OrchestrationDebugCard: View {
+    let text: String
+    let label: String
+    @State private var isExpanded = false
+
+    var body: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(Brand.purple.opacity(0.5))
+                Image(systemName: "gearshape.2")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Brand.purple.opacity(0.5))
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Brand.purple.opacity(0.6))
+                if !isExpanded {
+                    Text(String(text.prefix(60)).replacingOccurrences(of: "\n", with: " "))
+                        .font(.system(size: 10))
+                        .foregroundStyle(TextGrade.muted.opacity(0.6))
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, AppSpace.sm)
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.plain)
+
+        if isExpanded {
+            Text(text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(TextGrade.muted.opacity(0.7))
+                .textSelection(.enabled)
+                .padding(.horizontal, AppSpace.md)
+                .padding(.vertical, AppSpace.xs)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                        .fill(Brand.purple.opacity(0.03))
+                )
+                .padding(.horizontal, AppSpace.sm)
+        }
+    }
 }

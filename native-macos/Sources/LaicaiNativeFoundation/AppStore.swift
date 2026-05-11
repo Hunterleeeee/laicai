@@ -12,9 +12,24 @@ public final class AppStore: ObservableObject {
     static let streamingOutputID = "__streaming_output__"
     var streamBuffers: [UUID: String] = [:]
     var streamLastFlushAt: [UUID: Date] = [:]
+    var thinkingBuffers: [UUID: String] = [:]
+    var thinkingLastFlushAt: [UUID: Date] = [:]
     var chatStreamBuffers: [UUID: String] = [:]
     var chatStreamLastFlushAt: [UUID: Date] = [:]
     var healthChecksInFlight: Set<UUID> = []
+    private var _cachedThreadSummaries: [ThreadRecord]?
+    private var _cachedSummaryGen: UInt64 = 0
+
+    public var cachedThreadRecordSummaries: [ThreadRecord] {
+        if let cached = _cachedThreadSummaries, _cachedSummaryGen == state.threadSummaryGeneration {
+            return cached
+        }
+        let result = state.threadRecordSummaries
+        _cachedThreadSummaries = result
+        _cachedSummaryGen = state.threadSummaryGeneration
+        return result
+    }
+
     let streamFlushCharacterThreshold = 900
     let streamFlushInterval: TimeInterval = 0.8
     let chatStreamFlushCharacterThreshold = 1_200
@@ -36,6 +51,8 @@ public final class AppStore: ObservableObject {
         }
         // Self-evolution: auto-promote winning prompt variants on startup
         PromptRegistry.shared.autoPromote()
+        // Auto-resume: select the most recently interrupted task on launch
+        autoResumeInterruptedTask()
         shellStreamObserver = NotificationCenter.default.addObserver(
             forName: .shellStreamUpdate,
             object: nil,
@@ -93,7 +110,23 @@ public final class AppStore: ObservableObject {
             title: "新会话",
             preview: "",
             modelName: connectorName,
-            category: .engineering
+            category: .engineering,
+            projectID: nil
+        )
+        state.threads.insert(thread, at: 0)
+        state.selectThread(id: thread.id)
+        persistThreads()
+    }
+
+    /// Create a new session explicitly bound to a specific project
+    public func newSessionInProject(_ projectID: UUID) {
+        let connectorName = state.activeConnector?.name ?? state.settings.defaultConnectorName
+        let thread = Thread(
+            title: "新会话",
+            preview: "",
+            modelName: connectorName,
+            category: .engineering,
+            projectID: projectID
         )
         state.threads.insert(thread, at: 0)
         state.selectThread(id: thread.id)
@@ -103,6 +136,26 @@ public final class AppStore: ObservableObject {
     public func selectSession(id: UUID?) {
         state.selectThread(id: id)
         state.modeLabel = "聊天"
+        syncGeneratingStateForSelectedThread()
+    }
+
+    /// Sync `isGenerating` UI flag to match whether the *selected* thread
+    /// has an active generation task, so the composer / stop-button / typing
+    /// indicator correctly reflect the visible thread.
+    func syncGeneratingStateForSelectedThread() {
+        if let tid = state.selectedThreadID, generationTasks[tid] != nil {
+            if !state.isGenerating {
+                state.isGenerating = true
+                state.generationStartedAt = state.generationStartedAt ?? Date()
+                state.liveActivity = "正在生成…"
+            }
+        } else {
+            if state.isGenerating {
+                state.isGenerating = false
+                state.generationStartedAt = nil
+                state.liveActivity = ""
+            }
+        }
     }
 
     public func updateExecutionMode(_ mode: ExecutionMode) {
@@ -122,13 +175,14 @@ public final class AppStore: ObservableObject {
     public func pinSession(id: UUID) {
         guard let index = state.threads.firstIndex(where: { $0.id == id }) else { return }
         state.threads[index].isPinned.toggle()
+        state.invalidateThreadSummaryCache()
         persistThreads()
     }
 
     public func renameSession(id: UUID, title: String) {
         guard let index = state.threads.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty { state.threads[index].title = trimmed }
+        if !trimmed.isEmpty { state.threads[index].title = trimmed; state.invalidateThreadSummaryCache() }
         persistThreads()
     }
 
@@ -160,6 +214,25 @@ public final class AppStore: ObservableObject {
         state.selectThread(id: cloned.id)
         persistThreads()
         notify("已克隆会话", style: .success)
+    }
+
+    public func forkThread(id: UUID, fromStepID: UUID) {
+        guard let thread = state.threads.first(where: { $0.id == id }) else { return }
+        guard let stepIndex = thread.steps.firstIndex(where: { $0.id == fromStepID }) else { return }
+        let forkedSteps = Array(thread.steps.prefix(through: stepIndex))
+        let forked = Thread(
+            title: thread.title + " 分支",
+            preview: forkedSteps.last?.text.prefix(60).trimmingCharacters(in: .whitespacesAndNewlines) ?? thread.preview,
+            steps: forkedSteps,
+            connectorID: thread.connectorID,
+            context: thread.context,
+            modelName: thread.modelName,
+            source: thread.source
+        )
+        state.threads.insert(forked, at: 0)
+        state.selectThread(id: forked.id)
+        persistThreads()
+        notify("已创建分支", style: .success)
     }
 
     public func exportSession(id: UUID) -> String? {
@@ -214,6 +287,7 @@ public final class AppStore: ObservableObject {
     public func archiveThread(id: UUID) {
         guard let index = state.threads.firstIndex(where: { $0.id == id }) else { return }
         state.threads[index].isArchived.toggle()
+        state.invalidateThreadSummaryCache()
         // If the archived thread was selected, deselect it
         if state.threads[index].isArchived && state.selectedThread?.id == id {
             state.selectedThreadID = nil
@@ -257,6 +331,52 @@ public final class AppStore: ObservableObject {
         }
         if lines.count <= 4 {
             lines.append("- 说明：这条任务还没有形成足够工具证据。")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Export shell commands from the selected thread as a runnable bash script
+    public func exportSelectedThreadShellScript() -> String? {
+        guard let thread = state.selectedThread else { return nil }
+        let commands = thread.steps
+            .filter { $0.kind == .toolCall && $0.toolName == "shell.exec" }
+            .compactMap { $0.toolParams?["command"] }
+        guard !commands.isEmpty else { return nil }
+
+        var script = "#!/bin/bash\n"
+        script += "# 来财导出 — \(thread.title)\n"
+        script += "# 时间：\(thread.updatedAt)\n"
+        script += "set -euo pipefail\n\n"
+        for cmd in commands {
+            script += "\(cmd)\n"
+        }
+        return script
+    }
+
+    /// Export the selected thread as a replayable workflow YAML
+    public func exportSelectedThreadWorkflowYAML() -> String? {
+        guard let thread = state.selectedThread else { return nil }
+        let toolSteps = thread.steps.filter { $0.kind == .toolCall && $0.toolName != nil }
+        guard !toolSteps.isEmpty else { return nil }
+
+        var lines: [String] = [
+            "name: \(thread.title)",
+            "description: 从会话自动导出",
+            "category: custom",
+            "steps:"
+        ]
+        for (i, step) in toolSteps.enumerated() {
+            let toolName = step.toolName ?? "unknown"
+            lines.append("  - name: \"\(step.text.prefix(40).replacingOccurrences(of: "\n", with: " "))\"")
+            lines.append("    tool: \(toolName)")
+            if let params = step.toolParams, !params.isEmpty {
+                lines.append("    params:")
+                for (k, v) in params.sorted(by: { $0.key < $1.key }) {
+                    let escaped = v.replacingOccurrences(of: "\"", with: "\\\"")
+                    lines.append("      \(k): \"\(escaped)\"")
+                }
+            }
+            if i > 0 { lines.append("    on_failure: skip") }
         }
         return lines.joined(separator: "\n")
     }
@@ -540,6 +660,15 @@ public final class AppStore: ObservableObject {
 
     private var generationTasks: [UUID: Task<Void, Never>] = [:]
 
+    /// Codex-style steer: inject a correction into a running agent loop.
+    /// Unlike stop, this does NOT cancel the task — it redirects it.
+    public func steerRunningTask(_ message: String) {
+        guard let threadID = state.selectedThreadID,
+              let loop = agentLoops[threadID] else { return }
+        loop.steer(message)
+        ToastCenter.shared.show("🔀 已发送方向修正")
+    }
+
     public func stopGenerating() {
         // Cancel only the selected thread's generation task
         if let threadID = state.selectedThreadID {
@@ -547,11 +676,11 @@ public final class AppStore: ObservableObject {
             generationTasks.removeValue(forKey: threadID)
             agentLoops.removeValue(forKey: threadID)
         }
-        if generationTasks.isEmpty {
-            state.isGenerating = false
-            state.generationStartedAt = nil
-            state.liveActivity = ""
-        }
+        // Always reset UI generating state — the user stopped the visible thread.
+        // Background tasks continue silently and clean up on their own.
+        state.isGenerating = false
+        state.generationStartedAt = nil
+        state.liveActivity = ""
         if let threadID = state.selectedThreadID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }),
            state.threads[threadIndex].source == .task,
@@ -604,13 +733,31 @@ public final class AppStore: ObservableObject {
         if handleSlashCommand(message) { return }
 
         let agentInvocation = customAgentInvocation(from: message)
-        let effectiveMessage = agentInvocation?.message ?? message
+        var effectiveMessage = agentInvocation?.message ?? message
+
+        // Intent enrichment: expand ultra-short/vague messages using thread context
+        effectiveMessage = Self.enrichVagueMessage(effectiveMessage, thread: state.selectedThread)
 
         reconcileSelectedRunningTaskIfIdle()
         if answerSelectedTaskStatusQuestion(effectiveMessage) {
             return
         }
-        let decision = IntentRouter.plan(effectiveMessage)
+        var decision = IntentRouter.plan(effectiveMessage)
+
+        // Context-aware intent upgrade: if the selected thread already has tool calls,
+        // the user is continuing an action-oriented conversation — keep tools available.
+        if decision.intent == .chat,
+           let tid = state.selectedThreadID,
+           let thread = state.threads.first(where: { $0.id == tid }),
+           thread.steps.contains(where: { $0.kind == .toolCall }) {
+            decision = PlannerDecision(
+                intent: .task,
+                confidence: max(decision.confidence, 0.75),
+                reason: decision.reason + " [线程已有工具调用历史，自动升级为任务模式]",
+                routeLabel: "任务",
+                expectedCapabilities: decision.expectedCapabilities + ["运行命令", "提出文件修改"]
+            )
+        }
 
         // Auto-match skill from registry
         let matchedSkill = SkillMatcher.match(input: effectiveMessage, intent: decision.intent)
@@ -751,10 +898,25 @@ public final class AppStore: ObservableObject {
             for step in initialSteps {
                 state.threads[threadIndex].steps.append(step)
             }
-            loopPriorSteps = isEmptyPlaceholder ? initialSteps : state.threads[threadIndex].steps
+            // Lightweight follow-up path: long thread + small clarification question →
+            // strip heavy tool history and memory so the model isn't dragged into
+            // re-doing failed file edits or claiming non-existent tools.
+            let allSteps = state.threads[threadIndex].steps
+            let isHeavyThread = allSteps.count > 40
+                || allSteps.reduce(0) { $0 + $1.text.count } > 40_000
+            let isLightweightFollowUp = Self.isLightweightStatusQuery(message)
+            if isHeavyThread && isLightweightFollowUp {
+                let trimmedTail = Array(allSteps.suffix(8))
+                loopPriorSteps = trimmedTail
+                context.memory = TaskMemory()  // clear injected userDecisions / read files etc.
+            } else {
+                loopPriorSteps = isEmptyPlaceholder ? initialSteps : allSteps
+            }
             state.threads[threadIndex].updatedAt = .now
             targetTaskID = selectedID
         } else {
+            // Bind new thread to active project (Codex-style)
+            let activeProjectID = ProjectManager.shared.activeProjectID
             let thread = Thread(
                 title: String(message.prefix(32)),
                 status: .running,
@@ -762,7 +924,8 @@ public final class AppStore: ObservableObject {
                 connectorID: state.activeConnectorID,
                 workflowName: workflowName,
                 context: context,
-                source: isChatIntent ? .session : nil
+                source: isChatIntent ? .session : nil,
+                projectID: activeProjectID
             )
             state.threads.insert(thread, at: 0)
             targetTaskID = thread.id
@@ -820,6 +983,14 @@ public final class AppStore: ObservableObject {
             loopConfig.maxIterations = min(loopConfig.maxIterations, 3)
         }
         let attemptedToolCalling = loopConfig.supportsToolCalling && !isChatIntent
+
+        // Seed expected iterations from historical data for progress estimation
+        if !isChatIntent, let threadIdx = state.threads.firstIndex(where: { $0.id == targetTaskID }) {
+            let intentStr: String = { switch intent { case .chat: return "chat"; case .research: return "research"; case .task: return "task"; case .workflow(let n): return "workflow:\(n)" } }()
+            let avgIter = TaskOutcomeRecorder.shared.avgIterations(intent: intentStr) ?? Double(loopConfig.maxIterations)
+            state.threads[threadIdx].context.metadata["expectedIterations"] = "\(Int(ceil(avgIter)))"
+        }
+
         let loop = AgentLoop(
             config: loopConfig,
             runtime: environment.runtimeClient
@@ -846,12 +1017,24 @@ public final class AppStore: ObservableObject {
                     onStreamDelta: { [weak self] delta in
                         guard let self else { return }
                         self.appendStreamDelta(delta, to: targetTaskID)
+                    },
+                    onReasoningDelta: { [weak self] delta in
+                        guard let self else { return }
+                        self.appendThinkingDelta(delta, to: targetTaskID)
+                    },
+                    onCheckInterrupt: { [weak self] in
+                        guard let self else { return nil }
+                        guard let followUp = self.state.pendingFollowUp, !followUp.isEmpty else { return nil }
+                        self.state.pendingFollowUp = nil
+                        self.state.draftMessage = ""
+                        return followUp
                     }
                 )
 
                 guard !Task.isCancelled else { return }
 
                 // Update task with completed state
+                self.flushThinkingBuffer(for: targetTaskID)
                 self.flushStreamBuffer(for: targetTaskID)
                 self.mergeCompletedTask(completedTask, into: targetTaskID)
                 self.recordConnectorOutcome(completedTask, connectorID: connector.id, attemptedToolCalling: attemptedToolCalling)
@@ -898,10 +1081,16 @@ public final class AppStore: ObservableObject {
                 }
             } catch {
                 guard !Task.isCancelled else { return }
+                self.flushThinkingBuffer(for: targetTaskID)
                 self.flushStreamBuffer(for: targetTaskID)
                 if let threadIndex = self.state.threads.firstIndex(where: { $0.id == targetTaskID }) {
+                    let steps = self.state.threads[threadIndex].steps
+                    let progressSummary = Self.errorProgressSummary(steps: steps)
+                    let errorText = progressSummary.isEmpty
+                        ? error.localizedDescription
+                        : "\(error.localizedDescription)\n\n已完成：\(progressSummary)"
                     self.state.threads[threadIndex].steps.append(
-                        TaskStep(kind: .error, text: error.localizedDescription, isFailure: true, recoverable: true, retryAction: "重试")
+                        TaskStep(kind: .error, text: errorText, isFailure: true, recoverable: true, retryAction: "重试")
                     )
                     self.state.threads[threadIndex].status = .failed
                     self.state.threads[threadIndex].updatedAt = Date()
@@ -1748,6 +1937,7 @@ public final class AppStore: ObservableObject {
         }
         state.threads[threadIndex].updatedAt = .now
         persistThreads()
+        updateDockBadge()
     }
 
     public func approveHunk(taskID: UUID, stepID: UUID, hunkID: UUID) {
@@ -2136,6 +2326,7 @@ public final class AppStore: ObservableObject {
 
         state.threads[threadIndex].updatedAt = .now
         persistThreads()
+        updateDockBadge()
     }
 
     public func rollbackBatch(taskID: UUID) {
@@ -2273,6 +2464,7 @@ public final class AppStore: ObservableObject {
         if let id, let thread = state.threads.first(where: { $0.id == id }) {
             state.modeLabel = thread.workflowName == nil ? "任务" : "工作流"
         }
+        syncGeneratingStateForSelectedThread()
     }
 
     public func prepareTaskContinuation(id: UUID) {
@@ -2296,6 +2488,7 @@ public final class AppStore: ObservableObject {
         } else {
             state.modeLabel = "聊天"
         }
+        syncGeneratingStateForSelectedThread()
     }
 
     public func startWorkflow(named name: String, goal: String? = nil, userParams: [String: String] = [:]) {
@@ -2351,6 +2544,7 @@ public final class AppStore: ObservableObject {
     public func submitFollowUp() {
         guard let followUp = state.pendingFollowUp, !followUp.isEmpty else { return }
         state.pendingFollowUp = nil
+        state.draftMessage = ""
         // Append follow-up as user input to current task
         if let taskID = state.selectedTaskID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) {
@@ -2487,5 +2681,105 @@ public final class AppStore: ObservableObject {
         state.threads[threadIndex].preview = ""
         state.threads[threadIndex].updatedAt = .now
         persistThreads()
+    }
+
+    // MARK: - Intent Enrichment
+
+    /// Expand ultra-short/vague user messages using thread context so the LLM gets actionable input.
+    /// Examples: "做" → "继续执行上次的任务", "继续" → "继续处理，优先基于当前证据..."
+    static func enrichVagueMessage(_ message: String, thread: Thread?) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count <= 8 else { return message } // Only enrich very short messages
+
+        // If there's an active thread with steps, infer continuation
+        let hasContext = thread != nil && !(thread?.steps.isEmpty ?? true)
+        let lastUserInput = thread?.steps.last(where: { $0.kind == .userInput })?.text ?? ""
+        let threadTitle = thread?.title ?? ""
+
+        // Map common vague instructions to enriched versions
+        let continuationPhrases = ["继续", "接着", "接着做", "go on", "continue", "好的继续", "ok继续"]
+        let executionPhrases = ["做", "开始", "开始做", "做吧", "干", "go", "start", "执行"]
+        let allDonePhrases = ["全做", "都做", "全部", "一起做", "all"]
+        let retryPhrases = ["重试", "再试", "retry", "again", "再来"]
+
+        let lower = trimmed.lowercased()
+
+        if continuationPhrases.contains(where: { lower == $0 }) {
+            if hasContext {
+                return "继续处理当前任务，优先基于已有证据形成结论；不要重复已完成的读取、搜索或执行步骤。"
+            }
+        }
+
+        if executionPhrases.contains(where: { lower == $0 }) {
+            if hasContext {
+                return "执行上面讨论的方案。\(!lastUserInput.isEmpty ? "原始需求：\(lastUserInput.prefix(200))" : "")"
+            }
+        }
+
+        if allDonePhrases.contains(where: { lower == $0 || lower.contains($0) }) {
+            if hasContext {
+                return "按上面讨论的方案，全部执行。按优先级顺序逐一完成，每完成一项汇报进度。\(!threadTitle.isEmpty ? "任务：\(threadTitle)" : "")"
+            }
+        }
+
+        if retryPhrases.contains(where: { lower == $0 }) {
+            if hasContext && !lastUserInput.isEmpty {
+                return "重试上一次操作。原始需求：\(lastUserInput.prefix(300))\n注意避免之前的失败原因。"
+            }
+        }
+
+        // "好" / "行" / "ok" — affirmation, proceed with whatever was suggested
+        let affirmations = ["好", "行", "ok", "可以", "好的", "行吧", "嗯"]
+        if affirmations.contains(where: { lower == $0 }) && hasContext {
+            return "确认，请执行你建议的方案。"
+        }
+
+        return message
+    }
+
+    // MARK: - Auto-Resume Interrupted Tasks
+
+    /// Called after app launch to offer resumption of interrupted tasks.
+    /// Finds the most recently interrupted task and selects it so the user sees the "继续" button.
+    public func autoResumeInterruptedTask() {
+        // Find the most recently interrupted task (marked cancelled by markStaleRunningTasks)
+        let interrupted = state.threads
+            .filter { $0.source == .task && $0.status == .cancelled }
+            .filter { $0.steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+
+        guard let latest = interrupted.first else { return }
+
+        // Auto-select the interrupted thread so user sees the resume card
+        state.selectedThreadID = latest.id
+
+        // If the task was recent (within 30 min), offer auto-continue
+        let timeSinceInterruption = Date.now.timeIntervalSince(latest.updatedAt)
+        if timeSinceInterruption < 30 * 60 {
+            // Add a system hint step suggesting continuation
+            if let idx = state.threads.firstIndex(where: { $0.id == latest.id }) {
+                let hasResumeHint = state.threads[idx].steps.contains(where: {
+                    $0.kind == .error && $0.text.contains("自动恢复")
+                })
+                if !hasResumeHint {
+                    state.threads[idx].steps.append(TaskStep(
+                        kind: .error,
+                        text: "检测到上次任务被中断（\(Self.relativeTimeString(latest.updatedAt))）。点击「继续任务」自动恢复，或发送新消息开始新的对话。",
+                        isFailure: false,
+                        recoverable: true,
+                        retryAction: "继续执行"
+                    ))
+                    persistThreads()
+                }
+            }
+        }
+    }
+
+    private static func relativeTimeString(_ date: Date) -> String {
+        let interval = Date.now.timeIntervalSince(date)
+        if interval < 60 { return "\(Int(interval))秒前" }
+        if interval < 3600 { return "\(Int(interval / 60))分钟前" }
+        if interval < 86400 { return "\(Int(interval / 3600))小时前" }
+        return "\(Int(interval / 86400))天前"
     }
 }

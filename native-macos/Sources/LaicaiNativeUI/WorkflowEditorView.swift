@@ -318,25 +318,38 @@ struct WorkflowEditorView: View {
     }
 
     private func flowConnector(index: Int) -> some View {
-        VStack(spacing: 0) {
+        let prevIsCondition = index > 0 && index <= steps.count && steps[index - 1].toolType == .condition
+        let branchLabel = prevIsCondition ? (steps[index - 1].condition.flatMap { $0.isEmpty ? nil : $0 } ?? "true") : nil
+
+        return VStack(spacing: 0) {
             // Vertical line with dot
             Circle()
-                .fill(SurfaceGrade.border.opacity(0.4))
-                .frame(width: 4, height: 4)
+                .fill(prevIsCondition ? Color(hex: "F59E0B").opacity(0.6) : SurfaceGrade.border.opacity(0.4))
+                .frame(width: prevIsCondition ? 6 : 4, height: prevIsCondition ? 6 : 4)
+            if let label = branchLabel {
+                Text(label)
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color(hex: "F59E0B"))
+                    .padding(.horizontal, 4)
+                    .background(Capsule().fill(Color(hex: "F59E0B").opacity(0.1)))
+            }
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [SurfaceGrade.border.opacity(0.3), SurfaceGrade.border.opacity(0.15)],
+                        colors: [
+                            (prevIsCondition ? Color(hex: "F59E0B") : SurfaceGrade.border).opacity(0.3),
+                            SurfaceGrade.border.opacity(0.15)
+                        ],
                         startPoint: .top, endPoint: .bottom
                     )
                 )
-                .frame(width: 1.5, height: 24)
+                .frame(width: 1.5, height: prevIsCondition ? 18 : 24)
             // Arrow
             Image(systemName: "chevron.down")
                 .font(.system(size: 7, weight: .bold))
-                .foregroundStyle(SurfaceGrade.border.opacity(0.4))
+                .foregroundStyle(prevIsCondition ? Color(hex: "F59E0B").opacity(0.5) : SurfaceGrade.border.opacity(0.4))
         }
-        .frame(height: 36)
+        .frame(height: 40)
     }
 
     private var addNodeButton: some View {
@@ -887,6 +900,46 @@ struct EditableStep: Identifiable, Equatable {
 struct ParamPair: Equatable {
     var key: String
     var value: String
+}
+
+struct NodeEdge: Identifiable, Equatable {
+    let id = UUID()
+    var fromStepID: UUID
+    var toStepID: UUID
+    var label: String  // "success", "failure", "always"
+}
+
+// MARK: - DAG Layout Helpers
+
+enum DAGLayout {
+    /// Compute column assignments for steps based on condition branches.
+    /// Returns (stepID → column, stepID → row) for 2D positioning.
+    static func layout(steps: [EditableStep], edges: [NodeEdge]) -> [(id: UUID, col: Int, row: Int)] {
+        guard !steps.isEmpty else { return [] }
+        var result: [(id: UUID, col: Int, row: Int)] = []
+        var row = 0
+        var i = 0
+        while i < steps.count {
+            let step = steps[i]
+            if step.toolType == .condition {
+                // Condition node at center
+                result.append((id: step.id, col: 1, row: row))
+                row += 1
+                // Next two steps are branches (success / failure) if available
+                let branchCount = min(2, steps.count - i - 1)
+                for b in 0..<branchCount {
+                    result.append((id: steps[i + 1 + b].id, col: b * 2, row: row))
+                }
+                i += 1 + branchCount
+                row += 1
+            } else {
+                result.append((id: step.id, col: 1, row: row))
+                i += 1
+                row += 1
+            }
+        }
+        return result
+    }
 }
 
 // MARK: - Drag & Drop

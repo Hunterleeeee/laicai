@@ -145,6 +145,24 @@ public struct AppState: Equatable {
         connectors.first(where: { $0.id == activeConnectorID })
     }
 
+    public var pendingReviewCount: Int {
+        threads.reduce(0) { count, thread in
+            count + thread.steps.filter { $0.kind == .reviewRequest && $0.approved == nil }.count
+        }
+    }
+
+    /// Estimated progress (0.0–1.0) for the currently running task based on tool call iterations.
+    public var estimatedProgress: Double? {
+        guard isGenerating, let id = selectedThreadID,
+              let thread = threads.first(where: { $0.id == id }),
+              thread.source == .task else { return nil }
+        let toolCalls = thread.steps.filter { $0.kind == .toolCall }.count
+        guard toolCalls > 0 else { return nil }
+        // Use historical average or fallback to 8 iterations as typical
+        let expectedIterations = max(3.0, Double(thread.context.metadata["expectedIterations"] ?? "8") ?? 8.0)
+        return min(0.95, Double(toolCalls) / expectedIterations)
+    }
+
     public var selectedTask: AgentTask? {
         guard let id = selectedThreadID, let thread = threads.first(where: { $0.id == id }), thread.source == .task else { return nil }
         return AgentTask(thread: thread)
@@ -162,11 +180,18 @@ public struct AppState: Equatable {
         }
     }
 
+    // Cache invalidation token — increment to force recomputation
+    public var threadSummaryGeneration: UInt64 = 0
+
     public var threadRecordSummaries: [ThreadRecord] {
         threads.map { ThreadRecord(thread: $0, includeEvents: false) }.sorted { lhs, rhs in
             if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
             return lhs.updatedAt > rhs.updatedAt
         }
+    }
+
+    public mutating func invalidateThreadSummaryCache() {
+        threadSummaryGeneration &+= 1
     }
 
     public var filteredThreadRecords: [ThreadRecord] {

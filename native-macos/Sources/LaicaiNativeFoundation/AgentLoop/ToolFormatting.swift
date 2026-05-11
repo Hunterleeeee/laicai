@@ -4,7 +4,21 @@ import LaicaiNativeDomain
 enum ToolResultFormatter {
     static func displayText(toolName: String, arguments: [String: String], result: ToolResult) -> String {
         guard result.success else {
-            return compact("失败：\(result.error ?? result.output)", limit: 360)
+            // Surface BOTH error code and output. The output usually contains the actual
+            // diagnostic ("batchEdits 参数格式错误：xxx 需要 JSON 数组格式...") that the
+            // model needs to recover. Returning only the error code (e.g. "invalid_batch_edits")
+            // leaves the model in the dark and causes repeated identical failures.
+            let code = result.error ?? ""
+            let detail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            let combined: String
+            if !code.isEmpty && !detail.isEmpty && detail != code {
+                combined = "失败 [\(code)]：\(detail)"
+            } else if !code.isEmpty {
+                combined = "失败：\(code)"
+            } else {
+                combined = "失败：\(detail.isEmpty ? "未知错误" : detail)"
+            }
+            return compact(combined, limit: 600)
         }
 
         switch toolName {

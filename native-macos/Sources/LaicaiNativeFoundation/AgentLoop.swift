@@ -13,6 +13,15 @@ public final class AgentLoop: ObservableObject {
     let runtime: any ChatRuntimeClient
     let toolRegistry: ToolRegistry
 
+    // Codex-style steer: inject a user correction into a running loop
+    private var pendingSteer: String?
+
+    /// Steer: inject a new instruction into the running agent loop.
+    /// The message will be inserted as a user message at the next iteration.
+    public func steer(_ message: String) {
+        pendingSteer = message
+    }
+
     public init(
         config: Config,
         runtime: any ChatRuntimeClient,
@@ -36,8 +45,27 @@ public final class AgentLoop: ObservableObject {
         summaryCache: String? = nil,
         imageAttachments: [ImageAttachment] = [],
         onStep: @MainActor (TaskStep) -> Void = { _ in },
-        onStreamDelta: @Sendable @MainActor (String) -> Void = { _ in }
+        onStreamDelta: @Sendable @MainActor (String) -> Void = { _ in },
+        onReasoningDelta: @Sendable @MainActor (String) -> Void = { _ in },
+        onCheckInterrupt: @MainActor () -> String? = { nil }
     ) async throws -> AgentTask {
+        // ── Pipeline delegation ──
+        if config.usePipeline {
+            return try await runPipeline(
+                taskID: taskID,
+                message: message,
+                intent: intent,
+                connector: connector,
+                allConnectors: allConnectors,
+                context: context,
+                priorSteps: priorSteps,
+                summaryCache: summaryCache,
+                imageAttachments: imageAttachments,
+                onStep: onStep,
+                onStreamDelta: onStreamDelta
+            )
+        }
+
         let startTime = CFAbsoluteTimeGetCurrent()
         let wasCancelled = false
         // PERF-3: Chat fast path — skip heavy file scan and git diff for simple chat
@@ -76,6 +104,54 @@ public final class AgentLoop: ObservableObject {
         }
 
         authorizeUserPathsAndNarrowWorkspace(message: message, intent: intent, taskContext: &taskContext)
+
+        // Ensure project exists for this workspace (auto-creates on first use)
+        if !taskContext.workspaceRoot.isEmpty && intent != .chat {
+            let project = ProjectManager.shared.ensureProject(for: taskContext.workspaceRoot)
+
+            // Codex-style: run setup script before task
+            if let script = project.setupScript, !script.isEmpty {
+                let setupStep = TaskStep(
+                    kind: .toolCall,
+                    text: "🔧 运行项目 setup script…",
+                    isCollapsible: true,
+                    isCollapsed: true
+                )
+                task.steps.append(setupStep)
+                onStep(setupStep)
+                let proc = Process()
+                proc.launchPath = "/bin/bash"
+                proc.arguments = ["-c", script]
+                proc.currentDirectoryPath = taskContext.workspaceRoot
+                proc.environment = ProcessInfo.processInfo.environment
+                let pipe = Pipe()
+                proc.standardOutput = pipe
+                proc.standardError = pipe
+                try? proc.run()
+                proc.waitUntilExit()
+            }
+
+            // Codex-style: create worktree for parallel isolation
+            if project.useWorktree {
+                let branchName = "laicai/task-\(task.id.uuidString.prefix(8))"
+                let worktreePath = "/tmp/laicai-worktrees/\(branchName)"
+                let proc = Process()
+                proc.launchPath = "/usr/bin/git"
+                proc.arguments = ["worktree", "add", "-b", branchName, worktreePath]
+                proc.currentDirectoryPath = taskContext.workspaceRoot
+                let pipe = Pipe()
+                proc.standardOutput = pipe
+                proc.standardError = pipe
+                try? proc.run()
+                proc.waitUntilExit()
+                if proc.terminationStatus == 0 {
+                    taskContext.workspaceRoot = worktreePath
+                    taskContext.metadata["worktreeBranch"] = branchName
+                    taskContext.metadata["worktreeOriginalRoot"] = project.rootPath
+                }
+            }
+        }
+
         await runPreparationTools(message: message, intent: intent, needsPlanning: needsPlanning, taskContext: &taskContext, task: &task, onStep: onStep)
 
         // Build system prompt
@@ -191,6 +267,10 @@ public final class AgentLoop: ObservableObject {
         // Phase-aware: infer current phase from prior steps to dynamically open/close tools.
         let initialPhase = priorSteps.isEmpty ? TaskPhase.explore : Self.inferPhase(from: priorSteps)
         var toolDefs = config.supportsToolCalling ? filteredToolDefinitions(Self.toolDefinitions(for: intent, phase: initialPhase, registry: toolRegistry)) : []
+        // Model-specific schema adaptation: simplify for local/weak models
+        if !toolDefs.isEmpty {
+            toolDefs = Self.adaptToolDefsForModel(toolDefs, modelName: config.modelName)
+        }
         // W1+A3: Reorder tools by historical effectiveness and annotate low-success tools
         let tStats = toolDefs.isEmpty ? [] : TaskOutcomeRecorder.shared.toolStats(days: 14)
         if !tStats.isEmpty {
@@ -213,6 +293,16 @@ public final class AgentLoop: ObservableObject {
                 systemPrompt += "\n\n## 工具效率提示\n以下工具近期成功率较低，请优先使用替代方案或仔细检查参数：\(warnings)"
             }
         }
+        // Ground-truth tool availability injection. Without this the model occasionally
+        // hallucinates that some tools "are not available" mid-session, even after
+        // it just used them. App layer is the single source of truth.
+        if config.supportsToolCalling, !toolDefs.isEmpty {
+            let names = toolDefs.map(\.function.name).sorted()
+            systemPrompt += "\n\n## 可用工具\n\(names.joined(separator: ", "))\n以此列表为准，不要否认或编造工具。"
+        } else if !config.supportsToolCalling {
+            systemPrompt += "\n\n## 可用工具\n无（纯文本模式）。"
+        }
+
         var currentPhase = initialPhase
         var usedToolCompatibilityFallback = false
         // Hard circuit breaker: tool+target combos that have failed too many times
@@ -346,7 +436,7 @@ public final class AgentLoop: ObservableObject {
             let resultContent = ToolResultFormatter.modelContent(
                 toolName: "web.fetch",
                 result: toolResult,
-                limit: config.maxTokensPerTurn
+                limit: min(4000, config.maxTokensPerTurn)
             )
             let instruction = toolResult.success
                 ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWebFetch, baseline: "我已读取用户提供的网页。请基于网页正文和当前任务继续工作，必要时再搜索或读取项目文件；不要声称无法访问该链接。")
@@ -413,7 +503,7 @@ public final class AgentLoop: ObservableObject {
             let resultContent = ToolResultFormatter.modelContent(
                 toolName: "file.read",
                 result: toolResult,
-                limit: config.maxTokensPerTurn
+                limit: min(8000, config.maxTokensPerTurn)
             )
             let instruction = toolResult.success
                 ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapFileRead, baseline: "我已直接读取用户提供的本地路径。请基于真实读取结果继续完成任务；如果这是目录，先根据目录清单判断下一步该读哪些文件。")
@@ -469,7 +559,7 @@ public final class AgentLoop: ObservableObject {
             let resultContent = ToolResultFormatter.modelContent(
                 toolName: "workspace.index",
                 result: toolResult,
-                limit: config.maxTokensPerTurn
+                limit: min(2000, config.maxTokensPerTurn)
             )
             let instruction = toolResult.success
                 ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWorkspaceIndex, baseline: "我已先建立工作区索引。请基于索引里的入口候选、测试候选、配置候选和风险候选判断项目结构；下一步优先读取 README/项目指令/配置/入口/测试文件，必要时用 code_search 精确补充，不要自由拼 shell find。")
@@ -524,7 +614,7 @@ public final class AgentLoop: ObservableObject {
             let resultContent = ToolResultFormatter.modelContent(
                 toolName: "code.search",
                 result: toolResult,
-                limit: config.maxTokensPerTurn
+                limit: min(2000, config.maxTokensPerTurn)
             )
             var autoReadBlock = ""
             if toolResult.success,
@@ -609,7 +699,7 @@ public final class AgentLoop: ObservableObject {
             let resultContent = ToolResultFormatter.modelContent(
                 toolName: "web.search",
                 result: toolResult,
-                limit: config.maxTokensPerTurn
+                limit: min(3000, config.maxTokensPerTurn)
             )
             let instruction = toolResult.success
                 ? "我已先执行联网搜索。请只基于下面的真实搜索结果回答用户问题，并尽量给出来源标题或链接；不要编造未搜索到的信息。"
@@ -667,6 +757,8 @@ public final class AgentLoop: ObservableObject {
             }
         }
 
+        var connector = connector
+        var didConnectorFailover = false
         var iteration = 0
         var didComplete = false
         var hadFailure = false
@@ -711,6 +803,33 @@ public final class AgentLoop: ObservableObject {
             }
             iteration += 1
 
+            // Codex-style steer: check for injected user correction
+            if let steerMsg = pendingSteer {
+                pendingSteer = nil
+                let steerStep = TaskStep(
+                    kind: .userInput,
+                    text: "🔀 \(steerMsg)",
+                    isCollapsible: false,
+                    isCollapsed: false
+                )
+                task.steps.append(steerStep)
+                onStep(steerStep)
+                messages.append(ChatMessage(role: "user", content: "[方向修正] 用户在执行中插入了新指令，请立即调整方向：\n\(steerMsg)"))
+            }
+
+            // Check for user interrupt (pending follow-up injection)
+            if let interrupt = onCheckInterrupt() {
+                let interruptStep = TaskStep(
+                    kind: .userInput,
+                    text: interrupt,
+                    isCollapsible: false,
+                    isCollapsed: false
+                )
+                task.steps.append(interruptStep)
+                onStep(interruptStep)
+                messages.append(ChatMessage(role: "user", content: interrupt))
+            }
+
             // Re-infer phase from accumulated steps and update tool definitions
             if config.supportsToolCalling && intent != .chat {
                 let newPhase = Self.inferPhase(from: task.steps)
@@ -718,6 +837,12 @@ public final class AgentLoop: ObservableObject {
                     let oldPhase = currentPhase
                     currentPhase = newPhase
                     toolDefs = filteredToolDefinitions(Self.toolDefinitions(for: intent, phase: currentPhase, registry: toolRegistry))
+                    // Re-anchor ground truth: tool availability changed, refresh model's view
+                    let names = toolDefs.map(\.function.name).sorted().joined(separator: "、")
+                    messages.append(ChatMessage(
+                        role: "system",
+                        content: "[工具可用性更新] 阶段切换到「\(currentPhase.title)」，当前真实可用工具：\(names)。以这份为准，不要引用更早的工具列表。"
+                    ))
 
                     // Phase transition → aggressively compress old messages for context isolation
                     // Keep only system prompt + first user + last 6 messages
@@ -775,8 +900,8 @@ public final class AgentLoop: ObservableObject {
                 let charsPerToken: Double = cjkCount > content.count / 3 ? 2.5 : 4.0
                 return sum + Int(Double(content.count) / charsPerToken)
             }
-            // Compress when approaching context window limit (leave 20% headroom for response)
-            let safeLimit = Int(Double(tokenLimit) * 0.8)
+            // Compress early to save input tokens (leave 40% headroom)
+            let safeLimit = Int(Double(tokenLimit) * 0.6)
             if estimatedTokens > safeLimit {
                 messages = Self.compressMidTaskHistory(messages, maxMessages: max(10, messageThreshold / 2))
                 if messages.reduce(0, { sum, msg in
@@ -803,8 +928,8 @@ public final class AgentLoop: ObservableObject {
                 }
             }
 
-            // F3: Structured progress state — inject every 3 iterations for precise awareness
-            if iteration > 0 && iteration % 3 == 0 && intent != .chat {
+            // F3: Structured progress state — inject every 5 iterations (token economy)
+            if iteration > 0 && iteration % 5 == 0 && intent != .chat {
                 var state: [String] = []
 
                 // Files read
@@ -871,6 +996,11 @@ public final class AgentLoop: ObservableObject {
                 effectiveSystemPrompt += "\n\n[第\(iteration)轮] 直接行动，不要计划或解释。用最少步骤完成任务。"
             }
 
+            // Context window management: compress old messages when approaching token budget
+            // Use conservative estimate: 128K tokens budget, keep 20% for response
+            let tokenBudget = 100_000
+            Self.compressMessages(&messages, estimatedTokenBudget: tokenBudget)
+
             // Send to LLM with tools
             let intentModeLabel: String = {
                 switch intent {
@@ -904,7 +1034,25 @@ public final class AgentLoop: ObservableObject {
 
             let response: SendMessageResponse
             do {
-                response = try await runtime.sendMessageStream(request, onChunk: onStreamDelta)
+                response = try await runtime.sendMessageStream(request, onChunk: onStreamDelta, onReasoningChunk: onReasoningDelta)
+
+                // Record per-request token usage for analytics
+                if let m = response.metrics {
+                    let projectName = ProjectManager.shared.activeProject?.name ?? ""
+                    UsageTracker.shared.record(
+                        modelName: config.modelName,
+                        connectorName: connector.name,
+                        projectName: projectName,
+                        threadID: task.id.uuidString,
+                        inputTokens: m.inputTokens ?? 0,
+                        outputTokens: m.outputTokens ?? 0,
+                        durationSeconds: m.totalDuration,
+                        tokensPerSecond: m.tokensPerSecond ?? 0,
+                        isStreaming: true,
+                        intent: intentString
+                    )
+                }
+
                 // G2: Merge speculative pre-fetch results into task context
                 let specResult = await speculativeTask.value
                 for (path, content) in specResult.cachedFiles {
@@ -925,12 +1073,28 @@ public final class AgentLoop: ObservableObject {
                         kind: .aiThinking,
                         text: "模型请求失败（\(error.localizedDescription)），自动重试（\(transientRetryCount)/\(maxTransientRetries)）…",
                         isCollapsible: true,
-                        isCollapsed: true
+                        isCollapsed: false
                     )
                     task.steps.append(retryStep)
                     onStep(retryStep)
                     let delaySec = min(Int(pow(2.0, Double(transientRetryCount))), 8)
                     try? await Task.sleep(for: .milliseconds(delaySec * 1000))
+                    continue
+                }
+                // Connector failover: if we have alternatives and haven't tried failover yet, switch
+                if !didConnectorFailover,
+                   let fallback = allConnectors.first(where: { $0.id != connector.id && $0.health != .offline }) {
+                    didConnectorFailover = true
+                    connector = fallback
+                    transientRetryCount = 0
+                    let failoverStep = TaskStep(
+                        kind: .aiThinking,
+                        text: "主连接器 \(config.modelName) 连续失败，自动切换至备用连接器 \(fallback.name)（\(fallback.modelName)）",
+                        isCollapsible: true,
+                        isCollapsed: false
+                    )
+                    task.steps.append(failoverStep)
+                    onStep(failoverStep)
                     continue
                 }
                 let errorStep = TaskStep(
@@ -1621,9 +1785,13 @@ public final class AgentLoop: ObservableObject {
                         let target = callStep.toolParams?["path"] ?? callStep.toolParams?["command"] ?? "unknown"
                         let failKey = "\(toolName):\(target)"
                         toolFailureCounts[failKey, default: 0] += 1
-                        if toolFailureCounts[failKey]! >= maxRepeatedFailures {
+                        let failCount = toolFailureCounts[failKey]!
+                        // file.edit: after 1st failure, immediately guide to file.write
+                        if toolName == "file.edit" && failCount == 1 {
+                            messages.append(ChatMessage(role: "system", content: "编排层：file.edit 对 \(URL(fileURLWithPath: target).lastPathComponent) 匹配失败。下次对该文件直接使用 file_write 全量写入（先 file_read 获取当前内容，在内容中做修改，然后 file_write 写回完整内容）。不要再尝试 file_edit。"))
+                        } else if failCount >= maxRepeatedFailures {
                             let alternatives = Self.suggestAlternatives(for: toolName, target: target)
-                            let circuitMsg = "⚠️ \(toolName) 对 \(target) 已失败 \(toolFailureCounts[failKey]!) 次，禁止再用相同参数重试。\n替代方案：\(alternatives)"
+                            let circuitMsg = "⚠️ \(toolName) 对 \(target) 已失败 \(failCount) 次，禁止再用相同参数重试。\n替代方案：\(alternatives)"
                             messages.append(ChatMessage(role: "system", content: circuitMsg))
                         }
                     } else {
@@ -1686,7 +1854,7 @@ public final class AgentLoop: ObservableObject {
                     }
                     if ["file.write", "file.edit"].contains(callStep.toolName ?? ""), toolResult.success {
                         if let path = callStep.toolParams?["path"] {
-                            taskContext.memory.userDecisions.append("已写入：\(path)")
+                            taskContext.memory.appendDecision("已写入：\(path)")
                             // Invalidate read cache — file content changed
                             taskContext.memory.fileContentCache.removeValue(forKey: path)
                             let fullPath = (taskContext.workspaceRoot as NSString).appendingPathComponent(path)
@@ -1760,20 +1928,23 @@ public final class AgentLoop: ObservableObject {
                     }
 
                     // F5: Smart context window — dynamic token allocation per tool result
+                    // Token economy: aggressive caps to reduce input token bloat
                     let toolResultLimit: Int = {
                         let tn = callStep.toolName ?? ""
-                        // Failures get full budget — model needs all error details
-                        if !toolResult.success { return config.maxTokensPerTurn }
-                        // Reads are primary content — generous budget
-                        if tn == "file.read" { return config.maxTokensPerTurn }
-                        // Successful verify = minimal (just "passed")
+                        // Failures: cap at 2K (error messages don't need 16K)
+                        if !toolResult.success { return 2000 }
+                        // Reads: cap at 8K (was 16K — most files don't need full dump)
+                        if tn == "file.read" || tn == "file.extract" { return min(8000, config.maxTokensPerTurn) }
+                        // Successful verify = minimal
                         if tn == "verify.build" { return 200 }
-                        // Index/search = medium
-                        if tn == "workspace.index" || tn == "code.search" { return min(3000, config.maxTokensPerTurn) }
-                        // Shell output varies — cap at half
-                        if tn == "shell.exec" { return config.maxTokensPerTurn / 2 }
-                        // Default
-                        return config.maxTokensPerTurn
+                        // Index/search = 2K (was 3K)
+                        if tn == "workspace.index" || tn == "code.search" { return 2000 }
+                        // Shell output: cap at 3K (was 8K)
+                        if tn == "shell.exec" { return 3000 }
+                        // Web: cap at 4K
+                        if tn == "web.fetch" || tn == "web.search" { return 4000 }
+                        // Default: 4K
+                        return 4000
                     }()
                     let resultContent = ToolResultFormatter.modelContent(
                         toolName: callStep.toolName ?? "tool",
@@ -1886,6 +2057,20 @@ public final class AgentLoop: ObservableObject {
                     }
                 }
 
+                // Mid-task failure pattern matching: check if current tool usage matches known failure patterns
+                if intent != .chat {
+                    let recentToolNames = Array(Set(recentSignatures.compactMap { $0.split(separator: ":").first.map(String.init) }))
+                    let midPatterns = FailurePatternDB.shared.matches(
+                        intent: intentString,
+                        recentTools: recentToolNames,
+                        message: message,
+                        modelName: config.modelName
+                    )
+                    for pattern in midPatterns.prefix(2) {
+                        orchestrationNotes.append("⚠️ 历史失败模式匹配：\(pattern.preemptiveInstruction)")
+                    }
+                }
+
                 if !orchestrationNotes.isEmpty {
                     messages.append(ChatMessage(role: "system", content: "编排层提示：\n" + orchestrationNotes.joined(separator: "\n")))
                 }
@@ -1903,8 +2088,9 @@ public final class AgentLoop: ObservableObject {
                 }
                 let batchHadVerify = callSteps.contains { $0.1.toolName == "verify.build" }
                 let hasBuildSystem = ValidationEngine.suggestVerificationCommand(workspaceRoot: taskContext.workspaceRoot) != nil
-                if batchHadCodeWrite && !batchHadVerify && isToolAllowed("verify.build") && hasBuildSystem {
-                    let verifyNudge = "代码文件已修改。下一步必须调用 verify_build 验证编译是否通过。如果失败，立即 file_edit 修复后再次 verify_build。"
+                let previousVerifyFailed = task.steps.contains { $0.toolName == "verify.build" && $0.isFailure == true }
+                if batchHadCodeWrite && !batchHadVerify && isToolAllowed("verify.build") && hasBuildSystem && !previousVerifyFailed {
+                    let verifyNudge = "代码文件已修改。建议调用 verify_build 验证编译是否通过。如果失败，根据错误信息修复。"
                     messages.append(ChatMessage(role: "user", content: verifyNudge))
                 }
 
@@ -2006,17 +2192,39 @@ public final class AgentLoop: ObservableObject {
                         messages.append(ChatMessage(role: "system", content: "上一轮模型没有返回任何可见内容或工具调用。已临时移除工具 schema，请直接用文字给出基于已有材料的结论；如果用户要求保存/写入但工具不可用，请明确说明尚未保存。"))
                         continue
                     }
-                    // Auto-retry empty response once before giving up
+                    // Auto-retry empty response once before giving up.
+                    // Also peel off any trailing orchestration-injected nudge that may
+                    // have overwhelmed the model. We only peel if we can clearly identify
+                    // the message as our own injection (markers below).
                     if consecutiveEmptyResponses == 1 {
+                        let nudgeMarkers = [
+                            "[工具可用性更新]",
+                            "立即调用工具",
+                            "请至少调用",
+                            "你已经完成搜索",
+                            "完成质量门",
+                            "已临时移除工具 schema"
+                        ]
+                        var peeled = 0
+                        while peeled < 2, messages.count > 2 {
+                            let last = messages[messages.count - 1]
+                            let body = last.content ?? ""
+                            let isInjected = nudgeMarkers.contains(where: { body.contains($0) })
+                            guard isInjected else { break }
+                            messages.removeLast()
+                            peeled += 1
+                        }
                         let retryStep = TaskStep(
                             kind: .aiThinking,
-                            text: "模型返回空内容，自动重试中…",
+                            text: peeled > 0
+                                ? "模型返回空内容，剥离最近 \(peeled) 条编排提示后自动重试…"
+                                : "模型返回空内容，自动重试中…",
                             isCollapsible: true,
                             isCollapsed: true
                         )
                         task.steps.append(retryStep)
                         onStep(retryStep)
-                        continue  // retry same messages, URLSession will get a fresh response
+                        continue
                     }
                     let nudgeText = Self.buildEmptyResponseNudge(task: task, intent: intent)
                     messages.append(ChatMessage(role: "user", content: nudgeText))
@@ -2113,6 +2321,22 @@ public final class AgentLoop: ObservableObject {
                     task.steps.append(warningStep)
                     onStep(warningStep)
                 }
+                // Sanitize fake tool call blocks from user-visible text.
+                // Without this, raw <|DSML| function_calls> ... templates leak to the user.
+                var visibleText = text
+                if hasFakeToolCalls {
+                    if let cleaned = Self.stripFakeToolCallBlocks(from: text) {
+                        visibleText = cleaned
+                    } else {
+                        visibleText = "（已隐藏一段未执行的伪工具调用文本，请重新提问或切换支持 function calling 的模型）"
+                    }
+                }
+                // Completion-claim guard: model says "已修改/已写入/已保存" but no successful
+                // file.write/file.edit/wiki.build happened — append correction so user is not misled.
+                if Self.expectsWriteOutput(message) && !hasWritten && !Self.hasSavedWiki(in: task)
+                    && Self.containsFalseCompletionClaim(visibleText) {
+                    visibleText += "\n\n---\n⚠️ **来财提醒**：本轮未实际执行成功的写入/保存操作（`file.write` / `file.edit` / `wiki.build` 全部未成功）。上面的「已修改 / 已保存」等说法是模型自述，不代表磁盘上文件已变更。请检查上方工具结果，或要求重试。"
+                }
 
                 if Self.looksLikeProviderError(text) {
                     let errorStep = TaskStep(
@@ -2130,7 +2354,7 @@ public final class AgentLoop: ObservableObject {
                 }
                 let outputStep = TaskStep(
                     kind: .textOutput,
-                    text: text,
+                    text: visibleText,
                     isCollapsible: false,
                     isCollapsed: false,
                     metrics: response.metrics
@@ -2285,22 +2509,20 @@ public final class AgentLoop: ObservableObject {
             onStep(continueStep)
         }
 
-        // Only emit detailed diagnostics for non-trivial tasks with issues
+        // Diagnostic audit steps ("完成检查"/"阶段总结"/"证据清单") were visually
+        // polluting timelines and getting fed back into the model's context, encouraging
+        // it to mimic the same internal audit format in user-visible output. They are
+        // disabled by default; only retained as collapsed annotations when there is a
+        // genuine failure that needs traceability.
         let toolCallCount = task.steps.filter { $0.kind == .toolCall }.count
-        let needsDiagnostics = hadFailure || wasTruncated || (!didComplete && toolCallCount > 0)
-        if needsDiagnostics {
-            let checkStep = Self.completionCheckStep(for: task, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun)
+        let emitDiagnosticAudit = (hadFailure && toolCallCount > 0) || wasTruncated
+        if emitDiagnosticAudit {
+            // Single compact diagnostic, always collapsed so UI hides it (see TimelineCards aiThinking branch).
+            var checkStep = Self.completionCheckStep(for: task, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun)
+            checkStep.isCollapsible = true
+            checkStep.isCollapsed = true
             task.steps.append(checkStep)
             onStep(checkStep)
-            if Self.shouldEmitStageSummary(for: task, hasPlan: hasPlan, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun) {
-                let summaryStep = Self.stageSummaryStep(for: task, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated)
-                task.steps.append(summaryStep)
-                onStep(summaryStep)
-            }
-            if let evidenceStep = Self.evidenceChecklistStep(for: task, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun) {
-                task.steps.append(evidenceStep)
-                onStep(evidenceStep)
-            }
         }
 
         let finalStatus: TaskStatus = Self.meetsCompletionCriteria(task: task, intent: intent, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun)
@@ -2519,6 +2741,44 @@ public final class AgentLoop: ObservableObject {
         // Persist task memory for cross-session continuity
         TaskMemoryStore.save(taskContext.memory, workspaceRoot: config.workspaceRoot)
         TaskMemoryStore.appendHistory(memory: taskContext.memory, workspaceRoot: config.workspaceRoot, taskDescription: task.title)
+
+        // Update project knowledge from task results
+        if !config.workspaceRoot.isEmpty {
+            let summary = taskContext.memory.stageConclusions.last ?? task.title
+            let modified = Array(Set(taskContext.memory.pendingFiles))
+            ProjectManager.shared.learnFromTask(
+                rootPath: config.workspaceRoot,
+                summary: summary,
+                filesModified: modified,
+                conclusions: taskContext.memory.stageConclusions
+            )
+        }
+
+        // Codex-style diff review: capture git diff for the task
+        let workRoot = taskContext.metadata["worktreeOriginalRoot"] ?? config.workspaceRoot
+        if !workRoot.isEmpty, intent != .chat {
+            let diffProc = Process()
+            diffProc.launchPath = "/usr/bin/git"
+            diffProc.arguments = ["diff", "--stat"]
+            diffProc.currentDirectoryPath = taskContext.workspaceRoot
+            let diffPipe = Pipe()
+            diffProc.standardOutput = diffPipe
+            diffProc.standardError = diffPipe
+            try? diffProc.run()
+            diffProc.waitUntilExit()
+            let diffOutput = String(data: diffPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            if !diffOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let diffStep = TaskStep(
+                    kind: .toolResult,
+                    text: "📋 文件变更：\n```\n\(String(diffOutput.prefix(2000)))\n```",
+                    isCollapsible: true,
+                    isCollapsed: true
+                )
+                task.steps.append(diffStep)
+                onStep(diffStep)
+                task.context.metadata["diffStat"] = String(diffOutput.prefix(1000))
+            }
+        }
 
         // Clear task-specific path allowances
         WorkspaceSandbox.shared.clearAllowedPaths()

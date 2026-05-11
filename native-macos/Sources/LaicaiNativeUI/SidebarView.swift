@@ -16,6 +16,11 @@ struct SidebarView: View {
     @State private var deletingSessionID: UUID?
     @State private var deletingTaskID: UUID?
     @State private var showingAddConnector = false
+    @State private var showingNewProjectSheet = false
+    @State private var deletingProjectID: UUID?
+    @State private var collapsedProjects: Set<UUID> = []
+    @State private var isHoveringProject: UUID?
+    @ObservedObject private var projectManager = ProjectManager.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -123,11 +128,13 @@ struct SidebarView: View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: AppSpace.xs) {
                 ForEach(filteredThreadItems) { item in
-                    CompactThreadDot(
-                        item: item,
-                        isSelected: isSelected(item)
-                    )
-                    .onTapGesture { selectThread(item) }
+                    Button { selectThread(item) } label: {
+                        CompactThreadDot(
+                            item: item,
+                            isSelected: isSelected(item)
+                        )
+                    }
+                    .buttonStyle(.plain)
                     .contextMenu { threadMenu(for: item) }
                 }
             }
@@ -136,24 +143,52 @@ struct SidebarView: View {
         }
     }
 
-    // MARK: - Expanded List (280px mode)
+    // MARK: - Expanded List (project-grouped, Codex style)
 
     private var expandedList: some View {
         List {
-            ForEach(Array(timeGroupedThreads.enumerated()), id: \.element.0) { _, pair in
-                let (group, items) = pair
-
+            // Section: 项目 (projects with nested threads)
+            if !projectManager.projects.isEmpty {
                 Section {
-                    ForEach(items) { item in
-                        ExpandedThreadRow(item: item, isSelected: isSelected(item))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: 1, leading: AppSpace.xs, bottom: 1, trailing: AppSpace.xs))
-                            .onTapGesture { selectThread(item) }
-                            .contextMenu { threadMenu(for: item) }
+                    ForEach(projectManager.projects) { project in
+                        projectGroupView(project)
                     }
                 } header: {
-                    Text(group)
+                    HStack {
+                        Text("项目")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(TextGrade.ghost)
+                            .textCase(.uppercase)
+                        Spacer()
+                        Button {
+                            showingNewProjectSheet = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(TextGrade.ghost)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.top, 4)
+                }
+            }
+
+            // Section: 其他对话 (threads not belonging to any project)
+            let orphanThreads = filteredThreadItems.filter { $0.projectID == nil }
+            if !orphanThreads.isEmpty {
+                Section {
+                    ForEach(orphanThreads) { item in
+                        Button { selectThread(item) } label: {
+                            ExpandedThreadRow(item: item, isSelected: isSelected(item))
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu { threadMenu(for: item) }
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 1, leading: AppSpace.xs, bottom: 1, trailing: AppSpace.xs))
+                    }
+                } header: {
+                    Text("其他对话")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(TextGrade.ghost)
                         .textCase(.uppercase)
@@ -163,6 +198,149 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
+        .sheet(isPresented: $showingNewProjectSheet) {
+            NewProjectSheet()
+        }
+        .alert("删除项目", isPresented: Binding(
+            get: { deletingProjectID != nil },
+            set: { if !$0 { deletingProjectID = nil } }
+        )) {
+            Button("取消", role: .cancel) { deletingProjectID = nil }
+            Button("删除", role: .destructive) {
+                if let id = deletingProjectID {
+                    projectManager.deleteProject(id: id)
+                }
+                deletingProjectID = nil
+            }
+        } message: { Text("确定要删除这个项目吗？项目文件不会被删除。") }
+    }
+
+    // MARK: - Project Group (collapsible header + nested threads)
+
+    @ViewBuilder
+    private func projectGroupView(_ project: Project) -> some View {
+        let isActive = project.id == projectManager.activeProjectID
+        let isCollapsed = collapsedProjects.contains(project.id)
+        let projectThreads = filteredThreadItems.filter { $0.projectID == project.id }
+            .sorted { $0.updatedAt > $1.updatedAt }
+        let displayThreads = isCollapsed ? [] : Array(projectThreads.prefix(5))
+        let hasMore = projectThreads.count > 5 && !isCollapsed
+
+        // Project header — tap activates project + expands; tap again collapses
+        Button {
+            withAnimation(AppAnimation.quick) {
+                if isActive {
+                    // Already active: just toggle collapse
+                    if isCollapsed {
+                        collapsedProjects.remove(project.id)
+                    } else {
+                        collapsedProjects.insert(project.id)
+                    }
+                } else {
+                    // Activate this project + expand + switch workspace
+                    projectManager.openProject(id: project.id)
+                    store.switchWorkspace(to: project.rootPath)
+                    collapsedProjects.remove(project.id)
+                }
+            }
+        } label: {
+            HStack(spacing: AppSpace.sm) {
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(TextGrade.ghost)
+                    .frame(width: 10)
+
+                Image(systemName: isActive ? "folder.fill" : "folder")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(isActive ? Brand.primary : TextGrade.muted)
+
+                Text(project.name)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                    .foregroundStyle(isActive ? TextGrade.primary : TextGrade.secondary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                if !projectThreads.isEmpty {
+                    Text("\(projectThreads.count)")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(TextGrade.ghost)
+                }
+            }
+            .padding(.vertical, 3)
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .trailing) {
+            Button {
+                projectManager.openProject(id: project.id)
+                store.switchWorkspace(to: project.rootPath)
+                collapsedProjects.remove(project.id)
+                store.newSessionInProject(project.id)
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(TextGrade.muted)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(isHoveringProject == project.id ? 1 : 0)
+            .offset(x: -2)
+        }
+        .onHover { hovering in
+            isHoveringProject = hovering ? project.id : nil
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 0, leading: AppSpace.xs, bottom: 0, trailing: AppSpace.xs))
+        .contextMenu { projectContextMenu(for: project) }
+
+        // Nested threads
+        ForEach(displayThreads) { item in
+            Button { selectThread(item) } label: {
+                ExpandedThreadRow(item: item, isSelected: isSelected(item))
+            }
+            .buttonStyle(.plain)
+            .contextMenu { threadMenu(for: item) }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 1, leading: AppSpace.xl, bottom: 1, trailing: AppSpace.xs))
+        }
+
+        // "展开显示" link
+        if hasMore {
+            Button {
+                // Show all by removing from collapsed (it's already expanded, this means show all)
+                // For simplicity, just remove collapse
+                collapsedProjects.remove(project.id)
+            } label: {
+                Text("展开显示")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Brand.primary)
+            }
+            .buttonStyle(.plain)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 0, leading: AppSpace.xl, bottom: 2, trailing: AppSpace.xs))
+        }
+    }
+
+    @ViewBuilder
+    private func projectContextMenu(for project: Project) -> some View {
+        Button {
+            projectManager.openProject(id: project.id)
+            store.switchWorkspace(to: project.rootPath)
+        } label: { Label("打开项目", systemImage: "folder") }
+
+        Button {
+            NSWorkspace.shared.open(URL(fileURLWithPath: project.rootPath))
+        } label: { Label("Finder 中打开", systemImage: "arrow.right.circle") }
+
+        Divider()
+
+        Button(role: .destructive) {
+            deletingProjectID = project.id
+        } label: { Label("删除项目", systemImage: "trash") }
     }
 
     // MARK: - Bottom Bar
@@ -170,7 +348,7 @@ struct SidebarView: View {
     private var bottomBar: some View {
         Group {
             if isVisible {
-                // Expanded: new thread + settings
+                // Expanded: new session + new project + settings
                 HStack(spacing: AppSpace.sm) {
                     Button {
                         store.newSession()
@@ -192,6 +370,9 @@ struct SidebarView: View {
                     }
                     .buttonStyle(.plain)
 
+                    IconButton(icon: "folder.badge.plus", tooltip: "新项目") {
+                        showingNewProjectSheet = true
+                    }
                     IconButton(icon: "gearshape", tooltip: "设置") {
                         showingSettings = true
                     }
@@ -203,6 +384,9 @@ struct SidebarView: View {
                 VStack(spacing: AppSpace.sm) {
                     CompactRailButton(icon: "plus", tooltip: "新会话") {
                         store.newSession()
+                    }
+                    CompactRailButton(icon: "folder.badge.plus", tooltip: "新项目") {
+                        showingNewProjectSheet = true
                     }
                     CompactRailButton(icon: "gearshape", tooltip: "设置") {
                         showingSettings = true
@@ -269,20 +453,6 @@ struct SidebarView: View {
 
     private var filteredThreadItems: [ThreadRecord] {
         store.state.filteredThreadSummaries.filter { !$0.isArchived }
-    }
-
-    private var timeGroupedThreads: [(String, [ThreadRecord])] {
-        let items = filteredThreadItems
-        let cal = Calendar.current
-        let now = Date()
-        let today = items.filter { cal.isDateInToday($0.updatedAt) }
-        let yesterday = items.filter { cal.isDate($0.updatedAt, equalTo: now.addingTimeInterval(-86400), toGranularity: .day) }
-        let earlier = items.filter { !cal.isDateInToday($0.updatedAt) && !cal.isDate($0.updatedAt, equalTo: now.addingTimeInterval(-86400), toGranularity: .day) }
-        var groups: [(String, [ThreadRecord])] = []
-        if !today.isEmpty { groups.append(("今天", today)) }
-        if !yesterday.isEmpty { groups.append(("昨天", yesterday)) }
-        if !earlier.isEmpty { groups.append(("更早", earlier)) }
-        return groups
     }
 
     private func selectThread(_ item: ThreadRecord) {
@@ -366,6 +536,8 @@ private struct ExpandedThreadRow: View {
     let isSelected: Bool
     @State private var isHovering = false
     @State private var dotPhase: Bool = false
+    @State private var cachedTokenLabel: String?
+    @State private var didLoadTokens = false
 
     private var isRunning: Bool { item.status == .running }
 
@@ -409,9 +581,15 @@ private struct ExpandedThreadRow: View {
             Spacer(minLength: 0)
 
             VStack(alignment: .trailing, spacing: 1) {
-                Text(item.shortID)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(TextGrade.ghost)
+                if let label = cachedTokenLabel {
+                    Text(label)
+                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(TextGrade.ghost)
+                } else {
+                    Text(item.shortID)
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(TextGrade.ghost)
+                }
                 Text(RelativeTimeFormatter.string(for: item.updatedAt))
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.ghost)
@@ -422,12 +600,35 @@ private struct ExpandedThreadRow: View {
         .threadRailItem(isSelected: isSelected, isHovering: isHovering)
         .contentShape(Rectangle())
         .onHover { h in withAnimation(AppAnimation.micro) { isHovering = h } }
-        .onAppear { if isRunning { dotPhase = true } }
+        .onAppear {
+            if isRunning { dotPhase = true }
+            loadTokenLabel()
+        }
         .onChange(of: isRunning) { running in
             dotPhase = running
         }
+        .onChange(of: item.updatedAt) { _ in
+            loadTokenLabel()
+        }
     }
 
+    private func loadTokenLabel() {
+        let threadID = item.id.uuidString
+        DispatchQueue.global(qos: .utility).async {
+            let usage = UsageTracker.shared.threadUsage(threadID: threadID)
+            let total = usage.inputTokens + usage.outputTokens
+            let label: String? = {
+                guard total > 0 else { return nil }
+                if total >= 1_000_000 { return String(format: "%.1fM", Double(total) / 1_000_000) }
+                if total >= 1_000 { return "\(total / 1000)k" }
+                return "\(total)"
+            }()
+            DispatchQueue.main.async {
+                cachedTokenLabel = label
+                didLoadTokens = true
+            }
+        }
+    }
 }
 
 // MARK: - Compact Rail Button
@@ -482,6 +683,191 @@ struct IconButton: View {
         .buttonStyle(.plain)
         .onHover { h in withAnimation(AppAnimation.quick) { isHovered = h } }
         .help(tooltip)
+    }
+}
+
+// MARK: - New Project Sheet
+
+struct NewProjectSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var projectName = ""
+    @State private var selectedPath = ""
+    @State private var createNew = false
+    @State private var newFolderName = ""
+
+    var body: some View {
+        VStack(spacing: AppSpace.lg) {
+            // Header
+            HStack {
+                Text("新建项目")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(TextGrade.primary)
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(TextGrade.ghost)
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Project name
+            VStack(alignment: .leading, spacing: 4) {
+                Text("项目名称")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(TextGrade.muted)
+                TextField("例如：来财 macOS", text: $projectName)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            // Mode toggle
+            Picker("", selection: $createNew) {
+                Text("选择已有文件夹").tag(false)
+                Text("创建新文件夹").tag(true)
+            }
+            .pickerStyle(.segmented)
+
+            if createNew {
+                // Create new folder
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("文件夹名称")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(TextGrade.muted)
+                    TextField("例如：my-project", text: $newFolderName)
+                        .textFieldStyle(.roundedBorder)
+
+                    HStack {
+                        Text("将创建在：")
+                            .font(.system(size: 10))
+                            .foregroundStyle(TextGrade.ghost)
+                        Text(targetNewPath)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(TextGrade.muted)
+                            .lineLimit(1)
+                    }
+
+                    Button("选择父目录...") {
+                        pickFolder { path in selectedPath = path }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Brand.primary)
+                }
+            } else {
+                // Select existing
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("项目文件夹")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(TextGrade.muted)
+
+                    HStack {
+                        Text(selectedPath.isEmpty ? "未选择" : abbreviateHome(selectedPath))
+                            .font(.system(size: 11))
+                            .foregroundStyle(selectedPath.isEmpty ? TextGrade.ghost : TextGrade.secondary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Button("选择文件夹...") {
+                            pickFolder { path in
+                                selectedPath = path
+                                if projectName.isEmpty {
+                                    projectName = URL(fileURLWithPath: path).lastPathComponent
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Brand.primary)
+                    }
+                    .padding(AppSpace.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(SurfaceGrade.card)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(SurfaceGrade.border.opacity(0.3), lineWidth: 0.5)
+                    )
+                }
+            }
+
+            Spacer()
+
+            // Actions
+            HStack {
+                Button("取消") { dismiss() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(TextGrade.muted)
+
+                Spacer()
+
+                Button {
+                    createProject()
+                    dismiss()
+                } label: {
+                    Text("创建项目")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, AppSpace.lg)
+                        .padding(.vertical, AppSpace.sm)
+                        .background(
+                            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                                .fill(canCreate ? Brand.premiumGradient : LinearGradient(colors: [TextGrade.ghost], startPoint: .leading, endPoint: .trailing))
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canCreate)
+            }
+        }
+        .padding(AppSpace.xl)
+        .frame(width: 420, height: 380)
+        .background(SurfaceGrade.panel)
+    }
+
+    private var canCreate: Bool {
+        if createNew {
+            return !projectName.isEmpty && !newFolderName.isEmpty && !selectedPath.isEmpty
+        } else {
+            return !projectName.isEmpty && !selectedPath.isEmpty
+        }
+    }
+
+    private var targetNewPath: String {
+        guard !selectedPath.isEmpty, !newFolderName.isEmpty else { return "..." }
+        return (selectedPath as NSString).appendingPathComponent(newFolderName)
+    }
+
+    @MainActor
+    private func createProject() {
+        let rootPath: String
+        if createNew {
+            rootPath = targetNewPath
+            try? FileManager.default.createDirectory(atPath: rootPath, withIntermediateDirectories: true)
+        } else {
+            rootPath = selectedPath
+        }
+        guard !rootPath.isEmpty else { return }
+        let _ = ProjectManager.shared.createProject(name: projectName, rootPath: rootPath)
+    }
+
+    private func pickFolder(completion: @escaping (String) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "选择"
+        if panel.runModal() == .OK, let url = panel.url {
+            completion(url.path)
+        }
+    }
+
+    private func abbreviateHome(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if path.hasPrefix(home) {
+            return "~" + path.dropFirst(home.count)
+        }
+        return path
     }
 }
 

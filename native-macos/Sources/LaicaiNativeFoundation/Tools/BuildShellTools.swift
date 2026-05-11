@@ -52,7 +52,17 @@ public struct VerifyBuildTool: LaicaiTool {
             let allowedBuildPrefixes = ["swift ", "xcodebuild", "cargo ", "make", "npm ", "yarn ", "pnpm ", "go ", "gradle", "mvn ", "cmake", "dotnet ", "gcc ", "g++ ", "clang", "bash build", "pytest", "npm run build", "npm run test"]
             let looksLikeBuild = allowedBuildPrefixes.contains(where: { custom.lowercased().hasPrefix($0) })
             if (isSuspicious || hasHeredoc) && !looksLikeBuild {
-                return ToolResult(output: "拒绝命令「\(String(custom.prefix(60)))」：verify.build 仅用于编译/测试验证。请用 shell_exec 执行其他命令。", success: false, error: "invalid_command")
+                let lowerCustom = custom.lowercased()
+                let isContentCheck = lowerCustom.contains("assert") || lowerCustom.contains("read_text") || lowerCustom.contains("readtext")
+                    || lowerCustom.contains("path(") || lowerCustom.contains("from pathlib")
+                let redirect = isContentCheck
+                    ? "\n💡 检查文件内容请改用 file_read / file_extract（读取后看返回值），而不是用 verify_build 跑 python assert。"
+                    : "\n💡 verify_build 仅用于编译/测试。一般 shell 任务请改用 shell_exec。"
+                return ToolResult(
+                    output: "拒绝命令「\(String(custom.prefix(60)))…」：verify.build 仅接受编译/测试类命令。\(redirect)",
+                    success: false,
+                    error: "invalid_command"
+                )
             } else {
                 buildCommand = custom
             }
@@ -65,11 +75,23 @@ public struct VerifyBuildTool: LaicaiTool {
             return ToolResult(output: "当前工作区无构建系统（未找到 Package.swift / package.json / Cargo.toml / Makefile 等）。无需调用 verify.build。", success: false, error: "no_build_system")
         }
 
-        // Execute build command
+        // Execute build command — use login shell so user PATH (brew, node, etc.) is available
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-c", "cd \(shellEscape(workspaceRoot)) && \(buildCommand) 2>&1"]
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", "cd \(shellEscape(workspaceRoot)) && \(buildCommand) 2>&1"]
         var buildEnv = ProcessInfo.processInfo.environment
+        let commonPaths = [
+            "/opt/homebrew/bin", "/opt/homebrew/sbin",
+            "/usr/local/bin", "/usr/local/sbin",
+            "/usr/bin", "/usr/sbin", "/bin", "/sbin"
+        ]
+        let existingPath = buildEnv["PATH"] ?? ""
+        let existingParts = Set(existingPath.components(separatedBy: ":"))
+        let mergedPath = (commonPaths.filter { !existingParts.contains($0) } + [existingPath])
+            .filter { !$0.isEmpty }
+            .joined(separator: ":")
+        buildEnv["PATH"] = mergedPath
+        buildEnv["HOME"] = NSHomeDirectory()
         if buildEnv["LANG"] == nil { buildEnv["LANG"] = "en_US.UTF-8" }
         if buildEnv["LC_ALL"] == nil { buildEnv["LC_ALL"] = "en_US.UTF-8" }
         process.environment = buildEnv

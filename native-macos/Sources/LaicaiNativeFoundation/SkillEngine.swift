@@ -307,6 +307,26 @@ public struct ModelRouter {
         }
     }
 
+    /// Route model based on user intent: chat→fast, research→strong, task→code, workflow→default
+    public static func selectModel(
+        forIntent intent: UserIntent,
+        connectors: [ConnectorProfile],
+        activeConnectorID: UUID?
+    ) -> ConnectorProfile? {
+        let active = connectors.first(where: { $0.id == activeConnectorID }) ?? connectors.first
+        guard connectors.count > 1 else { return active }
+        switch intent {
+        case .chat:
+            return connectors.first(where: { $0.modelName.contains("mini") || $0.modelName.contains("flash") }) ?? active
+        case .research:
+            return connectors.first(where: { $0.modelName.contains("gpt-4") || $0.modelName.contains("claude") || $0.modelName.contains("opus") }) ?? active
+        case .task:
+            return connectors.first(where: { $0.modelName.contains("code") || $0.modelName.contains("coder") || $0.modelName.contains("deepseek") }) ?? active
+        case .workflow:
+            return active
+        }
+    }
+
     /// Route model based on task phase: explore→fast, execute→code, verify→strong, summarize→default
     public static func selectModel(
         forPhase phase: TaskPhase,

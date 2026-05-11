@@ -25,9 +25,12 @@ extension AgentLoop {
             WorkspaceSandbox.shared.addAllowedPath(vault)
         }
 
-        let persisted = TaskMemoryStore.load(workspaceRoot: config.workspaceRoot)
-        if !persisted.isEmpty {
-            taskContext.memory = TaskMemoryStore.merge(persisted, into: taskContext.memory)
+        // Skip persistent memory load for pure chat (reduces startup latency)
+        if intent != .chat || message.count > 100 {
+            let persisted = TaskMemoryStore.load(workspaceRoot: config.workspaceRoot)
+            if !persisted.isEmpty {
+                taskContext.memory = TaskMemoryStore.merge(persisted, into: taskContext.memory)
+            }
         }
         return taskContext
     }
@@ -107,7 +110,7 @@ extension AgentLoop {
             )
             task.steps.append(resultStep)
             onStep(resultStep)
-            taskContext.memory.userDecisions.append("工作区索引：\(String(result.output.prefix(2000)))")
+            taskContext.memory.appendDecision("工作区索引：\(String(result.output.prefix(2000)))")
         }
     }
 
@@ -148,7 +151,7 @@ extension AgentLoop {
             }
         }
         if !prefetchedContent.isEmpty {
-            taskContext.memory.userDecisions.append("预读文件内容：\n" + prefetchedContent.joined(separator: "\n\n"))
+            taskContext.memory.appendDecision("预读文件内容：\n" + prefetchedContent.joined(separator: "\n\n"))
         }
     }
 }

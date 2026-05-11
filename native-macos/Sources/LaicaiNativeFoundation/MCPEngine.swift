@@ -484,6 +484,10 @@ public final class MCPManager: ObservableObject {
         do {
             try await server.start()
             servers.append(server)
+            // Auto-register new tools into global registry
+            for tool in server.tools.map({ MCPToolAdapter(server: server, toolInfo: $0) }) {
+                ToolRegistry.shared.register(tool)
+            }
         } catch {
             LaicaiLog.error("MCP server '\(config.name)' 启动失败: \(error.localizedDescription)")
         }

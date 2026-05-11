@@ -239,15 +239,39 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         ChatMessage(role: "system", content: "你正在执行连接器兼容性自检。直接输出 ok。"),
         ChatMessage(role: "user", content: "请直接回复 ok。")
     ]
-    private static let probeToolDefinitions = [
-        ToolDefinition(
-            function: FunctionDefinition(
-                name: "connector_probe_noop",
-                description: "Connector compatibility probe. Do not call unless tool calling is supported.",
-                parameters: FunctionParameters()
-            )
+    /// Probe tools mimic real production tools (string params, required fields, JSON schema)
+    /// so we don't false-positive on servers that accept trivial empty-params tools but reject
+    /// realistic schemas.
+    private static let probeToolDefinitions: [ToolDefinition] = {
+        let pathParam = FunctionParameters(
+            type: "object",
+            properties: [
+                "path": .init(type: "string", description: "Absolute file path"),
+                "encoding": .init(type: "string", description: "Optional encoding, e.g. utf-8")
+            ],
+            required: ["path"]
         )
-    ]
+        let queryParam = FunctionParameters(
+            type: "object",
+            properties: [
+                "query": .init(type: "string", description: "Search keyword"),
+                "limit": .init(type: "string", description: "Optional max results")
+            ],
+            required: ["query"]
+        )
+        return [
+            ToolDefinition(function: FunctionDefinition(
+                name: "connector_probe_read",
+                description: "Probe: representative file read tool with required path parameter.",
+                parameters: pathParam
+            )),
+            ToolDefinition(function: FunctionDefinition(
+                name: "connector_probe_search",
+                description: "Probe: representative search tool with required query parameter.",
+                parameters: queryParam
+            ))
+        ]
+    }()
 
     private let session: URLSession
 
@@ -358,7 +382,15 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         }
     }
 
-    public func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
+    public func sendMessageStream(_ request: SendMessageRequest, onChunk: @escaping @Sendable @MainActor (String) -> Void, onReasoningChunk: @escaping @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
+        return try await sendMessageStreamImpl(request, onChunk: onChunk, onReasoningChunk: onReasoningChunk)
+    }
+
+    public func sendMessageStream(_ request: SendMessageRequest, onChunk: @escaping @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
+        return try await sendMessageStreamImpl(request, onChunk: onChunk, onReasoningChunk: nil)
+    }
+
+    private func sendMessageStreamImpl(_ request: SendMessageRequest, onChunk: @escaping @Sendable @MainActor (String) -> Void, onReasoningChunk: (@Sendable @MainActor (String) -> Void)?) async throws -> SendMessageResponse {
         guard let connector = request.connector else {
             return Self.fallbackResponse(request: request)
         }
@@ -428,7 +460,9 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                         finalOllamaChunk = ollamaChunk
                     }
                     if let thinking = ollamaChunk.message?.thinking {
+                        reasoningText += thinking
                         reasoningCount += thinking.count
+                        if let onReasoningChunk { await onReasoningChunk(thinking) }
                     }
                     if let chunkToolCalls = ollamaChunk.message?.toolCalls {
                         for (offset, tc) in chunkToolCalls.enumerated() {
@@ -473,6 +507,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                     if let reasoning = chunk.choices.first?.delta.reasoningContent ?? chunk.choices.first?.delta.reasoning {
                         reasoningText += reasoning
                         reasoningCount += reasoning.count
+                        if let onReasoningChunk { await onReasoningChunk(reasoning) }
                     }
                     if let delta = chunk.choices.first?.delta.content {
                         rawText += delta

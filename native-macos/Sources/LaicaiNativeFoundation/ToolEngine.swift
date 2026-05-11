@@ -27,6 +27,11 @@ public final class ToolRegistry {
         register(SkillManageTool()) // Agent self-creates/updates/deletes skills
         register(BrowserTool())     // Browser control: navigate, extract, screenshot, JS
         register(MemoryTool())      // Cross-session memory: store, recall, search
+        register(PMAgentTool())     // Product Manager agent: PRD, user stories, competitive analysis
+        #if !LAICAI_CLI
+        register(ComputerTool())    // macOS automation: open apps, keystrokes, clipboard, screenshots
+        register(RealBrowserTool()) // Real browser control: Safari/Chrome via AppleScript
+        #endif
     }
 
     public func register(_ tool: any LaicaiTool) {
@@ -73,6 +78,8 @@ public enum ToolNameCodec {
         case "skill_manage": return "skill.manage"
         case "lsp_query": return "lsp.query"
         case "diff_apply": return "diff.apply"
+        case "pm_agent": return "pm.agent"
+        case "browser_real": return "browser.real"
         default: return name
         }
     }

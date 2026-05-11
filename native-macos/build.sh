@@ -81,6 +81,7 @@ for ARCH in $ARCHS; do
   echo "  arch: $ARCH"
   swiftc -target "$ARCH-apple-macos$MIN_MACOS_VERSION" -sdk "$K" \
     -parse-as-library \
+    -D LAICAI_CLI \
     -o "$B/laicai-$ARCH" \
     "$B"/cli_src/*.swift \
     -framework Foundation -framework WebKit

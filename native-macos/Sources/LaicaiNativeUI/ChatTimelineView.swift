@@ -139,6 +139,23 @@ struct ThreadTimelineView: View {
                     Color.clear
                         .frame(height: 1)
                         .id(bottomID)
+                        .background(
+                            GeometryReader { geo in
+                                // Quantize to reduce onChange firing frequency (every ~50pt instead of every pixel)
+                                let frame = geo.frame(in: .named("timeline-scroll"))
+                                let quantized = Int(frame.minY / 50)
+                                Color.clear
+                                    .onChange(of: quantized) { _ in
+                                        let scrollViewHeight = geo.frame(in: .global).height
+                                        let isNearBottom = frame.minY < scrollViewHeight + 120
+                                        if !isNearBottom && !userScrolledAway {
+                                            userScrolledAway = true
+                                        } else if isNearBottom && userScrolledAway {
+                                            userScrolledAway = false
+                                        }
+                                    }
+                            }
+                        )
                 }
                 .frame(maxWidth: LayoutConst.composerMaxWidth + 60, alignment: .leading)
                 .padding(.horizontal, AppSpace.xl)
@@ -146,19 +163,31 @@ struct ThreadTimelineView: View {
                 .padding(.bottom, AppSpace.lg)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
+            .coordinateSpace(name: "timeline-scroll")
             .background(SurfaceGrade.base)
             .onAppear {
                 scrollToBottom(proxy)
             }
             .onChange(of: thread.events.count) { _ in scheduleScrollToBottom(proxy) }
-            .onChange(of: thread.task?.status) { newStatus in
-                if newStatus == .running { userScrolledAway = false }
+            .onChange(of: thread.task?.steps.count) { _ in scheduleScrollToBottom(proxy) }
+            .onChange(of: store.state.isGenerating) { isGen in
+                if isGen { userScrolledAway = false; scheduleScrollToBottom(proxy) }
             }
+            .onChange(of: thread.task?.status) { newStatus in
+                if newStatus == .running { userScrolledAway = false; scheduleScrollToBottom(proxy) }
+            }
+            .onChange(of: streamingTextLength) { _ in scheduleScrollToBottom(proxy) }
             .onReceive(NotificationCenter.default.publisher(for: .laicaiPanelToggled)) { _ in
                 userScrolledAway = false
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(150))
                     guard !userScrolledAway else { return }
+                    proxy.scrollTo(bottomID, anchor: .bottom)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .laicaiScrollToBottom)) { _ in
+                userScrolledAway = false
+                withAnimation(.easeOut(duration: 0.25)) {
                     proxy.scrollTo(bottomID, anchor: .bottom)
                 }
             }
@@ -188,6 +217,35 @@ struct ThreadTimelineView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
+
+                // Scroll-to-bottom floating button
+                if userScrolledAway {
+                    Button {
+                        userScrolledAway = false
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            proxy.scrollTo(bottomID, anchor: .bottom)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("最新")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, AppSpace.md)
+                        .padding(.vertical, AppSpace.sm)
+                        .background(
+                            Capsule()
+                                .fill(Brand.primary.opacity(0.9))
+                                .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, AppSpace.lg)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .animation(.easeInOut(duration: 0.2), value: userScrolledAway)
+                }
             }
         }
     }
@@ -207,6 +265,19 @@ struct ThreadTimelineView: View {
         Task { @MainActor in
             proxy.scrollTo(bottomID, anchor: .bottom)
         }
+    }
+
+    /// Tracks total text length of the last step — when streaming appends text
+    /// to an existing step, steps.count doesn't change but this does, triggering auto-scroll.
+    /// Quantized to ~200 chars to avoid firing on every single character append.
+    private var streamingTextLength: Int {
+        let raw: Int
+        if let task = thread.task {
+            raw = task.steps.last?.text.count ?? 0
+        } else {
+            raw = thread.events.last?.text.count ?? 0
+        }
+        return raw / 200
     }
 
     private func shouldCompact(_ task: AgentTask) -> Bool {
@@ -876,6 +947,17 @@ private struct TaskSummaryCard: View {
         task.steps.filter { $0.isFailure || $0.kind == .error }.count
     }
 
+    private var recoveryCount: Int {
+        task.steps.filter { ($0.toolCallId ?? "").hasPrefix("call_recovery_") || $0.text.hasPrefix("自动恢复") }.count
+    }
+
+    private var recoverySuccessCount: Int {
+        task.steps.filter {
+            (($0.toolCallId ?? "").hasPrefix("call_recovery_") || $0.text.hasPrefix("自动恢复"))
+            && !$0.isFailure && $0.kind == .toolResult
+        }.count
+    }
+
     private var readCount: Int {
         task.steps.filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }.count
     }
@@ -1090,6 +1172,9 @@ private struct TaskSummaryCard: View {
         var parts = ["\(task.status.label)", "\(completedSteps) 步"]
         if readCount > 0 { parts.append("读 \(readCount) 个文件") }
         if failureCount > 0 { parts.append("失败 \(failureCount) 项") }
+        if recoveryCount > 0 {
+            parts.append("恢复 \(recoverySuccessCount)/\(recoveryCount)")
+        }
         parts.append(RelativeTimeFormatter.string(for: task.updatedAt))
         return parts.joined(separator: " · ")
     }
@@ -1121,6 +1206,11 @@ private struct TaskSummaryCard: View {
         if let first = searches.first {
             pills.append("搜过 \(String(first.prefix(18)))")
         }
+
+        if recoveryCount > 0 {
+            pills.append("自动恢复 ×\(recoveryCount)")
+        }
+
         return pills
     }
 
@@ -1183,6 +1273,12 @@ private struct TypingIndicator: View {
                     Text(elapsedLabel)
                         .font(AppFont.tiny)
                         .foregroundStyle(TextGrade.ghost)
+                }
+
+                if let progress = store.state.estimatedProgress {
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Brand.primary)
                 }
             }
             .padding(.horizontal, AppSpace.lg)

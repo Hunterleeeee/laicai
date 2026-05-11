@@ -416,6 +416,7 @@ private struct IntentSignals {
             || requestsMutation
             || requestsWebResearch
             || requestsModelCurrentInfo
+            || requestsPMDocument
     }
 
     var requestsAction: Bool {
@@ -426,6 +427,7 @@ private struct IntentSignals {
             || requestsWebResearch
             || requestsModelCurrentInfo
             || requestedDeliverable
+            || requestsPMDocument
     }
 
     var shouldInspectBeforeActing: Bool {
@@ -527,12 +529,25 @@ private struct IntentSignals {
          "配置", "设置", "接入", "集成", "迁移", "替换", "重命名", "移动", "复制",
          "加入", "注册", "导入", "导出", "初始化",
          "改成", "换成", "改为", "调整", "改进", "重写", "拆分", "合并",
+         "记住", "记下", "长期记忆", "写进记忆", "保存偏好", "保存到记忆", "remember",
          "fix", "implement", "create", "add", "remove", "update", "refactor"].contains { input.contains($0) }
     }
 
     private var requestedDeliverable: Bool {
         ["生成", "创建", "整理", "汇总", "给我一份", "写一个", "写一份", "做一个"].contains { input.contains($0) }
             && !capabilityOnly
+    }
+
+    private var requestsPMDocument: Bool {
+        let pmMarkers = ["prd", "PRD", "需求文档", "产品需求", "用户故事", "user story", "user stories",
+                         "竞品分析", "竞品调研", "competitive analysis", "实验设计", "a/b test", "ab test",
+                         "okr", "OKR", "复盘", "retrospective", "用户画像", "persona",
+                         "上线清单", "launch checklist", "发版说明", "release notes",
+                         "jtbd", "JTBD", "验收标准", "acceptance criteria",
+                         "边界用例", "edge case", "方案简述", "solution brief",
+                         "架构决策", "adr", "ADR", "问题定义", "problem statement",
+                         "假设验证", "hypothesis", "干系人汇报"]
+        return pmMarkers.contains { input.localizedCaseInsensitiveContains($0) }
     }
 
     private var wantsCodeReview: Bool {
@@ -713,6 +728,7 @@ public struct AutoContextEngine {
     private static func loadProjectInstructions(workspaceRoot: String) -> String? {
         // Priority-ordered instruction files (higher priority first)
         let instructionFiles = [
+            "LAICAI.md",
             "AGENTS.md",
             ".agents/AGENTS.md",
             "CLAUDE.md",
@@ -1048,68 +1064,42 @@ public struct PromptComposer {
     public static func composeSystemPrompt(context: TaskContext, intent: UserIntent) -> String {
         var parts: [String] = []
 
-        parts.append("你是来财（Laicai），运行在用户 macOS 本机的 AI 编排助手。当前日期：\(currentDateString())。")
+        parts.append("你是来财（Laicai），macOS 本机 AI 编排助手。\(currentDateString())。")
         if intent != .chat {
             parts.append("""
-            ## 核心准则 — 高效行动
-            你必须用工具行动，不能只说不做。
-
-            ### 第一轮：探索 + 计划 + 首步执行
-            1. 先调 workspace_index 或 code_search 了解项目结构（如果已有索引或明确文件路径，不要重复索引）
-            2. 用1句话写出执行计划（做什么、改哪些文件）
-            3. 立即在同一轮开始执行第一步
-            禁止：第一轮只输出计划不行动。
-
-            ### 执行纪律
-            4. **每轮必须行动**：调用工具或给出最终结果。禁止返回"我建议你…"。
-            5. **证据优先**：修改、结论和验证必须来自工具结果；没有读过的文件不要判断其内容。
-            6. **并行调用**：同一轮可同时调多个只读工具（workspace_index、file_read、code_search、web_search、web_fetch）。
-            7. **失败立刻换路**：工具失败→换另一种工具或参数。不要用相同参数重试。
-               - file_read 找不到 → code_search 搜路径
-               - code_search 无结果 → shell_exec find/grep
-               - shell_exec 超时 → 缩小范围或换命令
-            8. **精准编辑**：已有文件用 file_edit（search/replace），新文件才用 file_write；不要无理由全量覆盖。
-            9. **写后验证**：file_write/file_edit 后用 file_read 或 verify_build 确认结果。不跳过。
-            10. **联网优先**：不认识的概念、版本、价格、新闻、规则或推荐→web_search。有 URL→web_fetch。
-            11. **直接执行**：用户说安装/配置/实现→实际运行命令或编辑文件；需要权限或上下文不足时才说明阻塞点。
-            12. **收口清晰**：最终回复只说改了什么、验证了什么、还剩什么风险；不要把内部步骤流水账贴给用户。
-
-            ### ⚠️ 严禁幻觉
-            - **禁止声称已完成未做的操作**：只有工具返回成功后才能说"已完成"。没调过 file_write 就不能说"已写入"。
-            - **禁止编造文件内容**：file_read 返回空或0字符 = 文件为空，不要假装读到了内容。
-            - **禁止无限重试**：同一操作失败2次后必须换方法或报告用户。
-            - **禁止把用户原话当搜索词**：code_search 的 query 必须是具体关键词（文件名、函数名、错误消息），不是自然语言。
-            - **用户追问之前的结果时**：直接根据会话历史回答，不要再次搜索。
-
-            ### ⚠️ 输出格式禁令
-            你的回答直接呈现给用户。**严禁**输出以下内部推理格式：
-            - 禁止输出「阶段总结」「执行路径」「证据清单」「完成检查」等自我审计框架
-            - 禁止输出「Plan:」「Execute:」「Verify:」「Summarize:」等流程标签
-            - 禁止输出「已运行命令：xxx」「失败工具：xxx」「状态：仅需继续」等元信息
-            - 禁止把 shell 命令的拼接过程展示给用户
-            只输出：结论、关键发现、操作结果。用简洁自然语言回答，不要暴露内部工作流程。
-
-            ### 整理/知识库类任务
-            当用户要求整理文件夹、创建知识库或 Wiki 时：
-            1. 先用 workspace_index 获取完整文件列表（一次即可）
-            2. 按文件类型分批读取：先读 .md/.txt，再处理 .docx/.pdf/.html
-            3. .docx 用 shell_exec python3 提取文本（注意检查输出是否为空）
-            4. 对每个源文件，提取核心内容后写入对应 Wiki 页面
-            5. **覆盖率要求**：不能只处理几个文件就收工，要覆盖用户给的所有文件
-            6. 每写完一批文件，用 file_read 验证内容确实写入
+            ## 准则
+            每轮必须调用工具行动。禁止只说不做。
+            - 第一轮：探索→1句话计划→立即执行首步。
+            - 证据优先：没读过的文件不判断内容。只读工具可并行。
+            - 失败换路：同参数不重试，换工具或参数。失败2次报告用户。
+            - 编辑：已有文件用 file_edit；失败则 file_read→file_write 全量。新文件 file_write。代码改后 verify_build。
+            - 不认识的概念/版本/新闻→web_search。有URL→web_fetch。
+            - 收口只说：改了什么、验证了什么、剩余风险。不输出内部流程。
+            - 禁止声称完成未做操作。禁止编造文件内容。禁止输出 Plan/Execute/Verify 等框架。
+            - 记忆持久化用 memory(action="store")。整理知识库用 wiki_build。
             """)
         } else {
-            parts.append("直接回答问题。")
+            parts.append("直接回答问题。简洁、准确、不啰嗦。")
         }
 
-        // Inject skill summary so LLM knows about available skills
-        let skillSummary = SkillRegistry.skillSummary()
-        if !skillSummary.isEmpty {
-            parts.append("\n## 可用技能\n\(skillSummary)。用 skill_manage(action=\"list\") 可查看完整列表。")
+        // Chat mode: minimal context for speed
+        if intent == .chat {
+            if let claudeMD = context.claudeMD {
+                parts.append("\n## 项目记忆\n\(claudeMD)")
+            }
+            parts.append("\n## 模式\n聊天模式。直接回答。如需读取文件或操作项目可使用工具，但不要主动发起复杂操作。")
+            return parts.joined(separator: "\n")
         }
+
+        // Non-chat modes: context injection (keep concise to avoid prompt bloat)
 
         if let claudeMD = context.claudeMD {
             parts.append("\n## 项目记忆\n\(claudeMD)")
+        }
+
+        // Inject structured project context (tech stack, conventions, active tasks)
+        if let projectCtx = ProjectManager.buildProjectContext(projects: ProjectManager.cachedProjects, rootPath: context.workspaceRoot) {
+            parts.append("\n## 项目概况\n\(projectCtx)")
         }
 
         if let branch = context.gitBranch {
@@ -1126,52 +1116,42 @@ public struct PromptComposer {
         }
 
         if let vaultRoot = context.vaultRoot, !vaultRoot.isEmpty {
-            parts.append("\n## Vault\n\(vaultRoot)")
-            parts.append("""
-            用户要求整理知识库或 Wiki 时，使用 wiki_build 工具：
-            - **原子笔记**（默认）：mode=atomic，一个概念/实体/产品一个文件，存入 02 Atomic/
-            - **索引页**：mode=moc，按领域汇总所有相关概念，用 [[双链]] 做导航，存入 03 MOC/
-            - 先拆分为多个独立概念，每个概念调一次 wiki_build(mode=atomic)
-            - 拆分完后，为该领域创建一个 wiki_build(mode=moc) 索引页
-            - save=true 时系统会自动添加双链和更新 MOC
-            - 禁止把多个概念塞进一个大文件
-            """)
+            parts.append("\n## Vault\n\(vaultRoot)\nwiki_build: mode=atomic 拆概念, mode=moc 做索引。save=true 自动双链。")
         }
 
         if !context.relevantFiles.isEmpty {
-            let fileList = context.relevantFiles.prefix(30).map { "- \($0.path) (\($0.language))" }.joined(separator: "\n")
-            parts.append("\n## 工作区文件（前 30 个）\n\(fileList)")
+            let fileList = context.relevantFiles.prefix(15).map { "- \($0.path) (\($0.language))" }.joined(separator: "\n")
+            parts.append("\n## 工作区文件\n\(fileList)")
         }
 
         if !context.memory.readFiles.isEmpty {
-            let cachedList = context.memory.readFiles.prefix(20).map { "- \($0)" + (context.memory.fileSummaries[$0].map { "：\($0)" } ?? "") }.joined(separator: "\n")
-            parts.append("\n## 已读取文件（不要重复读取）\n\(cachedList)")
+            let cachedList = context.memory.readFiles.prefix(10).map { "- \($0)" + (context.memory.fileSummaries[$0].map { "：\($0)" } ?? "") }.joined(separator: "\n")
+            parts.append("\n## 已读文件\n\(cachedList)")
         }
 
         switch intent {
         case .chat:
-            parts.append("\n## 模式\n当前为聊天模式。优先直接回答用户问题。如果需要读取文件或操作项目，可以使用工具。")
+            break // handled above
         case .research:
             parts.append("""
             ## 模式
-            当前为研究模式。用户需要外部信息检索和整理，不是安装/写文件任务：
-            1. 优先调用 web_search 获取真实来源
-            2. 对关键来源调用 web_fetch 读取详情
-            3. 基于来源整理推荐、对比、列表或结论
-            4. 不要写入文件、不要运行安装命令，除非用户明确要求安装、配置或保存
+            研究模式。用户需要外部信息检索和整理：
+            1. 优先 web_search 获取真实来源
+            2. 对关键来源 web_fetch 读取详情
+            3. 基于来源整理结论
+            4. 不写文件不装软件，除非用户明确要求
             """)
-            parts.append("如果 web_search 没有结果，可以换关键词继续搜索；如果资料不足，要说明来源范围和不确定性，不能编造。")
         case .task:
             parts.append("""
             ## 任务模式
-            流程：搜索/索引 → 读关键文件 → 执行(file_edit/file_write/shell_exec) → 验证(verify_build或项目命令) → 总结。
-            规则：file_edit精准编辑已有文件，file_write仅用于新建。URL→web_fetch，实时信息→web_search。失败不编造；除非用户明确要求，不要自行提交 git commit。
+            流程：搜索→读→执行→验证→总结。file_edit 改已有文件，file_write 新建文件。不自行 git commit。
+            PM 文档类需求用 pm_agent(skill=xxx, topic=xxx) 工具。
             """)
             if let verifyCmd = ValidationEngine.suggestVerificationCommand(workspaceRoot: context.workspaceRoot) {
                 parts.append("验证命令：`\(verifyCmd)`")
             }
         case .workflow(let name):
-            parts.append("\n## 模式\n当前为工作流模式：\(name)。按工作流步骤执行。")
+            parts.append("\n## 模式\n工作流模式：\(name)。按步骤执行。")
         }
 
         return parts.joined(separator: "\n")

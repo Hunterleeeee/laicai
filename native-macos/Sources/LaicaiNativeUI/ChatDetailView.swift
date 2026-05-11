@@ -12,6 +12,9 @@ struct ChatDetailView: View {
     @ObservedObject private var skillRegistry = SkillRegistry.shared
 
     @State private var composerFocused = false
+    @State private var gaugeTokens: Int = 0
+    @State private var gaugePct: Double = 0
+    @State private var gaugeLastThread: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -214,34 +217,29 @@ struct ChatDetailView: View {
                     Label("管理连接器", systemImage: "gearshape")
                 }
             } label: {
-                HStack(spacing: AppSpace.xs) {
-                    ZStack {
-                        Circle()
-                            .fill(connector.health.color)
-                            .frame(width: 8, height: 8)
-                        Circle()
-                            .fill(connector.health.color.opacity(0.30))
-                            .frame(width: 16, height: 16)
-                    }
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(connector.health.color)
+                        .frame(width: 6, height: 6)
                     Text(connector.modelName.isEmpty ? connector.name : connector.modelName)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(TextGrade.primary)
+                        .foregroundStyle(TextGrade.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .frame(maxWidth: 150, alignment: .leading)
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.system(size: 7, weight: .bold))
                         .foregroundStyle(TextGrade.ghost)
                 }
                 .padding(.horizontal, AppSpace.sm + 2)
-                .frame(height: 28)
+                .frame(height: 26)
                 .background(
                     Capsule()
-                        .fill(SurfaceGrade.elevated.opacity(0.6))
+                        .fill(SurfaceGrade.card.opacity(0.6))
                 )
                 .overlay(
                     Capsule()
-                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
                 )
             }
             .menuStyle(.borderlessButton)
@@ -348,9 +346,11 @@ struct ChatDetailView: View {
                 .opacity(store.state.activeConnector == nil ? 0.4 : 1)
 
                 HStack(spacing: 0) {
-                    // Left: skill picker
+                    // Left: model picker + context gauge + skill picker
                     HStack(spacing: AppSpace.xs) {
+                        modelPicker
                         modeIndicator
+                        contextGauge
                         skillPickerMenu
                     }
 
@@ -358,7 +358,6 @@ struct ChatDetailView: View {
 
                     // Right: attach + send
                     HStack(spacing: AppSpace.sm) {
-                        modelPicker
                         attachImageButton
                         attachFileButton
                         if store.state.isGenerating {
@@ -499,6 +498,62 @@ struct ChatDetailView: View {
             Capsule()
                 .strokeBorder(TextGrade.muted.opacity(0.28), lineWidth: 0.8)
         )
+    }
+
+    @ViewBuilder
+    private var contextGauge: some View {
+        if gaugeTokens > 0 {
+            let color: Color = gaugePct < 0.5 ? Semantic.success : (gaugePct < 0.8 ? Semantic.warning : Semantic.error)
+            let label = gaugeTokens >= 1000 ? "\(gaugeTokens / 1000)k" : "\(gaugeTokens)"
+
+            HStack(spacing: 3) {
+                ZStack {
+                    Circle()
+                        .stroke(color.opacity(0.15), lineWidth: 2)
+                        .frame(width: 12, height: 12)
+                    Circle()
+                        .trim(from: 0, to: gaugePct)
+                        .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .frame(width: 12, height: 12)
+                        .rotationEffect(.degrees(-90))
+                }
+                Text(label)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(color)
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 28)
+            .background(Capsule().fill(color.opacity(0.08)))
+            .overlay(Capsule().strokeBorder(color.opacity(0.2), lineWidth: 0.5))
+            .help("本会话已用 \(gaugeTokens.formatted()) token · 约占上下文 \(Int(gaugePct * 100))%")
+            .onAppear { refreshGauge() }
+            .onChange(of: store.state.selectedThread?.id) { _ in refreshGauge() }
+            .onChange(of: store.state.isGenerating) { gen in if !gen { refreshGauge() } }
+        } else {
+            Color.clear.frame(width: 0, height: 0)
+                .onAppear { refreshGauge() }
+                .onChange(of: store.state.selectedThread?.id) { _ in refreshGauge() }
+                .onChange(of: store.state.isGenerating) { gen in if !gen { refreshGauge() } }
+        }
+    }
+
+    private func refreshGauge() {
+        let threadID = store.state.selectedThread?.id.uuidString ?? ""
+        let connMode = store.state.settings.contextMode
+        let conn = store.state.activeConnector
+        DispatchQueue.global(qos: .utility).async {
+            let usage = UsageTracker.shared.threadUsage(threadID: threadID)
+            let total = usage.inputTokens + usage.outputTokens
+            let contextWindow: Int = {
+                if let c = conn { return max(128_000, ConnectorCapabilityProfile.infer(for: c, mode: connMode).contextWindow) }
+                return 128_000
+            }()
+            let pct = min(1.0, Double(usage.inputTokens) / Double(contextWindow))
+            DispatchQueue.main.async {
+                gaugeTokens = total
+                gaugePct = pct
+            }
+        }
     }
 
     private func applySkillTemplate(_ skill: SkillDefinition) {

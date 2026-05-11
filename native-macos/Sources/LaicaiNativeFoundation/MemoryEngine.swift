@@ -325,6 +325,36 @@ public final class MemoryEngine: ObservableObject {
                 tags: uniqueTools
             ))
         }
+
+        // Auto-extract user preferences from conversation
+        extractPreferences(from: task.steps, source: "task:\(task.id)")
+    }
+
+    /// Extract user preferences/instructions from conversation steps and persist them.
+    public func extractPreferences(from steps: [TaskStep], source: String) {
+        let preferenceMarkers = ["以后", "永远", "每次", "都要", "不要", "不用", "一律", "默认",
+                                  "记住", "偏好", "习惯", "规则", "always", "never", "prefer"]
+        let userInputs = steps.filter { $0.kind == .userInput }
+        for input in userInputs {
+            let text = input.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.count >= 6, text.count <= 500 else { continue }
+            let lower = text.lowercased()
+            let isPreference = preferenceMarkers.contains(where: { lower.contains($0) })
+            guard isPreference else { continue }
+            // Avoid duplicates: check if we already have a similar preference
+            let existing = recall(query: text, limit: 3)
+            let isDuplicate = existing.contains { entry in
+                entry.kind == .preference && entry.content.hasPrefix(String(text.prefix(30)))
+            }
+            guard !isDuplicate else { continue }
+            store(MemoryEntry(
+                kind: .preference,
+                content: text,
+                source: source,
+                tags: ["auto-extracted", "user-preference"],
+                score: 3.0
+            ))
+        }
     }
 
     // MARK: - Context integration

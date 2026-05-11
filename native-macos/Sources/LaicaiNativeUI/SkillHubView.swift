@@ -647,74 +647,72 @@ struct SkillCreateSheet: View {
 
 public struct ModelRegressionPanel: View {
     @ObservedObject private var runner = ModelRegressionRunner.shared
+    @State private var expandedResult: UUID?
 
     public init() {}
 
     public var body: some View {
         VStack(alignment: .leading, spacing: AppSpace.md) {
+            // Header
             HStack(spacing: AppSpace.sm) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Semantic.success.opacity(0.1))
+                        .fill(Brand.primary.opacity(0.12))
                         .frame(width: 24, height: 24)
-                    Image(systemName: "checkmark.shield")
+                    Image(systemName: "stethoscope")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Semantic.success)
+                        .foregroundStyle(Brand.primary)
                 }
-                Text("模型回归测试")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(TextGrade.primary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("连接器诊断")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(TextGrade.primary)
+                    Text("测试各模型 API 的连通性和功能兼容性")
+                        .font(.system(size: 10))
+                        .foregroundStyle(TextGrade.muted)
+                }
                 Spacer()
                 if runner.isRunning {
                     ProgressView()
                         .controlSize(.small)
-                    Text(runner.currentTest)
+                    Text("测试中: \(runner.currentTest)")
                         .font(.system(size: 10))
-                        .foregroundStyle(TextGrade.muted)
+                        .foregroundStyle(Brand.primary)
                 } else {
                     Button {
                         Task { await runner.runAll() }
                     } label: {
-                        HStack(spacing: 3) {
+                        HStack(spacing: 4) {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 8, weight: .bold))
-                            Text("运行全部")
+                            Text("全部测试")
                                 .font(.system(size: 10, weight: .medium))
                         }
-                        .foregroundStyle(Brand.primary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Brand.primary.opacity(0.08)))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Brand.premiumGradient))
                     }
                     .buttonStyle(.plain)
                 }
             }
 
             if !runner.results.isEmpty {
-                VStack(spacing: 4) {
+                VStack(spacing: 6) {
                     ForEach(runner.results, id: \.id) { result in
-                        HStack(spacing: AppSpace.sm) {
-                            Image(systemName: result.overallPassed ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(result.overallPassed ? Semantic.success : Semantic.error)
-                            Text(result.testCase.name)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(TextGrade.primary)
-                            Spacer()
-                            Text("\(result.passedCount)/\(result.results.count)")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(TextGrade.muted)
-                            Text("\(result.results.map(\.latencyMs).reduce(0,+))ms")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(TextGrade.ghost)
-                        }
-                        .padding(.vertical, 3)
+                        connectorResultCard(result)
                     }
                 }
             } else {
-                Text("尚未运行")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TextGrade.ghost)
+                HStack(spacing: AppSpace.sm) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(TextGrade.ghost)
+                    Text("点击「全部测试」检查已配置连接器的兼容性")
+                        .font(.system(size: 11))
+                        .foregroundStyle(TextGrade.ghost)
+                }
+                .padding(.vertical, AppSpace.sm)
             }
         }
         .padding(AppSpace.lg)
@@ -724,8 +722,128 @@ public struct ModelRegressionPanel: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
-                .strokeBorder(SurfaceGrade.border.opacity(0.12), lineWidth: 0.5)
+                .strokeBorder(SurfaceGrade.border.opacity(0.2), lineWidth: 0.5)
         )
+    }
+
+    @ViewBuilder
+    private func connectorResultCard(_ result: ModelTestResult) -> some View {
+        let isExpanded = expandedResult == result.id
+        VStack(alignment: .leading, spacing: 0) {
+            // Summary row
+            Button {
+                withAnimation(AppAnimation.quick) {
+                    expandedResult = isExpanded ? nil : result.id
+                }
+            } label: {
+                HStack(spacing: AppSpace.sm) {
+                    // Status badge
+                    Circle()
+                        .fill(result.overallPassed ? Semantic.success : Semantic.error)
+                        .frame(width: 8, height: 8)
+
+                    Text(result.testCase.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(TextGrade.primary)
+
+                    Spacer()
+
+                    // Capability pills
+                    HStack(spacing: 3) {
+                        ForEach(result.results, id: \.check) { cr in
+                            Text(checkShortLabel(cr.check))
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(cr.passed ? Semantic.success : Semantic.error)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill((cr.passed ? Semantic.success : Semantic.error).opacity(0.1))
+                                )
+                        }
+                    }
+
+                    // Latency
+                    let totalMs = result.results.map(\.latencyMs).reduce(0, +)
+                    Text(totalMs < 1000 ? "\(totalMs)ms" : String(format: "%.1fs", Double(totalMs) / 1000))
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(TextGrade.ghost)
+                        .frame(width: 40, alignment: .trailing)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(TextGrade.ghost)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, AppSpace.sm)
+            }
+            .buttonStyle(.plain)
+
+            // Expanded detail
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(result.results, id: \.check) { cr in
+                        HStack(spacing: AppSpace.sm) {
+                            Image(systemName: cr.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(cr.passed ? Semantic.success : Semantic.error)
+                            Text(checkLabel(cr.check))
+                                .font(.system(size: 11))
+                                .foregroundStyle(TextGrade.secondary)
+                            Spacer()
+                            if !cr.detail.isEmpty {
+                                Text(cr.detail)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(TextGrade.ghost)
+                                    .lineLimit(1)
+                            }
+                            Text("\(cr.latencyMs)ms")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(TextGrade.ghost)
+                        }
+                    }
+                    if let err = result.results.first(where: { !$0.passed })?.error {
+                        Text(err)
+                            .font(.system(size: 9))
+                            .foregroundStyle(Semantic.error)
+                            .lineLimit(2)
+                            .padding(.top, 2)
+                    }
+                }
+                .padding(.horizontal, AppSpace.md)
+                .padding(.bottom, AppSpace.sm)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .fill(SurfaceGrade.elevated.opacity(0.5))
+        )
+    }
+
+    private func checkShortLabel(_ check: ModelTestCase.Check) -> String {
+        switch check {
+        case .healthCheck: return "连通"
+        case .basicChat: return "对话"
+        case .streamingChat: return "流式"
+        case .toolCalling: return "工具"
+        case .reasoning: return "推理"
+        case .longContext: return "长文"
+        case .chineseOutput: return "中文"
+        }
+    }
+
+    private func checkLabel(_ check: ModelTestCase.Check) -> String {
+        switch check {
+        case .healthCheck: return "API 连通性"
+        case .basicChat: return "基础对话"
+        case .streamingChat: return "流式输出"
+        case .toolCalling: return "工具调用"
+        case .reasoning: return "推理链"
+        case .longContext: return "长上下文"
+        case .chineseOutput: return "中文输出"
+        }
     }
 }
 

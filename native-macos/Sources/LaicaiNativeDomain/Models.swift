@@ -408,6 +408,19 @@ public struct TaskMemory: Equatable, Codable, Sendable {
             && fileSummaries.isEmpty
             && trimDetails.isEmpty
     }
+
+    /// Append a decision with dedup + cap. userDecisions feeds back into the LLM
+    /// context every turn; unbounded growth saturates the window.
+    /// Cap = 24, with newest entries kept. Duplicate entries are deduped (newer wins).
+    public mutating func appendDecision(_ entry: String, cap: Int = 24) {
+        let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        userDecisions.removeAll { $0 == trimmed }
+        userDecisions.append(trimmed)
+        if userDecisions.count > cap {
+            userDecisions.removeFirst(userDecisions.count - cap)
+        }
+    }
 }
 
 public struct FileInfo: Identifiable, Equatable, Codable, Sendable {
@@ -553,6 +566,7 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
     public var createdAt: Date
     public var updatedAt: Date
     public var source: ThreadSource
+    public var projectID: UUID?  // Codex-style: bind thread to a project
 
     public init(
         id: UUID = UUID(),
@@ -573,7 +587,8 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         userRating: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now,
-        source: ThreadSource? = nil
+        source: ThreadSource? = nil,
+        projectID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -595,13 +610,14 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         self.updatedAt = updatedAt
         // Infer source if not explicitly set
         self.source = source ?? Self.inferSource(context: context, workflowName: workflowName, steps: steps)
+        self.projectID = projectID
     }
 
     // Custom Codable: tolerate missing fields added after initial schema
     private enum CodingKeys: String, CodingKey {
         case id, title, preview, status, steps, connectorID, workflowName, context
         case modelName, category, isPinned, isArchived, unreadCount, summaryCache
-        case multiAgentPlan, userRating, createdAt, updatedAt, source
+        case multiAgentPlan, userRating, createdAt, updatedAt, source, projectID
     }
 
     public init(from decoder: Decoder) throws {
@@ -626,6 +642,7 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? updatedAt
         source = try c.decodeIfPresent(ThreadSource.self, forKey: .source)
             ?? Self.inferSource(context: context, workflowName: workflowName, steps: steps)
+        projectID = try c.decodeIfPresent(UUID.self, forKey: .projectID)
     }
 
     /// Short human-readable ID (first 6 hex chars of UUID, uppercased)
@@ -705,9 +722,11 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
     public var updatedAt: Date
     public var isPinned: Bool
     public var isArchived: Bool
+    public var hasContent: Bool
     public var events: [ThreadEvent]
     public var session: ChatSession?
     public var task: AgentTask?
+    public var projectID: UUID?
 
     public var shortID: String { String(id.uuidString.prefix(6)) }
 
@@ -719,7 +738,9 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
         status = thread.source == .task ? thread.status : nil
         updatedAt = thread.updatedAt
         isPinned = thread.isPinned
+        projectID = thread.projectID
         isArchived = thread.isArchived
+        hasContent = !thread.steps.isEmpty
         events = includeEvents ? thread.steps.map { step in
             ThreadEvent(
                 id: step.id,
@@ -730,8 +751,13 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
                 metrics: step.metrics
             )
         } : []
-        session = thread.source == .session ? ChatSession(thread: thread) : nil
-        task = thread.source == .task ? AgentTask(thread: thread) : nil
+        if includeEvents {
+            session = thread.source == .session ? ChatSession(thread: thread) : nil
+            task = thread.source == .task ? AgentTask(thread: thread) : nil
+        } else {
+            session = nil
+            task = nil
+        }
     }
 
     public init(session: ChatSession, includeEvents: Bool = true) {
@@ -743,6 +769,7 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
         updatedAt = session.updatedAt
         isPinned = session.isPinned
         isArchived = false
+        hasContent = !session.turns.isEmpty
         events = includeEvents ? session.turns.map { turn in
             ThreadEvent(
                 id: turn.id,
@@ -766,6 +793,7 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
         updatedAt = task.updatedAt
         isPinned = false
         isArchived = false
+        hasContent = !task.steps.isEmpty
         events = includeEvents ? task.steps.map { step in
             ThreadEvent(
                 id: step.id,
@@ -1509,6 +1537,7 @@ public enum WorkbenchTab: String, Codable, Sendable, CaseIterable, Identifiable 
     case agents
     case wiki
     case report
+    case stats
     case logs
 
     public var id: String {
@@ -1531,6 +1560,8 @@ public enum WorkbenchTab: String, Codable, Sendable, CaseIterable, Identifiable 
             return "Wiki"
         case .report:
             return "报告"
+        case .stats:
+            return "统计"
         case .logs:
             return "诊断"
         }
@@ -1545,6 +1576,7 @@ public enum WorkbenchTab: String, Codable, Sendable, CaseIterable, Identifiable 
         case .agents: return "person.3"
         case .wiki: return "book.closed"
         case .report: return "chart.bar.doc.horizontal"
+        case .stats: return "chart.bar.xaxis"
         case .logs: return "waveform.path.ecg"
         }
     }
@@ -1761,6 +1793,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
     public var comfyUIModelName: String
     // G16: Multi-workspace support — recent workspace paths for quick switching
     public var recentWorkspaces: [String]
+    public var usePipeline: Bool
 
     public init(
         workspacePath: String,
@@ -1771,7 +1804,8 @@ public struct AppSettings: Equatable, Codable, Sendable {
         contextMode: ContextMode = .balanced,
         comfyUIServerURL: String = "http://127.0.0.1:8188",
         comfyUIModelName: String = "",
-        recentWorkspaces: [String] = []
+        recentWorkspaces: [String] = [],
+        usePipeline: Bool = false
     ) {
         self.workspacePath = workspacePath
         self.vaultPath = vaultPath
@@ -1782,6 +1816,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         self.comfyUIServerURL = comfyUIServerURL
         self.comfyUIModelName = comfyUIModelName
         self.recentWorkspaces = recentWorkspaces
+        self.usePipeline = usePipeline
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1794,6 +1829,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         case comfyUIServerURL
         case comfyUIModelName
         case recentWorkspaces
+        case usePipeline
     }
 
     public init(from decoder: Decoder) throws {
@@ -1807,6 +1843,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         comfyUIServerURL = try container.decodeIfPresent(String.self, forKey: .comfyUIServerURL) ?? "http://127.0.0.1:8188"
         comfyUIModelName = try container.decodeIfPresent(String.self, forKey: .comfyUIModelName) ?? ""
         recentWorkspaces = try container.decodeIfPresent([String].self, forKey: .recentWorkspaces) ?? []
+        usePipeline = try container.decodeIfPresent(Bool.self, forKey: .usePipeline) ?? false
     }
 
     // G16: Switch active workspace and track in recents

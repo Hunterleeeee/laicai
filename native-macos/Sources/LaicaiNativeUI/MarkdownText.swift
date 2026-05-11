@@ -239,11 +239,41 @@ struct MarkdownText: View {
         if let cached = blockCache.object(forKey: key) {
             return cached.blocks
         }
-        let parsed = parseBlocks(from: preprocess(text))
+
+        // Incremental: try to reuse a prefix cache from a shorter version of this text.
+        // During streaming, text grows by appending — the earlier blocks are stable.
+        let preprocessed = preprocess(text)
+        let parsed: [Block]
+
+        let prefixKey = NSString(string: String(text.prefix(64)) + "_prefix")
+        if let prefixEntry = blockCache.object(forKey: prefixKey),
+           prefixEntry.blocks.count > 2 {
+            // Reuse all but the last 2 blocks (last block may be incomplete during streaming)
+            let stableCount = prefixEntry.blocks.count - 2
+            let stableBlocks = Array(prefixEntry.blocks.prefix(stableCount))
+
+            // Find where the stable blocks end in the source
+            let lines = preprocessed.components(separatedBy: "\n")
+            let tailLineIndex = estimateTailStart(stableBlockCount: stableCount, totalLines: lines.count)
+            let tailText = lines[tailLineIndex...].joined(separator: "\n")
+            let tailBlocks = parseBlocks(from: tailText)
+            parsed = stableBlocks + tailBlocks
+        } else {
+            parsed = parseBlocks(from: preprocessed)
+        }
+
         let entry = BlockCacheEntry(blocks: parsed)
         blockCache.setObject(entry, forKey: key)
-        blockCache.countLimit = 30
+        // Store as prefix cache for next incremental parse
+        blockCache.setObject(entry, forKey: prefixKey)
+        blockCache.countLimit = 60
         return parsed
+    }
+
+    private static func estimateTailStart(stableBlockCount: Int, totalLines: Int) -> Int {
+        // Rough heuristic: each block ≈ 3 lines on average
+        let estimatedStableLines = stableBlockCount * 3
+        return max(0, min(estimatedStableLines, totalLines - 10))
     }
 
     /// Normalize LLM output: ensure headings/lists start on their own line.

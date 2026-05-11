@@ -302,6 +302,38 @@ public final class MultiAgentOrchestrator: ObservableObject {
             }
         }
 
+        // Re-plan: if some agents failed but others succeeded, retry failed ones with a different connector
+        let failedAgents = currentPlan.agents.filter { $0.status == .failed }
+        let hasSuccesses = currentPlan.agents.contains { $0.status == .completed }
+        if !failedAgents.isEmpty && hasSuccesses && failedAgents.count <= 2 {
+            let replanStep = TaskStep(
+                kind: .aiThinking,
+                text: "部分子任务失败（\(failedAgents.map { $0.role.title }.joined(separator: "、"))），尝试重新分配并重试…",
+                isCollapsible: true, isCollapsed: true, agentRole: .planner
+            )
+            task.steps.append(replanStep)
+            onStep(replanStep)
+
+            for failedNode in failedAgents {
+                guard let idx = currentPlan.agents.firstIndex(where: { $0.id == failedNode.id }) else { continue }
+                // Reset status for retry
+                currentPlan.agents[idx].status = .queued
+                currentPlan.agents[idx].retryCount = 0
+                currentPlan.agents[idx].errorMessage = nil
+                // Switch to a different connector
+                let altConnector = selectFailoverConnector(excluding: failedNode.connectorID, allConnectors: allConnectors, fallback: connector)
+                currentPlan.agents[idx].connectorID = altConnector.id
+                currentPlan.agents[idx].updatedAt = .now
+
+                await runSingleAgent(
+                    node: currentPlan.agents[idx], message: message, intent: intent,
+                    connector: altConnector, allConnectors: allConnectors,
+                    plan: &currentPlan, task: &task, artifacts: &agentArtifacts,
+                    onStep: onStep, onStreamDelta: onStreamDelta, onPlanUpdate: onPlanUpdate
+                )
+            }
+        }
+
         // Finalize
         let allCompleted = currentPlan.agents.allSatisfy { $0.status == .completed }
         currentPlan.status = allCompleted ? .completed : .failed

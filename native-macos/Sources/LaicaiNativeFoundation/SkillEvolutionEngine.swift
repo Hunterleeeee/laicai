@@ -226,27 +226,39 @@ public final class SkillEvolutionEngine {
         guard !candidates.isEmpty else { return nil }
 
         let messageTokens = Self.matchTokens(in: message)
-        if messageTokens.isEmpty {
-            return candidates.first { $0.successRate >= 0.65 && $0.usageCount >= 2 }
+        // Reject chitchat-derived skills: the patterns "你是谁", "你能", "你好" etc.
+        // produced "skills" from interactions with no real domain — they tend to
+        // accidentally match unrelated tasks just by their high Q value.
+        let chitChatPrefixes = ["你是", "你能", "你会", "你好", "你叫", "你来", "你看", "继续", "再丰富", "好，加入", "这就完了", "为什么"]
+        let cleanCandidates = candidates.filter { skill in
+            !chitChatPrefixes.contains(where: { skill.name.hasPrefix($0) })
         }
-        return candidates
-            .map { skill -> (LearnedSkill, Double) in
+        let pool = cleanCandidates.isEmpty ? candidates : cleanCandidates
+        if messageTokens.isEmpty {
+            return pool.first { $0.successRate >= 0.65 && $0.usageCount >= 2 }
+        }
+        return pool
+            .map { skill -> (skill: LearnedSkill, score: Double, overlap: Int, toolBonus: Double) in
                 let skillTokens = Self.matchTokens(in: [skill.name, skill.strategy, skill.toolSequence.joined(separator: " ")].joined(separator: " "))
-                let overlap = Double(messageTokens.intersection(skillTokens).count)
+                let overlapCount = messageTokens.intersection(skillTokens).count
                 let denominator = Double(max(1, min(messageTokens.count, 8)))
-                let semanticScore = overlap / denominator
+                let semanticScore = Double(overlapCount) / denominator
                 let toolBonus = Self.toolIntentBonus(skill: skill, message: message)
                 let score = semanticScore + toolBonus + min(skill.qValue, 2.0) * 0.05
-                return (skill, score)
+                return (skill, score, overlapCount, toolBonus)
             }
-            .filter { pair in
-                pair.1 >= 0.28 || Self.toolIntentBonus(skill: pair.0, message: message) >= 0.35
+            .filter { entry in
+                // Stricter gates:
+                // - Require at least 1 real token overlap (prevents Q-only matches)
+                // - AND either composite score >= 0.40 OR strong tool keyword bonus >= 0.35
+                guard entry.overlap >= 1 else { return false }
+                return entry.score >= 0.40 || entry.toolBonus >= 0.35
             }
             .sorted { lhs, rhs in
-                if lhs.1 == rhs.1 { return lhs.0.qValue > rhs.0.qValue }
-                return lhs.1 > rhs.1
+                if lhs.score == rhs.score { return lhs.skill.qValue > rhs.skill.qValue }
+                return lhs.score > rhs.score
             }
-            .first?.0
+            .first?.skill
     }
 
     // MARK: - Q-Value Update (feedback loop)

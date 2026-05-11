@@ -202,10 +202,11 @@ extension AgentLoop {
             .filter { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .suffix(3)
             .map { compactSummaryText($0.text, limit: 260) } + context.memory.stageConclusions
-        let checkpoints = steps
-            .filter { $0.kind == .aiThinking && $0.text.hasPrefix("任务检查点") }
-            .suffix(1)
-            .map { compactSummaryText($0.text, limit: 520) } + context.memory.checkpoints
+        // Note: deliberately do NOT pull "任务检查点" / "阶段总结" / "证据清单"
+        // aiThinking steps into memory. They are orchestration audits that contain
+        // boilerplate ("状态：仍需继续") and re-feeding them to the model encourages
+        // it to mimic the same internal audit format in user-visible output.
+        let checkpoints = context.memory.checkpoints
 
         var lines = ["结构化任务记忆"]
         if indexedWorkspace {
@@ -308,13 +309,12 @@ extension AgentLoop {
 
     /// Compress mid-task conversation history when it grows too long.
     /// Keeps the system prompt, first user message, and recent messages intact;
-    /// replaces older messages with a compressed summary.
+    /// replaces older messages with a structured semantic summary.
     static func compressMidTaskHistory(_ messages: [ChatMessage], maxMessages: Int = 16) -> [ChatMessage] {
         guard messages.count > maxMessages else { return messages }
 
         // Always keep: system prompt (index 0), first user message, last N messages
         var result: [ChatMessage] = []
-        var compressedBlock: [String] = []
 
         // Keep system prompt
         if let first = messages.first, first.role == "system" {
@@ -333,40 +333,78 @@ extension AgentLoop {
             result.append(messages[firstUserIdx])
         }
 
-        // C4: Smart compression — prioritize failed results, compress successful ones aggressively
+        // Semantic extraction from compressed block
+        var filesRead: Set<String> = []
+        var filesWritten: Set<String> = []
+        var searchQueries: [String] = []
+        var errors: [String] = []
+        var decisions: [String] = []
+        var toolSuccessCount = 0
+        var toolFailCount = 0
+
         for i in (firstUserIdx + 1)..<compressEnd {
             let msg = messages[i]
             let content = msg.content ?? ""
+
             if msg.role == "tool" || msg.toolCallId != nil {
-                // Tool results: keep errors verbose, compress successes
-                if content.contains("❌") || content.contains("失败") || content.contains("Error") {
-                    compressedBlock.append("[工具失败] \(String(content.prefix(300)))")
+                let isFail = content.contains("❌") || content.contains("Error") || content.contains("失败")
+                if isFail {
+                    toolFailCount += 1
+                    errors.append(String(content.prefix(120)))
                 } else {
-                    compressedBlock.append("[工具成功] \(String(content.prefix(60)))")
+                    toolSuccessCount += 1
+                }
+                // Extract file paths from tool results
+                if let path = extractPath(from: content) {
+                    if content.contains("已读取") || content.contains("file.read") {
+                        filesRead.insert(path)
+                    } else if content.contains("已写入") || content.contains("file_edit") || content.contains("file_write") {
+                        filesWritten.insert(path)
+                    }
+                }
+                if content.contains("搜索") || content.contains("code.search") {
+                    if let q = extractSearchQuery(from: content) { searchQueries.append(q) }
                 }
             } else if msg.role == "assistant" {
-                // Assistant messages: only keep if they contain actual decisions/code
+                // Extract key decisions/code changes only
                 if content.contains("```") || content.contains("file_edit") || content.contains("file_write") {
-                    compressedBlock.append("[助手] \(String(content.prefix(200)))")
-                } else {
-                    compressedBlock.append("[助手] \(String(content.prefix(50)))…")
+                    // Extract the first meaningful line as a decision
+                    let firstLine = content.components(separatedBy: .newlines)
+                        .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty && !$0.hasPrefix("```") })
+                    if let line = firstLine {
+                        decisions.append(String(line.prefix(80)))
+                    }
                 }
-            } else if msg.role == "system" {
-                // System injections: keep budget warnings, compress the rest
-                if content.contains("即将结束") || content.contains("编排层提示") {
-                    compressedBlock.append("[系统] \(String(content.prefix(150)))")
-                }
-                // Skip other system messages (progress awareness, etc.)
-            } else {
-                compressedBlock.append("[\(msg.role)] \(String(content.prefix(80)))")
             }
+            // System messages are dropped entirely — they're already processed
         }
 
-        if !compressedBlock.isEmpty {
-            let summary = compressedBlock.joined(separator: "\n")
+        // Build compact structured summary
+        var summaryParts: [String] = []
+        if !filesRead.isEmpty {
+            summaryParts.append("已读: \(filesRead.sorted().map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", "))")
+        }
+        if !filesWritten.isEmpty {
+            summaryParts.append("已改: \(filesWritten.sorted().map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", "))")
+        }
+        if !searchQueries.isEmpty {
+            summaryParts.append("已搜索: \(searchQueries.prefix(5).joined(separator: ", "))")
+        }
+        if toolSuccessCount > 0 || toolFailCount > 0 {
+            summaryParts.append("工具: \(toolSuccessCount)成功 \(toolFailCount)失败")
+        }
+        if !errors.isEmpty {
+            summaryParts.append("错误: " + errors.prefix(3).joined(separator: "; "))
+        }
+        if !decisions.isEmpty {
+            summaryParts.append("决策: " + decisions.prefix(3).joined(separator: "; "))
+        }
+
+        if !summaryParts.isEmpty {
+            let summary = summaryParts.joined(separator: "\n")
             result.append(ChatMessage(
                 role: "user",
-                content: "以下是之前会话的压缩摘要（已完成步骤）：\n\(summary)\n\n请基于以上摘要继续任务。"
+                content: "[上下文摘要 · 已压缩 \(compressEnd - firstUserIdx - 1) 条消息]\n\(summary)\n\n请基于以上摘要和后续消息继续任务，不要重复已完成的步骤。"
             ))
         }
 
@@ -376,6 +414,40 @@ extension AgentLoop {
         }
 
         return result
+    }
+
+    /// Extract file path from tool result content
+    private static func extractPath(from content: String) -> String? {
+        // Pattern: "已读取 /path/to/file" or "path": "/path/to/file"
+        let patterns = [
+            #"已读取\s+(\S+)"#,
+            #"已写入\s+(\S+)"#,
+            #"\"path\"\s*:\s*\"([^\"]+)\""#,
+            #"·\s+(/\S+)"#
+        ]
+        for pattern in patterns {
+            if let match = content.range(of: pattern, options: .regularExpression) {
+                let captured = String(content[match])
+                // Extract the path part
+                let path = captured.components(separatedBy: .whitespaces).last ?? captured
+                let cleaned = path.trimmingCharacters(in: CharacterSet(charactersIn: "\"·"))
+                if cleaned.contains("/") { return cleaned }
+            }
+        }
+        return nil
+    }
+
+    /// Extract search query from tool content
+    private static func extractSearchQuery(from content: String) -> String? {
+        let patterns = [#"搜索[：:]\s*(.{2,40})"#, #"query[：:]\s*\"?([^\"]{2,40})"#]
+        for pattern in patterns {
+            if let range = content.range(of: pattern, options: .regularExpression) {
+                let match = String(content[range])
+                let parts = match.components(separatedBy: CharacterSet(charactersIn: "：:"))
+                return parts.last?.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "")
+            }
+        }
+        return nil
     }
 
     static func compactHistoryText(_ text: String, limit: Int = 1400) -> String {
@@ -420,6 +492,18 @@ extension AgentLoop {
     /// Unified detection: model writing tool calls as text instead of using function calling API.
     /// Covers both fake syntax patterns and tool name spam.
     static func containsFakeToolCallSyntax(_ text: String) -> Bool {
+        // Pattern 0: high-confidence single-match patterns (DSML, antml, function_calls XML, etc.)
+        // These are unambiguous — model is leaking tool-call template syntax.
+        let strongPatterns = [
+            "<|DSML|", "<|dsml|",
+            "<function_calls", "<invoke",
+            "<function_calls>", "</function_calls>",
+            "<invoke name=",
+            "<tool_call>", "</tool_call>",
+            "<|tool_call|>", "<|/tool_call|>",
+            "<|assistant_tool_call|>"
+        ]
+        if strongPatterns.contains(where: { text.contains($0) }) { return true }
         // Pattern 1: explicit tool call syntax in text
         let syntaxPatterns = [
             "[tool:", "[TOOL:", "tool:web_search", "tool:file_read", "tool:code_search",
@@ -444,6 +528,34 @@ extension AgentLoop {
     /// Alias for backward compat — same as containsFakeToolCallSyntax
     static func looksLikeToolSpam(_ text: String) -> Bool {
         containsFakeToolCallSyntax(text)
+    }
+
+    /// Strip fake tool-call blocks from user-visible text. Used when the model leaks
+    /// DSML / function_calls / invoke syntax inline. Returns cleaned prose; if everything
+    /// would be stripped, returns nil so caller can fall back to a generic message.
+    static func stripFakeToolCallBlocks(from text: String) -> String? {
+        var cleaned = text
+        // Remove block-style fakes: <|DSML| ... |>  and  <function_calls>...</function_calls>
+        let blockPatterns: [String] = [
+            #"<\|DSML\|[\s\S]*?(\|>|$)"#,
+            #"<\|dsml\|[\s\S]*?(\|>|$)"#,
+            #"<function_calls>[\s\S]*?</function_calls>"#,
+            #"<function_calls[\s\S]*?(?=\n\n|$)"#,
+            #"<invoke[\s\S]*?</invoke>"#,
+            #"<invoke[\s\S]*?(?=\n\n|$)"#,
+            #"<tool_call>[\s\S]*?</tool_call>"#,
+            #"<\|tool_call\|>[\s\S]*?(<\|/tool_call\|>|$)"#,
+            #"<\|assistant_tool_call\|>[\s\S]*?(?=\n\n|$)"#
+        ]
+        for pattern in blockPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+                let range = NSRange(cleaned.startIndex..., in: cleaned)
+                cleaned = regex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
+            }
+        }
+        cleaned = cleaned.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : cleaned
     }
 
     static func looksLikeProviderError(_ text: String) -> Bool {
@@ -552,6 +664,105 @@ extension AgentLoop {
             let relative = String(path.dropFirst(rootPath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             return relative.isEmpty ? nil : relative
         })).sorted()
+    }
+
+    // MARK: - Context Window Compression
+
+    /// Compress message history to stay within token budget.
+    /// Strategy: keep system prompt + recent N messages intact, compress older messages.
+    /// - Summarize old tool results into one-line summaries
+    /// - Fold consecutive failed tool calls into a single summary
+    /// - Deduplicate repeated file.read results for the same file
+    static func compressMessages(_ messages: inout [ChatMessage], estimatedTokenBudget: Int) {
+        let estimatedTokens = messages.reduce(0) { $0 + roughTokenCount($1.content ?? "") }
+        guard estimatedTokens > estimatedTokenBudget else { return }
+
+        // Keep first message (system prompt) and last 8 messages intact
+        let keepHead = 1
+        let keepTail = 8
+        guard messages.count > keepHead + keepTail else { return }
+
+        let compressibleRange = keepHead..<(messages.count - keepTail)
+        var compressed: [ChatMessage] = Array(messages[0..<keepHead])
+
+        // Group compressible messages and compress
+        var i = compressibleRange.lowerBound
+        while i < compressibleRange.upperBound {
+            let msg = messages[i]
+            let content = msg.content ?? ""
+
+            // Compress tool results: keep only summary
+            if msg.role == "user" && content.hasPrefix("工具") && content.count > 500 {
+                let firstLine = content.components(separatedBy: "\n").first ?? content
+                compressed.append(ChatMessage(role: msg.role, content: String(firstLine.prefix(200)) + " [已压缩]"))
+                i += 1
+                continue
+            }
+
+            // Compress tool call result pairs
+            if msg.role == "tool" && content.count > 800 {
+                // Extract first meaningful line as summary
+                let lines = content.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                let summary = lines.prefix(3).joined(separator: "\n")
+                compressed.append(ChatMessage(role: msg.role, content: String(summary.prefix(400)) + "\n[…已压缩]", toolCallId: msg.toolCallId))
+                i += 1
+                continue
+            }
+
+            // Fold consecutive system messages into one
+            if msg.role == "system" {
+                var combined = content
+                while i + 1 < compressibleRange.upperBound && messages[i + 1].role == "system" {
+                    i += 1
+                    combined += "\n" + (messages[i].content ?? "")
+                }
+                if combined.count > 600 {
+                    combined = String(combined.prefix(600)) + " [已压缩]"
+                }
+                compressed.append(ChatMessage(role: "system", content: combined))
+                i += 1
+                continue
+            }
+
+            // Keep other messages but truncate if very long
+            if content.count > 2000 {
+                compressed.append(ChatMessage(role: msg.role, content: String(content.prefix(1500)) + "\n[…已压缩]", toolCallId: msg.toolCallId))
+            } else {
+                compressed.append(msg)
+            }
+            i += 1
+        }
+
+        // Append tail
+        compressed.append(contentsOf: messages[(messages.count - keepTail)...])
+        messages = compressed
+    }
+
+    /// Rough token estimate: ~1.5 chars per token for mixed CJK/English
+    static func roughTokenCount(_ text: String) -> Int {
+        max(1, text.count * 2 / 3)
+    }
+
+    /// Deduplicate tool call cache entries that are semantically equivalent.
+    /// Returns true if the new query is a semantic duplicate of a cached one.
+    static func isSemanticDuplicate(newQuery: String, cachedQueries: [String], toolName: String) -> Bool {
+        guard toolName == "code.search" || toolName == "web.search" else { return false }
+        let newNorm = newQuery.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        for cached in cachedQueries {
+            let cachedNorm = cached.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            // Exact match
+            if newNorm == cachedNorm { return true }
+            // Containment match
+            if newNorm.contains(cachedNorm) || cachedNorm.contains(newNorm) { return true }
+            // Word overlap: if >80% words overlap, it's a duplicate
+            let newWords = Set(newNorm.components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 1 })
+            let cachedWords = Set(cachedNorm.components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 1 })
+            guard !newWords.isEmpty && !cachedWords.isEmpty else { continue }
+            let overlap = newWords.intersection(cachedWords).count
+            let maxSize = max(newWords.count, cachedWords.count)
+            if Double(overlap) / Double(maxSize) > 0.8 { return true }
+        }
+        return false
     }
 
 }

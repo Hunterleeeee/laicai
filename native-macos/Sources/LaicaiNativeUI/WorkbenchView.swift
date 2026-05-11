@@ -69,6 +69,7 @@ struct WorkbenchView: View {
                 case .agents: AgentsPanel()
                 case .wiki: WikiPanel()
                 case .report: ReportPanel()
+                case .stats: UsageStatsPanel()
                 case .logs: DiagnosticsPanel()
                 }
             }
@@ -80,7 +81,7 @@ struct WorkbenchView: View {
 // MARK: - Tab Item
 
 enum WorkbenchTabItem: String, CaseIterable, Identifiable {
-    case context, tools, workflows, skills, agents, wiki, report, logs
+    case context, tools, workflows, skills, agents, wiki, report, stats, logs
 
     var id: String { rawValue }
 
@@ -93,6 +94,7 @@ enum WorkbenchTabItem: String, CaseIterable, Identifiable {
         case .agents: return .agents
         case .wiki: return .wiki
         case .report: return .report
+        case .stats: return .stats
         case .logs: return .logs
         }
     }
@@ -106,6 +108,7 @@ enum WorkbenchTabItem: String, CaseIterable, Identifiable {
         case .agents: return "Agent"
         case .wiki: return "Wiki"
         case .report: return "报告"
+        case .stats: return "统计"
         case .logs: return "日志"
         }
     }
@@ -119,6 +122,7 @@ enum WorkbenchTabItem: String, CaseIterable, Identifiable {
         case .agents: return "person.3"
         case .wiki: return "book.closed"
         case .report: return "chart.bar.doc.horizontal"
+        case .stats: return "chart.bar.xaxis"
         case .logs: return "terminal"
         }
     }

@@ -94,6 +94,21 @@ public extension AppState {
             state.selectThread(id: latest.id)
         }
 
+        // Start MCP servers and register their tools
+        Task { @MainActor in
+            let manager = MCPManager.shared
+            await manager.startAll()
+            manager.registerTools(in: ToolRegistry.shared)
+        }
+
+        // Load plugins from .laicai/plugins/
+        let wsRoot = state.settings.workspacePath
+        if !wsRoot.isEmpty {
+            Task { @MainActor in
+                PluginRegistry.shared.loadPlugins(workspaceRoot: wsRoot)
+            }
+        }
+
         return state
     }
 }

@@ -397,7 +397,12 @@ public struct FileEditTool: LaicaiTool {
             let editsData = editsJSON.data(using: .utf8) ?? Data()
             edits = try JSONDecoder().decode([EditOp].self, from: editsData)
         } catch {
-            return ToolResult(output: "edits 参数格式错误，需要 JSON 数组 [{\"oldText\":\"...\",\"newText\":\"...\"}]", success: false, error: "invalid_edits")
+            // Auto-repair: try common JSON format mistakes before giving up
+            if let repaired = Self.repairEditsJSON(editsJSON) {
+                edits = repaired
+            } else {
+                return ToolResult(output: "edits 参数格式错误，需要 JSON 数组 [{\"oldText\":\"...\",\"newText\":\"...\"}]", success: false, error: "invalid_edits")
+            }
         }
 
         guard !edits.isEmpty else {
@@ -467,7 +472,16 @@ public struct FileEditTool: LaicaiTool {
                 appliedEdits.append(edit)
                 errors.append("第\(i+1)条编辑：模糊匹配成功（\(fuzzyResult.matchType)）")
             } else {
-                errors.append("第\(i+1)条编辑：未找到 oldText（前80字符：\(String(edit.oldText.prefix(80)))）")
+                let preview = String(edit.oldText.prefix(80))
+                let similar = Self.findSimilarLines(in: content, target: edit.oldText, maxResults: 3)
+                if similar.isEmpty {
+                    errors.append("第\(i+1)条编辑：未找到 oldText（前80字符：\(preview)）。建议先用 file_read 重新读取文件，确认目标内容是否存在。")
+                } else {
+                    let hint = similar.enumerated().map { idx, line in
+                        "    [\(idx+1)] \(line)"
+                    }.joined(separator: "\n")
+                    errors.append("第\(i+1)条编辑：未找到 oldText（前80字符：\(preview)）\n  最相似行：\n\(hint)\n  建议：复制其中一行作为新的 oldText 重试，注意空格和缩进必须完全一致。")
+                }
                 continue
             }
         }
@@ -545,6 +559,116 @@ public struct FileEditTool: LaicaiTool {
         let matchType: String
     }
 
+    /// Auto-repair common JSON format mistakes in the edits parameter.
+    /// Models frequently produce malformed edits JSON — this rescues those cases.
+    private static func repairEditsJSON(_ raw: String) -> [EditOp]? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Strategy 1: Single object instead of array → wrap in array
+        // e.g. {"oldText":"foo","newText":"bar"} instead of [{"oldText":"foo","newText":"bar"}]
+        if trimmed.hasPrefix("{") && !trimmed.hasPrefix("[") {
+            let wrapped = "[\(trimmed)]"
+            if let data = wrapped.data(using: .utf8),
+               let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+                return ops
+            }
+        }
+
+        // Strategy 2: Escaped JSON string (double-encoded) → unescape first
+        // e.g. "[{\"oldText\":\"foo\",\"newText\":\"bar\"}]" as a string value
+        if trimmed.hasPrefix("\"") && trimmed.hasSuffix("\"") {
+            let inner = String(trimmed.dropFirst().dropLast())
+                .replacingOccurrences(of: "\\\"", with: "\"")
+                .replacingOccurrences(of: "\\\\", with: "\\")
+                .replacingOccurrences(of: "\\/", with: "/")
+            if let data = inner.data(using: .utf8),
+               let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+                return ops
+            }
+        }
+
+        // Strategy 3: Markdown code fence wrapping → strip fences
+        // e.g. ```json\n[...]\n```
+        var stripped = trimmed
+        if stripped.hasPrefix("```") {
+            let lines = stripped.components(separatedBy: "\n")
+            let filtered = lines.filter { !$0.hasPrefix("```") }
+            stripped = filtered.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if let data = stripped.data(using: .utf8),
+               let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+                return ops
+            }
+        }
+
+        // Strategy 4: Unescaped newlines/tabs inside JSON strings → escape them
+        let escaped = trimmed
+            .replacingOccurrences(of: "\t", with: "\\t")
+        // Replace actual newlines between quotes (crude but effective)
+        if let data = escaped.data(using: .utf8),
+           let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+            return ops
+        }
+
+        // Strategy 5: Alternative key names (old_text/new_text, old/new, before/after)
+        if let data = trimmed.data(using: .utf8),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            let ops: [EditOp] = arr.compactMap { dict in
+                let old = dict["oldText"] as? String
+                    ?? dict["old_text"] as? String
+                    ?? dict["old"] as? String
+                    ?? dict["before"] as? String
+                    ?? dict["search"] as? String
+                    ?? ""
+                let new = dict["newText"] as? String
+                    ?? dict["new_text"] as? String
+                    ?? dict["new"] as? String
+                    ?? dict["after"] as? String
+                    ?? dict["replace"] as? String
+                guard new != nil else { return nil }
+                return EditOp(oldText: old, newText: new!)
+            }
+            if !ops.isEmpty { return ops }
+        }
+
+        return nil
+    }
+
+    /// Find lines in content most similar to target's first non-empty line.
+    /// Used to give the model recovery hints when its oldText didn't match exactly.
+    static func findSimilarLines(in content: String, target: String, maxResults: Int = 3) -> [String] {
+        let firstTargetLine = target.components(separatedBy: "\n")
+            .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
+            .trimmingCharacters(in: .whitespaces) ?? target.trimmingCharacters(in: .whitespaces)
+        guard !firstTargetLine.isEmpty else { return [] }
+        let normalizedTarget = firstTargetLine.lowercased()
+
+        // Score each non-empty line by character overlap (cheap Jaccard-ish)
+        let targetChars = Set(normalizedTarget)
+        let lines = content.components(separatedBy: "\n")
+        var scored: [(score: Double, line: String)] = []
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+            let lower = trimmed.lowercased()
+            // Exact substring or substring-of are highest-value
+            if lower.contains(normalizedTarget) || normalizedTarget.contains(lower) {
+                scored.append((1.0, trimmed))
+                continue
+            }
+            let lineChars = Set(lower)
+            let intersection = targetChars.intersection(lineChars).count
+            let unionCount = targetChars.union(lineChars).count
+            guard unionCount > 0 else { continue }
+            let score = Double(intersection) / Double(unionCount)
+            if score > 0.4 {
+                scored.append((score, trimmed))
+            }
+        }
+        return scored.sorted { $0.score > $1.score }
+            .prefix(maxResults)
+            .map { String($0.line.prefix(120)) }
+    }
+
     private static func fuzzyReplace(in content: String, oldText: String, newText: String) -> FuzzyReplaceResult? {
         let contentLines = content.components(separatedBy: "\n")
         let oldLines = oldText.components(separatedBy: "\n")
@@ -577,6 +701,55 @@ public struct FileEditTool: LaicaiTool {
                 var result = contentLines
                 result.replaceSubrange(startIdx..<(startIdx + oldLines.count), with: adjustedNew.components(separatedBy: "\n"))
                 return FuzzyReplaceResult(content: result.joined(separator: "\n"), matchType: "缩进感知")
+            }
+        }
+
+        // Strategy 3: Full-width / half-width normalization (Chinese punctuation tolerance)
+        let normalizeWidth: (String) -> String = { str in
+            var s = str
+            let pairs: [(String, String)] = [
+                ("（", "("), ("）", ")"), ("：", ":"), ("；", ";"),
+                ("，", ","), ("。", "."), ("！", "!"), ("？", "?"),
+                ("【", "["), ("】", "]"), ("「", "\""), ("」", "\""),
+                ("\u{3000}", " "), // full-width space
+            ]
+            for (fw, hw) in pairs {
+                s = s.replacingOccurrences(of: fw, with: hw)
+            }
+            return s
+        }
+        let normalizedOld = oldLines.map { normalizeWidth($0.trimmingCharacters(in: .init(charactersIn: " \t"))) }
+        for startIdx in 0...(max(0, contentLines.count - oldLines.count)) {
+            let slice = contentLines[startIdx..<min(startIdx + oldLines.count, contentLines.count)]
+            let normalizedSlice = slice.map { normalizeWidth($0.trimmingCharacters(in: .init(charactersIn: " \t"))) }
+            if normalizedSlice == normalizedOld {
+                let matchedIndent = detectIndent(Array(slice))
+                let adjustedNew = reindent(newText, from: 0, to: matchedIndent)
+                var result = contentLines
+                result.replaceSubrange(startIdx..<(startIdx + oldLines.count), with: adjustedNew.components(separatedBy: "\n"))
+                return FuzzyReplaceResult(content: result.joined(separator: "\n"), matchType: "全角标准化")
+            }
+        }
+
+        // Strategy 4: First+last anchor match — if oldText is long (≥5 lines),
+        // match by first 2 and last 2 non-empty lines as anchors
+        let nonEmptyOld = oldLines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        if nonEmptyOld.count >= 5 {
+            let firstAnchor = nonEmptyOld.prefix(2).map { $0.trimmingCharacters(in: .init(charactersIn: " \t")) }
+            let lastAnchor = nonEmptyOld.suffix(2).map { $0.trimmingCharacters(in: .init(charactersIn: " \t")) }
+            for startIdx in 0...(max(0, contentLines.count - oldLines.count)) {
+                let candidateSlice = Array(contentLines[startIdx..<min(startIdx + oldLines.count, contentLines.count)])
+                let nonEmptyCandidate = candidateSlice.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                guard nonEmptyCandidate.count >= 5 else { continue }
+                let candidateFirst = nonEmptyCandidate.prefix(2).map { $0.trimmingCharacters(in: .init(charactersIn: " \t")) }
+                let candidateLast = nonEmptyCandidate.suffix(2).map { $0.trimmingCharacters(in: .init(charactersIn: " \t")) }
+                if Array(candidateFirst) == Array(firstAnchor) && Array(candidateLast) == Array(lastAnchor) {
+                    let matchedIndent = detectIndent(candidateSlice)
+                    let adjustedNew = reindent(newText, from: 0, to: matchedIndent)
+                    var result = contentLines
+                    result.replaceSubrange(startIdx..<(startIdx + oldLines.count), with: adjustedNew.components(separatedBy: "\n"))
+                    return FuzzyReplaceResult(content: result.joined(separator: "\n"), matchType: "锚点匹配")
+                }
             }
         }
 

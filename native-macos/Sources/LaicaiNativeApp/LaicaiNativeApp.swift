@@ -64,6 +64,19 @@ struct LaicaiNativeApp: App {
                 }
                 .keyboardShortcut(.return, modifiers: [.command])
 
+                Button("停止生成") {
+                    store.stopGenerating()
+                }
+                .keyboardShortcut(".", modifiers: [.command])
+                .disabled(!store.state.isGenerating)
+
+                Divider()
+
+                Button("滚动到底部") {
+                    NotificationCenter.default.post(name: .laicaiScrollToBottom, object: nil)
+                }
+                .keyboardShortcut(.downArrow, modifiers: [.command])
+
                 Button("搜索") {
                     NotificationCenter.default.post(name: .laicaiToggleSearch, object: nil)
                 }

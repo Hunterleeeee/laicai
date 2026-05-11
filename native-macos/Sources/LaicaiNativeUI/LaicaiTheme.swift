@@ -65,33 +65,33 @@ struct Semantic {
 // MARK: - Text Colors
 
 struct TextGrade {
-    static var primary: Color { Color(hex: "F8FAFC") }
-    static var secondary: Color { Color(hex: "94A3B8") }
-    static var muted: Color { Color(hex: "64748B") }
-    static var ghost: Color { Color(hex: "475569") }
-    static var inverted: Color { Color(hex: "0F172A") }
+    static var primary: Color { Color(hex: "F1F5F9") }
+    static var secondary: Color { Color(hex: "A8C0DA") }
+    static var muted: Color { Color(hex: "7B96B5") }
+    static var ghost: Color { Color(hex: "506880") }
+    static var inverted: Color { Color(hex: "0B1120") }
 }
 
-// MARK: - Surface System — Deep Space Layers
+// MARK: - Surface System — Elevated Dark
 
 struct SurfaceGrade {
-    static var base: Color { Color(hex: "020617") }      // Deepest void — slate-950
-    static var panel: Color { Color(hex: "0F172A") }     // Sidebar — slate-900
-    static var card: Color { Color(hex: "1E293B") }      // Cards — slate-800
-    static var elevated: Color { Color(hex: "334155") }   // Elevated — slate-700
-    static var sunken: Color { Color(hex: "020617") }     // Sunken = abyss
-    static var glass: Color { Color(hex: "1E293B").opacity(0.8) }
+    static var base: Color { Color(hex: "0B1120") }      // Rich navy
+    static var panel: Color { Color(hex: "111B2E") }     // Sidebar
+    static var card: Color { Color(hex: "1A2744") }      // Cards — lifted
+    static var elevated: Color { Color(hex: "243352") }   // Elevated — brighter
+    static var sunken: Color { Color(hex: "080E1A") }     // Sunken
+    static var glass: Color { Color(hex: "1A2744").opacity(0.85) }
 
-    static var hover: Color { Color.white.opacity(0.05) }
-    static var selected: Color { Brand.primary.opacity(0.12) }
-    static var pressed: Color { Color.white.opacity(0.03) }
-    static var active: Color { Brand.primary.opacity(0.08) }
+    static var hover: Color { Color.white.opacity(0.07) }
+    static var selected: Color { Brand.primary.opacity(0.15) }
+    static var pressed: Color { Color.white.opacity(0.04) }
+    static var active: Color { Brand.primary.opacity(0.10) }
 
-    static var divider: Color { Color(hex: "334155").opacity(0.6) }
-    static var hairline: Color { Color.white.opacity(0.06) }
-    static var ring: Color { Color(hex: "475569") }
-    static var focusRing: Color { Brand.primary.opacity(0.50) }
-    static var border: Color { Color(hex: "334155") }
+    static var divider: Color { Color(hex: "2A3F5F").opacity(0.7) }
+    static var hairline: Color { Color.white.opacity(0.08) }
+    static var ring: Color { Color(hex: "3D5A80") }
+    static var focusRing: Color { Brand.primary.opacity(0.55) }
+    static var border: Color { Color(hex: "2A3F5F") }
 }
 
 // MARK: - Typography — Clean & Functional

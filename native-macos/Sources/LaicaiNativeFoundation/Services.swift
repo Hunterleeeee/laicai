@@ -96,6 +96,7 @@ public struct ConnectorProbeResult: Sendable, Equatable {
 public protocol ChatRuntimeClient {
     func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse
     func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse
+    func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void, onReasoningChunk: @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse
     func healthCheck(endpoint: String, model: String, apiKey: String, kind: String) async throws -> ConnectorHealth
     func probeConnector(endpoint: String, model: String, apiKey: String, kind: String, probeToolCalling: Bool) async throws -> ConnectorProbeResult
 }
@@ -103,6 +104,10 @@ public protocol ChatRuntimeClient {
 extension ChatRuntimeClient {
     public func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
         return try await sendMessage(request)
+    }
+
+    public func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void, onReasoningChunk: @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
+        return try await sendMessageStream(request, onChunk: onChunk)
     }
 
     public func healthCheck(endpoint: String, model: String, apiKey: String, kind: String = "openai-compatible") async throws -> ConnectorHealth {

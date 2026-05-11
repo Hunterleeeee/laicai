@@ -197,6 +197,27 @@ extension AppStore {
         state.threads[threadIndex].steps.append(step)
         state.threads[threadIndex].updatedAt = Date()
         persistThreads()
+
+        // Send macOS notification for review requests so users don't miss them
+        if step.kind == .reviewRequest {
+            sendReviewNotification(step: step, threadTitle: state.threads[threadIndex].title)
+        }
+    }
+
+    private func sendReviewNotification(step: TaskStep, threadTitle: String) {
+        let center = NSUserNotificationCenter.default
+        let notification = NSUserNotification()
+        notification.title = "需要审查确认"
+        notification.subtitle = threadTitle
+        notification.informativeText = step.diffFilePath.map { "文件：\($0)" } ?? "有变更等待确认"
+        notification.soundName = NSUserNotificationDefaultSoundName
+        center.deliver(notification)
+        updateDockBadge()
+    }
+
+    func updateDockBadge() {
+        let count = state.pendingReviewCount
+        NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
     }
 
     func appendStreamDelta(_ delta: String, to taskID: UUID) {
@@ -209,6 +230,41 @@ extension AppStore {
             return
         }
         flushStreamBuffer(for: taskID)
+    }
+
+    private static let thinkingStreamID = "__thinking_stream__"
+
+    func appendThinkingDelta(_ delta: String, to taskID: UUID) {
+        guard !delta.isEmpty else { return }
+        thinkingBuffers[taskID, default: ""] += delta
+        let now = Date()
+        let pending = thinkingBuffers[taskID] ?? ""
+        let lastFlush = thinkingLastFlushAt[taskID] ?? .distantPast
+        guard pending.count >= streamFlushCharacterThreshold || now.timeIntervalSince(lastFlush) >= streamFlushInterval else {
+            return
+        }
+        flushThinkingBuffer(for: taskID)
+    }
+
+    func flushThinkingBuffer(for taskID: UUID) {
+        guard let pending = thinkingBuffers[taskID], !pending.isEmpty else { return }
+        thinkingBuffers[taskID] = ""
+        thinkingLastFlushAt[taskID] = Date()
+        guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
+        state.liveActivity = "正在思考…"
+        if let idx = state.threads[threadIndex].steps.lastIndex(where: { $0.kind == .aiThinking && $0.toolCallId == Self.thinkingStreamID }) {
+            // Append to reasoningContent for purple reasoning panel display
+            state.threads[threadIndex].steps[idx].reasoningContent = (state.threads[threadIndex].steps[idx].reasoningContent ?? "") + pending
+        } else {
+            state.threads[threadIndex].steps.append(TaskStep(
+                kind: .aiThinking,
+                text: "思考中…",
+                toolCallId: Self.thinkingStreamID,
+                isCollapsible: true,
+                isCollapsed: false,
+                reasoningContent: pending
+            ))
+        }
     }
 
     func flushStreamBuffer(for taskID: UUID) {
@@ -450,15 +506,20 @@ extension AppStore {
     func rememberToolCallingCapabilityIfNeeded(from task: AgentTask, connectorID: UUID, attemptedToolCalling: Bool) {
         guard attemptedToolCalling else { return }
         let fallbackDetected = task.steps.contains(where: { $0.retryAction == AgentLoop.toolCompatibilityFallbackAction })
-        let producedAgentContent = task.steps.contains {
-            $0.kind == .textOutput || $0.kind == .toolCall || $0.kind == .toolResult || $0.kind == .reviewResult
+        // Strict success criterion: model actually invoked a tool AND that tool succeeded.
+        // A text-only response says nothing about whether tool schemas are compatible — many
+        // local servers happily reply text but reject realistic tool schemas. We must NOT
+        // upgrade to .supported on those.
+        let hasSuccessfulToolCall = task.steps.contains {
+            $0.kind == .toolResult && !$0.isFailure && ($0.toolName?.isEmpty == false)
         }
         let nextCapability: ConnectorToolCallingCapability?
         if fallbackDetected {
             nextCapability = .unsupported
-        } else if producedAgentContent {
+        } else if hasSuccessfulToolCall {
             nextCapability = .supported
         } else {
+            // No tool ever ran successfully → keep capability undecided rather than over-promising
             nextCapability = nil
         }
         if rememberToolCallingCapability(nextCapability, connectorID: connectorID, activitySource: .taskRun) {

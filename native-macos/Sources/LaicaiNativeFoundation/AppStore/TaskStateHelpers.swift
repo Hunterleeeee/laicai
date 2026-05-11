@@ -120,7 +120,8 @@ extension AppStore {
             supportsToolCalling: profile.supportsToolCalling,
             contextMode: settings.contextMode,
             contextWindow: profile.contextWindow,
-            modelName: connector?.modelName ?? ""
+            modelName: connector?.modelName ?? "",
+            usePipeline: settings.usePipeline
         )
     }
 
@@ -216,7 +217,7 @@ extension AppStore {
         summary += checkpointText
 
         // Inject as context memory, NOT as visible step — user should never see this
-        thread.context.memory.userDecisions.append("[continuation] \(summary)")
+        thread.context.memory.appendDecision("[continuation] \(summary)")
     }
 
     static func ensureCheckpointIfNeeded(_ thread: inout Thread) {
@@ -323,6 +324,29 @@ extension AppStore {
                     && step.kind != .reviewResult
             }
             .suffix(20)
+    }
+
+    /// Lightweight clarification/status query — NOT a request to do more work.
+    /// Used to decide whether to strip tool history when continuing a heavy thread.
+    static func isLightweightStatusQuery(_ message: String) -> Bool {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, normalized.count <= 30 else { return false }
+        // Pure punctuation
+        if ["?", "？", "??", "？？"].contains(normalized) { return true }
+        // Status / clarification phrases
+        let statusMarkers = [
+            "怎么回事", "怎么了", "为啥", "为什么", "啥情况", "什么情况",
+            "怎么这么", "是不是", "有没有",
+            "你确定", "真的吗", "对吗", "好了吗", "完事了吗",
+            "卡住了吗", "出错了吗", "断了吗", "停了吗",
+            "你是什么", "你能", "你会", "现在能", "现在有"
+        ]
+        if statusMarkers.contains(where: { normalized.contains($0) }) { return true }
+        // Short question without action verb
+        let actionVerbs = ["改", "写", "建", "做", "执行", "运行", "搜", "查", "读", "整理", "保存", "翻译", "重写"]
+        let hasAction = actionVerbs.contains(where: { normalized.contains($0) })
+        let endsWithQuestion = normalized.hasSuffix("？") || normalized.hasSuffix("?") || normalized.hasSuffix("吗")
+        return endsWithQuestion && !hasAction
     }
 
     static func isTinyFollowUp(_ message: String) -> Bool {
@@ -643,6 +667,25 @@ extension AppStore {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleaned.count > limit else { return cleaned }
         return String(cleaned.prefix(max(0, limit - 1))) + "…"
+    }
+
+    /// Build a concise progress summary from completed steps for error display.
+    nonisolated static func errorProgressSummary(steps: [TaskStep]) -> String {
+        let filesRead = Set(steps
+            .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
+            .compactMap { $0.toolParams?["path"] })
+        let filesWritten = Set(steps
+            .filter { $0.kind == .reviewRequest && $0.approved == true }
+            .compactMap(\.diffFilePath))
+        let toolCalls = steps.filter { $0.kind == .toolCall }.count
+        let searches = steps.filter { $0.kind == .toolCall && ($0.toolName == "code.search" || $0.toolName == "web.search") }.count
+
+        var parts: [String] = []
+        if !filesRead.isEmpty { parts.append("读 \(filesRead.count) 文件") }
+        if !filesWritten.isEmpty { parts.append("写 \(filesWritten.count) 文件") }
+        if searches > 0 { parts.append("搜索 \(searches) 次") }
+        if toolCalls > 0 && parts.isEmpty { parts.append("工具调用 \(toolCalls) 次") }
+        return parts.joined(separator: "、")
     }
 
 }
