@@ -13,20 +13,11 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.sessions.first?.id, store.state.selectedSessionID)
     }
     func testSendDraftCreatesUnifiedTaskThreadImmediately() {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
-        let store = AppStore(state: .init(
-            workspaceName: "Test",
-            modeLabel: "Build",
-            sessions: [],
-            selectedSessionID: nil,
-            workbenchTab: .tools,
+        let connector = makeConnector()
+        let store = AppStore(state: testState(
+            defaultConnectorName: "Test",
             connectors: [connector],
-            activeConnectorID: connector.id,
-            toolActivities: [],
-            workflowRuns: [],
-            draftMessage: "",
-            isGenerating: false,
-            settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+            activeConnectorID: connector.id
         ))
 
         store.updateDraft("请继续 native rewrite")
@@ -39,30 +30,14 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.threads.first?.source, .task)
     }
     func testPlainQuestionsUseDirectSessionWithoutTools() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = makeConnector()
         let runtime = CapturingToolsRuntime()
-        let store = AppStore(
-            state: .init(
-                workspaceName: "Test",
-                modeLabel: "Agent",
-                sessions: [],
-                selectedSessionID: nil,
-                workbenchTab: .tools,
-                connectors: [connector],
-                activeConnectorID: connector.id,
-                toolActivities: [],
-                workflowRuns: [],
-                draftMessage: "",
-                isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
-            ),
-            environment: AppEnvironment(
-                runtimeClient: runtime,
-                sessionRepository: NoopSessionRepository(),
-                connectorRepository: NoopConnectorRepository(),
-                taskRepository: NoopTaskRepository(),
-                threadRepository: NoopThreadRepository()
-            )
+        let store = makeTestStore(
+            modeLabel: "Agent",
+            defaultConnectorName: "Test",
+            connectors: [connector],
+            activeConnectorID: connector.id,
+            runtime: runtime
         )
 
         store.updateDraft("你能生成视频吗？")
@@ -78,7 +53,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.modeLabel, "聊天")
     }
     func testDirectShortQuestionsDoNotCarryUnrelatedHistory() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = makeConnector()
         let session = ChatSession(
             title: "旧话题",
             preview: "删除文件",
@@ -90,28 +65,14 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
             ]
         )
         let runtime = CapturingToolsRuntime()
-        let store = AppStore(
-            state: .init(
-                workspaceName: "Test",
-                modeLabel: "Agent",
-                sessions: [session],
-                selectedSessionID: session.id,
-                workbenchTab: .tools,
-                connectors: [connector],
-                activeConnectorID: connector.id,
-                toolActivities: [],
-                workflowRuns: [],
-                draftMessage: "",
-                isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
-            ),
-            environment: AppEnvironment(
-                runtimeClient: runtime,
-                sessionRepository: NoopSessionRepository(),
-                connectorRepository: NoopConnectorRepository(),
-                taskRepository: NoopTaskRepository(),
-                threadRepository: NoopThreadRepository()
-            )
+        let store = makeTestStore(
+            sessions: [session],
+            selectedSessionID: session.id,
+            modeLabel: "Agent",
+            defaultConnectorName: "Test",
+            connectors: [connector],
+            activeConnectorID: connector.id,
+            runtime: runtime
         )
 
         store.updateDraft("测试通过了吗")
@@ -121,7 +82,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(runtime.requests.last?.history.isEmpty == true)
     }
     func testDirectExplicitFollowUpsCarryRecentHistory() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = makeConnector()
         let session = ChatSession(
             title: "旧话题",
             preview: "旧回答",
@@ -133,28 +94,14 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
             ]
         )
         let runtime = CapturingToolsRuntime()
-        let store = AppStore(
-            state: .init(
-                workspaceName: "Test",
-                modeLabel: "Agent",
-                sessions: [session],
-                selectedSessionID: session.id,
-                workbenchTab: .tools,
-                connectors: [connector],
-                activeConnectorID: connector.id,
-                toolActivities: [],
-                workflowRuns: [],
-                draftMessage: "",
-                isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
-            ),
-            environment: AppEnvironment(
-                runtimeClient: runtime,
-                sessionRepository: NoopSessionRepository(),
-                connectorRepository: NoopConnectorRepository(),
-                taskRepository: NoopTaskRepository(),
-                threadRepository: NoopThreadRepository()
-            )
+        let store = makeTestStore(
+            sessions: [session],
+            selectedSessionID: session.id,
+            modeLabel: "Agent",
+            defaultConnectorName: "Test",
+            connectors: [connector],
+            activeConnectorID: connector.id,
+            runtime: runtime
         )
 
         store.updateDraft("继续这个话题")
@@ -164,29 +111,13 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(runtime.requests.last?.history.count, 2)
     }
     func testDirectSessionStreamsAndStoresMetrics() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
-        let store = AppStore(
-            state: .init(
-                workspaceName: "Test",
-                modeLabel: "Agent",
-                sessions: [],
-                selectedSessionID: nil,
-                workbenchTab: .tools,
-                connectors: [connector],
-                activeConnectorID: connector.id,
-                toolActivities: [],
-                workflowRuns: [],
-                draftMessage: "",
-                isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
-            ),
-            environment: AppEnvironment(
-                runtimeClient: StreamingRuntime(),
-                sessionRepository: NoopSessionRepository(),
-                connectorRepository: NoopConnectorRepository(),
-                taskRepository: NoopTaskRepository(),
-                threadRepository: NoopThreadRepository()
-            )
+        let connector = makeConnector()
+        let store = makeTestStore(
+            modeLabel: "Agent",
+            defaultConnectorName: "Test",
+            connectors: [connector],
+            activeConnectorID: connector.id,
+            runtime: StreamingRuntime()
         )
 
         store.updateDraft("你好吗？")
@@ -201,18 +132,9 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.selectedThread?.events.last?.metrics?.outputTokens, 4)
     }
     func testFrustratedDirectChatAddsRepairGuidance() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = makeConnector()
         let runtime = CapturingToolsRuntime()
-        let store = AppStore(
-            state: testState(connectors: [connector], activeConnectorID: connector.id),
-            environment: AppEnvironment(
-                runtimeClient: runtime,
-                sessionRepository: NoopSessionRepository(),
-                connectorRepository: NoopConnectorRepository(),
-                taskRepository: NoopTaskRepository(),
-                threadRepository: NoopThreadRepository()
-            )
-        )
+        let store = makeTestStore(connectors: [connector], activeConnectorID: connector.id, runtime: runtime)
 
         store.updateDraft("你又胡说八道了")
         store.sendDraft()

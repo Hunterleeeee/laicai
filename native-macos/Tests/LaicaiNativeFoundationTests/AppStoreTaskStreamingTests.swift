@@ -5,29 +5,13 @@ import XCTest
 @MainActor
 final class AppStoreTaskStreamingTests: LaicaiNativeFoundationTestCase {
     func testStreamingOutputIsCoalescedAndFinalStepCarriesMetrics() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
-        let store = AppStore(
-            state: .init(
-                workspaceName: "Test",
-                modeLabel: "Agent",
-                sessions: [],
-                selectedSessionID: nil,
-                workbenchTab: .tools,
-                connectors: [connector],
-                activeConnectorID: connector.id,
-                toolActivities: [],
-                workflowRuns: [],
-                draftMessage: "",
-                isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
-            ),
-            environment: AppEnvironment(
-                runtimeClient: StreamingRuntime(),
-                sessionRepository: NoopSessionRepository(),
-                connectorRepository: NoopConnectorRepository(),
-                taskRepository: NoopTaskRepository(),
-                threadRepository: NoopThreadRepository()
-            )
+        let connector = makeConnector()
+        let store = makeTestStore(
+            modeLabel: "Agent",
+            defaultConnectorName: "Test",
+            connectors: [connector],
+            activeConnectorID: connector.id,
+            runtime: StreamingRuntime()
         )
 
         store.updateDraft("写一段长回复")
@@ -41,30 +25,13 @@ final class AppStoreTaskStreamingTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(outputs.first?.metrics?.outputTokens, 4)
     }
     func testStreamingDeltasUpdateCurrentThreadBeforeFinalOutput() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = makeConnector()
         let runtime = StreamingRuntime()
-        let store = AppStore(
-            state: .init(
-                workspaceName: "Test",
-                modeLabel: "Build",
-                sessions: [],
-                selectedSessionID: nil,
-                workbenchTab: .tools,
-                connectors: [connector],
-                activeConnectorID: connector.id,
-                toolActivities: [],
-                workflowRuns: [],
-                draftMessage: "",
-                isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
-            ),
-            environment: AppEnvironment(
-                runtimeClient: runtime,
-                sessionRepository: NoopSessionRepository(),
-                connectorRepository: NoopConnectorRepository(),
-                taskRepository: NoopTaskRepository(),
-                threadRepository: NoopThreadRepository()
-            )
+        let store = makeTestStore(
+            defaultConnectorName: "Test",
+            connectors: [connector],
+            activeConnectorID: connector.id,
+            runtime: runtime
         )
 
         store.updateDraft("请写一段流式回答")

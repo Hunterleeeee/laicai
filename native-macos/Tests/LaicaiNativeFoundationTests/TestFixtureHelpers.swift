@@ -63,17 +63,21 @@ extension LaicaiNativeFoundationTestCase {
 
     func testState(
         sessions: [ChatSession] = [],
+        selectedSessionID: UUID? = nil,
+        modeLabel: String = "Build",
         tasks: [AgentTask] = [],
         selectedTaskID: UUID? = nil,
         workspacePath: String = "/tmp",
+        defaultConnectorName: String = "None",
+        contextMode: ContextMode = .balanced,
         connectors: [ConnectorProfile] = [],
         activeConnectorID: UUID? = nil
     ) -> AppState {
         AppState(
             workspaceName: "Test",
-            modeLabel: "Build",
+            modeLabel: modeLabel,
             sessions: sessions,
-            selectedSessionID: nil,
+            selectedSessionID: selectedSessionID,
             workbenchTab: .tools,
             connectors: connectors,
             activeConnectorID: activeConnectorID,
@@ -81,7 +85,13 @@ extension LaicaiNativeFoundationTestCase {
             workflowRuns: [],
             draftMessage: "",
             isGenerating: false,
-            settings: .init(workspacePath: workspacePath, defaultConnectorName: "None", compactComposer: false, showDebugPanels: false),
+            settings: .init(
+                workspacePath: workspacePath,
+                defaultConnectorName: defaultConnectorName,
+                compactComposer: false,
+                showDebugPanels: false,
+                contextMode: contextMode
+            ),
             tasks: tasks,
             selectedTaskID: selectedTaskID
         )
@@ -105,9 +115,13 @@ extension LaicaiNativeFoundationTestCase {
 
     func makeTestStore(
         sessions: [ChatSession] = [],
+        selectedSessionID: UUID? = nil,
+        modeLabel: String = "Build",
         tasks: [AgentTask] = [],
         selectedTaskID: UUID? = nil,
         workspacePath: String = "/tmp",
+        defaultConnectorName: String = "None",
+        contextMode: ContextMode = .balanced,
         connectors: [ConnectorProfile] = [],
         activeConnectorID: UUID? = nil,
         runtime: any ChatRuntimeClient = CapturingToolsRuntime()
@@ -115,9 +129,13 @@ extension LaicaiNativeFoundationTestCase {
         AppStore(
             state: testState(
                 sessions: sessions,
+                selectedSessionID: selectedSessionID,
+                modeLabel: modeLabel,
                 tasks: tasks,
                 selectedTaskID: selectedTaskID,
                 workspacePath: workspacePath,
+                defaultConnectorName: defaultConnectorName,
+                contextMode: contextMode,
                 connectors: connectors,
                 activeConnectorID: activeConnectorID
             ),
