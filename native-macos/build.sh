@@ -56,6 +56,10 @@ for f in $B/src/*.swift; do
   case "$bn" in
     LaicaiNativeApp.swift|AppStore.swift|AppStateBootstrap.swift|TaskStateHelpers.swift|RuntimeHelpers.swift|HeadlessRunner.swift|SampleData.swift|BackgroundIntelligence.swift) continue ;;
   esac
+  # Skip AppStore extensions; CLI talks directly to AgentLoop and has no desktop AppStore.
+  if grep -qE '^[[:space:]]*(@MainActor[[:space:]]+)?extension AppStore|^[[:space:]]*public final class AppStore' "$f"; then
+    continue
+  fi
   # Skip any file that imports SwiftUI or AppKit (UI file)
   if grep -qE '^import (SwiftUI|AppKit)' "$f"; then
     continue
