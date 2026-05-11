@@ -283,6 +283,9 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         guard let connector = request.connector else {
             return Self.fallbackResponse(request: request)
         }
+        if let response = Self.imageOnlyModelResponse(for: connector) {
+            return response
+        }
 
         let startedAt = Date()
         let url = Self.buildURL(from: connector.endpoint, kind: connector.kind)
@@ -393,6 +396,9 @@ public struct LiveChatRuntime: ChatRuntimeClient {
     private func sendMessageStreamImpl(_ request: SendMessageRequest, onChunk: @escaping @Sendable @MainActor (String) -> Void, onReasoningChunk: (@Sendable @MainActor (String) -> Void)?) async throws -> SendMessageResponse {
         guard let connector = request.connector else {
             return Self.fallbackResponse(request: request)
+        }
+        if let response = Self.imageOnlyModelResponse(for: connector) {
+            return response
         }
 
         let startedAt = Date()
@@ -1183,6 +1189,23 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         SendMessageResponse(
             assistantText: "未选择连接器。请从顶部选择一个模型开始。",
             toolActivities: [ToolActivity(name: "chat.fallback", summary: "无可用连接器", statusLine: "等待选择连接器", isFailure: true)]
+        )
+    }
+
+    private static func imageOnlyModelResponse(for connector: ConnectorProfile) -> SendMessageResponse? {
+        guard ConnectorCapabilityProfile.isImageOnlyModel(connector.modelName) else { return nil }
+        let message = ConnectorCapabilityProfile.imageOnlyModelChatMessage(modelName: connector.modelName)
+        return SendMessageResponse(
+            assistantText: message,
+            finishReason: "model_not_supported_for_chat",
+            toolActivities: [
+                ToolActivity(
+                    name: "chat.model_unsupported",
+                    summary: "图片生成模型不能用于聊天",
+                    statusLine: connector.modelName,
+                    isFailure: true
+                )
+            ]
         )
     }
 }

@@ -15,6 +15,16 @@ extension AppStore {
             notify("请先选择一个连接器", style: .error)
             return
         }
+        if ConnectorCapabilityProfile.isImageOnlyModel(connector.modelName) {
+            notify(ConnectorCapabilityProfile.imageOnlyModelChatMessage(modelName: connector.modelName), style: .error)
+            recordToolActivity(
+                name: "chat.model_unsupported",
+                summary: "图片生成模型不能用于聊天",
+                statusLine: connector.modelName,
+                isFailure: true
+            )
+            return
+        }
         if decision.intent != .chat {
             let wp = state.settings.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
             if wp.isEmpty {

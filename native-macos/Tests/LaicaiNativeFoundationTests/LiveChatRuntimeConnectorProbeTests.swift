@@ -118,6 +118,71 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(response.assistantText, "")
         XCTAssertFalse(response.assistantText.contains("模型没有返回可显示内容"))
     }
+    func testLiveChatRuntimeRejectsImageOnlyModelBeforeNetworkRequest() async throws {
+        let session = makeStubbedSession { request in
+            XCTFail("Image-only models must not be sent to chat completions: \(request.url?.absoluteString ?? "")")
+            let response = HTTPURLResponse(
+                url: request.url ?? URL(string: "https://example.com")!,
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data())
+        }
+        let runtime = LiveChatRuntime(session: session)
+
+        let response = try await runtime.sendMessage(SendMessageRequest(
+            sessionID: UUID(),
+            message: "画一张图",
+            connector: ConnectorProfile(
+                name: "图片模型",
+                kind: "openai-compatible",
+                endpoint: "https://duckcu.tech/v1/chat/completions",
+                modelName: "gpt-image-2",
+                note: "",
+                health: .ready
+            ),
+            modeLabel: "测试"
+        ))
+
+        XCTAssertTrue(response.assistantText.contains("图片生成模型"))
+        XCTAssertTrue(response.assistantText.contains("不能作为聊天/任务模型使用"))
+        XCTAssertEqual(response.finishReason, "model_not_supported_for_chat")
+        XCTAssertEqual(response.toolActivities.first?.name, "chat.model_unsupported")
+        XCTAssertEqual(response.toolActivities.first?.isFailure, true)
+    }
+    func testLiveChatRuntimeRejectsImageOnlyStreamingBeforeNetworkRequest() async throws {
+        let session = makeStubbedSession { request in
+            XCTFail("Image-only models must not be streamed through chat completions: \(request.url?.absoluteString ?? "")")
+            let response = HTTPURLResponse(
+                url: request.url ?? URL(string: "https://example.com")!,
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data())
+        }
+        let runtime = LiveChatRuntime(session: session)
+        var streamedText = ""
+
+        let response = try await runtime.sendMessageStream(SendMessageRequest(
+            sessionID: UUID(),
+            message: "画一张图",
+            connector: ConnectorProfile(
+                name: "图片模型",
+                kind: "openai-compatible",
+                endpoint: "https://duckcu.tech/v1/chat/completions",
+                modelName: "dall-e-3",
+                note: "",
+                health: .ready
+            ),
+            modeLabel: "测试"
+        ), onChunk: { streamedText += $0 })
+
+        XCTAssertTrue(response.assistantText.contains("图片生成模型"))
+        XCTAssertEqual(response.finishReason, "model_not_supported_for_chat")
+        XCTAssertEqual(streamedText, "")
+    }
     func testLiveChatRuntimeTreatsLocalV1OllamaProfileAsOpenAICompatible() async throws {
         var capturedURL: URL?
         var capturedBody = ""

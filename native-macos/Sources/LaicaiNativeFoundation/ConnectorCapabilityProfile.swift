@@ -132,6 +132,32 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
         resolveToolCalling(for: connector).supports
     }
 
+    public static func isImageOnlyModel(_ modelName: String) -> Bool {
+        let model = modelName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+            .replacingOccurrences(of: " ", with: "-")
+        guard !model.isEmpty else { return false }
+
+        return model.hasPrefix("gpt-image")
+            || model.contains("/gpt-image")
+            || model.hasPrefix("dall-e")
+            || model.contains("/dall-e")
+            || model.hasPrefix("imagen")
+            || model.contains("/imagen")
+            || model.contains("midjourney")
+            || model.contains("stable-diffusion")
+            || model.contains("sdxl")
+            || model.contains("flux.1")
+    }
+
+    public static func imageOnlyModelChatMessage(modelName: String) -> String {
+        let displayName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelLabel = displayName.isEmpty ? "当前模型" : "`\(displayName)`"
+        return "当前选择的是图片生成模型 \(modelLabel)，不能作为聊天/任务模型使用。请切换到聊天模型（如 gpt-5.5、gpt-4o、Claude），或在设置中配置 ComfyUI 后使用图片生成工具。"
+    }
+
     public static func resolveToolCalling(for connector: ConnectorProfile) -> (supports: Bool, source: ConnectorToolCallingResolutionSource) {
         switch connector.toolCallingPolicy ?? .automatic {
         case .enabled:
