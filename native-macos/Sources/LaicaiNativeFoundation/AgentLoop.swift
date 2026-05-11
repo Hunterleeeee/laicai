@@ -1631,96 +1631,14 @@ public final class AgentLoop: ObservableObject {
                     if toolResult.success,
                        Self.isFileChangeTool(toolName),
                        let data = toolResult.data {
-                        // Auto-apply writes in agent mode so verify.build sees changes.
-                        // Still emit reviewRequest for user rollback capability.
-                        if let batchCountString = data["batchCount"], let batchCount = Int(batchCountString) {
-                            for batchIndex in 0..<batchCount {
-                                let prefix = "batch\(batchIndex)"
-                                guard let filePath = data["\(prefix).path"],
-                                      let oldContent = data["\(prefix).diffOld"],
-                                      let newContent = data["\(prefix).diffNew"],
-                                      !newContent.isEmpty else { continue }
-                                // Auto-apply: write file immediately
-                                let batchFullPath = data["\(prefix).fullPath"] ?? (filePath.hasPrefix("/") ? filePath : (taskContext.workspaceRoot as NSString).appendingPathComponent(filePath))
-                                let batchCreateDirs = data["\(prefix).createDirectories"] != "false"
-                                do {
-                                    try WriteFileTool().performWrite(fullPath: batchFullPath, content: newContent, createDirectories: batchCreateDirs)
-                                } catch {
-                                    // Write failed — will be surfaced in review step
-                                }
-                                var reviewParams = toolParams
-                                for (key, value) in data where key.hasPrefix(prefix + ".") {
-                                    reviewParams[String(key.dropFirst(prefix.count + 1))] = value
-                                }
-                                reviewParams["batchIndex"] = "\(batchIndex + 1)"
-                                reviewParams["batchCount"] = "\(batchCount)"
-                                let hunks = Self.extractHunks(from: reviewParams)
-                                let reviewStep = TaskStep(
-                                    kind: .reviewRequest,
-                                    text: "已写入文件（可回滚）（\(batchIndex + 1)/\(batchCount)）：\(filePath)",
-                                    toolName: toolName,
-                                    toolParams: reviewParams,
-                                    toolCallId: callId,
-                                    isCollapsible: false,
-                                    isCollapsed: false,
-                                    diffFilePath: filePath,
-                                    diffOldContent: oldContent,
-                                    diffNewContent: newContent,
-                                    approved: true,
-                                    diffHunks: hunks.isEmpty ? nil : hunks
-                                )
-                                task.steps.append(reviewStep)
-                                onStep(reviewStep)
-                            }
-                        } else if let filePath = data["path"] ?? toolParams["path"],
-                                  let oldContent = data["diffOld"],
-                                  let newContent = data["diffNew"],
-                                  !newContent.isEmpty {
-                            // Auto-apply: write file immediately
-                            let writeFullPath = data["fullPath"] ?? (filePath.hasPrefix("/") ? filePath : (taskContext.workspaceRoot as NSString).appendingPathComponent(filePath))
-                            let createDirs = data["createDirectories"] != "false"
-                            var writeSucceeded = false
-                            do {
-                                try WriteFileTool().performWrite(fullPath: writeFullPath, content: newContent, createDirectories: createDirs)
-                                // P1: Post-write verification — confirm file actually has content
-                                if let written = try? String(contentsOfFile: writeFullPath, encoding: .utf8),
-                                   !written.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    writeSucceeded = true
-                                }
-                            } catch {
-                                // Write failed — will be surfaced in review step
-                            }
-                            if !writeSucceeded {
-                                // Surface write failure so model doesn't hallucinate success
-                                let failStep = TaskStep(
-                                    kind: .toolResult,
-                                    text: "⚠️ 文件写入验证失败：\(filePath) 写入后为空。请检查工具参数并重试（确保 content 参数包含完整内容）。",
-                                    toolName: toolName,
-                                    toolCallId: callId,
-                                    isFailure: true
-                                )
-                                task.steps.append(failStep)
-                                onStep(failStep)
-                            }
-                            var reviewParams = toolParams
-                            for (key, value) in data {
-                                reviewParams[key] = value
-                            }
-                            let hunks = Self.extractHunks(from: reviewParams)
-                            let reviewStep = TaskStep(
-                                kind: .reviewRequest,
-                                text: writeSucceeded ? "已写入文件（可回滚）：\(filePath)" : "写入失败（文件为空）：\(filePath)",
-                                toolName: toolName,
-                                toolParams: reviewParams,
-                                toolCallId: callId,
-                                isCollapsible: false,
-                                isCollapsed: false,
-                                diffFilePath: filePath,
-                                diffOldContent: oldContent,
-                                diffNewContent: newContent,
-                                approved: true,
-                                diffHunks: hunks.isEmpty ? nil : hunks
-                            )
+                        let reviewSteps = Self.fileChangeReviewSteps(
+                            data: data,
+                            toolName: toolName,
+                            toolParams: toolParams,
+                            callId: callId,
+                            workspaceRoot: taskContext.workspaceRoot
+                        )
+                        for reviewStep in reviewSteps {
                             task.steps.append(reviewStep)
                             onStep(reviewStep)
                         }
