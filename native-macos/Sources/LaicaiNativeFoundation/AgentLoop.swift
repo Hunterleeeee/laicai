@@ -1348,7 +1348,7 @@ public final class AgentLoop: ObservableObject {
                                 if toolResult == nil, let tool = self.toolRegistry.tool(named: apiToolName) {
                                     if Self.requiresExplicitUserApprovalBeforeExecution(toolName: toolName, tool: tool) {
                                         toolResult = Self.approvalRequiredToolResult(toolName: toolName)
-                                    } else if Self.isFileChangeTool(toolName) {
+                                    } else if Self.isFileChangeTool(toolName: toolName, tool: tool) {
                                         Self.gitCheckpoint(workspaceRoot: self.config.workspaceRoot, paths: Self.checkpointPaths(toolName: toolName, arguments: self.parseParamsFromJSON(argumentsJSON), workspaceRoot: self.config.workspaceRoot))
                                     }
 

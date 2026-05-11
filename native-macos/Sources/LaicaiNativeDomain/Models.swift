@@ -1080,6 +1080,12 @@ public struct ToolResultMessage: Codable, Sendable, Equatable {
 
 // MARK: - Tool Protocol (Updated for Function Calling)
 
+public enum ToolExecutionPolicy: String, Sendable, Codable, Equatable {
+    case immediate
+    case fileChangeReview
+    case explicitUserApproval
+}
+
 public protocol LaicaiTool: Sendable {
     var name: String { get }
     var description: String { get }
@@ -1094,6 +1100,9 @@ public protocol LaicaiTool: Sendable {
 
     /// Whether this tool requires user review before execution
     var requiresReview: Bool { get }
+
+    /// How the agent loop should gate and present tool execution.
+    var executionPolicy: ToolExecutionPolicy { get }
 }
 
 extension LaicaiTool {
@@ -1103,6 +1112,10 @@ extension LaicaiTool {
 
     public var requiresReview: Bool {
         false
+    }
+
+    public var executionPolicy: ToolExecutionPolicy {
+        requiresReview ? .explicitUserApproval : .immediate
     }
 
     /// Backward-compatible execute method for [String: String] params

@@ -156,7 +156,7 @@ struct ToolExecutionEngine {
             if toolResult == nil, let tool = toolRegistry.tool(named: apiToolName) {
                 if AgentLoop.requiresExplicitUserApprovalBeforeExecution(toolName: toolName, tool: tool) {
                     toolResult = AgentLoop.approvalRequiredToolResult(toolName: toolName)
-                } else if AgentLoop.isFileChangeTool(toolName) {
+                } else if AgentLoop.isFileChangeTool(toolName: toolName, tool: tool) {
                     AgentLoop.gitCheckpoint(
                         workspaceRoot: config.workspaceRoot,
                         paths: AgentLoop.checkpointPaths(

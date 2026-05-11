@@ -31,6 +31,7 @@ public struct RealBrowserTool: LaicaiTool {
     }
 
     public var requiresReview: Bool { true }
+    public var executionPolicy: ToolExecutionPolicy { .explicitUserApproval }
 
     public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
         struct Params: Codable {

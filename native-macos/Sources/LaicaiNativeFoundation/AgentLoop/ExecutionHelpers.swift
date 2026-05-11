@@ -37,6 +37,20 @@ extension AgentLoop {
         explicitApprovalSideEffectTools.contains(ToolNameCodec.canonicalName(toolName))
     }
 
+    nonisolated static func isFileChangeTool(toolName: String, tool: (any LaicaiTool)?) -> Bool {
+        if tool?.executionPolicy == .fileChangeReview { return true }
+        return isFileChangeTool(toolName)
+    }
+
+    nonisolated static func requiresExplicitUserApprovalBeforeExecution(toolName: String, tool: any LaicaiTool) -> Bool {
+        switch tool.executionPolicy {
+        case .explicitUserApproval:
+            return true
+        case .fileChangeReview, .immediate:
+            return false
+        }
+    }
+
     nonisolated static func canonicalToolSet(_ names: Set<String>?) -> Set<String>? {
         names.map { Set($0.map(ToolNameCodec.canonicalName)) }
     }
@@ -44,10 +58,6 @@ extension AgentLoop {
     nonisolated static func allowsTool(_ toolName: String, allowedTools: Set<String>?) -> Bool {
         guard let allowedTools, !allowedTools.isEmpty else { return true }
         return canonicalToolSet(allowedTools)?.contains(ToolNameCodec.canonicalName(toolName)) ?? false
-    }
-
-    nonisolated static func requiresExplicitUserApprovalBeforeExecution(toolName: String, tool: any LaicaiTool) -> Bool {
-        tool.requiresReview && !isFileChangeTool(toolName)
     }
 
     nonisolated static func approvalRequiredToolResult(toolName: String) -> ToolResult {

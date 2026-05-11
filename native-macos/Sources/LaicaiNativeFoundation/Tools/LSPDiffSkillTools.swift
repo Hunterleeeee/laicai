@@ -175,6 +175,7 @@ public struct DiffApplyTool: LaicaiTool {
     public var name: String { "diff.apply" }
     public var description: String { "应用 unified diff 格式的补丁到文件。比 file.edit 更适合多处修改。" }
     public var requiresReview: Bool { true }
+    public var executionPolicy: ToolExecutionPolicy { .fileChangeReview }
 
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(

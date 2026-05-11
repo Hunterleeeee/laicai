@@ -211,6 +211,16 @@ final class AppStoreToolingTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(names.contains("diff.apply"))
     }
 
+    func testToolExecutionPoliciesSeparateReviewFromExplicitApproval() {
+        XCTAssertEqual(WriteFileTool().executionPolicy, .fileChangeReview)
+        XCTAssertEqual(FileEditTool().executionPolicy, .fileChangeReview)
+        XCTAssertEqual(DiffApplyTool().executionPolicy, .fileChangeReview)
+        XCTAssertEqual(RealBrowserTool().executionPolicy, .explicitUserApproval)
+
+        XCTAssertFalse(AgentLoop.requiresExplicitUserApprovalBeforeExecution(toolName: "diff.apply", tool: DiffApplyTool()))
+        XCTAssertTrue(AgentLoop.requiresExplicitUserApprovalBeforeExecution(toolName: "browser.real", tool: RealBrowserTool()))
+    }
+
     func testShellToolDefinitionSteersProjectReadingToStructuredTools() {
         let shellDefinition = ToolRegistry.shared.toolDefinitions.first { $0.function.name == "shell_exec" }
         let commandDescription = shellDefinition?.function.parameters.properties["command"]?.description ?? ""

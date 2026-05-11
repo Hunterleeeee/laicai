@@ -263,6 +263,7 @@ public struct WriteFileTool: LaicaiTool {
     public var name: String { "file.write" }
     public var description: String { "写入文件内容（需用户审查确认）" }
     public var requiresReview: Bool { true }
+    public var executionPolicy: ToolExecutionPolicy { .fileChangeReview }
 
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(

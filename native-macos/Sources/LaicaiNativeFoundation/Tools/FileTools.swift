@@ -311,6 +311,7 @@ public struct FileEditTool: LaicaiTool {
     public var name: String { "file.edit" }
     public var description: String { "精准编辑文件：查找并替换指定内容片段，支持多处同时替换。优先使用此工具而非 file.write 全量覆盖。" }
     public var requiresReview: Bool { true }
+    public var executionPolicy: ToolExecutionPolicy { .fileChangeReview }
 
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(
