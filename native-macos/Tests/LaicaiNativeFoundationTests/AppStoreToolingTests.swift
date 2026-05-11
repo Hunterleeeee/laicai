@@ -168,6 +168,49 @@ final class AppStoreToolingTests: LaicaiNativeFoundationTestCase {
         XCTAssertLessThan(fileRead!, fileEdit!)
     }
 
+    func testAgentLoopBlocksExplicitReviewToolsWithoutRunningSideEffects() async throws {
+        let runtime = RealBrowserToolThenFinalRuntime()
+        let loop = AgentLoop(
+            config: .init(
+                maxIterations: 3,
+                maxTokensPerTurn: 1024,
+                workspaceRoot: "/tmp",
+                allowedTools: ["browser.real"],
+                usePipeline: false
+            ),
+            runtime: runtime
+        )
+
+        let task = try await loop.run(
+            message: "打开真实浏览器",
+            intent: .task,
+            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            context: TaskContext(workspaceRoot: "/tmp")
+        )
+
+        XCTAssertEqual(task.status, .failed)
+        XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "browser.real" })
+        XCTAssertTrue(task.steps.contains { step in
+            step.kind == .toolResult
+                && step.toolName == "browser.real"
+                && step.isFailure
+                && step.text.contains("approval_required")
+        })
+        XCTAssertTrue(runtime.requests.contains { request in
+            request.messages.contains { $0.role == "tool" && ($0.content ?? "").contains("approval_required") }
+        })
+    }
+
+    func testDiffApplyUsesFileChangeToolSemantics() {
+        let names = AgentLoop.toolDefinitions(for: .task, phase: .execute).map {
+            ToolNameCodec.canonicalName($0.function.name)
+        }
+
+        XCTAssertTrue(AgentLoop.isFileChangeTool("diff.apply"))
+        XCTAssertTrue(AgentLoop.isFileChangeTool("diff_apply"))
+        XCTAssertTrue(names.contains("diff.apply"))
+    }
+
     func testShellToolDefinitionSteersProjectReadingToStructuredTools() {
         let shellDefinition = ToolRegistry.shared.toolDefinitions.first { $0.function.name == "shell_exec" }
         let commandDescription = shellDefinition?.function.parameters.properties["command"]?.description ?? ""

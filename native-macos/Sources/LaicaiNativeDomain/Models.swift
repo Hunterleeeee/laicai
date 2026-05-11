@@ -1162,7 +1162,7 @@ public enum TaskPhase: String, Sendable, Equatable, CaseIterable {
     /// fetch web pages, or run commands when it needed to.
     public var allowedTools: Set<String> {
         return [
-            "file.read", "file.write", "file.edit",
+            "file.read", "file.write", "file.edit", "diff.apply",
             "file.extract",
             "code.search", "workspace.index",
             "shell.exec", "verify.build",
@@ -1209,7 +1209,7 @@ public enum AgentRole: String, Codable, Sendable, CaseIterable, Identifiable {
         case .planner:
             return ["file.read", "file.extract", "code.search", "workspace.index"]
         case .coder:
-            return ["file.read", "file.extract", "code.search", "workspace.index", "file.write", "shell.exec", "git", "image.generate"]
+            return ["file.read", "file.extract", "code.search", "workspace.index", "file.write", "file.edit", "diff.apply", "shell.exec", "git", "image.generate"]
         case .reviewer:
             return ["file.read", "file.extract", "code.search", "git"]
         case .researcher:

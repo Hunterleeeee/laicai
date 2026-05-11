@@ -13,6 +13,11 @@ public final class SessionPostMortem: Sendable {
     public static let shared = SessionPostMortem()
     private init() {}
 
+    private static func isFileChangeTool(_ toolName: String?) -> Bool {
+        guard let toolName else { return false }
+        return ["file.write", "file.edit", "diff.apply"].contains(ToolNameCodec.canonicalName(toolName))
+    }
+
     // MARK: - Failure Pattern Types
 
     public enum PatternID: String, Sendable, CaseIterable {
@@ -112,7 +117,7 @@ public final class SessionPostMortem: Sendable {
         var findings: [Finding] = []
         for (i, step) in steps.enumerated() {
             guard step.kind == .reviewRequest,
-                  step.toolName == "file.write" || step.toolName == "file.edit" else { continue }
+                  Self.isFileChangeTool(step.toolName) else { continue }
 
             let diffNew = step.diffNewContent ?? ""
             let contentParam = step.toolParams?["content"] ?? ""
@@ -164,7 +169,7 @@ public final class SessionPostMortem: Sendable {
             guard step.isFailure,
                   step.text.contains("security_denied"),
                   let toolName = step.toolName,
-                  ["file.write", "file.edit"].contains(toolName) else { continue }
+                  Self.isFileChangeTool(toolName) else { continue }
 
             let targetPath = step.toolParams?["path"] ?? step.diffFilePath ?? ""
             let isVaultTarget = !vaultRoot.isEmpty && targetPath.hasPrefix(vaultRoot)
@@ -246,7 +251,7 @@ public final class SessionPostMortem: Sendable {
                 if step.kind == .textOutput && (step.text.contains("已完成") || step.text.contains("已成功") || step.text.contains("已写入")) {
                     // Check if there was an actual tool call between complaint and this response
                     let hasToolCall = ((ci+1)..<j).contains { idx in
-                        steps[idx].kind == .toolCall && ["file.write", "file.edit"].contains(steps[idx].toolName ?? "")
+                        steps[idx].kind == .toolCall && Self.isFileChangeTool(steps[idx].toolName)
                     }
                     if !hasToolCall {
                         evidenceItems.append(EvidenceItem(stepIndex: j, stepKind: step.kind.rawValue, toolName: nil, snippet: String(step.text.prefix(200))))

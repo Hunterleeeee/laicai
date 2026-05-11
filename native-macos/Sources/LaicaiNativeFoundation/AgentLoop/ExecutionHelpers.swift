@@ -21,6 +21,48 @@ extension AgentLoop {
         }
     }
 
+    nonisolated static var fileChangeTools: Set<String> {
+        ["file.write", "file.edit", "diff.apply"]
+    }
+
+    nonisolated static var explicitApprovalSideEffectTools: Set<String> {
+        ["browser.real", "computer"]
+    }
+
+    nonisolated static func isFileChangeTool(_ toolName: String) -> Bool {
+        fileChangeTools.contains(ToolNameCodec.canonicalName(toolName))
+    }
+
+    nonisolated static func isExplicitApprovalSideEffectTool(_ toolName: String) -> Bool {
+        explicitApprovalSideEffectTools.contains(ToolNameCodec.canonicalName(toolName))
+    }
+
+    nonisolated static func canonicalToolSet(_ names: Set<String>?) -> Set<String>? {
+        names.map { Set($0.map(ToolNameCodec.canonicalName)) }
+    }
+
+    nonisolated static func allowsTool(_ toolName: String, allowedTools: Set<String>?) -> Bool {
+        guard let allowedTools, !allowedTools.isEmpty else { return true }
+        return canonicalToolSet(allowedTools)?.contains(ToolNameCodec.canonicalName(toolName)) ?? false
+    }
+
+    nonisolated static func requiresExplicitUserApprovalBeforeExecution(toolName: String, tool: any LaicaiTool) -> Bool {
+        tool.requiresReview && !isFileChangeTool(toolName)
+    }
+
+    nonisolated static func approvalRequiredToolResult(toolName: String) -> ToolResult {
+        ToolResult(
+            output: "已阻止工具调用：\(toolName)。该工具会影响真实系统或外部应用，必须由用户显式确认后才能执行。",
+            data: ["approvalRequired": "true"],
+            success: false,
+            error: "approval_required"
+        )
+    }
+
+    nonisolated static func pathForFileChange(callStep: TaskStep, toolResult: ToolResult? = nil) -> String {
+        toolResult?.data?["path"] ?? callStep.toolParams?["path"] ?? ""
+    }
+
     // G9: Allow file edits on DIFFERENT files to run in parallel
     static func scheduledToolCallBatches(
         _ calls: [(Int, TaskStep, String, String, String, [String: String])]
@@ -46,7 +88,7 @@ extension AgentLoop {
                 }
                 batches.append([call])
             case .fileExclusive(let path):
-                // file.edit / file.write — can parallel if different files
+                // File change tools can parallel if they target different files.
                 if currentBatchPaths.contains(path) || (!currentBatchIsReadOnly && !currentBatchPaths.isEmpty) {
                     batches.append(currentBatch)
                     currentBatch.removeAll()
@@ -82,7 +124,7 @@ extension AgentLoop {
 
     private static func toolExclusivity(toolName: String, params: [String: String]) -> ToolExclusivity {
         if toolName == "shell.exec" { return .fullyExclusive }
-        if ["file.write", "file.edit"].contains(toolName) {
+        if isFileChangeTool(toolName) {
             let path = params["path"] ?? "unknown"
             return .fileExclusive(path)
         }
@@ -140,7 +182,7 @@ extension AgentLoop {
             if hasVerificationFailure { return false }
             if hadFailure && failedResults.count >= successfulResults.count { return false }
             if hasWrite {
-                return hasFinalOutput || successfulResults.contains { $0.toolName == "file.write" || $0.toolName == "file.edit" }
+                return hasFinalOutput || successfulResults.contains { isFileChangeTool($0.toolName ?? "") }
             }
             return hasFinalOutput && (!hadFailure || successfulResults.count >= 2)
         }
@@ -153,7 +195,7 @@ extension AgentLoop {
         let later = task.steps.dropFirst(lastFailureIndex + 1)
         return later.contains { step in
             if step.kind == .toolResult, !step.isFailure {
-                let recoveryTools: Set<String> = ["file.extract", "file.read", "wiki.build", "file.write", "file.edit", "workspace.index", "code.search", "shell.exec", "web.fetch", "web.search"]
+                let recoveryTools: Set<String> = ["file.extract", "file.read", "wiki.build", "file.write", "file.edit", "diff.apply", "workspace.index", "code.search", "shell.exec", "web.fetch", "web.search"]
                 return recoveryTools.contains(step.toolName ?? "")
             }
             if step.kind == .reviewRequest, step.approved == true {
@@ -164,9 +206,8 @@ extension AgentLoop {
     }
 
     static func hasSuccessfulWrite(in task: AgentTask) -> Bool {
-        let writeTools: Set<String> = ["file.write", "file.edit"]
         return task.steps.contains { step in
-            guard writeTools.contains(step.toolName ?? "") else { return false }
+            guard isFileChangeTool(step.toolName ?? "") else { return false }
             if step.kind == .reviewRequest, step.approved == true { return true }
             return step.kind == .toolResult && !step.isFailure
         }
@@ -196,15 +237,15 @@ extension AgentLoop {
         expectsWiki: Bool
     ) -> [String] {
         var issues: [String] = []
-        let failedWrites = task.steps.filter { $0.kind == .toolResult && $0.isFailure == true && ["file.write", "file.edit"].contains($0.toolName ?? "") }
+        let failedWrites = task.steps.filter { $0.kind == .toolResult && $0.isFailure == true && isFileChangeTool($0.toolName ?? "") }
         if !failedWrites.isEmpty {
             issues.append("有 \(failedWrites.count) 次文件写入失败")
         }
 
         let wroteCode = task.steps.contains { step in
-            guard step.kind == .toolCall, ["file.write", "file.edit"].contains(step.toolName ?? "") else { return false }
+            guard step.kind == .toolCall, isFileChangeTool(step.toolName ?? "") else { return false }
             let codeExts: Set<String> = ["swift", "py", "js", "ts", "tsx", "jsx", "rs", "go", "java", "c", "cpp", "h", "m", "mm"]
-            return codeExts.contains(((step.toolParams?["path"] ?? "") as NSString).pathExtension.lowercased())
+            return codeExts.contains((pathForFileChange(callStep: step) as NSString).pathExtension.lowercased())
         }
         let hadVerify = task.steps.contains { $0.kind == .toolCall && $0.toolName == "verify.build" }
         if wroteCode && !hadVerify && ValidationEngine.suggestVerificationCommand(workspaceRoot: workspaceRoot) != nil {
@@ -698,7 +739,7 @@ extension AgentLoop {
             return false
         }
         return task.steps.contains { step in
-            ["file.write", "file.edit", "shell.exec", "verify.build"].contains(step.toolName ?? "") || step.kind == .error
+            isFileChangeTool(step.toolName ?? "") || ["shell.exec", "verify.build"].contains(step.toolName ?? "") || step.kind == .error
         }
     }
 
@@ -706,7 +747,7 @@ extension AgentLoop {
         let toolCalls = task.steps.filter { $0.kind == .toolCall }
         guard !toolCalls.isEmpty || hadFailure || wasTruncated else { return nil }
         let hasWriteOrCommand = toolCalls.contains {
-            ["file.write", "file.edit", "shell.exec", "verify.build"].contains($0.toolName ?? "")
+            isFileChangeTool($0.toolName ?? "") || ["shell.exec", "verify.build"].contains($0.toolName ?? "")
         }
         guard hadFailure || wasTruncated || hasWriteOrCommand || (!isReadOnlyRun && toolCalls.count >= 4) else { return nil }
 
@@ -867,12 +908,18 @@ extension AgentLoop {
         task.steps.append(callStep)
         onStep(callStep)
 
-        let (result, _) = await ValidationEngine.executeWithValidationJSON(
-            tool: tool,
-            argumentsJSON: argumentsJSON,
-            context: context,
-            maxRetries: 1
-        )
+        let result: ToolResult
+        if Self.requiresExplicitUserApprovalBeforeExecution(toolName: canonicalName, tool: tool) {
+            result = Self.approvalRequiredToolResult(toolName: canonicalName)
+        } else {
+            let validated = await ValidationEngine.executeWithValidationJSON(
+                tool: tool,
+                argumentsJSON: argumentsJSON,
+                context: context,
+                maxRetries: 1
+            )
+            result = validated.result
+        }
         let resultText = ToolResultFormatter.displayText(
             toolName: canonicalName,
             arguments: params,
@@ -1099,8 +1146,9 @@ extension AgentLoop {
         guard !evidence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
 
         // Check if any real execution happened
-        let execTools: Set<String> = ["file.write", "file.edit", "shell.exec"]
-        let hasExecution = task.steps.contains(where: { $0.kind == .toolCall && execTools.contains($0.toolName ?? "") })
+        let hasExecution = task.steps.contains { step in
+            step.kind == .toolCall && (isFileChangeTool(step.toolName ?? "") || step.toolName == "shell.exec")
+        }
 
         let prompt: String
         if hasExecution {
@@ -1169,7 +1217,7 @@ extension AgentLoop {
             // Chat still gets tools so the model can read files, search, or write
             // when the user asks. Iteration cap keeps it from running away.
             let chatAllowed: Set<String> = [
-                "file.read", "file.extract", "file.write", "file.edit",
+                "file.read", "file.extract", "file.write", "file.edit", "diff.apply",
                 "code.search", "web.search", "web.fetch",
                 "wiki.build", "memory", "shell.exec", "skill.manage"
             ]
@@ -1239,13 +1287,14 @@ extension AgentLoop {
                 base = [
                     "file.edit": 0,
                     "file.write": 1,
-                    "shell.exec": 2,
-                    "file.read": 3,
-                    "file.extract": 4,
-                    "code.search": 5,
-                    "wiki.build": 6,
-                    "web.fetch": 7,
-                    "web.search": 8
+                    "diff.apply": 2,
+                    "shell.exec": 3,
+                    "file.read": 4,
+                    "file.extract": 5,
+                    "code.search": 6,
+                    "wiki.build": 7,
+                    "web.fetch": 8,
+                    "web.search": 9
                 ]
             case .verify:
                 base = [
@@ -1255,7 +1304,8 @@ extension AgentLoop {
                     "file.extract": 3,
                     "code.search": 4,
                     "file.edit": 5,
-                    "git": 6
+                    "diff.apply": 6,
+                    "git": 7
                 ]
             case .summarize:
                 base = [
@@ -1273,7 +1323,7 @@ extension AgentLoop {
     /// Infer current task phase from accumulated steps.
     nonisolated public static func inferPhase(from steps: [TaskStep]) -> TaskPhase {
         // If there's been a file.write, we're past explore
-        let hasWrite = steps.contains { $0.toolName == "file.write" }
+        let hasWrite = steps.contains { isFileChangeTool($0.toolName ?? "") }
         // If there's been a verify/complete check, we're in verify or summarize
         let hasVerifyCheck = steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("完成检查") }
         // If there's been a final text output after verify, we're summarizing
@@ -1693,11 +1743,13 @@ extension AgentLoop {
         }
 
         // After file.write/edit failure → pre-read the target file
-        if let lastFail = recentSteps.last(where: { $0.isFailure == true && ["file.write", "file.edit"].contains($0.toolName ?? "") }),
-           let path = lastFail.toolParams?["path"],
-           !taskContext.memory.readFiles.contains(path) {
-            guard !Task.isCancelled else { return result }
-            if let content = try? String(contentsOfFile: path, encoding: .utf8), content.count < 100_000 {
+        if let lastFail = recentSteps.last(where: { $0.isFailure == true && isFileChangeTool($0.toolName ?? "") }) {
+            let path = pathForFileChange(callStep: lastFail)
+            if !path.isEmpty,
+               !taskContext.memory.readFiles.contains(path),
+               !Task.isCancelled,
+               let content = try? String(contentsOfFile: path, encoding: .utf8),
+               content.count < 100_000 {
                 result.cachedFiles[path] = content
             }
         }
@@ -2053,7 +2105,7 @@ extension AgentLoop {
         var changed = false
 
         // Fix 1: Relative paths → absolute paths for file tools
-        if ["file.read", "file.write", "file.edit"].contains(toolName),
+        if ["file.read", "file.write", "file.edit", "diff.apply"].contains(toolName),
            let path = dict["path"] as? String,
            !path.hasPrefix("/") && !workspaceRoot.isEmpty {
             dict["path"] = (workspaceRoot as NSString).appendingPathComponent(path)

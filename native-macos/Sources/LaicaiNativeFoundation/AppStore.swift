@@ -634,7 +634,7 @@ public final class AppStore: ObservableObject {
                 return "读取 \(name)…"
             }
             return "读取文件…"
-        case "file.write", "file.edit":
+        case "file.write", "file.edit", "diff.apply":
             if let p = params?["path"] ?? params?["fullPath"] {
                 let name = URL(fileURLWithPath: p).lastPathComponent
                 return "修改 \(name)…"
@@ -1167,7 +1167,7 @@ public final class AppStore: ObservableObject {
             contextMode: .deep,
             modelName: connector.modelName
         )
-        loopConfig.allowedTools = ["file.read", "file.edit", "code.search", "workspace.index", "shell.exec", "verify.build", "git"]
+        loopConfig.allowedTools = ["file.read", "file.edit", "diff.apply", "code.search", "workspace.index", "shell.exec", "verify.build", "git"]
 
         let loop = AgentLoop(config: loopConfig, runtime: environment.runtimeClient)
         let targetID = thread.id
@@ -1203,8 +1203,9 @@ public final class AppStore: ObservableObject {
                     category: diagnosis.category.rawValue,
                     description: diagnosis.description,
                     filesChanged: completedTask.steps
-                        .filter { $0.kind == .toolCall && ($0.toolName == "file.edit" || $0.toolName == "file.write") }
-                        .compactMap { $0.toolParams?["path"] },
+                        .filter { $0.kind == .toolCall && AgentLoop.isFileChangeTool($0.toolName ?? "") }
+                        .map { AgentLoop.pathForFileChange(callStep: $0) }
+                        .filter { !$0.isEmpty },
                     buildSuccess: succeeded,
                     commitHash: nil
                 )
@@ -1298,7 +1299,7 @@ public final class AppStore: ObservableObject {
             contextMode: .deep,
             modelName: connector.modelName
         )
-        loopConfig.allowedTools = ["file.read", "file.edit", "code.search", "workspace.index", "shell.exec", "verify.build", "git"]
+        loopConfig.allowedTools = ["file.read", "file.edit", "diff.apply", "code.search", "workspace.index", "shell.exec", "verify.build", "git"]
 
         let loop = AgentLoop(config: loopConfig, runtime: environment.runtimeClient)
         agentLoops[targetID] = loop

@@ -154,7 +154,9 @@ struct ToolExecutionEngine {
 
             // Normal execution
             if toolResult == nil, let tool = toolRegistry.tool(named: apiToolName) {
-                if tool.requiresReview || ["file.write", "file.edit"].contains(toolName) {
+                if AgentLoop.requiresExplicitUserApprovalBeforeExecution(toolName: toolName, tool: tool) {
+                    toolResult = AgentLoop.approvalRequiredToolResult(toolName: toolName)
+                } else if AgentLoop.isFileChangeTool(toolName) {
                     AgentLoop.gitCheckpoint(
                         workspaceRoot: config.workspaceRoot,
                         paths: AgentLoop.checkpointPaths(
@@ -165,58 +167,60 @@ struct ToolExecutionEngine {
                     )
                 }
 
-                let validation: ValidationEngine.ValidationResult
-                if toolName == "shell.exec" {
-                    let streamStepID = UUID()
-                    let callID = callStep.toolCallId ?? "call_\(index)"
-                    let result = await AgentLoop.executeShellStreamingViaNotification(
-                        argumentsJSON: argumentsJSON,
-                        context: taskContext,
-                        resultStepID: streamStepID,
-                        callID: callID,
-                        command: callStep.toolParams?["command"] ?? ""
-                    )
-                    toolResult = result
-                    validation = ValidationEngine.ValidationResult(
-                        isValid: tool.validate(result: result),
-                        error: result.error,
-                        retryCount: 0
-                    )
-                } else {
-                    let validated = await ValidationEngine.executeWithValidationJSON(
-                        tool: tool,
-                        argumentsJSON: argumentsJSON,
-                        context: taskContext
-                    )
-                    toolResult = validated.result
-                    validation = validated.validation
-                }
+                if toolResult == nil {
+                    let validation: ValidationEngine.ValidationResult
+                    if toolName == "shell.exec" {
+                        let streamStepID = UUID()
+                        let callID = callStep.toolCallId ?? "call_\(index)"
+                        let result = await AgentLoop.executeShellStreamingViaNotification(
+                            argumentsJSON: argumentsJSON,
+                            context: taskContext,
+                            resultStepID: streamStepID,
+                            callID: callID,
+                            command: callStep.toolParams?["command"] ?? ""
+                        )
+                        toolResult = result
+                        validation = ValidationEngine.ValidationResult(
+                            isValid: tool.validate(result: result),
+                            error: result.error,
+                            retryCount: 0
+                        )
+                    } else {
+                        let validated = await ValidationEngine.executeWithValidationJSON(
+                            tool: tool,
+                            argumentsJSON: argumentsJSON,
+                            context: taskContext
+                        )
+                        toolResult = validated.result
+                        validation = validated.validation
+                    }
 
-                if !validation.isValid {
-                    let recoveryError = [toolResult.error, toolResult.output]
-                        .compactMap { $0 }
-                        .joined(separator: "：")
-                    recoveryPlan = ErrorRecoveryEngine.planRecoveryJSON(
-                        error: recoveryError.isEmpty ? "验证失败" : recoveryError,
-                        toolName: toolName,
-                        argumentsJSON: argumentsJSON,
-                        attemptCount: validation.retryCount
-                    )
-                }
+                    if !validation.isValid {
+                        let recoveryError = [toolResult.error, toolResult.output]
+                            .compactMap { $0 }
+                            .joined(separator: "：")
+                        recoveryPlan = ErrorRecoveryEngine.planRecoveryJSON(
+                            error: recoveryError.isEmpty ? "验证失败" : recoveryError,
+                            toolName: toolName,
+                            argumentsJSON: argumentsJSON,
+                            attemptCount: validation.retryCount
+                        )
+                    }
 
-                // C3: Automatic parameter mutation retry
-                if !toolResult.success {
-                    toolResult = await attemptAutoRecovery(
-                        toolName: toolName,
-                        callStep: callStep,
-                        argumentsJSON: argumentsJSON,
-                        currentResult: toolResult,
-                        recoveryPlan: &recoveryPlan,
-                        validation: validation,
-                        taskContext: taskContext,
-                        config: config,
-                        toolRegistry: toolRegistry
-                    )
+                    // C3: Automatic parameter mutation retry
+                    if !toolResult.success {
+                        toolResult = await attemptAutoRecovery(
+                            toolName: toolName,
+                            callStep: callStep,
+                            argumentsJSON: argumentsJSON,
+                            currentResult: toolResult,
+                            recoveryPlan: &recoveryPlan,
+                            validation: validation,
+                            taskContext: taskContext,
+                            config: config,
+                            toolRegistry: toolRegistry
+                        )
+                    }
                 }
             } else if toolResult == nil {
                 toolResult = ToolResult(
@@ -724,8 +728,8 @@ struct ToolExecutionEngine {
                 result: toolResult
             )
 
-            // Emit review steps for file writes
-            if toolResult.success, ["file.write", "file.edit"].contains(toolName), let data = toolResult.data {
+            // Emit review steps for file changes
+            if toolResult.success, AgentLoop.isFileChangeTool(toolName), let data = toolResult.data {
                 emitReviewSteps(
                     data: data,
                     toolName: toolName,
@@ -809,9 +813,10 @@ struct ToolExecutionEngine {
 
             // F1: Auto-verify after code writes
             var autoVerifyContent = ""
-            if ["file.write", "file.edit"].contains(callStep.toolName ?? "") && toolResult.success {
+            if AgentLoop.isFileChangeTool(callStep.toolName ?? "") && toolResult.success {
                 autoVerifyContent = await runAutoVerify(
                     callStep: callStep,
+                    toolResult: toolResult,
                     state: &state,
                     config: config,
                     toolRegistry: toolRegistry,
@@ -886,12 +891,18 @@ struct ToolExecutionEngine {
                 )
                 state.task.steps.append(callStep)
                 onStep(callStep)
-                let (result, _) = await ValidationEngine.executeWithValidationJSON(
-                    tool: tool,
-                    argumentsJSON: fallbackJSON,
-                    context: state.taskContext,
-                    maxRetries: 1
-                )
+                let result: ToolResult
+                if AgentLoop.requiresExplicitUserApprovalBeforeExecution(toolName: canonicalName, tool: tool) {
+                    result = AgentLoop.approvalRequiredToolResult(toolName: canonicalName)
+                } else {
+                    let validated = await ValidationEngine.executeWithValidationJSON(
+                        tool: tool,
+                        argumentsJSON: fallbackJSON,
+                        context: state.taskContext,
+                        maxRetries: 1
+                    )
+                    result = validated.result
+                }
                 let resultStep = TaskStep(
                     kind: .toolResult,
                     text: result.success ? "自动恢复成功" : "自动恢复失败",
@@ -915,6 +926,9 @@ struct ToolExecutionEngine {
             case .retryWithModifiedJSON(let modifiedJSON):
                 let canonicalName = ToolNameCodec.canonicalName(originalToolName)
                 guard let tool = toolRegistry.tool(named: ToolNameCodec.apiName(canonicalName)) else { continue }
+                guard !AgentLoop.requiresExplicitUserApprovalBeforeExecution(toolName: canonicalName, tool: tool) else {
+                    continue
+                }
                 let (result, _) = await ValidationEngine.executeWithValidationJSON(
                     tool: tool,
                     argumentsJSON: modifiedJSON,
@@ -935,6 +949,9 @@ struct ToolExecutionEngine {
                 let jsonStr = jsonData.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
                 let canonicalName = ToolNameCodec.canonicalName(originalToolName)
                 guard let tool = toolRegistry.tool(named: ToolNameCodec.apiName(canonicalName)) else { continue }
+                guard !AgentLoop.requiresExplicitUserApprovalBeforeExecution(toolName: canonicalName, tool: tool) else {
+                    continue
+                }
                 let (result, _) = await ValidationEngine.executeWithValidationJSON(
                     tool: tool,
                     argumentsJSON: jsonStr,
@@ -1106,8 +1123,9 @@ struct ToolExecutionEngine {
         } else {
             state.taskContext.memory.failedTools.append(callStep.toolName ?? "unknown")
         }
-        if ["file.write", "file.edit"].contains(callStep.toolName ?? ""), toolResult.success {
-            if let path = callStep.toolParams?["path"] {
+        if AgentLoop.isFileChangeTool(callStep.toolName ?? ""), toolResult.success {
+            let path = AgentLoop.pathForFileChange(callStep: callStep, toolResult: toolResult)
+            if !path.isEmpty {
                 state.taskContext.memory.appendDecision("已写入：\(path)")
                 state.taskContext.memory.fileContentCache.removeValue(forKey: path)
                 let fullPath = (state.taskContext.workspaceRoot as NSString).appendingPathComponent(path)
@@ -1120,12 +1138,13 @@ struct ToolExecutionEngine {
 
     private static func runAutoVerify(
         callStep: TaskStep,
+        toolResult: ToolResult,
         state: inout PipelineState,
         config: AgentLoop.Config,
         toolRegistry: ToolRegistry,
         onStep: @MainActor (TaskStep) -> Void
     ) async -> String {
-        let writtenPath = callStep.toolParams?["path"] ?? ""
+        let writtenPath = AgentLoop.pathForFileChange(callStep: callStep, toolResult: toolResult)
         let ext = (writtenPath as NSString).pathExtension.lowercased()
         let codeExts: Set<String> = ["swift", "py", "js", "ts", "tsx", "jsx", "rs", "go", "java", "c", "cpp", "h", "m", "mm"]
         let hasBuildSys = ValidationEngine.suggestVerificationCommand(workspaceRoot: state.taskContext.workspaceRoot) != nil
@@ -1194,7 +1213,6 @@ struct ToolExecutionEngine {
     // MARK: - Utility
 
     private static func isToolAllowed(_ name: String, config: AgentLoop.Config) -> Bool {
-        guard let allowedTools = config.allowedTools, !allowedTools.isEmpty else { return true }
-        return allowedTools.contains(ToolNameCodec.canonicalName(name))
+        AgentLoop.allowsTool(name, allowedTools: config.allowedTools)
     }
 }

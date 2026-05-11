@@ -242,6 +242,30 @@ final class CapturingContinuationRuntime: ChatRuntimeClient {
 }
 
 @MainActor
+final class RealBrowserToolThenFinalRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        if requests.count == 1 {
+            return SendMessageResponse(
+                assistantText: "我需要打开真实浏览器。",
+                toolCalls: [
+                    FunctionCallResponse(
+                        id: "call_real_browser",
+                        function: FunctionCallDetail(
+                            name: "browser_real",
+                            arguments: #"{"action":"open","url":"https://example.com"}"#
+                        )
+                    )
+                ]
+            )
+        }
+        return SendMessageResponse(assistantText: "真实浏览器操作需要用户显式确认，已停止自动执行。")
+    }
+}
+
+@MainActor
 final class ShellTraversalThenFinalRuntime: ChatRuntimeClient {
     var requests: [SendMessageRequest] = []
 

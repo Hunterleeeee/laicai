@@ -7,7 +7,7 @@ extension AgentLoop {
         var lines: [String] = []
         let reads = task.steps.filter { $0.kind == .toolResult && ["file.read", "file.extract"].contains($0.toolName ?? "") && !$0.isFailure }
         if !reads.isEmpty { lines.append("- 已读取 \(reads.count) 个文件") }
-        let writes = task.steps.filter { $0.kind == .toolResult && ["file.write", "file.edit"].contains($0.toolName ?? "") && !$0.isFailure }
+        let writes = task.steps.filter { $0.kind == .toolResult && isFileChangeTool($0.toolName ?? "") && !$0.isFailure }
         if !writes.isEmpty { lines.append("- 已修改 \(writes.count) 个文件") }
         let shells = task.steps.filter { $0.kind == .toolResult && $0.toolName == "shell.exec" && !$0.isFailure }
         if !shells.isEmpty { lines.append("- 已执行 \(shells.count) 个命令") }
@@ -507,17 +507,17 @@ extension AgentLoop {
         // Pattern 1: explicit tool call syntax in text
         let syntaxPatterns = [
             "[tool:", "[TOOL:", "tool:web_search", "tool:file_read", "tool:code_search",
-            "tool:workspace_index", "tool:shell_exec",
+            "tool:workspace_index", "tool:shell_exec", "tool:diff_apply",
             "<file_read", "<code_search", "<web_search", "<shell_exec",
             "web_search(query=", "file_read(path=", "code_search(query=",
-            "workspace_index(path=", "shell_exec(command="
+            "workspace_index(path=", "shell_exec(command=", "diff_apply(path="
         ]
         let syntaxMatches = syntaxPatterns.filter { text.contains($0) }.count
         if syntaxMatches >= 2 { return true }
         // Pattern 2: spam list of tool names (10+ mentions)
-        let toolNames = ["shell.exec", "file.read", "file.write", "file.edit",
+        let toolNames = ["shell.exec", "file.read", "file.write", "file.edit", "diff.apply",
                          "web.search", "web.fetch", "code.search", "workspace.index",
-                         "shell_exec", "file_read", "file_write", "file_edit",
+                         "shell_exec", "file_read", "file_write", "file_edit", "diff_apply",
                          "web_search", "web_fetch", "code_search", "workspace_index"]
         let totalMentions = toolNames.reduce(0) { count, name in
             count + text.components(separatedBy: name).count - 1
@@ -645,7 +645,7 @@ extension AgentLoop {
 
     static func checkpointPaths(toolName: String, arguments: [String: String], workspaceRoot: String) -> [String] {
         switch toolName {
-        case "file.write", "file.edit":
+        case "file.write", "file.edit", "diff.apply":
             return [arguments["path"], arguments["target"], arguments["file"]].compactMap { $0 }
         default:
             return []

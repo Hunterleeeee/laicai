@@ -87,12 +87,18 @@ struct PipelineState {
             && message.count > 10
         self.isPureContinuation = AgentLoop.isPureContinuationCommand(message)
 
+        let canonicalAllowedTools = AgentLoop.canonicalToolSet(config.allowedTools)
+        let isAllowed: (String) -> Bool = { name in
+            canonicalAllowedTools?.contains(ToolNameCodec.canonicalName(name)) ?? false
+        }
         self.isReadOnlyRun = config.allowedTools != nil
-            && !(config.allowedTools?.contains("file.write") ?? false)
-            && !(config.allowedTools?.contains("file.edit") ?? false)
-            && !(config.allowedTools?.contains("shell.exec") ?? false)
-            && !(config.allowedTools?.contains("wiki.build") ?? false)
-            && !(config.allowedTools?.contains("verify.build") ?? false)
+            && !isAllowed("file.write")
+            && !isAllowed("file.edit")
+            && !isAllowed("diff.apply")
+            && !isAllowed("shell.exec")
+            && !isAllowed("wiki.build")
+            && !isAllowed("verify.build")
+            && !AgentLoop.explicitApprovalSideEffectTools.contains { isAllowed($0) }
 
         self.usesOllamaChat = AgentLoop.usesOllamaChat(connector)
         self.maxTransientRetries = isReadOnlyRun ? 1 : 3

@@ -59,6 +59,10 @@ enum ToolResultFormatter {
             let path = result.data?["path"] ?? arguments["path"] ?? "文件"
             return "已准备文件写入 · \(path)"
 
+        case "diff.apply":
+            let path = result.data?["path"] ?? arguments["path"] ?? "文件"
+            return "已准备补丁应用 · \(path)"
+
         case "verify.build":
             let command = result.data?["command"] ?? arguments["command"] ?? "自动检测"
             let exitCode = result.data?["exitCode"] ?? "0"
@@ -230,6 +234,8 @@ enum ToolStepFormatter {
             return "正在建立项目索引"
         case "file.edit":
             return "正在精准编辑文件：\(arguments["path"] ?? "目标文件")"
+        case "diff.apply":
+            return "正在应用补丁：\(arguments["path"] ?? "目标文件")"
         case "verify.build":
             return "正在验证构建/测试"
         case "shell.exec":

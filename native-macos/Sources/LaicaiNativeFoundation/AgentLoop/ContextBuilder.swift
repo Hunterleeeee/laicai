@@ -195,8 +195,9 @@ struct ContextBuilder {
     /// Static filtering — avoids needing an AgentLoop instance.
     static func filterToolDefinitions(_ definitions: [ToolDefinition], allowedTools: Set<String>?) -> [ToolDefinition] {
         guard let allowedTools, !allowedTools.isEmpty else { return definitions }
+        let canonicalAllowedTools = AgentLoop.canonicalToolSet(allowedTools) ?? []
         return definitions.filter { definition in
-            allowedTools.contains(ToolNameCodec.canonicalName(definition.function.name))
+            canonicalAllowedTools.contains(ToolNameCodec.canonicalName(definition.function.name))
         }
     }
 
@@ -241,4 +242,3 @@ struct ContextBuilder {
         }
     }
 }
-

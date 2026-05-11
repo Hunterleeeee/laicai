@@ -394,8 +394,8 @@ public struct StepExecutor {
             return ToolResult(output: "未找到工具：\(renderedStep.tool)", success: false, error: "tool_not_found")
         }
 
-        // Skip file.read / file.write when required path param is empty (unresolved template var)
-        if ["file.read", "file.write", "file.edit"].contains(renderedStep.tool) {
+        // Skip file tools when required path param is empty (unresolved template var)
+        if ["file.read", "file.write", "file.edit", "diff.apply"].contains(ToolNameCodec.canonicalName(renderedStep.tool)) {
             let pathVal = (renderedStep.params["path"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if pathVal.isEmpty {
                 return ToolResult(output: "跳过：未指定目标文件路径。", success: true)

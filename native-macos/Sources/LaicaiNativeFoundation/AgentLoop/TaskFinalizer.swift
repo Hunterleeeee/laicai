@@ -134,7 +134,7 @@ struct TaskFinalizer {
     ) {
         guard finalStatus == .completed && !state.isReadOnlyRun && state.intent != .chat else { return }
 
-        let hasFileEdits = state.task.steps.contains { ["file.write", "file.edit"].contains($0.toolName ?? "") && !$0.isFailure }
+        let hasFileEdits = state.task.steps.contains { AgentLoop.isFileChangeTool($0.toolName ?? "") && !$0.isFailure }
         let hasVerify = state.task.steps.contains { $0.toolName == "verify.build" }
         let hasGitCommit = state.task.steps.contains { $0.toolName == "git" && ($0.toolParams?["subcommand"] ?? "").contains("commit") }
 

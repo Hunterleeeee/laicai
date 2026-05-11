@@ -243,11 +243,10 @@ struct IterationEngine {
 
         // Auto-fix loop: verify nudge after code writes
         let codeExtensions: Set<String> = ["swift", "py", "js", "ts", "tsx", "jsx", "rs", "go", "java", "c", "cpp", "h", "m", "mm"]
-        let writeTools: Set<String> = ["file.write", "file.edit"]
         let batchHadCodeWrite = toolCallResults.contains { entry in
             let step = callSteps[entry.0].1
-            guard entry.1.success, writeTools.contains(step.toolName ?? "") else { return false }
-            let path = step.toolParams?["path"] ?? ""
+            guard entry.1.success, AgentLoop.isFileChangeTool(step.toolName ?? "") else { return false }
+            let path = AgentLoop.pathForFileChange(callStep: step, toolResult: entry.1)
             let ext = (path as NSString).pathExtension.lowercased()
             return codeExtensions.contains(ext)
         }
@@ -266,12 +265,12 @@ struct IterationEngine {
             callSteps[entry.0].1.toolName == "verify.build" && entry.1.success
         }
         let batchHadWrite = toolCallResults.contains { entry in
-            writeTools.contains(callSteps[entry.0].1.toolName ?? "") && entry.1.success
+            AgentLoop.isFileChangeTool(callSteps[entry.0].1.toolName ?? "") && entry.1.success
         }
         let batchHadNonCodeWrite = toolCallResults.contains { entry in
             let step = callSteps[entry.0].1
-            guard entry.1.success, writeTools.contains(step.toolName ?? "") else { return false }
-            let path = step.toolParams?["path"] ?? ""
+            guard entry.1.success, AgentLoop.isFileChangeTool(step.toolName ?? "") else { return false }
+            let path = AgentLoop.pathForFileChange(callStep: step, toolResult: entry.1)
             let ext = (path as NSString).pathExtension.lowercased()
             return !codeExtensions.contains(ext) && !ext.isEmpty
         }
@@ -326,7 +325,6 @@ struct IterationEngine {
     // MARK: - Utility
 
     private static func isToolAllowed(_ name: String, config: AgentLoop.Config) -> Bool {
-        guard let allowedTools = config.allowedTools, !allowedTools.isEmpty else { return true }
-        return allowedTools.contains(ToolNameCodec.canonicalName(name))
+        AgentLoop.allowsTool(name, allowedTools: config.allowedTools)
     }
 }

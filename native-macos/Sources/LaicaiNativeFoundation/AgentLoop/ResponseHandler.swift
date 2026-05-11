@@ -383,7 +383,6 @@ struct ResponseHandler {
     // MARK: - Utility
 
     private static func isToolAllowed(_ name: String, config: AgentLoop.Config) -> Bool {
-        guard let allowedTools = config.allowedTools, !allowedTools.isEmpty else { return true }
-        return allowedTools.contains(ToolNameCodec.canonicalName(name))
+        AgentLoop.allowsTool(name, allowedTools: config.allowedTools)
     }
 }

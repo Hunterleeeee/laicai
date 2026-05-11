@@ -84,15 +84,13 @@ extension AgentLoop {
         guard let allowedTools = config.allowedTools, !allowedTools.isEmpty else {
             return definitions
         }
+        let canonicalAllowedTools = Self.canonicalToolSet(allowedTools) ?? []
         return definitions.filter { definition in
-            allowedTools.contains(ToolNameCodec.canonicalName(definition.function.name))
+            canonicalAllowedTools.contains(ToolNameCodec.canonicalName(definition.function.name))
         }
     }
 
     func isToolAllowed(_ name: String) -> Bool {
-        guard let allowedTools = config.allowedTools, !allowedTools.isEmpty else {
-            return true
-        }
-        return allowedTools.contains(ToolNameCodec.canonicalName(name))
+        Self.allowsTool(name, allowedTools: config.allowedTools)
     }
 }

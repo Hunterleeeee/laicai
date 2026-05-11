@@ -449,11 +449,17 @@ struct BootstrapEngine {
         state.task.steps.append(callStep)
         onStep(callStep)
 
-        let (toolResult, _) = await ValidationEngine.executeWithValidationJSON(
-            tool: tool,
-            argumentsJSON: argumentsJSON,
-            context: state.taskContext
-        )
+        let toolResult: ToolResult
+        if AgentLoop.requiresExplicitUserApprovalBeforeExecution(toolName: toolName, tool: tool) {
+            toolResult = AgentLoop.approvalRequiredToolResult(toolName: toolName)
+        } else {
+            let validated = await ValidationEngine.executeWithValidationJSON(
+                tool: tool,
+                argumentsJSON: argumentsJSON,
+                context: state.taskContext
+            )
+            toolResult = validated.result
+        }
         let displayText = ToolResultFormatter.displayText(
             toolName: toolName,
             arguments: toolParams,
@@ -477,7 +483,6 @@ struct BootstrapEngine {
     // MARK: - Utility
 
     private static func isToolAllowed(_ name: String, config: AgentLoop.Config) -> Bool {
-        guard let allowedTools = config.allowedTools, !allowedTools.isEmpty else { return true }
-        return allowedTools.contains(ToolNameCodec.canonicalName(name))
+        AgentLoop.allowsTool(name, allowedTools: config.allowedTools)
     }
 }
