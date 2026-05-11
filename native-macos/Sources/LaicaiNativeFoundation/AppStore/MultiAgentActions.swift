@@ -80,14 +80,7 @@ extension AppStore {
                     self.persistThreadsNow()
                 }
             }
-            self.generationTasks.removeValue(forKey: maThreadID)
-            self.streamBuffers.removeValue(forKey: maThreadID)
-            self.streamLastFlushAt.removeValue(forKey: maThreadID)
-            if self.generationTasks.isEmpty {
-                self.state.isGenerating = false
-                self.state.generationStartedAt = nil
-                self.state.liveActivity = ""
-            }
+            self.finishGenerationTask(maThreadID)
         }
     }
 
@@ -161,14 +154,7 @@ extension AppStore {
                     self.persistThreadsNow()
                 }
             }
-            self.generationTasks.removeValue(forKey: epThreadID)
-            self.streamBuffers.removeValue(forKey: epThreadID)
-            self.streamLastFlushAt.removeValue(forKey: epThreadID)
-            if self.generationTasks.isEmpty {
-                self.state.isGenerating = false
-                self.state.generationStartedAt = nil
-                self.state.liveActivity = ""
-            }
+            self.finishGenerationTask(epThreadID)
         }
     }
 
@@ -251,14 +237,7 @@ extension AppStore {
                     self.persistThreadsNow()
                 }
             }
-            self.generationTasks.removeValue(forKey: rpThreadID)
-            self.streamBuffers.removeValue(forKey: rpThreadID)
-            self.streamLastFlushAt.removeValue(forKey: rpThreadID)
-            if self.generationTasks.isEmpty {
-                self.state.isGenerating = false
-                self.state.generationStartedAt = nil
-                self.state.liveActivity = ""
-            }
+            self.finishGenerationTask(rpThreadID)
         }
     }
 }

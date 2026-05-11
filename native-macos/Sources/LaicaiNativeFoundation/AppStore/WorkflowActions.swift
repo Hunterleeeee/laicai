@@ -84,12 +84,7 @@ extension AppStore {
                 self.persistThreadsNow()
             }
 
-            self.generationTasks.removeValue(forKey: wfThreadID)
-            if self.generationTasks.isEmpty {
-                self.state.isGenerating = false
-                self.state.generationStartedAt = nil
-                self.state.liveActivity = ""
-            }
+            self.finishGenerationTask(wfThreadID)
         }
     }
 

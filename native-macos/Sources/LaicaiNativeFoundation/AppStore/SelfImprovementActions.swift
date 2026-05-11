@@ -255,13 +255,7 @@ extension AppStore {
                 SelfImprovementEngine.shared.onImprovementFailure()
             }
 
-            self.generationTasks.removeValue(forKey: targetTaskID)
-            self.agentLoops.removeValue(forKey: targetTaskID)
-            if self.generationTasks.isEmpty {
-                self.state.isGenerating = false
-                self.state.generationStartedAt = nil
-                self.state.liveActivity = ""
-            }
+            self.finishGenerationTask(targetTaskID)
         }
     }
 }
