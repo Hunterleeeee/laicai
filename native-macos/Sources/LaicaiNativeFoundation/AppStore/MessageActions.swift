@@ -3,6 +3,7 @@ import LaicaiNativeDomain
 
 extension AppStore {
     public func sendDraft() {
+        reconcileSelectedRunningTaskIfIdle()
         let message = composedDraftMessage()
         let selectedThreadRunning: Bool = {
             guard let tid = state.selectedThreadID else { return false }
@@ -16,7 +17,6 @@ extension AppStore {
         var effectiveMessage = agentInvocation?.message ?? message
         effectiveMessage = Self.enrichVagueMessage(effectiveMessage, thread: state.selectedThread)
 
-        reconcileSelectedRunningTaskIfIdle()
         if answerSelectedTaskStatusQuestion(effectiveMessage) {
             return
         }

@@ -9,7 +9,8 @@ extension AppStore {
         context: TaskContext,
         message: String,
         decision: PlannerDecision? = nil,
-        userParams: [String: String] = [:]
+        userParams: [String: String] = [:],
+        projectID: UUID? = nil
     ) {
         guard let connector = state.activeConnector else {
             notify("请先选择一个连接器", style: .error)
@@ -37,7 +38,8 @@ extension AppStore {
             ],
             connectorID: state.activeConnectorID,
             workflowName: workflow.name,
-            context: context
+            context: context,
+            projectID: projectID
         )
         state.threads.insert(thread, at: 0)
         state.selectThread(id: thread.id)
@@ -114,7 +116,14 @@ extension AppStore {
             comfyUIServerURL: state.settings.comfyUIServerURL,
             comfyUIModelName: state.settings.comfyUIModelName
         )
-        executeWorkflow(taskTitle: message, workflow: workflow, context: context, message: message, userParams: userParams)
+        executeWorkflow(
+            taskTitle: message,
+            workflow: workflow,
+            context: context,
+            message: message,
+            userParams: userParams,
+            projectID: projectIDForNewThreadFromSelection()
+        )
     }
 
     public func useSkill(_ skill: SkillDefinition) {

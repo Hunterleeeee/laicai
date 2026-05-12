@@ -36,7 +36,8 @@ extension AppStore {
             case .session:
                 state.modeLabel = "聊天"
             case .task:
-                state.modeLabel = record.task?.workflowName == nil ? "任务" : "工作流"
+                let workflowName = state.threads.first { $0.id == record.id }?.workflowName ?? record.task?.workflowName
+                state.modeLabel = workflowName == nil ? "任务" : "工作流"
             }
         } else {
             state.modeLabel = "聊天"

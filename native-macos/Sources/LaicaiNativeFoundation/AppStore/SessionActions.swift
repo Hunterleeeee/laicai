@@ -105,8 +105,13 @@ extension AppStore {
             title: thread.title + " 副本",
             preview: thread.preview,
             steps: thread.steps,
+            connectorID: thread.connectorID,
+            workflowName: thread.workflowName,
+            context: thread.context,
             modelName: thread.modelName,
-            category: thread.category
+            category: thread.category,
+            source: thread.source,
+            projectID: thread.projectID
         )
         state.threads.insert(cloned, at: 0)
         state.selectThread(id: cloned.id)
@@ -125,7 +130,8 @@ extension AppStore {
             connectorID: thread.connectorID,
             context: thread.context,
             modelName: thread.modelName,
-            source: thread.source
+            source: thread.source,
+            projectID: thread.projectID
         )
         state.threads.insert(forked, at: 0)
         state.selectThread(id: forked.id)

@@ -116,7 +116,8 @@ struct WelcomeView: View {
     // MARK: - Hero
 
     private var heroTitle: String {
-        if let project = projectManager.activeProject {
+        if let projectID = store.state.selectedThread?.projectID,
+           let project = projectManager.projects.first(where: { $0.id == projectID }) {
             return "要在 \(project.name) 中构建什么？"
         }
         return "有什么我能帮你的？"

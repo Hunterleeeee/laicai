@@ -8,7 +8,8 @@ extension AppStore {
         connector: ConnectorProfile,
         plan: MultiAgentPlan,
         intent: UserIntent,
-        decision: PlannerDecision
+        decision: PlannerDecision,
+        projectID: UUID? = nil
     ) {
         let thread = Thread(
             title: String(message.prefix(32)),
@@ -16,7 +17,8 @@ extension AppStore {
             steps: [],
             connectorID: state.activeConnectorID,
             context: context,
-            multiAgentPlan: plan
+            multiAgentPlan: plan,
+            projectID: projectID
         )
         state.threads.insert(thread, at: 0)
         state.selectThread(id: thread.id)

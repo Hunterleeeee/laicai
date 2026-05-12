@@ -81,15 +81,24 @@ extension AppStore {
         let intent = decision.intent
         let workflowName: String? = { if case .workflow(let name) = intent { return name } else { return nil } }()
 
+        let selectedThreadProjectID = projectIDForNewThreadFromSelection()
+
         if let wfName = workflowName, let workflow = WorkflowLibrary.find(named: wfName, workspaceRoot: state.settings.workspacePath) {
-            executeWorkflow(taskTitle: message, workflow: workflow, context: context, message: message, decision: decision)
+            executeWorkflow(
+                taskTitle: message,
+                workflow: workflow,
+                context: context,
+                message: message,
+                decision: decision,
+                projectID: selectedThreadProjectID
+            )
             return
         }
 
         if customAgent == nil,
            MultiAgentOrchestrator.shouldUseMultiAgent(message: message, intent: intent),
            let plan = MultiAgentOrchestrator.createPlan(for: message, intent: intent, connectors: state.connectors, activeConnectorID: state.activeConnectorID) {
-            executeMultiAgent(message: message, context: context, connector: connector, plan: plan, intent: intent, decision: decision)
+            executeMultiAgent(message: message, context: context, connector: connector, plan: plan, intent: intent, decision: decision, projectID: selectedThreadProjectID)
             return
         }
 
@@ -130,6 +139,7 @@ extension AppStore {
                     context.memory = state.threads[threadIndex].context.memory
                 }
                 Self.prepareThreadForContinuation(&state.threads[threadIndex], message: message)
+                context.memory = state.threads[threadIndex].context.memory
                 if UserFrustrationDetector.isFrustrated(message) {
                     BehaviorSignalTracker.record(signal: .frustration, thread: state.threads[threadIndex])
                 }
@@ -139,9 +149,12 @@ extension AppStore {
                 state.threads[threadIndex].title = String(message.prefix(32))
             }
             state.threads[threadIndex].status = .running
-            state.threads[threadIndex].connectorID = state.activeConnectorID
+            state.threads[threadIndex].connectorID = connector.id
             state.threads[threadIndex].workflowName = workflowName
             state.threads[threadIndex].context = context
+            if !isChatIntent {
+                state.threads[threadIndex].source = .task
+            }
             for step in initialSteps {
                 state.threads[threadIndex].steps.append(step)
             }
@@ -158,16 +171,15 @@ extension AppStore {
             state.threads[threadIndex].updatedAt = .now
             targetTaskID = selectedID
         } else {
-            let activeProjectID = ProjectManager.shared.activeProjectID
             let thread = Thread(
                 title: String(message.prefix(32)),
                 status: .running,
                 steps: initialSteps,
-                connectorID: state.activeConnectorID,
+                connectorID: connector.id,
                 workflowName: workflowName,
                 context: context,
-                source: isChatIntent ? .session : nil,
-                projectID: activeProjectID
+                source: isChatIntent ? .session : .task,
+                projectID: nil
             )
             state.threads.insert(thread, at: 0)
             targetTaskID = thread.id
@@ -313,5 +325,12 @@ extension AppStore {
         return imageConnectors.first { $0.modelName.localizedCaseInsensitiveContains("gpt-image-2") }
             ?? imageConnectors.first { $0.modelName.localizedCaseInsensitiveContains("gpt-image") }
             ?? imageConnectors.first
+    }
+
+    func projectIDForNewThreadFromSelection() -> UUID? {
+        guard let selectedID = state.selectedThreadID,
+              let thread = state.threads.first(where: { $0.id == selectedID }),
+              thread.status != .running else { return nil }
+        return thread.projectID
     }
 }

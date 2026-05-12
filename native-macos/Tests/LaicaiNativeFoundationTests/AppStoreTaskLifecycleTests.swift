@@ -274,4 +274,35 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(store.state.selectedTask?.steps.contains { $0.text.contains("上次执行没有正常结束") } == true)
         XCTAssertTrue(store.state.selectedTask?.steps.contains { $0.kind == .userInput && $0.text.contains("继续刚才这个任务") } == true)
     }
+
+    func testTaskCreatedWithoutSelectionIgnoresGlobalActiveProject() async throws {
+        let previousActiveProjectID = ProjectManager.shared.activeProjectID
+        ProjectManager.shared.activeProjectID = UUID()
+        defer { ProjectManager.shared.activeProjectID = previousActiveProjectID }
+        let connector = makeConnector()
+        let store = makeTestStore(connectors: [connector], activeConnectorID: connector.id)
+
+        store.updateDraft("帮我生成一个 README")
+        store.sendDraft()
+        try await waitUntilIdle(store)
+
+        XCTAssertEqual(store.state.selectedThread?.source, .task)
+        XCTAssertNil(store.state.selectedThread?.projectID)
+    }
+
+    func testProjectPlaceholderKeepsProjectIDWhenPromotedToTask() async throws {
+        let projectID = UUID()
+        let connector = makeConnector()
+        let store = makeTestStore(connectors: [connector], activeConnectorID: connector.id)
+
+        store.newSessionInProject(projectID)
+        let threadID = try XCTUnwrap(store.state.selectedThreadID)
+        store.updateDraft("帮我生成一个 README")
+        store.sendDraft()
+        try await waitUntilIdle(store)
+
+        XCTAssertEqual(store.state.selectedThreadID, threadID)
+        XCTAssertEqual(store.state.selectedThread?.source, .task)
+        XCTAssertEqual(store.state.selectedThread?.projectID, projectID)
+    }
 }

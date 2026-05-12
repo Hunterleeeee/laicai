@@ -62,6 +62,7 @@ extension LaicaiNativeFoundationTestCase {
     }
 
     func testState(
+        threads: [Thread]? = nil,
         sessions: [ChatSession] = [],
         selectedSessionID: UUID? = nil,
         modeLabel: String = "Build",
@@ -73,6 +74,28 @@ extension LaicaiNativeFoundationTestCase {
         connectors: [ConnectorProfile] = [],
         activeConnectorID: UUID? = nil
     ) -> AppState {
+        if let threads {
+            return AppState(
+                workspaceName: "Test",
+                modeLabel: modeLabel,
+                threads: threads,
+                selectedThreadID: selectedTaskID ?? selectedSessionID,
+                workbenchTab: .tools,
+                connectors: connectors,
+                activeConnectorID: activeConnectorID,
+                toolActivities: [],
+                workflowRuns: [],
+                draftMessage: "",
+                isGenerating: false,
+                settings: .init(
+                    workspacePath: workspacePath,
+                    defaultConnectorName: defaultConnectorName,
+                    compactComposer: false,
+                    showDebugPanels: false,
+                    contextMode: contextMode
+                )
+            )
+        }
         AppState(
             workspaceName: "Test",
             modeLabel: modeLabel,

@@ -143,4 +143,24 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(runtime.requests.first?.tools?.isEmpty ?? true, true)
         XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("证据优先修复模式") == true)
     }
+
+    func testPlainSessionIgnoresGlobalActiveProject() async throws {
+        let previousActiveProjectID = ProjectManager.shared.activeProjectID
+        ProjectManager.shared.activeProjectID = UUID()
+        defer { ProjectManager.shared.activeProjectID = previousActiveProjectID }
+        let connector = makeConnector()
+        let store = makeTestStore(connectors: [connector], activeConnectorID: connector.id)
+
+        store.newSession()
+        let threadID = try XCTUnwrap(store.state.selectedThreadID)
+        XCTAssertNil(store.state.selectedThread?.projectID)
+
+        store.updateDraft("你好")
+        store.sendDraft()
+        try await waitUntilIdle(store)
+
+        XCTAssertEqual(store.state.selectedThreadID, threadID)
+        XCTAssertEqual(store.state.selectedThread?.source, .session)
+        XCTAssertNil(store.state.selectedThread?.projectID)
+    }
 }

@@ -26,6 +26,32 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         store.stopGenerating()
     }
 
+    func testImageRequestReusesSelectedPlainSessionAndDoesNotUseActiveProject() async throws {
+        let previousActiveProjectID = ProjectManager.shared.activeProjectID
+        ProjectManager.shared.activeProjectID = UUID()
+        defer { ProjectManager.shared.activeProjectID = previousActiveProjectID }
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let chatConnector = makeConnector(name: "GPT", endpoint: "https://duckcu.tech/v1", modelName: "gpt-5.5")
+        let imageConnector = makeConnector(name: "图片", endpoint: "https://duckcu.tech", modelName: "gpt-image-2")
+        let store = makeTestStore(
+            workspacePath: workspace.path,
+            connectors: [chatConnector, imageConnector],
+            activeConnectorID: chatConnector.id
+        )
+
+        store.newSession()
+        let threadID = try XCTUnwrap(store.state.selectedThreadID)
+        store.updateDraft("生成一张雪碧介绍图")
+        store.sendDraft()
+
+        XCTAssertEqual(store.state.selectedThreadID, threadID)
+        XCTAssertEqual(store.state.selectedThread?.source, .task)
+        XCTAssertEqual(store.state.selectedThread?.connectorID, imageConnector.id)
+        XCTAssertNil(store.state.selectedThread?.projectID)
+        store.stopGenerating()
+    }
+
     func testImageOnlyConnectorUsesImagesAPIEndpointAndWritesImage() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }

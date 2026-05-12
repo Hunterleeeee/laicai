@@ -406,46 +406,48 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func threadMenu(for item: ThreadRecord) -> some View {
+        let thread = store.state.threads.first { $0.id == item.id }
+        let title = thread?.title ?? item.title
+        let isPinned = thread?.isPinned ?? item.isPinned
+        let isArchived = thread?.isArchived ?? item.isArchived
+        let hasContent = thread?.steps.isEmpty == false || item.hasContent
+
         switch item.source {
         case .session:
-            if let session = item.session {
-                Button { store.pinSession(id: session.id) } label: {
-                    Label(session.isPinned ? "取消置顶" : "置顶", systemImage: session.isPinned ? "pin.slash" : "pin")
-                }
-                Button { renamingSessionID = session.id; renameText = session.title } label: {
-                    Label("重命名", systemImage: "pencil")
-                }
-                Divider()
-                Button { store.cloneSession(id: session.id) } label: {
-                    Label("克隆", systemImage: "doc.on.doc")
-                }
-                Button {
-                    if let json = store.exportSession(id: session.id) {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(json, forType: .string)
-                        ToastCenter.shared.success("已复制到剪贴板")
-                    }
-                } label: { Label("导出", systemImage: "arrow.up.doc") }
-                Divider()
-                Button { store.clearSessionTurns(id: session.id) } label: { Label("清空", systemImage: "eraser") }.disabled(session.turns.isEmpty)
-                Button { store.archiveThread(id: session.id) } label: { Label(item.isArchived ? "取消归档" : "归档", systemImage: "archivebox") }
-                Button(role: .destructive) { deletingSessionID = session.id } label: { Label("删除", systemImage: "trash") }
+            Button { store.pinSession(id: item.id) } label: {
+                Label(isPinned ? "取消置顶" : "置顶", systemImage: isPinned ? "pin.slash" : "pin")
             }
+            Button { renamingSessionID = item.id; renameText = title } label: {
+                Label("重命名", systemImage: "pencil")
+            }
+            Divider()
+            Button { store.cloneSession(id: item.id) } label: {
+                Label("克隆", systemImage: "doc.on.doc")
+            }
+            Button {
+                if let json = store.exportSession(id: item.id) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(json, forType: .string)
+                    ToastCenter.shared.success("已复制到剪贴板")
+                }
+            } label: { Label("导出", systemImage: "arrow.up.doc") }
+            Divider()
+            Button { store.clearSessionTurns(id: item.id) } label: { Label("清空", systemImage: "eraser") }.disabled(!hasContent)
+            Button { store.archiveThread(id: item.id) } label: { Label(isArchived ? "取消归档" : "归档", systemImage: "archivebox") }
+            Button(role: .destructive) { deletingSessionID = item.id } label: { Label("删除", systemImage: "trash") }
         case .task:
-            if let task = item.task {
-                Button { store.prepareTaskContinuation(id: task.id) } label: { Label("继续处理", systemImage: "arrow.turn.down.right") }
-                Divider()
-                Button {
-                    if let json = store.exportTask(id: task.id) {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(json, forType: .string)
-                        ToastCenter.shared.success("已复制到剪贴板")
-                    }
-                } label: { Label("导出", systemImage: "arrow.up.doc") }
-                Divider()
-                Button { store.archiveThread(id: task.id) } label: { Label(item.isArchived ? "取消归档" : "归档", systemImage: "archivebox") }
-                Button(role: .destructive) { deletingTaskID = task.id } label: { Label("删除", systemImage: "trash") }
-            }
+            Button { store.prepareTaskContinuation(id: item.id) } label: { Label("继续处理", systemImage: "arrow.turn.down.right") }
+            Divider()
+            Button {
+                if let json = store.exportTask(id: item.id) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(json, forType: .string)
+                    ToastCenter.shared.success("已复制到剪贴板")
+                }
+            } label: { Label("导出", systemImage: "arrow.up.doc") }
+            Divider()
+            Button { store.archiveThread(id: item.id) } label: { Label(isArchived ? "取消归档" : "归档", systemImage: "archivebox") }
+            Button(role: .destructive) { deletingTaskID = item.id } label: { Label("删除", systemImage: "trash") }
         }
     }
 

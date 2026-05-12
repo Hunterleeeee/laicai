@@ -13,7 +13,7 @@ extension AppStore {
             return
         }
 
-        let context = TaskContext(
+        var context = TaskContext(
             workspaceRoot: workspaceRoot,
             vaultRoot: state.settings.vaultPath,
             contextMode: state.settings.contextMode,
@@ -31,16 +31,45 @@ extension AppStore {
             isCollapsible: true,
             isCollapsed: true
         )
-        let thread = Thread(
-            title: String(message.prefix(32)),
-            status: .running,
-            steps: [userStep, planStep],
-            connectorID: connector.id,
-            context: context,
-            projectID: ProjectManager.shared.activeProjectID
-        )
-        state.threads.insert(thread, at: 0)
-        state.selectThread(id: thread.id)
+        let initialSteps = [userStep, planStep]
+        let targetThreadID: UUID
+        if let selectedID = state.selectedThreadID,
+           let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }),
+           state.threads[threadIndex].status != .running {
+            let isEmptyPlaceholder = state.threads[threadIndex].steps.isEmpty
+            if !isEmptyPlaceholder {
+                if !state.threads[threadIndex].context.memory.isEmpty {
+                    context.memory = state.threads[threadIndex].context.memory
+                }
+                Self.prepareThreadForContinuation(&state.threads[threadIndex], message: message)
+                context.memory = state.threads[threadIndex].context.memory
+            }
+            let currentTitle = state.threads[threadIndex].title
+            if isEmptyPlaceholder || currentTitle.isEmpty || currentTitle == "新会话" || currentTitle == "新对话" {
+                state.threads[threadIndex].title = String(message.prefix(32))
+            }
+            state.threads[threadIndex].status = .running
+            state.threads[threadIndex].connectorID = connector.id
+            state.threads[threadIndex].workflowName = nil
+            state.threads[threadIndex].context = context
+            state.threads[threadIndex].source = .task
+            state.threads[threadIndex].steps.append(contentsOf: initialSteps)
+            state.threads[threadIndex].updatedAt = .now
+            targetThreadID = selectedID
+        } else {
+            let thread = Thread(
+                title: String(message.prefix(32)),
+                status: .running,
+                steps: initialSteps,
+                connectorID: connector.id,
+                context: context,
+                source: .task,
+                projectID: nil
+            )
+            state.threads.insert(thread, at: 0)
+            targetThreadID = thread.id
+        }
+        state.selectThread(id: targetThreadID)
         state.modeLabel = decision.routeLabel
         state.isGenerating = true
         state.generationStartedAt = Date()
@@ -50,7 +79,7 @@ extension AppStore {
         state.draftImages = []
         persistThreads()
 
-        generationTasks[thread.id] = Task { [weak self] in
+        generationTasks[targetThreadID] = Task { [weak self] in
             guard let self else { return }
             let tool = ComfyUITool()
             let arguments = Self.imageGenerationArguments(prompt: message)
@@ -66,10 +95,11 @@ extension AppStore {
                     isCollapsed: false,
                     isFailure: !result.success
                 )
-                self.appendTaskStep(resultStep, to: thread.id)
-                if let index = self.state.threads.firstIndex(where: { $0.id == thread.id }) {
+                self.appendTaskStep(resultStep, to: targetThreadID)
+                if let index = self.state.threads.firstIndex(where: { $0.id == targetThreadID }) {
                     self.state.threads[index].status = result.success ? .completed : .failed
                     self.state.threads[index].context = context
+                    self.state.threads[index].source = .task
                     self.state.threads[index].updatedAt = Date()
                     self.persistThreadsNow()
                 }
@@ -82,15 +112,15 @@ extension AppStore {
             } catch {
                 guard !Task.isCancelled else { return }
                 let errorStep = TaskStep(kind: .error, text: error.localizedDescription, isFailure: true, recoverable: true, retryAction: "重试")
-                self.appendTaskStep(errorStep, to: thread.id)
-                if let index = self.state.threads.firstIndex(where: { $0.id == thread.id }) {
+                self.appendTaskStep(errorStep, to: targetThreadID)
+                if let index = self.state.threads.firstIndex(where: { $0.id == targetThreadID }) {
                     self.state.threads[index].status = .failed
                     self.state.threads[index].updatedAt = Date()
                     self.persistThreadsNow()
                 }
                 self.recordToolActivity(name: "image.generate", summary: "图片生成失败", statusLine: error.localizedDescription, isFailure: true)
             }
-            self.finishGenerationTask(thread.id)
+            self.finishGenerationTask(targetThreadID)
         }
     }
 

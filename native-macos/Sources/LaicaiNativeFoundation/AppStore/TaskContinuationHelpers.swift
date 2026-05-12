@@ -126,9 +126,10 @@ extension AppStore {
 
     static func markStaleRunningTasks(in state: inout AppState, now: Date = .now) {
         let timeout: TimeInterval = 20 * 60
-        for index in state.threads.indices where state.threads[index].source == .task {
+        for index in state.threads.indices {
             let shouldCancelRunning = state.threads[index].status == .running
-            let shouldCancelStaleReview = state.threads[index].status == .waitingReview
+            let shouldCancelStaleReview = state.threads[index].source == .task
+                && state.threads[index].status == .waitingReview
                 && now.timeIntervalSince(state.threads[index].updatedAt) > timeout
             guard shouldCancelRunning || shouldCancelStaleReview else { continue }
             state.threads[index].status = .cancelled
@@ -143,7 +144,9 @@ extension AppStore {
                 recoverable: true,
                 retryAction: "继续"
             ))
-            ensureCheckpointIfNeeded(&state.threads[index])
+            if state.threads[index].source == .task {
+                ensureCheckpointIfNeeded(&state.threads[index])
+            }
         }
     }
 }
