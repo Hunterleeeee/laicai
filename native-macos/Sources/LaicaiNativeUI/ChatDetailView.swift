@@ -10,6 +10,7 @@ struct ChatDetailView: View {
     @Binding var showSidebar: Bool
     @Binding var showWorkbench: Bool
     @ObservedObject private var skillRegistry = SkillRegistry.shared
+    @ObservedObject private var projectManager = ProjectManager.shared
 
     @State private var composerFocused = false
     @State private var gaugeTokens: Int = 0
@@ -398,7 +399,7 @@ struct ChatDetailView: View {
                 y: composerFocused ? 4 : 2
             )
 
-            if store.state.activeConnector == nil || store.state.isGenerating {
+            if store.state.activeConnector == nil || store.state.isGenerating || currentScopeLabel != nil {
                 composerStatusBar
                     .padding(.top, AppSpace.sm)
             }
@@ -439,7 +440,12 @@ struct ChatDetailView: View {
                     composerChip(icon: "exclamationmark.triangle", text: "未连接模型", tone: .warning)
                 }
                 if store.state.isGenerating {
-                    composerChip(icon: "sparkles", text: "处理中", tone: .active)
+                    composerChip(icon: "plus.bubble", text: "当前输入会追加到正在运行的任务", tone: .active)
+                    if let thread = store.state.selectedThread {
+                        composerChip(icon: "target", text: TextHelper.compactTitle(thread.title), tone: .neutral)
+                    }
+                } else if let scope = currentScopeLabel {
+                    composerChip(icon: currentScopeIcon, text: scope, tone: .neutral)
                 }
             }
             .padding(.vertical, 1)
@@ -768,7 +774,7 @@ struct ChatDetailView: View {
     private var sendButton: some View {
         Button {
             if store.state.isGenerating {
-                store.stopGenerating()
+                store.submitFollowUp()
             } else {
                 store.sendDraft()
             }
@@ -777,16 +783,16 @@ struct ChatDetailView: View {
                 if store.state.isGenerating {
                     ZStack {
                         Circle()
-                            .fill(Semantic.error.opacity(0.20))
+                            .fill(hasPendingFollowUp ? Brand.primary.opacity(0.22) : SurfaceGrade.elevated)
                             .frame(width: 30, height: 30)
                             .overlay(
-                                Circle().strokeBorder(Semantic.error.opacity(0.40), lineWidth: 1)
+                                Circle().strokeBorder(hasPendingFollowUp ? Brand.primary.opacity(0.40) : SurfaceGrade.border.opacity(0.35), lineWidth: 1)
                             )
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Semantic.error)
+                        Image(systemName: "plus.bubble.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(hasPendingFollowUp ? Brand.primaryLight : TextGrade.ghost)
                     }
-                    .shadow(color: Semantic.error.opacity(0.25), radius: 6)
+                    .shadow(color: hasPendingFollowUp ? Brand.primary.opacity(0.25) : .clear, radius: 6)
                 } else {
                     ZStack {
                         Circle()
@@ -806,8 +812,8 @@ struct ChatDetailView: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(!store.state.isGenerating && !canSend)
-        .help(store.state.isGenerating ? "停止生成" : (canSend ? "发送 (↵)" : "输入内容后发送"))
+        .disabled(store.state.isGenerating ? !hasPendingFollowUp : !canSend)
+        .help(store.state.isGenerating ? (hasPendingFollowUp ? "追加指令 (↵)" : "输入要追加的指令") : (canSend ? "发送 (↵)" : "输入内容后发送"))
     }
 
     private var canSend: Bool {
@@ -848,6 +854,7 @@ struct ChatDetailView: View {
     private var composerPlaceholder: String {
         if store.state.activeConnector == nil { return "先连接模型…" }
         let base = "输入问题或目标…"
+        if store.state.isGenerating { return "追加指令到当前任务，不会新建会话…" }
         if let task = store.state.selectedTask {
             switch task.status {
             case .cancelled: return "继续处理，或输入新的处理方式…"
@@ -953,6 +960,22 @@ struct ChatDetailView: View {
             return task.status == .running ? "执行中" : task.status.label
         }
         return store.state.selectedSession == nil ? "新会话" : "会话"
+    }
+
+    private var currentScopeLabel: String? {
+        if let projectID = store.state.selectedThread?.projectID,
+           let project = projectManager.projects.first(where: { $0.id == projectID }) {
+            return "项目：\(project.name)"
+        }
+        if store.state.selectedThread?.source == .session { return "普通会话" }
+        if store.state.selectedThread?.source == .task { return "任务线程" }
+        return nil
+    }
+
+    private var currentScopeIcon: String {
+        if store.state.selectedThread?.projectID != nil { return "folder" }
+        if store.state.selectedThread?.source == .task { return "hammer" }
+        return "text.bubble"
     }
 
 }

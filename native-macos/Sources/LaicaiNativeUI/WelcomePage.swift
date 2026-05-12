@@ -9,14 +9,13 @@ struct WelcomeView: View {
     @Binding var showingSettings: Bool
 
     private let samplePrompts = [
+        (icon: "photo", text: "生成一张产品介绍图", sub: "自动使用图片模型并给出预览"),
         (icon: "magnifyingglass", text: "帮我审查最近的 git 变更", sub: "自动扫描 diff 并给出改进建议"),
         (icon: "hammer", text: "重构这个项目的错误处理逻辑", sub: "分析代码结构，生成重构方案"),
-        (icon: "doc.text", text: "给核心模块生成文档", sub: "提取类型签名，输出 Markdown 文档"),
-        (icon: "ant", text: "排查并修复最近出现的 bug", sub: "搜索日志和代码，定位根因"),
+        (icon: "doc.text", text: "给核心模块生成文档", sub: "提取类型签名，输出 Markdown 文档")
     ]
 
     @ObservedObject private var projectManager = ProjectManager.shared
-    @State private var orbRotation: Double = 0
 
     // Composer overlay height (input area at bottom)
     private let composerHeight: CGFloat = 120
@@ -40,6 +39,7 @@ struct WelcomeView: View {
                         if store.state.activeConnector == nil {
                             connectPrompt
                         } else {
+                            quickActionGrid(narrow: isNarrow)
                             samplePromptsGrid(narrow: isNarrow)
                         }
 
@@ -61,54 +61,16 @@ struct WelcomeView: View {
 
     private var ambientBackground: some View {
         ZStack {
-            // Orb 1 — blue
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [Brand.primary.opacity(0.20), Brand.primary.opacity(0.0)],
-                        center: .center,
-                        startRadius: 0,
-                        endRadius: 200
-                    )
-                )
-                .frame(width: 400, height: 400)
-                .offset(x: -120, y: -80)
-                .blur(radius: 80)
-                .rotationEffect(.degrees(orbRotation))
-
-            // Orb 2 — purple
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [Brand.purple.opacity(0.15), Brand.purple.opacity(0.0)],
-                        center: .center,
-                        startRadius: 0,
-                        endRadius: 180
-                    )
-                )
-                .frame(width: 350, height: 350)
-                .offset(x: 150, y: 60)
-                .blur(radius: 70)
-                .rotationEffect(.degrees(-orbRotation * 0.7))
-
-            // Orb 3 — teal
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [Brand.teal.opacity(0.10), Brand.teal.opacity(0.0)],
-                        center: .center,
-                        startRadius: 0,
-                        endRadius: 150
-                    )
-                )
-                .frame(width: 300, height: 300)
-                .offset(x: -60, y: 180)
-                .blur(radius: 60)
-                .rotationEffect(.degrees(orbRotation * 0.5))
-        }
-        .onAppear {
-            withAnimation(.linear(duration: 60).repeatForever(autoreverses: false)) {
-                orbRotation = 360
+            SurfaceGrade.base
+            LinearGradient(
+                colors: [SurfaceGrade.panel.opacity(0.35), Color.clear],
+                startPoint: .top,
+                endPoint: .center
+            )
+            VStack(spacing: 0) {
+                Rectangle().fill(SurfaceGrade.divider.opacity(0.18)).frame(height: 1)
+                Spacer()
+                Rectangle().fill(SurfaceGrade.divider.opacity(0.12)).frame(height: 1)
             }
         }
     }
@@ -123,66 +85,20 @@ struct WelcomeView: View {
         return "有什么我能帮你的？"
     }
 
-    @State private var heroGlowPulse = false
-
     private func heroSection(compact: Bool) -> some View {
         let logoSize: CGFloat = compact ? 40 : 52
-        let ringSize: CGFloat = compact ? 58 : 74
-        let glowSize: CGFloat = compact ? 68 : 86
         let titleSize: CGFloat = compact ? 20 : 24
 
-        return VStack(spacing: compact ? 12 : 18) {
-            ZStack {
-                RoundedRectangle(cornerRadius: ringSize * 0.26, style: .continuous)
-                    .strokeBorder(
-                        AngularGradient(
-                            colors: [Brand.primary, Brand.purple, Brand.teal, Brand.primary],
-                            center: .center
-                        ),
-                        lineWidth: 2
-                    )
-                    .frame(width: ringSize, height: ringSize)
-                    .rotationEffect(.degrees(orbRotation * 2))
-                    .opacity(0.5)
-
-                RoundedRectangle(cornerRadius: glowSize * 0.24, style: .continuous)
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Brand.primary.opacity(0.22),
-                                Brand.purple.opacity(0.10),
-                                Color.clear
-                            ],
-                            center: .center,
-                            startRadius: logoSize * 0.2,
-                            endRadius: glowSize * 0.5
-                        )
-                    )
-                    .frame(width: glowSize, height: glowSize)
-                    .scaleEffect(heroGlowPulse ? 1.06 : 0.94)
-                    .onAppear {
-                        withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) {
-                            heroGlowPulse = true
-                        }
-                    }
-
-                BrandLogo(size: logoSize)
-                    .shadow(color: Brand.primary.opacity(0.5), radius: 20, y: 0)
-            }
-            .frame(height: glowSize + 8)
+        return VStack(spacing: compact ? 10 : 14) {
+            BrandLogo(size: logoSize)
+                .shadow(color: Brand.primary.opacity(0.28), radius: 12, y: 0)
 
             VStack(spacing: compact ? 6 : 10) {
                 Text(heroTitle)
                     .font(.system(size: titleSize, weight: .bold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [TextGrade.primary, TextGrade.secondary],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
+                    .foregroundStyle(TextGrade.primary)
 
-                Text("描述你的目标，来财自动决定搜索、分析还是直接动手")
+                Text("选择一个入口，或直接在下方输入目标")
                     .font(.system(size: compact ? 11 : 13, weight: .regular))
                     .foregroundStyle(TextGrade.muted)
                     .multilineTextAlignment(.center)
@@ -227,6 +143,50 @@ struct WelcomeView: View {
     }
 
     // MARK: - Sample Prompts
+
+    private func quickActionGrid(narrow: Bool) -> some View {
+        let columns = narrow
+            ? [GridItem(.flexible())]
+            : [GridItem(.flexible()), GridItem(.flexible())]
+        return LazyVGrid(columns: columns, spacing: AppSpace.sm) {
+            QuickStartCard(
+                icon: "plus.message",
+                title: "普通新会话",
+                subtitle: "从干净上下文开始",
+                tint: Brand.primary
+            ) {
+                store.newSession()
+            }
+            QuickStartCard(
+                icon: "photo.on.rectangle",
+                title: "生成图片",
+                subtitle: "自动走 image-2 模型",
+                tint: Semantic.success
+            ) {
+                store.updateDraft("生成一张")
+            }
+            QuickStartCard(
+                icon: "folder.badge.gearshape",
+                title: projectManager.activeProject?.name ?? "检查项目",
+                subtitle: "审查当前工作区问题",
+                tint: Semantic.warning
+            ) {
+                store.updateDraft("全面看一下当前项目还有哪些问题，并直接修复")
+            }
+            QuickStartCard(
+                icon: "arrow.turn.down.right",
+                title: "继续最近任务",
+                subtitle: "回到最近的任务线程",
+                tint: Brand.teal
+            ) {
+                if let task = store.state.threads.filter({ $0.source == .task }).sorted(by: { $0.updatedAt > $1.updatedAt }).first {
+                    store.selectTask(id: task.id)
+                } else {
+                    store.updateDraft("继续处理最近的问题")
+                }
+            }
+        }
+    }
 
     private func samplePromptsGrid(narrow: Bool) -> some View {
         let columns = narrow
@@ -284,6 +244,51 @@ struct WelcomeView: View {
             KeyHint(keys: "⇧↵", desc: "换行")
             KeyHint(keys: "⌘N", desc: "新会话")
             KeyHint(keys: "⌘K", desc: "命令面板")
+        }
+    }
+}
+
+struct QuickStartCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let tint: Color
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: AppSpace.md) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 30, height: 30)
+                    .background(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).fill(tint.opacity(0.10)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(AppFont.bodyMedium)
+                        .foregroundStyle(TextGrade.primary)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(AppFont.tiny)
+                        .foregroundStyle(TextGrade.ghost)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(AppSpace.md)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .fill(isHovered ? SurfaceGrade.hover : SurfaceGrade.card.opacity(0.58))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .strokeBorder(isHovered ? tint.opacity(0.35) : SurfaceGrade.border.opacity(0.18), lineWidth: 0.6)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(AppAnimation.quick) { isHovered = hovering }
         }
     }
 }

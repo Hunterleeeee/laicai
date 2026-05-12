@@ -7,8 +7,8 @@ enum RelativeTimeFormatter {
         let now = Date()
         let diff = now.timeIntervalSince(date)
 
-        // 未来时间
-        if diff < 0 { return formatDate(date) }
+        // 未来时间通常来自系统时间漂移或异常持久化，UI 上按最近活动处理。
+        if diff < 0 { return "刚刚" }
 
         // 刚刚（< 30秒）
         if diff < 30 { return "刚刚" }

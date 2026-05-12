@@ -148,6 +148,38 @@ struct SidebarView: View {
 
     private var expandedList: some View {
         List {
+            Section {
+                Button {
+                    store.newSession()
+                } label: {
+                    HStack(spacing: AppSpace.sm) {
+                        Image(systemName: "plus.message")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Brand.primary)
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("普通新会话")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(TextGrade.primary)
+                            Text("不会归入任何项目")
+                                .font(AppFont.tiny)
+                                .foregroundStyle(TextGrade.ghost)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: AppSpace.xs, bottom: 3, trailing: AppSpace.xs))
+            } header: {
+                Text("开始")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(TextGrade.ghost)
+                    .textCase(.uppercase)
+            }
+
             // Section: 项目 (projects with nested threads)
             if !projectManager.projects.isEmpty {
                 Section {
@@ -257,10 +289,18 @@ struct SidebarView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(isActive ? Brand.primary : TextGrade.muted)
 
-                Text(project.name)
-                    .font(.system(size: 12, weight: isActive ? .semibold : .medium))
-                    .foregroundStyle(isActive ? TextGrade.primary : TextGrade.secondary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(project.name)
+                        .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+                        .foregroundStyle(isActive ? TextGrade.primary : TextGrade.secondary)
+                        .lineLimit(1)
+                    if isActive {
+                        Text("当前项目")
+                            .font(AppFont.tiny)
+                            .foregroundStyle(Brand.primary.opacity(0.8))
+                            .lineLimit(1)
+                    }
+                }
 
                 Spacer(minLength: 0)
 
@@ -418,6 +458,11 @@ struct SidebarView: View {
         case .session:
             Button { store.pinSession(id: item.id) } label: {
                 Label(isPinned ? "取消置顶" : "置顶", systemImage: isPinned ? "pin.slash" : "pin")
+            }
+            if item.projectID != nil {
+                Text("项目会话")
+            } else {
+                Text("普通会话")
             }
             Button { renamingSessionID = item.id; renameText = title } label: {
                 Label("重命名", systemImage: "pencil")

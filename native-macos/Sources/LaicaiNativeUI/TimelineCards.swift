@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
@@ -565,6 +566,7 @@ struct ToolResultCard: View {
 }
 
 struct GeneratedImagePreviewCard: View {
+    @EnvironmentObject private var store: AppStore
     let path: String
     let caption: String
 
@@ -576,8 +578,60 @@ struct GeneratedImagePreviewCard: View {
         url.lastPathComponent
     }
 
+    private var fileSizeLabel: String {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? NSNumber else { return "" }
+        let value = size.doubleValue
+        if value >= 1_048_576 { return String(format: "%.1f MB", value / 1_048_576) }
+        if value >= 1024 { return String(format: "%.0f KB", value / 1024) }
+        return "\(Int(value)) B"
+    }
+
+    private var imageDimensionsLabel: String {
+        guard let image = NSImage(contentsOfFile: path) else { return "" }
+        return "\(Int(image.size.width)) x \(Int(image.size.height))"
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.sm) {
+                Image(systemName: "photo.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Semantic.success)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("图片已生成")
+                        .font(AppFont.captionMedium)
+                        .foregroundStyle(TextGrade.primary)
+                    HStack(spacing: AppSpace.sm) {
+                        Text(filename)
+                            .font(AppFont.codeSmall)
+                            .foregroundStyle(TextGrade.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if !imageDimensionsLabel.isEmpty {
+                            Text(imageDimensionsLabel)
+                        }
+                        if !fileSizeLabel.isEmpty {
+                            Text(fileSizeLabel)
+                        }
+                    }
+                    .font(AppFont.tiny)
+                    .foregroundStyle(TextGrade.ghost)
+                }
+
+                Spacer(minLength: AppSpace.sm)
+
+                imageAction(icon: "arrow.clockwise", label: "重新生成") {
+                    store.retryLastMessage()
+                }
+                imageAction(icon: "doc.on.doc", label: "复制路径") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(path, forType: .string)
+                    ToastCenter.shared.success("已复制图片路径")
+                }
+            }
+
             if let image = NSImage(contentsOfFile: path) {
                 Button {
                     NSWorkspace.shared.open(url)
@@ -585,69 +639,85 @@ struct GeneratedImagePreviewCard: View {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: 520, maxHeight: 360)
+                        .frame(maxWidth: 640, maxHeight: 420)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                                .strokeBorder(SurfaceGrade.border.opacity(0.25), lineWidth: 0.5)
+                        )
                 }
                 .buttonStyle(.plain)
                 .help("打开图片")
             } else {
-                Text("图片文件暂时无法预览")
-                    .font(AppFont.codeSmall)
-                    .foregroundStyle(Semantic.warning)
-                    .padding(AppSpace.sm)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous).fill(SurfaceGrade.sunken.opacity(0.34)))
+                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                    Text("图片文件暂时无法预览")
+                        .font(AppFont.captionMedium)
+                        .foregroundStyle(Semantic.warning)
+                    Text(path)
+                        .font(AppFont.codeSmall)
+                        .foregroundStyle(TextGrade.ghost)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                .padding(AppSpace.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).fill(SurfaceGrade.sunken.opacity(0.42)))
             }
 
             HStack(spacing: AppSpace.sm) {
-                Image(systemName: "photo")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Semantic.success)
-
-                Text(filename)
-                    .font(AppFont.codeSmall)
-                    .foregroundStyle(TextGrade.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                imageAction(icon: "arrow.up.right.square", label: "打开") {
+                    NSWorkspace.shared.open(url)
+                }
+                imageAction(icon: "folder", label: "Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
 
                 Spacer(minLength: AppSpace.sm)
 
-                Button {
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    Image(systemName: "arrow.up.right.square")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Brand.primary)
-                .help("打开图片")
-
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                } label: {
-                    Image(systemName: "folder")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(TextGrade.muted)
-                .help("在 Finder 中显示")
+                Text(path)
+                    .font(AppFont.codeSmall)
+                    .foregroundStyle(TextGrade.ghost)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
             }
 
             Text(caption)
                 .font(AppFont.tiny)
                 .foregroundStyle(TextGrade.ghost)
-                .lineLimit(2)
+                .lineLimit(3)
                 .textSelection(.enabled)
         }
-        .padding(AppSpace.sm)
-        .frame(maxWidth: 560, alignment: .leading)
+        .padding(AppSpace.md)
+        .frame(maxWidth: 680, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .fill(SurfaceGrade.sunken.opacity(0.34))
+            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                .fill(SurfaceGrade.card.opacity(0.68))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .strokeBorder(SurfaceGrade.border.opacity(0.35), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                .strokeBorder(Semantic.success.opacity(0.22), lineWidth: 0.8)
         )
+    }
+
+    private func imageAction(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(label)
+                    .font(AppFont.tiny)
+            }
+            .foregroundStyle(TextGrade.secondary)
+            .padding(.horizontal, AppSpace.sm)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(SurfaceGrade.elevated.opacity(0.72)))
+            .overlay(Capsule().strokeBorder(SurfaceGrade.border.opacity(0.28), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .help(label)
     }
 }
 
@@ -1124,43 +1194,48 @@ struct FailedCard: View {
         HStack(alignment: .top, spacing: AppSpace.sm) {
             AvatarBadge(icon: "exclamationmark.triangle.fill", color: Semantic.error)
 
-            VStack(alignment: .leading, spacing: AppSpace.xs) {
-                Text(failureTitle)
-                    .font(AppFont.captionMedium)
-                    .foregroundStyle(Semantic.error)
+            VStack(alignment: .leading, spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.sm) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(failureTitle)
+                            .font(AppFont.captionMedium)
+                            .foregroundStyle(Semantic.error)
+                        Text(failureHint)
+                            .font(AppFont.tiny)
+                            .foregroundStyle(TextGrade.ghost)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: AppSpace.sm)
+                    Text(failureKindLabel)
+                        .font(AppFont.tiny)
+                        .foregroundStyle(Semantic.error)
+                        .padding(.horizontal, AppSpace.sm)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Semantic.errorMuted.opacity(0.55)))
+                }
 
                 Text(step.text)
                     .font(AppFont.body)
                     .foregroundStyle(TextGrade.secondary)
-                    .lineLimit(4)
+                    .lineLimit(6)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
 
                 HStack(spacing: AppSpace.sm) {
-                    Button {
+                    failureAction(icon: "arrow.clockwise", label: "重试", isPrimary: true) {
                         store.retryLastMessage()
-                    } label: {
-                        Label("重试一次", systemImage: "arrow.clockwise")
-                            .font(AppFont.captionMedium)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, AppSpace.md)
-                            .padding(.vertical, AppSpace.sm)
-                            .background(Capsule().fill(Brand.primary))
                     }
-                    .buttonStyle(.plain)
 
-                    if step.text.contains("鉴权") || step.text.contains("401") || step.text.contains("API key") || step.text.contains("超时") {
-                        Button {
+                    if shouldOpenSettings {
+                        failureAction(icon: "gearshape", label: settingsActionTitle) {
                             NotificationCenter.default.post(name: .init("laicaiOpenSettings"), object: nil)
-                        } label: {
-                            Label(step.text.contains("超时") ? "调整超时" : "检查模型配置", systemImage: "gearshape")
-                                .font(AppFont.captionMedium)
-                                .foregroundStyle(Semantic.error)
-                                .padding(.horizontal, AppSpace.md)
-                                .padding(.vertical, AppSpace.sm)
-                                .background(Capsule().fill(Semantic.errorMuted.opacity(0.50)))
                         }
-                        .buttonStyle(.plain)
+                    }
+
+                    failureAction(icon: "doc.on.doc", label: "复制诊断") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(step.text, forType: .string)
+                        ToastCenter.shared.success("已复制诊断")
                     }
                 }
             }
@@ -1181,9 +1256,69 @@ struct FailedCard: View {
     }
 
     private var failureTitle: String {
+        if isImageFailure { return "图片生成失败" }
+        if isNetworkFailure { return "网络连接中断" }
         if step.text.contains("超时") { return "模型请求超时" }
-        if step.text.contains("鉴权") || step.text.contains("401") || step.text.contains("API key") { return "模型鉴权失败" }
+        if isAuthFailure { return "模型鉴权失败" }
+        if isWorkspaceFailure { return "工作区配置异常" }
         return "失败，需处理"
+    }
+
+    private var failureHint: String {
+        if isImageFailure { return "优先检查图片模型、网关连接和返回内容。" }
+        if isNetworkFailure { return "请求已发出但连接中途断开，可以直接重试或检查代理/网关。" }
+        if isAuthFailure { return "API Key、模型名或兼容接口配置可能不正确。" }
+        if isWorkspaceFailure { return "工作区目录为空、过宽或无权限。" }
+        if step.text.contains("超时") { return "任务可能仍在服务端排队，可以重试或换更快模型。" }
+        return "已保留诊断内容，可复制后继续排查。"
+    }
+
+    private var failureKindLabel: String {
+        if isImageFailure { return "图片" }
+        if isNetworkFailure { return "网络" }
+        if isAuthFailure { return "鉴权" }
+        if isWorkspaceFailure { return "工作区" }
+        if step.text.contains("超时") { return "超时" }
+        return "错误"
+    }
+
+    private var shouldOpenSettings: Bool {
+        isAuthFailure || isImageFailure || isWorkspaceFailure || step.text.contains("超时")
+    }
+
+    private var settingsActionTitle: String {
+        if isWorkspaceFailure { return "检查工作区" }
+        if step.text.contains("超时") { return "调整模型" }
+        return "检查配置"
+    }
+
+    private var isImageFailure: Bool {
+        step.text.contains("图片") || step.text.localizedCaseInsensitiveContains("image.generate") || step.text.localizedCaseInsensitiveContains("gpt-image")
+    }
+
+    private var isNetworkFailure: Bool {
+        step.text.contains("网络") || step.text.contains("连接") || step.text.localizedCaseInsensitiveContains("networkConnectionLost") || step.text.localizedCaseInsensitiveContains("timed out")
+    }
+
+    private var isAuthFailure: Bool {
+        step.text.contains("鉴权") || step.text.contains("401") || step.text.localizedCaseInsensitiveContains("API key") || step.text.localizedCaseInsensitiveContains("unauthorized")
+    }
+
+    private var isWorkspaceFailure: Bool {
+        step.text.contains("工作区") || step.text.localizedCaseInsensitiveContains("workspace")
+    }
+
+    private func failureAction(icon: String, label: String, isPrimary: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(label, systemImage: icon)
+                .font(AppFont.captionMedium)
+                .foregroundStyle(isPrimary ? Color.white : TextGrade.secondary)
+                .padding(.horizontal, AppSpace.md)
+                .padding(.vertical, AppSpace.sm)
+                .background(Capsule().fill(isPrimary ? Brand.primary : SurfaceGrade.elevated.opacity(0.62)))
+                .overlay(Capsule().strokeBorder(isPrimary ? Color.clear : SurfaceGrade.border.opacity(0.28), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
     }
 }
 
