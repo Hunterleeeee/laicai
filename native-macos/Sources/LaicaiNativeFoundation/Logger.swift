@@ -31,6 +31,14 @@ public enum NetworkDefaults {
         URLSession(configuration: .ephemeral)
     }
 
+    public static var imageSession: URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = imageRequest
+        configuration.timeoutIntervalForResource = imageRequest + 30
+        configuration.waitsForConnectivity = true
+        return URLSession(configuration: configuration)
+    }
+
     public static var webSocketSession: URLSession {
         URLSession(configuration: .default)
     }

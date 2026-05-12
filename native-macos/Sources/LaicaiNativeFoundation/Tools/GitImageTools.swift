@@ -301,7 +301,7 @@ public struct GitTool: LaicaiTool {
 public struct ComfyUITool: LaicaiTool {
     private let session: URLSession
 
-    public init(session: URLSession = NetworkDefaults.ephemeralSession) {
+    public init(session: URLSession = NetworkDefaults.imageSession) {
         self.session = session
     }
 
@@ -485,7 +485,7 @@ public struct ComfyUITool: LaicaiTool {
         ))
         request.timeoutInterval = NetworkDefaults.imageRequest
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performImagesAPIRequest(request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(status) else {
             let body = String(data: data, encoding: .utf8) ?? ""
@@ -553,6 +553,16 @@ public struct ComfyUITool: LaicaiTool {
         return width > height ? "1536x1024" : "1024x1536"
     }
 
+    private func performImagesAPIRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        do {
+            return try await session.data(for: request)
+        } catch {
+            guard Self.shouldRetryImagesAPIRequest(after: error) else { throw error }
+            try await Task.sleep(for: .seconds(2))
+            return try await session.data(for: request)
+        }
+    }
+
     private static func saveImageData(_ data: Data, outputDir: String, prefix: String) throws -> String {
         let root = outputDir.trimmingCharacters(in: .whitespacesAndNewlines)
         let directory = root.isEmpty ? FileManager.default.temporaryDirectory.path : root
@@ -586,9 +596,30 @@ public struct ComfyUITool: LaicaiTool {
     private static func friendlyImageError(_ error: Error) -> String {
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorTimedOut {
-            return "图片服务响应超时。已把图片生成等待时间延长到 180 秒，请重试；如果仍超时，可能是上游网关生成排队太久或暂时不可用。"
+            return "图片服务响应超时。已等待 \(Int(NetworkDefaults.imageRequest)) 秒并自动重试；如果仍失败，通常是上游图片网关排队太久或暂时不可用。"
+        }
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorNetworkConnectionLost {
+            return "图片服务连接中途断开。请求已正确发送到图片接口，但上游网关在生成过程中断开了连接；来财已自动重试一次，仍失败时请稍后重试或更换图片网关。"
+        }
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCannotConnectToHost {
+            return "无法连接图片服务。请检查图片连接器端点、代理或当前网络后重试。"
+        }
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorNotConnectedToInternet {
+            return "当前网络不可用，无法连接图片服务。"
         }
         return error.localizedDescription
+    }
+
+    private static func shouldRetryImagesAPIRequest(after error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return false }
+        return [
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorTimedOut,
+            NSURLErrorCannotConnectToHost,
+            NSURLErrorCannotFindHost,
+            NSURLErrorDNSLookupFailed
+        ].contains(nsError.code)
     }
 
     private func generateImage(

@@ -16,6 +16,7 @@ extension LaicaiNativeFoundationTestCase {
             )!
             return (response, body)
         }
+        MockURLProtocol.errorProvider = nil
         return URLSession(configuration: configuration)
     }
 
@@ -25,12 +26,24 @@ extension LaicaiNativeFoundationTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
         MockURLProtocol.responseProvider = responder
+        MockURLProtocol.errorProvider = nil
+        return URLSession(configuration: configuration)
+    }
+
+    func makeStubbedSession(
+        responder: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        MockURLProtocol.responseProvider = nil
+        MockURLProtocol.errorProvider = responder
         return URLSession(configuration: configuration)
     }
 }
 
 final class MockURLProtocol: URLProtocol {
     static var responseProvider: ((URLRequest) -> (HTTPURLResponse, Data))?
+    static var errorProvider: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -41,6 +54,17 @@ final class MockURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
+        if let provider = Self.errorProvider {
+            do {
+                let (response, data) = try provider(request)
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+            } catch {
+                client?.urlProtocol(self, didFailWithError: error)
+            }
+            return
+        }
         guard let provider = Self.responseProvider else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
