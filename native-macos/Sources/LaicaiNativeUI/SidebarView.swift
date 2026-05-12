@@ -157,14 +157,9 @@ struct SidebarView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Brand.primary)
                             .frame(width: 18)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("普通新会话")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(TextGrade.primary)
-                            Text("不会归入任何项目")
-                                .font(AppFont.tiny)
-                                .foregroundStyle(TextGrade.ghost)
-                        }
+                        Text("新会话")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(TextGrade.primary)
                         Spacer(minLength: 0)
                     }
                     .padding(.vertical, 4)
@@ -459,11 +454,6 @@ struct SidebarView: View {
             Button { store.pinSession(id: item.id) } label: {
                 Label(isPinned ? "取消置顶" : "置顶", systemImage: isPinned ? "pin.slash" : "pin")
             }
-            if item.projectID != nil {
-                Text("项目会话")
-            } else {
-                Text("普通会话")
-            }
             Button { renamingSessionID = item.id; renameText = title } label: {
                 Label("重命名", systemImage: "pencil")
             }
@@ -481,10 +471,19 @@ struct SidebarView: View {
             Divider()
             Button { store.clearSessionTurns(id: item.id) } label: { Label("清空", systemImage: "eraser") }.disabled(!hasContent)
             Button { store.archiveThread(id: item.id) } label: { Label(isArchived ? "取消归档" : "归档", systemImage: "archivebox") }
-            Button(role: .destructive) { deletingSessionID = item.id } label: { Label("删除", systemImage: "trash") }
+            Button { deletingSessionID = item.id } label: { Label("删除", systemImage: "trash") }
         case .task:
-            Button { store.prepareTaskContinuation(id: item.id) } label: { Label("继续处理", systemImage: "arrow.turn.down.right") }
+            Button { store.pinSession(id: item.id) } label: {
+                Label(isPinned ? "取消置顶" : "置顶", systemImage: isPinned ? "pin.slash" : "pin")
+            }
+            Button { renamingSessionID = item.id; renameText = title } label: {
+                Label("重命名", systemImage: "pencil")
+            }
             Divider()
+            Button { store.prepareTaskContinuation(id: item.id) } label: { Label("继续处理", systemImage: "arrow.turn.down.right") }
+            Button { store.cloneThread(id: item.id) } label: {
+                Label("克隆", systemImage: "doc.on.doc")
+            }
             Button {
                 if let json = store.exportTask(id: item.id) {
                     NSPasteboard.general.clearContents()
@@ -493,8 +492,9 @@ struct SidebarView: View {
                 }
             } label: { Label("导出", systemImage: "arrow.up.doc") }
             Divider()
+            Button { store.clearSessionTurns(id: item.id) } label: { Label("清空", systemImage: "eraser") }.disabled(!hasContent)
             Button { store.archiveThread(id: item.id) } label: { Label(isArchived ? "取消归档" : "归档", systemImage: "archivebox") }
-            Button(role: .destructive) { deletingTaskID = item.id } label: { Label("删除", systemImage: "trash") }
+            Button { deletingTaskID = item.id } label: { Label("删除", systemImage: "trash") }
         }
     }
 
@@ -634,10 +634,6 @@ private struct ExpandedThreadRow: View {
                 if let label = cachedTokenLabel {
                     Text(label)
                         .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(TextGrade.ghost)
-                } else {
-                    Text(item.shortID)
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(TextGrade.ghost)
                 }
                 Text(RelativeTimeFormatter.string(for: item.updatedAt))

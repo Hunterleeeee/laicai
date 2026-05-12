@@ -376,7 +376,7 @@ public struct ComfyUITool: LaicaiTool {
         let modelName = context.comfyUIModelName ?? ""
         guard await isServerReachable(serverURL) else {
             return ToolResult(
-                output: "没有可用的图片生成后端。请选择 gpt-image-2 / DALL-E 等图片模型连接器，或启动 ComfyUI（默认地址 \(serverURL)）后再生成图片。",
+                output: "没有可用的图片生成服务。请选择图片模型连接器，或启动 ComfyUI（默认地址 \(serverURL)）后再生成图片。",
                 success: false,
                 error: "image_backend_missing"
             )

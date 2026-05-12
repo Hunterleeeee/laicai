@@ -9,7 +9,7 @@ struct WelcomeView: View {
     @Binding var showingSettings: Bool
 
     private let samplePrompts = [
-        (icon: "photo", text: "生成一张产品介绍图", sub: "自动使用图片模型并给出预览"),
+        (icon: "photo", text: "生成一张产品介绍图", sub: "适合海报、封面、介绍图"),
         (icon: "magnifyingglass", text: "帮我审查最近的 git 变更", sub: "自动扫描 diff 并给出改进建议"),
         (icon: "hammer", text: "重构这个项目的错误处理逻辑", sub: "分析代码结构，生成重构方案"),
         (icon: "doc.text", text: "给核心模块生成文档", sub: "提取类型签名，输出 Markdown 文档")
@@ -151,8 +151,8 @@ struct WelcomeView: View {
         return LazyVGrid(columns: columns, spacing: AppSpace.sm) {
             QuickStartCard(
                 icon: "plus.message",
-                title: "普通新会话",
-                subtitle: "从干净上下文开始",
+                title: "新会话",
+                subtitle: "开始一个新话题",
                 tint: Brand.primary
             ) {
                 store.newSession()
@@ -160,15 +160,15 @@ struct WelcomeView: View {
             QuickStartCard(
                 icon: "photo.on.rectangle",
                 title: "生成图片",
-                subtitle: "自动走 image-2 模型",
+                subtitle: "海报、封面、产品图",
                 tint: Semantic.success
             ) {
                 store.updateDraft("生成一张")
             }
             QuickStartCard(
                 icon: "folder.badge.gearshape",
-                title: projectManager.activeProject?.name ?? "检查项目",
-                subtitle: "审查当前工作区问题",
+                title: projectManager.activeProject?.name ?? "看项目",
+                subtitle: "检查问题并继续完善",
                 tint: Semantic.warning
             ) {
                 store.updateDraft("全面看一下当前项目还有哪些问题，并直接修复")
@@ -176,7 +176,7 @@ struct WelcomeView: View {
             QuickStartCard(
                 icon: "arrow.turn.down.right",
                 title: "继续最近任务",
-                subtitle: "回到最近的任务线程",
+                subtitle: "接着上次处理",
                 tint: Brand.teal
             ) {
                 if let task = store.state.threads.filter({ $0.source == .task }).sorted(by: { $0.updatedAt > $1.updatedAt }).first {

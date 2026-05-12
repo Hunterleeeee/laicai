@@ -119,6 +119,30 @@ extension AppStore {
         notify("已克隆会话", style: .success)
     }
 
+    public func cloneThread(id: UUID) {
+        guard let thread = state.threads.first(where: { $0.id == id }) else { return }
+        let cloned = Thread(
+            title: thread.title + " 副本",
+            preview: thread.preview,
+            status: thread.status == .running ? .cancelled : thread.status,
+            steps: thread.steps,
+            connectorID: thread.connectorID,
+            workflowName: thread.workflowName,
+            context: thread.context,
+            modelName: thread.modelName,
+            category: thread.category,
+            isPinned: false,
+            summaryCache: thread.summaryCache,
+            multiAgentPlan: thread.multiAgentPlan,
+            source: thread.source,
+            projectID: thread.projectID
+        )
+        state.threads.insert(cloned, at: 0)
+        state.selectThread(id: cloned.id)
+        persistThreads()
+        notify("已克隆", style: .success)
+    }
+
     public func forkThread(id: UUID, fromStepID: UUID) {
         guard let thread = state.threads.first(where: { $0.id == id }) else { return }
         guard let stepIndex = thread.steps.firstIndex(where: { $0.id == fromStepID }) else { return }

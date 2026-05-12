@@ -49,13 +49,6 @@ struct ChatDetailView: View {
                                 .fill(task.status.color)
                                 .frame(width: 6, height: 6)
                         }
-                        Text(thread.shortID)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(TextGrade.ghost)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(SurfaceGrade.card.opacity(0.6))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
                         Text(TextHelper.compactTitle(thread.title))
                             .font(AppFont.bodyMedium)
                             .foregroundStyle(thread.source == .task ? TextGrade.primary : TextGrade.secondary)
@@ -440,7 +433,7 @@ struct ChatDetailView: View {
                     composerChip(icon: "exclamationmark.triangle", text: "未连接模型", tone: .warning)
                 }
                 if store.state.isGenerating {
-                    composerChip(icon: "plus.bubble", text: "当前输入会追加到正在运行的任务", tone: .active)
+                    composerChip(icon: "plus.bubble", text: "追加指令", tone: .active)
                     if let thread = store.state.selectedThread {
                         composerChip(icon: "target", text: TextHelper.compactTitle(thread.title), tone: .neutral)
                     }
@@ -854,7 +847,7 @@ struct ChatDetailView: View {
     private var composerPlaceholder: String {
         if store.state.activeConnector == nil { return "先连接模型…" }
         let base = "输入问题或目标…"
-        if store.state.isGenerating { return "追加指令到当前任务，不会新建会话…" }
+        if store.state.isGenerating { return "补充一句，让它调整方向…" }
         if let task = store.state.selectedTask {
             switch task.status {
             case .cancelled: return "继续处理，或输入新的处理方式…"
@@ -967,8 +960,8 @@ struct ChatDetailView: View {
            let project = projectManager.projects.first(where: { $0.id == projectID }) {
             return "项目：\(project.name)"
         }
-        if store.state.selectedThread?.source == .session { return "普通会话" }
-        if store.state.selectedThread?.source == .task { return "任务线程" }
+        if store.state.selectedThread?.source == .session { return "会话" }
+        if store.state.selectedThread?.source == .task { return "任务" }
         return nil
     }
 

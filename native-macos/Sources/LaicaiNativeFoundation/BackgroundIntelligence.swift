@@ -101,6 +101,7 @@ extension Notification.Name {
     public static let laicaiGlobalSearch = Notification.Name("laicai.globalSearch")
     public static let laicaiPanelToggled = Notification.Name("laicai.panelToggled")
     public static let laicaiScrollToBottom = Notification.Name("laicai.scrollToBottom")
+    public static let laicaiOpenSettings = Notification.Name("laicai.openSettings")
 }
 
 // MARK: - Global Shortcut Manager

@@ -32,7 +32,7 @@ extension AppStore {
             .filter { $0.isFailure }
             .prefix(5)
             .map { "  - \($0.toolName ?? "?")：\(String($0.text.prefix(80)))" }
-        var summary = "继续策略：沿用已有结果，从未完成处继续。\n\n"
+        var summary = "继续处理：沿用已有结果，从未完成处继续。\n\n"
         summary += "## 已完成操作\n"
         if !readFiles.isEmpty {
             summary += "- 已读取 \(Set(readFiles).count) 个文件：\(Array(Set(readFiles)).sorted().prefix(10).joined(separator: "、"))\n"

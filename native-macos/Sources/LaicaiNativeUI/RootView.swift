@@ -81,6 +81,9 @@ public struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .laicaiToggleCommandPalette)) { _ in
             withAnimation(AppAnimation.spring) { showingCommandPalette.toggle() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .laicaiOpenSettings)) { _ in
+            showingSettings = true
+        }
         .onChange(of: store.state.notice?.id) { _ in
             guard let notice = store.state.notice else { return }
             switch notice.style {

@@ -66,7 +66,7 @@ struct TaskStepCard: View {
                     EmptyView()
                 }
             } else {
-                ToolResultCard(step: step)
+                ToolResultCard(step: step, taskID: taskID)
             }
         case .textOutput: TextOutputCard(text: step.text, metrics: step.metrics, isRunning: isRunning && step.metrics == nil)
         case .error:
@@ -126,7 +126,7 @@ struct ContinuationStrategyBar: View {
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("继续策略：沿用已读结果，不重复搜索")
+                Text("接着上次进度继续")
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.muted)
                     .lineLimit(1)
@@ -316,8 +316,8 @@ struct ThinkingCard: View {
     private var reasoningTokenCount: String {
         guard let r = reasoningContent else { return "0" }
         let count = r.count / 4  // rough token estimate
-        if count > 1000 { return "\(count / 1000)k tokens" }
-        return "\(count) tokens"
+        if count > 1000 { return "\(count / 1000)k" }
+        return "\(count)"
     }
 }
 
@@ -417,9 +417,9 @@ struct ToolCallCard: View {
     private var toolTitle: String {
         if let name = step.toolName, !name.isEmpty {
             let display = Self.friendlyToolName(name)
-            return step.isFailure ? "\(display) 失败" : "调用 \(display)"
+            return step.isFailure ? "\(display)失败" : display
         }
-        return step.isFailure ? "工具失败" : "调用工具"
+        return step.isFailure ? "执行失败" : "处理中"
     }
 
     static func friendlyToolName(_ name: String) -> String {
@@ -477,44 +477,48 @@ struct ToolCallCard: View {
 struct ToolResultCard: View {
     @EnvironmentObject private var store: AppStore
     let step: TaskStep
+    let taskID: UUID
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
-            ProgressGlyph(icon: step.isFailure ? "xmark" : "checkmark", color: step.isFailure ? Semantic.error : Semantic.success)
+        if step.isFailure && !isTerminalOutput {
+            FailedCard(step: step, taskID: taskID)
+        } else {
+            HStack(alignment: .top, spacing: AppSpace.sm) {
+                ProgressGlyph(icon: step.isFailure ? "xmark" : "checkmark", color: step.isFailure ? Semantic.error : Semantic.success)
 
-            VStack(alignment: .leading, spacing: AppSpace.xs) {
-                if isTerminalOutput {
-                    TerminalOutputCard(text: step.text, isFailure: step.isFailure)
-                } else if let imagePath {
-                    GeneratedImagePreviewCard(path: imagePath, caption: displayText)
-                } else if !step.isCollapsed {
-                    toolTextView
-                } else {
-                    Text(step.isFailure ? String(step.text.prefix(90)) : "工具结果已折叠")
-                        .font(AppFont.tiny)
-                        .foregroundStyle(TextGrade.ghost)
-                        .lineLimit(1)
-                }
-
-                // Quick retry on failure
-                if step.isFailure {
-                    Button {
-                        store.retryLastMessage()
-                    } label: {
-                        Label("重试", systemImage: "arrow.clockwise")
+                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                    if isTerminalOutput {
+                        TerminalOutputCard(text: step.text, isFailure: step.isFailure)
+                    } else if let imagePath {
+                        GeneratedImagePreviewCard(path: imagePath, caption: displayText)
+                    } else if !step.isCollapsed {
+                        toolTextView
+                    } else {
+                        Text("已完成")
                             .font(AppFont.tiny)
-                            .foregroundStyle(Brand.primary)
-                            .padding(.horizontal, AppSpace.sm)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(Brand.primary.opacity(0.12)))
+                            .foregroundStyle(TextGrade.ghost)
+                            .lineLimit(1)
                     }
-                    .buttonStyle(.plain)
-                }
-            }
 
-            Spacer()
+                    if step.isFailure {
+                        Button {
+                            store.retryLastMessage()
+                        } label: {
+                            Label("重试", systemImage: "arrow.clockwise")
+                                .font(AppFont.tiny)
+                                .foregroundStyle(Brand.primary)
+                                .padding(.horizontal, AppSpace.sm)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Brand.primary.opacity(0.12)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.vertical, 2)
         }
-        .padding(.vertical, 2)
     }
 
     private var isTerminalOutput: Bool {
@@ -740,7 +744,7 @@ struct RecoveryCard: View {
 
             VStack(alignment: .leading, spacing: AppSpace.xs) {
                 HStack(spacing: AppSpace.xs) {
-                    Text("编排层自动恢复")
+                    Text("已自动换一种方式继续")
                         .font(AppFont.captionMedium)
                         .foregroundStyle(Semantic.warning)
 
@@ -829,7 +833,7 @@ struct TerminalOutputCard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: AppSpace.xs) {
                 Circle().fill(isFailure ? Semantic.error : Semantic.success).frame(width: 7, height: 7)
-                Text(isFailure ? "Terminal · failed" : "Terminal · completed")
+                Text(isFailure ? "命令执行失败" : "命令已完成")
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.ghost)
                 Spacer()
@@ -1228,14 +1232,14 @@ struct FailedCard: View {
 
                     if shouldOpenSettings {
                         failureAction(icon: "gearshape", label: settingsActionTitle) {
-                            NotificationCenter.default.post(name: .init("laicaiOpenSettings"), object: nil)
+                            NotificationCenter.default.post(name: .laicaiOpenSettings, object: nil)
                         }
                     }
 
-                    failureAction(icon: "doc.on.doc", label: "复制诊断") {
+                    failureAction(icon: "doc.on.doc", label: "复制详情") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(step.text, forType: .string)
-                        ToastCenter.shared.success("已复制诊断")
+                        ToastCenter.shared.success("已复制详情")
                     }
                 }
             }
@@ -1265,12 +1269,12 @@ struct FailedCard: View {
     }
 
     private var failureHint: String {
-        if isImageFailure { return "优先检查图片模型、网关连接和返回内容。" }
-        if isNetworkFailure { return "请求已发出但连接中途断开，可以直接重试或检查代理/网关。" }
+        if isImageFailure { return "可以先重试；若连续失败，检查图片模型、代理或网关。" }
+        if isNetworkFailure { return "连接中途断开，可以直接重试或检查代理/网关。" }
         if isAuthFailure { return "API Key、模型名或兼容接口配置可能不正确。" }
         if isWorkspaceFailure { return "工作区目录为空、过宽或无权限。" }
         if step.text.contains("超时") { return "任务可能仍在服务端排队，可以重试或换更快模型。" }
-        return "已保留诊断内容，可复制后继续排查。"
+        return "已保留详情，可复制后继续排查。"
     }
 
     private var failureKindLabel: String {
