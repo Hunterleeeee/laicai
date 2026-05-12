@@ -67,6 +67,16 @@ public struct IntentRouter {
             ))
         }
 
+        if signals.requestsImageGeneration {
+            return applyRoutingDrift(PlannerDecision(
+                intent: .task,
+                confidence: 0.84,
+                reason: "用户在要求生成视觉素材，应调用图片生成能力。",
+                routeLabel: "图片生成",
+                expectedCapabilities: ["生成图片", "整理交付"]
+            ))
+        }
+
         if signals.requiresExecution {
             return applyRoutingDrift(PlannerDecision(
                 intent: .task,
@@ -427,6 +437,7 @@ private struct IntentSignals {
     var requiresExecution: Bool {
         input.hasPrefix("/")
             || containsExplicitURLAction
+            || requestsImageGeneration
             || requestsFreshInformation
             || requestsShellExecution
             || requestsMutation
@@ -436,7 +447,8 @@ private struct IntentSignals {
     }
 
     var requestsAction: Bool {
-        requestsFreshInformation
+        requestsImageGeneration
+            || requestsFreshInformation
             || requestsLocalIO
             || requestsShellExecution
             || requestsMutation
@@ -561,6 +573,25 @@ private struct IntentSignals {
         ["生成", "创建", "整理", "汇总", "给我一份", "写一个", "写一份", "做一个"].contains { input.contains($0) }
     }
 
+    var requestsImageGeneration: Bool {
+        guard !capabilityOnly else { return false }
+        let actionMarkers = [
+            "生成", "创建", "做一张", "做张", "做个", "画一张", "画张", "画个",
+            "设计", "出一张", "出张", "出个", "来一张", "来张", "来个", "制作",
+            "generate", "create", "draw", "design", "make"
+        ]
+        let imageMarkers = [
+            "图片", "图像", "图", "配图", "插图", "海报", "封面", "主图", "介绍图",
+            "宣传图", "商品图", "产品图", "详情图", "banner", "logo", "头像", "壁纸",
+            "poster", "image", "illustration", "cover", "thumbnail", "visual"
+        ]
+        let hasAction = actionMarkers.contains { input.localizedCaseInsensitiveContains($0) }
+        let hasImage = imageMarkers.contains { input.localizedCaseInsensitiveContains($0) }
+        guard hasAction && hasImage else { return false }
+        let negativeContext = ["代码图", "架构图", "流程图", "类图", "mermaid", "截图", "看图", "读图", "图片里"]
+        return !negativeContext.contains { input.localizedCaseInsensitiveContains($0) }
+    }
+
     private var requestsPMDocument: Bool {
         let pmMarkers = ["prd", "PRD", "需求文档", "产品需求", "用户故事", "user story", "user stories",
                          "竞品分析", "竞品调研", "competitive analysis", "实验设计", "a/b test", "ab test",
@@ -663,6 +694,7 @@ private struct IntentSignals {
 
     var executionConfidence: Double {
         if containsURL || requestsFreshInformation || requestsWebResearch || requestsModelCurrentInfo { return 0.88 }
+        if requestsImageGeneration { return 0.84 }
         if requestsMutation || requestsShellExecution { return 0.84 }
         if requestsLocalIO { return 0.80 }
         return 0.70
@@ -670,6 +702,7 @@ private struct IntentSignals {
 
     var executionReason: String {
         if containsURL { return "用户提供了网页链接，需要读取外部资料。" }
+        if requestsImageGeneration { return "用户要求生成视觉素材，需要调用图片生成能力。" }
         if requestsFreshInformation || requestsWebResearch || requestsModelCurrentInfo { return "用户需要联网或时效信息，需要调用搜索/网页工具。" }
         if requestsLocalIO { return "用户要求读取、搜索或理解本地工作区。" }
         if requestsShellExecution { return "用户要求运行命令、测试、构建或部署。" }
@@ -679,6 +712,7 @@ private struct IntentSignals {
 
     var expectedCapabilities: [String] {
         var capabilities: [String] = []
+        if requestsImageGeneration { capabilities.append("生成图片") }
         if requestsFreshInformation || requestsWebResearch || requestsModelCurrentInfo || containsURL { capabilities.append("联网检索") }
         if requestsLocalIO { capabilities.append("读取工作区") }
         if requestsShellExecution { capabilities.append("运行命令") }

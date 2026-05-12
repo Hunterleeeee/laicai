@@ -4,6 +4,28 @@ import XCTest
 
 @MainActor
 final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
+    func testSemanticImageRequestAutoUsesImageConnectorEvenWhenChatConnectorIsActive() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let chatConnector = makeConnector(name: "GPT", endpoint: "https://duckcu.tech/v1", modelName: "gpt-5.5", note: "chat-key")
+        let imageConnector = makeConnector(name: "图片", endpoint: "https://duckcu.tech", modelName: "gpt-image-2", note: "image-key")
+        let store = makeTestStore(
+            workspacePath: workspace.path,
+            defaultConnectorName: "GPT",
+            connectors: [chatConnector, imageConnector],
+            activeConnectorID: chatConnector.id
+        )
+
+        store.updateDraft("做一张雪碧介绍图")
+        store.sendDraft()
+
+        XCTAssertTrue(store.state.isGenerating)
+        XCTAssertEqual(store.state.selectedTask?.connectorID, imageConnector.id)
+        XCTAssertEqual(store.state.modeLabel, "图片生成")
+        XCTAssertTrue(store.state.selectedTask?.steps.contains { $0.text.contains("正在调用 gpt-image-2 生成图片") } == true)
+        store.stopGenerating()
+    }
+
     func testImageOnlyConnectorUsesImagesAPIEndpointAndWritesImage() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }

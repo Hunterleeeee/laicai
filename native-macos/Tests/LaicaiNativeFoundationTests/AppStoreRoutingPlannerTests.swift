@@ -30,6 +30,25 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
     func testConcreteGenerationRequestBecomesTask() {
         XCTAssertEqual(IntentRouter.classify("帮我生成一个 README"), .task)
     }
+    func testSemanticImageRequestsBecomeImageGenerationTasks() {
+        let prompts = [
+            "做一张雪碧介绍图",
+            "设计个产品主图",
+            "来个活动海报",
+            "给这个品牌做个 logo",
+            "make a poster for Sprite"
+        ]
+
+        for prompt in prompts {
+            let decision = IntentRouter.plan(prompt)
+            XCTAssertEqual(decision.intent, .task, prompt)
+            XCTAssertEqual(decision.routeLabel, "图片生成", prompt)
+            XCTAssertTrue(decision.expectedCapabilities.contains("生成图片"), prompt)
+        }
+    }
+    func testImageCapabilityQuestionStaysChat() {
+        XCTAssertEqual(IntentRouter.classify("你能生成图片吗？"), .chat)
+    }
     func testPoliteExplanationRequestStaysInChatMode() {
         XCTAssertEqual(IntentRouter.classify("请先解释一下"), .chat)
         XCTAssertEqual(IntentRouter.classify("请说说你的能力"), .chat)
