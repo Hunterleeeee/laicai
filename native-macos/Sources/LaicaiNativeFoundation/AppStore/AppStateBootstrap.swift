@@ -56,7 +56,7 @@ public extension AppState {
         }
 
         if let savedThreads = try? environment.threadRepository.loadThreads(), !savedThreads.isEmpty {
-            state.threads = savedThreads
+            state.threads = savedThreads.filter { !$0.isEmptyPlaceholder }
         }
 
         if let catalog = try? environment.connectorRepository.loadConnectorCatalog(), !catalog.connectors.isEmpty {

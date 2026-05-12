@@ -94,7 +94,7 @@ public struct ValidationEngine {
         var lastResult: ToolResult?
         var lastError: String?
 
-        let timeoutSeconds: TimeInterval = tool.name.contains("shell") ? 60 : 30
+        let timeoutSeconds = timeoutSeconds(for: tool)
 
         for attempt in 0...maxRetries {
             do {
@@ -138,6 +138,12 @@ public struct ValidationEngine {
         let jitter = UInt64.random(in: 0...100)  // 0-100ms random jitter
         let totalDelayMs = exponentialDelay + jitter
         try? await Task.sleep(for: .milliseconds(totalDelayMs))
+    }
+
+    private static func timeoutSeconds(for tool: any LaicaiTool) -> TimeInterval {
+        if tool.name == "image.generate" { return NetworkDefaults.imageRequest + 20 }
+        if tool.name.contains("shell") { return 60 }
+        return 30
     }
 }
 

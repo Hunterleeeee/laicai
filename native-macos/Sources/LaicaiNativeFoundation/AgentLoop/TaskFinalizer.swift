@@ -20,6 +20,10 @@ struct TaskFinalizer {
             // Attempt fallback wiki save (deferred to AgentLoop helper)
         }
 
+        if AgentLoop.hasSatisfiedImageGenerationRequest(state.task) && !state.wasTruncated {
+            state.didComplete = true
+        }
+
         // ── Evidence-based finalization ──
         if !state.didComplete && !state.wasTruncated {
             if let summaryStep = try? await AgentLoop.finalizeFromCollectedEvidence(

@@ -1404,6 +1404,7 @@ public final class AgentLoop: ObservableObject {
                     let callStep = callSteps[index].1
                     let toolName = callStep.toolName ?? "tool"
                     let toolParams = callStep.toolParams ?? [:]
+                    let resultParams = Self.resultStepParams(toolName: toolName, arguments: toolParams, result: toolResult)
                     let callId = callStep.toolCallId ?? "call_\(index)"
 
                     let displayText = ToolResultFormatter.displayText(
@@ -1439,7 +1440,7 @@ public final class AgentLoop: ObservableObject {
                             kind: .toolResult,
                             text: stepText,
                             toolName: toolName,
-                            toolParams: toolParams,
+                            toolParams: resultParams,
                             toolCallId: callId,
                             isCollapsible: true,
                             isCollapsed: !shouldShowFullOutput,
@@ -2221,6 +2222,10 @@ public final class AgentLoop: ObservableObject {
         // it to mimic the same internal audit format in user-visible output. They are
         // disabled by default; only retained as collapsed annotations when there is a
         // genuine failure that needs traceability.
+        if Self.hasSatisfiedImageGenerationRequest(task) && !wasTruncated {
+            didComplete = true
+        }
+
         let toolCallCount = task.steps.filter { $0.kind == .toolCall }.count
         let emitDiagnosticAudit = (hadFailure && toolCallCount > 0) || wasTruncated
         if emitDiagnosticAudit {

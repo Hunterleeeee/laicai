@@ -742,6 +742,12 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         updatedAt = task.updatedAt
         source = .task
     }
+
+    public var isEmptyPlaceholder: Bool {
+        steps.isEmpty
+            && preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && status == .queued
+    }
 }
 
 public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {

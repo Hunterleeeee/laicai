@@ -69,9 +69,14 @@ extension AppStore {
             comfyUIServerURL: state.settings.comfyUIServerURL,
             comfyUIModelName: state.settings.comfyUIModelName
         )
-        context.imageGenerationEndpoint = connector.endpoint
-        context.imageGenerationModelName = connector.modelName
-        context.imageGenerationAPIKey = connector.note
+        let imageConnector = ConnectorCapabilityProfile.isImageOnlyModel(connector.modelName)
+            ? connector
+            : Self.imageGenerationConnector(from: state.connectors, activeID: state.activeConnectorID)
+        if let imageConnector {
+            context.imageGenerationEndpoint = imageConnector.endpoint
+            context.imageGenerationModelName = imageConnector.modelName
+            context.imageGenerationAPIKey = imageConnector.note
+        }
 
         let intent = decision.intent
         let workflowName: String? = { if case .workflow(let name) = intent { return name } else { return nil } }()

@@ -171,6 +171,9 @@ extension AgentLoop {
         let hasUnrecoveredFailure = !failedResults.isEmpty && !Self.hasRecoveryAfterLastFailure(task)
         let hasVerificationFailure = task.steps.contains { $0.toolName == "verify.build" && $0.isFailure }
 
+        if Self.hasSatisfiedImageGenerationRequest(task) {
+            return !hasVerificationFailure
+        }
         if expectsWikiOutput {
             return hasFinalOutput && (hasSavedWiki || hasWrite) && !hasUnrecoveredFailure
         }
@@ -215,12 +218,58 @@ extension AgentLoop {
         }
     }
 
+    static func resultStepParams(toolName: String, arguments: [String: String], result: ToolResult) -> [String: String] {
+        guard toolName == "image.generate", let data = result.data else {
+            return arguments
+        }
+        return arguments.merging(data) { _, resultValue in resultValue }
+    }
+
     static func hasSuccessfulWrite(in task: AgentTask) -> Bool {
         return task.steps.contains { step in
             guard isFileChangeTool(step.toolName ?? "") else { return false }
             if step.kind == .reviewRequest, step.approved == true { return true }
             return step.kind == .toolResult && !step.isFailure
         }
+    }
+
+    static func hasSatisfiedImageGenerationRequest(_ task: AgentTask) -> Bool {
+        let message = task.steps
+            .filter { $0.kind == .userInput }
+            .map(\.text)
+            .joined(separator: "\n")
+        guard expectsImageGeneration(message) else { return false }
+        guard let deliveredIndex = task.steps.firstIndex(where: { isSuccessfulGeneratedImageResult($0) }) else { return false }
+        let laterFailures = task.steps.dropFirst(deliveredIndex + 1).filter { $0.kind == .toolResult && $0.isFailure }
+        return laterFailures.allSatisfy { $0.toolName == "image.generate" }
+    }
+
+    static func isSuccessfulGeneratedImageResult(_ step: TaskStep) -> Bool {
+        guard step.kind == .toolResult, step.toolName == "image.generate", !step.isFailure else { return false }
+        if let path = step.toolParams?["imagePath"], !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        return step.text.contains("图片已生成") || step.text.contains("生成图片：")
+    }
+
+    static func expectsImageGeneration(_ message: String) -> Bool {
+        let lower = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lower.isEmpty else { return false }
+        let actionMarkers = [
+            "生成", "创建", "做一张", "做张", "做个", "画一张", "画张", "画个",
+            "设计", "出一张", "出张", "出个", "来一张", "来张", "来个", "制作",
+            "generate", "create", "draw", "design", "make"
+        ]
+        let imageMarkers = [
+            "图片", "图像", "图", "配图", "插图", "海报", "封面", "主图", "介绍图",
+            "宣传图", "商品图", "产品图", "详情图", "页面图", "生图", "banner", "logo", "头像", "壁纸",
+            "poster", "image", "illustration", "cover", "thumbnail", "visual"
+        ]
+        let hasAction = actionMarkers.contains { lower.localizedCaseInsensitiveContains($0) }
+        let hasImage = imageMarkers.contains { lower.localizedCaseInsensitiveContains($0) }
+        guard hasAction && hasImage else { return false }
+        let negativeContext = ["代码图", "架构图", "流程图", "类图", "mermaid", "截图", "看图", "读图", "图片里"]
+        return !negativeContext.contains { lower.localizedCaseInsensitiveContains($0) }
     }
 
     static func hasSavedWiki(in task: AgentTask) -> Bool {
@@ -1209,11 +1258,17 @@ extension AgentLoop {
         let hasVerificationFailure = task.steps.contains {
             ["shell.exec", "verify.build"].contains($0.toolName ?? "") && $0.kind == .toolResult && $0.isFailure
         }
+        let hasSatisfiedImageGeneration = Self.hasSatisfiedImageGenerationRequest(task)
 
         let text: String
         let isFailure: Bool
         if wasTruncated {
             text = "完成检查：回复被输出上限截断，尚未形成完整最终回复。请继续输出时沿用本任务上下文。"
+            isFailure = false
+        } else if hasSatisfiedImageGeneration {
+            text = toolFailures > 0
+                ? "完成检查：图片已成功生成；后续重复生图失败已记录，不影响本次图片交付。"
+                : "完成检查：图片已成功生成。"
             isFailure = false
         } else if isReadOnlyRun && didComplete && hasOutput {
             text = toolFailures > 0

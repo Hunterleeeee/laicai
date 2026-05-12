@@ -329,20 +329,9 @@ public struct ComfyUITool: LaicaiTool {
     }
 
     public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
-        struct Params: Codable {
-            var prompt: String
-            var negativePrompt: String?
-            var width: Int?
-            var height: Int?
-            var steps: Int?
-            var seed: Int?
-            var size: String?
-        }
-
-        let params: Params
+        let params: ImageGenerationParams
         do {
-            let data = argumentsJSON.data(using: .utf8) ?? Data()
-            params = try JSONDecoder().decode(Params.self, from: data)
+            params = try Self.decodeImageGenerationParams(argumentsJSON)
         } catch {
             return ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params")
         }
@@ -461,6 +450,54 @@ public struct ComfyUITool: LaicaiTool {
             var url: String?
         }
         var data: [Item]
+    }
+
+    private struct ImageGenerationParams {
+        var prompt: String
+        var negativePrompt: String?
+        var width: Int?
+        var height: Int?
+        var steps: Int?
+        var seed: Int?
+        var size: String?
+    }
+
+    private static func decodeImageGenerationParams(_ argumentsJSON: String) throws -> ImageGenerationParams {
+        let data = argumentsJSON.data(using: .utf8) ?? Data()
+        let object = try JSONSerialization.jsonObject(with: data)
+        guard let dict = object as? [String: Any] else {
+            throw NSError(domain: "ImageGenerateParams", code: 1, userInfo: [NSLocalizedDescriptionKey: "参数必须是 JSON 对象"])
+        }
+        guard let prompt = stringValue(dict["prompt"])?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !prompt.isEmpty else {
+            throw NSError(domain: "ImageGenerateParams", code: 2, userInfo: [NSLocalizedDescriptionKey: "缺少 prompt"])
+        }
+        return ImageGenerationParams(
+            prompt: prompt,
+            negativePrompt: stringValue(dict["negativePrompt"]),
+            width: intValue(dict["width"]),
+            height: intValue(dict["height"]),
+            steps: intValue(dict["steps"]),
+            seed: intValue(dict["seed"]),
+            size: stringValue(dict["size"])
+        )
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        switch value {
+        case let string as String: return string
+        case let number as NSNumber: return number.stringValue
+        default: return nil
+        }
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        switch value {
+        case let int as Int: return int
+        case let number as NSNumber: return number.intValue
+        case let string as String: return Int(string.trimmingCharacters(in: .whitespacesAndNewlines))
+        default: return nil
+        }
     }
 
     private func generateOpenAICompatibleImage(

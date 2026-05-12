@@ -125,4 +125,67 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(result.output.contains("图片服务连接中途断开"))
         XCTAssertTrue(result.output.contains("上游网关"))
     }
+
+    func testImageToolAcceptsRecoveryStringNumbersAndTimeoutNoise() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let pngData = Data([0x89, 0x50, 0x4E, 0x47])
+        let responseBody = #"{"data":[{"b64_json":"\#(pngData.base64EncodedString())"}]}"#.data(using: .utf8)!
+        let session = makeStubbedSession { request in
+            let response = HTTPURLResponse(
+                url: request.url ?? URL(string: "https://example.com")!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseBody)
+        }
+        let tool = ComfyUITool(session: session, prefersCurlTransport: false)
+
+        let result = try await tool.execute(
+            argumentsJSON: #"{"prompt":"生成一张雪碧介绍图","width":"1024","height":"1024","steps":"24","seed":"-1","timeout":"60"}"#,
+            context: TaskContext(
+                workspaceRoot: workspace.path,
+                imageGenerationEndpoint: "https://duckcu.tech",
+                imageGenerationModelName: "gpt-image-2",
+                imageGenerationAPIKey: "test-key"
+            )
+        )
+
+        XCTAssertTrue(result.success)
+        let imagePath = try XCTUnwrap(result.data?["imagePath"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: imagePath))
+    }
+
+    func testSuccessfulImageResultSatisfiesGenerationTaskDespiteLaterImageRetryFailure() {
+        let task = AgentTask(
+            title: "访问前端并重新生成页面图",
+            steps: [
+                TaskStep(kind: .userInput, text: "访问这个项目的前端，然后重新生成一个前端页面图"),
+                TaskStep(kind: .toolResult, text: "图片已生成：/tmp/generated.png", toolName: "image.generate", toolParams: ["imagePath": "/tmp/generated.png"]),
+                TaskStep(kind: .toolResult, text: "失败：工具执行超时（30秒）", toolName: "image.generate", isFailure: true)
+            ]
+        )
+
+        XCTAssertTrue(AgentLoop.hasSatisfiedImageGenerationRequest(task))
+        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(task: task, intent: .task, didComplete: true, hadFailure: true, wasTruncated: false))
+        let check = AgentLoop.completionCheckStep(for: task, didComplete: true, hadFailure: true)
+        XCTAssertFalse(check.isFailure)
+        XCTAssertTrue(check.text.contains("图片已成功生成"))
+    }
+
+    func testImageResultStepParamsCarryGeneratedImagePathForPreview() {
+        let params = AgentLoop.resultStepParams(
+            toolName: "image.generate",
+            arguments: ["prompt": "生成一张图"],
+            result: ToolResult(
+                output: "图片已生成：/tmp/generated.png",
+                data: ["imagePath": "/tmp/generated.png", "model": "gpt-image-2"]
+            )
+        )
+
+        XCTAssertEqual(params["prompt"], "生成一张图")
+        XCTAssertEqual(params["imagePath"], "/tmp/generated.png")
+        XCTAssertEqual(params["model"], "gpt-image-2")
+    }
 }

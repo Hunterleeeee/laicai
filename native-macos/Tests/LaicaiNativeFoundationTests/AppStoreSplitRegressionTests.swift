@@ -54,6 +54,27 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(state.filteredThreadRecordSummaries.first?.events.first?.text, "发现 SplitRegressionNeedle")
     }
 
+    func testThreadRecordsHideQueuedEmptyPlaceholdersEvenWithTypedTitle() {
+        let placeholder = Thread(
+            title: "前段时间比较火的酒馆 是什么东西",
+            status: .queued,
+            steps: [],
+            preview: "",
+            source: .session
+        )
+        let real = Thread(
+            title: "真实会话",
+            status: .completed,
+            steps: [TaskStep(kind: .userInput, text: "你好")],
+            preview: "你好",
+            source: .session
+        )
+        let state = testState(threads: [placeholder, real])
+
+        XCTAssertTrue(placeholder.isEmptyPlaceholder)
+        XCTAssertEqual(state.threadRecordSummaries.map(\.id), [real.id])
+    }
+
     func testDraftAttachmentAndFollowUpActionsSurviveSplit() {
         let task = AgentTask(title: "任务", status: .running)
         let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id))

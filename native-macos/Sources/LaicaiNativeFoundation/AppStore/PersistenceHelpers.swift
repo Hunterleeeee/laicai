@@ -20,7 +20,8 @@ extension AppStore {
     func persistThreadsNow() {
         lastPersistedAt = Date()
         updateSummaryCaches()
-        do { try environment.threadRepository.saveThreads(state.threads) }
+        let persistableThreads = state.threads.filter { !$0.isEmptyPlaceholder }
+        do { try environment.threadRepository.saveThreads(persistableThreads) }
         catch { recordToolActivity(name: "threads.save", summary: "会话持久化失败", statusLine: error.localizedDescription, isFailure: true) }
     }
 
@@ -56,5 +57,9 @@ extension AppStore {
 
     func persistSettings() {
         AppSettingsStorage.save(state.settings)
+    }
+
+    nonisolated static func isEmptyPlaceholderThread(_ thread: Thread) -> Bool {
+        return thread.isEmptyPlaceholder
     }
 }

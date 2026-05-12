@@ -313,6 +313,7 @@ struct ToolExecutionEngine {
             let callStep = callSteps[index].1
             let toolName = callStep.toolName ?? "tool"
             let toolParams = callStep.toolParams ?? [:]
+            let resultParams = AgentLoop.resultStepParams(toolName: toolName, arguments: toolParams, result: toolResult)
             let callId = callStep.toolCallId ?? "call_\(index)"
 
             let displayText = ToolResultFormatter.displayText(
@@ -345,7 +346,7 @@ struct ToolExecutionEngine {
                     kind: .toolResult,
                     text: stepText,
                     toolName: toolName,
-                    toolParams: toolParams,
+                    toolParams: resultParams,
                     toolCallId: callId,
                     isCollapsible: true,
                     isCollapsed: !shouldShowFullOutput,

@@ -19,7 +19,6 @@ extension AppStore {
         )
         state.threads.insert(thread, at: 0)
         state.selectThread(id: thread.id)
-        persistThreads()
     }
 
     public func newSessionInProject(_ projectID: UUID) {
@@ -33,7 +32,6 @@ extension AppStore {
         )
         state.threads.insert(thread, at: 0)
         state.selectThread(id: thread.id)
-        persistThreads()
     }
 
     public func selectSession(id: UUID?) {

@@ -59,14 +59,14 @@ extension AppState {
     }
 
     public var threadRecords: [ThreadRecord] {
-        threads.map { ThreadRecord(thread: $0, includeEvents: true) }.sorted { lhs, rhs in
+        threads.filter { !$0.isEmptyPlaceholder }.map { ThreadRecord(thread: $0, includeEvents: true) }.sorted { lhs, rhs in
             if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
             return lhs.updatedAt > rhs.updatedAt
         }
     }
 
     public var threadRecordSummaries: [ThreadRecord] {
-        threads.map { ThreadRecord(thread: $0, includeEvents: false) }.sorted { lhs, rhs in
+        threads.filter { !$0.isEmptyPlaceholder }.map { ThreadRecord(thread: $0, includeEvents: false) }.sorted { lhs, rhs in
             if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
             return lhs.updatedAt > rhs.updatedAt
         }
