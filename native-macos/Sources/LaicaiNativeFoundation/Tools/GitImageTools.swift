@@ -300,9 +300,11 @@ public struct GitTool: LaicaiTool {
 
 public struct ComfyUITool: LaicaiTool {
     private let session: URLSession
+    private let prefersCurlTransport: Bool
 
-    public init(session: URLSession = NetworkDefaults.imageSession) {
+    public init(session: URLSession = NetworkDefaults.imageSession, prefersCurlTransport: Bool = true) {
         self.session = session
+        self.prefersCurlTransport = prefersCurlTransport
     }
 
     public var name: String { "image.generate" }
@@ -485,7 +487,22 @@ public struct ComfyUITool: LaicaiTool {
         ))
         request.timeoutInterval = NetworkDefaults.imageRequest
 
-        let (data, response) = try await performImagesAPIRequest(request)
+        let (data, response): (Data, URLResponse)
+        if prefersCurlTransport, Self.canUseCurlTransport(for: url) {
+            data = try await performImagesAPICurlRequest(
+                url: url,
+                apiKey: apiKey,
+                body: request.httpBody ?? Data()
+            )
+            response = HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["X-Laicai-Transport": "curl"]
+            ) ?? URLResponse(url: url, mimeType: "application/json", expectedContentLength: data.count, textEncodingName: "utf-8")
+        } else {
+            (data, response) = try await performImagesAPIRequest(request)
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(status) else {
             let body = String(data: data, encoding: .utf8) ?? ""
@@ -560,6 +577,133 @@ public struct ComfyUITool: LaicaiTool {
             guard Self.shouldRetryImagesAPIRequest(after: error) else { throw error }
             try await Task.sleep(for: .seconds(2))
             return try await session.data(for: request)
+        }
+    }
+
+    private func performImagesAPICurlRequest(url: URL, apiKey: String, body: Data) async throws -> Data {
+        let result = try await Self.runCurlImagesRequest(url: url, apiKey: apiKey, body: body)
+        guard result.exitCode == 0 else {
+            let message = result.stderr.isEmpty ? "curl 退出码 \(result.exitCode)" : result.stderr
+            throw NSError(domain: "ImagesAPICurl", code: Int(result.exitCode), userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        guard (200...299).contains(result.statusCode) else {
+            throw NSError(
+                domain: "ImagesAPI",
+                code: result.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: Self.serverMessage(from: String(data: result.data, encoding: .utf8) ?? "", fallback: "图片服务返回 HTTP \(result.statusCode)")]
+            )
+        }
+        return result.data
+    }
+
+    private static func canUseCurlTransport(for url: URL) -> Bool {
+        guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return false }
+        return FileManager.default.isExecutableFile(atPath: "/usr/bin/curl")
+    }
+
+    private static func runCurlImagesRequest(url: URL, apiKey: String, body: Data) async throws -> (data: Data, statusCode: Int, stderr: String, exitCode: Int32) {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("laicai-image-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let bodyURL = tempRoot.appendingPathComponent("request.json")
+        let configURL = tempRoot.appendingPathComponent("curl.conf")
+        let responseURL = tempRoot.appendingPathComponent("response.json")
+        try body.write(to: bodyURL, options: .atomic)
+        let config = curlConfig(
+            url: url,
+            apiKey: apiKey,
+            bodyPath: bodyURL.path,
+            responsePath: responseURL.path
+        )
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+        process.arguments = ["--config", configURL.path]
+
+        let output = Pipe()
+        let error = Pipe()
+        process.standardOutput = output
+        process.standardError = error
+
+        try process.run()
+        let timedOut = await waitForCurlExit(process, timeoutSeconds: Int(NetworkDefaults.imageRequest) + 10)
+        if timedOut {
+            process.terminate()
+            process.waitUntilExit()
+        }
+
+        let outputData = output.fileHandleForReading.readDataToEndOfFile()
+        let stderr = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if timedOut {
+            throw NSError(domain: "ImagesAPICurl", code: Int(NSURLErrorTimedOut), userInfo: [NSLocalizedDescriptionKey: "curl 图片请求超时"])
+        }
+
+        let codeText = String(data: outputData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let responseData = (try? Data(contentsOf: responseURL)) ?? Data()
+        return (responseData, Int(codeText) ?? 0, stderr, process.terminationStatus)
+    }
+
+    private static func curlConfig(url: URL, apiKey: String, bodyPath: String, responsePath: String) -> String {
+        var lines = [
+            "silent",
+            "show-error",
+            "http1.1",
+            "connect-timeout = \"15\"",
+            "max-time = \"\(Int(NetworkDefaults.imageRequest))\"",
+            "request = \"POST\"",
+            "header = \"Content-Type: application/json\""
+        ]
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedKey.isEmpty {
+            lines.append("header = \"Authorization: Bearer \(curlConfigEscape(trimmedKey))\"")
+        }
+        lines += [
+            "data-binary = \"@\(curlConfigEscape(bodyPath))\"",
+            "output = \"\(curlConfigEscape(responsePath))\"",
+            "write-out = \"%{http_code}\"",
+            "url = \"\(curlConfigEscape(url.absoluteString))\""
+        ]
+        return lines.joined(separator: "\n")
+    }
+
+    private static func curlConfigEscape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\r", with: "")
+    }
+
+    private static func waitForCurlExit(_ process: Process, timeoutSeconds: Int) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let finished = Locked(false)
+            process.terminationHandler = { _ in
+                let shouldResume = finished.withValue { value in
+                    guard !value else { return false }
+                    value = true
+                    return true
+                }
+                if shouldResume {
+                    continuation.resume(returning: false)
+                }
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(timeoutSeconds))
+                let shouldResume = finished.withValue { value in
+                    guard !value else { return false }
+                    value = true
+                    return true
+                }
+                if shouldResume {
+                    continuation.resume(returning: true)
+                }
+            }
         }
     }
 

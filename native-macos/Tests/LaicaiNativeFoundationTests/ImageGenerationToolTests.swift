@@ -46,7 +46,7 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
             )!
             return (response, responseBody)
         }
-        let tool = ComfyUITool(session: session)
+        let tool = ComfyUITool(session: session, prefersCurlTransport: false)
 
         let result = try await tool.execute(
             argumentsJSON: #"{"prompt":"生成一张赛博朋克海报","width":1024,"height":1024}"#,
@@ -87,7 +87,7 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
             )!
             return (response, responseBody)
         }
-        let tool = ComfyUITool(session: session)
+        let tool = ComfyUITool(session: session, prefersCurlTransport: false)
 
         let result = try await tool.execute(
             argumentsJSON: #"{"prompt":"生成一张雪碧介绍图","width":1024,"height":1024}"#,
@@ -109,7 +109,7 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         let session = makeStubbedSession { _ in
             throw URLError(.networkConnectionLost)
         }
-        let tool = ComfyUITool(session: session)
+        let tool = ComfyUITool(session: session, prefersCurlTransport: false)
 
         let result = try await tool.execute(
             argumentsJSON: #"{"prompt":"生成一张雪碧介绍图","width":1024,"height":1024}"#,
