@@ -61,6 +61,7 @@ extension AppStore {
                     kind: .toolResult,
                     text: result.output,
                     toolName: "image.generate",
+                    toolParams: result.data,
                     isCollapsible: false,
                     isCollapsed: false,
                     isFailure: !result.success

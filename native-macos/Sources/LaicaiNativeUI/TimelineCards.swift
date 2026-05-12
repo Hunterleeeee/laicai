@@ -484,6 +484,8 @@ struct ToolResultCard: View {
             VStack(alignment: .leading, spacing: AppSpace.xs) {
                 if isTerminalOutput {
                     TerminalOutputCard(text: step.text, isFailure: step.isFailure)
+                } else if let imagePath {
+                    GeneratedImagePreviewCard(path: imagePath, caption: displayText)
                 } else if !step.isCollapsed {
                     toolTextView
                 } else {
@@ -518,6 +520,28 @@ struct ToolResultCard: View {
         ["shell.exec", "verify.build"].contains(step.toolName ?? "")
     }
 
+    private var imagePath: String? {
+        guard step.toolName == "image.generate", !step.isFailure else { return nil }
+        if let path = step.toolParams?["imagePath"], FileManager.default.fileExists(atPath: path) {
+            return path
+        }
+        return Self.firstImagePath(in: step.text)
+    }
+
+    private static func firstImagePath(in text: String) -> String? {
+        let pattern = #"(/[^\n\r\t]+?\.(?:png|jpg|jpeg|webp|heic))"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: nsRange),
+              let range = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        let raw = String(text[range]).trimmingCharacters(in: CharacterSet(charactersIn: "。.,，)）]】\"'"))
+        return FileManager.default.fileExists(atPath: raw) ? raw : nil
+    }
+
     private var displayText: String {
         let maxLen = 2000
         if step.text.count <= maxLen { return step.text }
@@ -537,6 +561,93 @@ struct ToolResultCard: View {
                 RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
                     .fill(SurfaceGrade.sunken.opacity(0.34))
             )
+    }
+}
+
+struct GeneratedImagePreviewCard: View {
+    let path: String
+    let caption: String
+
+    private var url: URL {
+        URL(fileURLWithPath: path)
+    }
+
+    private var filename: String {
+        url.lastPathComponent
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpace.sm) {
+            if let image = NSImage(contentsOfFile: path) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: 520, maxHeight: 360)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help("打开图片")
+            } else {
+                Text("图片文件暂时无法预览")
+                    .font(AppFont.codeSmall)
+                    .foregroundStyle(Semantic.warning)
+                    .padding(AppSpace.sm)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous).fill(SurfaceGrade.sunken.opacity(0.34)))
+            }
+
+            HStack(spacing: AppSpace.sm) {
+                Image(systemName: "photo")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Semantic.success)
+
+                Text(filename)
+                    .font(AppFont.codeSmall)
+                    .foregroundStyle(TextGrade.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: AppSpace.sm)
+
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Image(systemName: "arrow.up.right.square")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Brand.primary)
+                .help("打开图片")
+
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(TextGrade.muted)
+                .help("在 Finder 中显示")
+            }
+
+            Text(caption)
+                .font(AppFont.tiny)
+                .foregroundStyle(TextGrade.ghost)
+                .lineLimit(2)
+                .textSelection(.enabled)
+        }
+        .padding(AppSpace.sm)
+        .frame(maxWidth: 560, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .fill(SurfaceGrade.sunken.opacity(0.34))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .strokeBorder(SurfaceGrade.border.opacity(0.35), lineWidth: 0.5)
+        )
     }
 }
 
