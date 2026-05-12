@@ -23,7 +23,7 @@ public enum NetworkDefaults {
     public static let shortRequest: TimeInterval = 12
     public static let modelList: TimeInterval = 15
     public static let webFetch: TimeInterval = 18
-    public static let imageRequest: TimeInterval = 30
+    public static let imageRequest: TimeInterval = 180
     public static let localChat: TimeInterval = 45
     public static let remoteChat: TimeInterval = 120
 

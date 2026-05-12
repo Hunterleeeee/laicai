@@ -374,7 +374,7 @@ public struct ComfyUITool: LaicaiTool {
                 )
             } catch {
                 return ToolResult(
-                    output: "图片生成失败：\(error.localizedDescription)",
+                    output: "图片生成失败：\(Self.friendlyImageError(error))",
                     success: false,
                     error: "images_api_error"
                 )
@@ -581,6 +581,14 @@ public struct ComfyUITool: LaicaiTool {
             return message
         }
         return fallback
+    }
+
+    private static func friendlyImageError(_ error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorTimedOut {
+            return "图片服务响应超时。已把图片生成等待时间延长到 180 秒，请重试；如果仍超时，可能是上游网关生成排队太久或暂时不可用。"
+        }
+        return error.localizedDescription
     }
 
     private func generateImage(
