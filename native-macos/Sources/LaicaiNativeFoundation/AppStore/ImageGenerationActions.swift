@@ -32,6 +32,7 @@ extension AppStore {
             isCollapsed: true
         )
         let initialSteps = [userStep, planStep]
+        let selectedThreadProjectID = projectIDForNewThreadFromSelection(allowRunningThread: true)
         let targetThreadID: UUID
         if let selectedID = state.selectedThreadID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }),
@@ -64,7 +65,7 @@ extension AppStore {
                 connectorID: connector.id,
                 context: context,
                 source: .task,
-                projectID: nil
+                projectID: selectedThreadProjectID
             )
             state.threads.insert(thread, at: 0)
             targetThreadID = thread.id

@@ -52,6 +52,47 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         store.stopGenerating()
     }
 
+    func testImageRequestStartedBesideRunningProjectThreadKeepsProjectScope() async throws {
+        let projectID = UUID()
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let runningProjectThread = Thread(
+            title: "项目里正在执行",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "继续优化项目")],
+            source: .task,
+            projectID: projectID
+        )
+        let chatConnector = makeConnector(name: "GPT", endpoint: "https://duckcu.tech/v1", modelName: "gpt-5.5")
+        let imageConnector = makeConnector(name: "图片", endpoint: "https://duckcu.tech", modelName: "gpt-image-2")
+        let store = AppStore(
+            state: testState(
+                threads: [runningProjectThread],
+                selectedTaskID: runningProjectThread.id,
+                workspacePath: workspace.path,
+                connectors: [chatConnector, imageConnector],
+                activeConnectorID: chatConnector.id
+            ),
+            environment: makeTestEnvironment()
+        )
+        store.state.threads[0].status = .running
+
+        let decision = PlannerDecision(
+            intent: .task,
+            confidence: 0.9,
+            reason: "测试图片生成路由",
+            routeLabel: "图片生成",
+            expectedCapabilities: []
+        )
+        store.sendImageGenerationDraft(message: "生成一张项目封面图", decision: decision, connector: imageConnector)
+
+        XCTAssertNotEqual(store.state.selectedThreadID, runningProjectThread.id)
+        XCTAssertEqual(store.state.selectedThread?.source, .task)
+        XCTAssertEqual(store.state.selectedThread?.connectorID, imageConnector.id)
+        XCTAssertEqual(store.state.selectedThread?.projectID, projectID)
+        store.stopGenerating()
+    }
+
     func testImageOnlyConnectorUsesImagesAPIEndpointAndWritesImage() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }

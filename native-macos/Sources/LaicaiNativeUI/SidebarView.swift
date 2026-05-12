@@ -19,6 +19,7 @@ struct SidebarView: View {
     @State private var showingNewProjectSheet = false
     @State private var deletingProjectID: UUID?
     @State private var collapsedProjects: Set<UUID> = []
+    @State private var expandedProjects: Set<UUID> = []
     @State private var isHoveringProject: UUID?
     @ObservedObject private var projectManager = ProjectManager.shared
 
@@ -221,10 +222,11 @@ struct SidebarView: View {
     private func projectGroupView(_ project: Project) -> some View {
         let isActive = project.id == projectManager.activeProjectID
         let isCollapsed = collapsedProjects.contains(project.id)
+        let isShowingAll = expandedProjects.contains(project.id)
         let projectThreads = filteredThreadItems.filter { $0.projectID == project.id }
             .sorted { $0.updatedAt > $1.updatedAt }
-        let displayThreads = isCollapsed ? [] : Array(projectThreads.prefix(5))
-        let hasMore = projectThreads.count > 5 && !isCollapsed
+        let displayThreads = isCollapsed ? [] : (isShowingAll ? projectThreads : Array(projectThreads.prefix(5)))
+        let hasMore = projectThreads.count > 5 && !isCollapsed && !isShowingAll
 
         // Project header — tap activates project + expands; tap again collapses
         Button {
@@ -235,6 +237,7 @@ struct SidebarView: View {
                         collapsedProjects.remove(project.id)
                     } else {
                         collapsedProjects.insert(project.id)
+                        expandedProjects.remove(project.id)
                     }
                 } else {
                     // Activate this project + expand + switch workspace
@@ -275,6 +278,7 @@ struct SidebarView: View {
                 projectManager.openProject(id: project.id)
                 store.switchWorkspace(to: project.rootPath)
                 collapsedProjects.remove(project.id)
+                expandedProjects.remove(project.id)
                 store.newSessionInProject(project.id)
             } label: {
                 Image(systemName: "plus")
@@ -310,9 +314,7 @@ struct SidebarView: View {
         // "展开显示" link
         if hasMore {
             Button {
-                // Show all by removing from collapsed (it's already expanded, this means show all)
-                // For simplicity, just remove collapse
-                collapsedProjects.remove(project.id)
+                expandedProjects.insert(project.id)
             } label: {
                 Text("展开显示")
                     .font(.system(size: 10, weight: .medium))

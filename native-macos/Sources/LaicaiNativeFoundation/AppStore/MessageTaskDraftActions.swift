@@ -81,7 +81,7 @@ extension AppStore {
         let intent = decision.intent
         let workflowName: String? = { if case .workflow(let name) = intent { return name } else { return nil } }()
 
-        let selectedThreadProjectID = projectIDForNewThreadFromSelection()
+        let selectedThreadProjectID = projectIDForNewThreadFromSelection(allowRunningThread: true)
 
         if let wfName = workflowName, let workflow = WorkflowLibrary.find(named: wfName, workspaceRoot: state.settings.workspacePath) {
             executeWorkflow(
@@ -179,7 +179,7 @@ extension AppStore {
                 workflowName: workflowName,
                 context: context,
                 source: isChatIntent ? .session : .task,
-                projectID: nil
+                projectID: isChatIntent ? nil : selectedThreadProjectID
             )
             state.threads.insert(thread, at: 0)
             targetTaskID = thread.id
@@ -327,10 +327,10 @@ extension AppStore {
             ?? imageConnectors.first
     }
 
-    func projectIDForNewThreadFromSelection() -> UUID? {
+    func projectIDForNewThreadFromSelection(allowRunningThread: Bool = false) -> UUID? {
         guard let selectedID = state.selectedThreadID,
-              let thread = state.threads.first(where: { $0.id == selectedID }),
-              thread.status != .running else { return nil }
+              let thread = state.threads.first(where: { $0.id == selectedID }) else { return nil }
+        if thread.status == .running && !allowRunningThread { return nil }
         return thread.projectID
     }
 }

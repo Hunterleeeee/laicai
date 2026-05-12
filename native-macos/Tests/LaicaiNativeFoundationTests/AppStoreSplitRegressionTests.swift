@@ -187,4 +187,53 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         XCTAssertNil(state.threads.first?.projectID)
         XCTAssertEqual(state.selectedSessionID, plain.id)
     }
+
+    func testPlainNewSessionNeverInheritsActiveProject() {
+        let previousActiveProjectID = ProjectManager.shared.activeProjectID
+        ProjectManager.shared.activeProjectID = UUID()
+        defer { ProjectManager.shared.activeProjectID = previousActiveProjectID }
+        let store = AppStore(state: testState())
+
+        store.newSession()
+
+        XCTAssertEqual(store.state.selectedThread?.source, .session)
+        XCTAssertNil(store.state.selectedThread?.projectID)
+    }
+
+    func testTaskStartedBesideRunningProjectThreadKeepsProjectScope() throws {
+        let projectID = UUID()
+        let runningProjectThread = Thread(
+            title: "项目里正在执行",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "修复项目问题")],
+            source: .task,
+            projectID: projectID
+        )
+        let connector = makeConnector(modelName: "gpt-5.5")
+        let store = AppStore(
+            state: testState(
+                threads: [runningProjectThread],
+                selectedTaskID: runningProjectThread.id,
+                workspacePath: "/tmp/laicai-project",
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment()
+        )
+        store.state.threads[0].status = .running
+        let decision = PlannerDecision(
+            intent: .task,
+            confidence: 0.9,
+            reason: "测试任务路由",
+            routeLabel: "任务",
+            expectedCapabilities: []
+        )
+
+        store.sendTaskDraft(message: "整理 README", decision: decision)
+
+        XCTAssertNotEqual(store.state.selectedThreadID, runningProjectThread.id)
+        XCTAssertEqual(store.state.selectedThread?.source, .task)
+        XCTAssertEqual(store.state.selectedThread?.projectID, projectID)
+        store.stopGenerating()
+    }
 }
