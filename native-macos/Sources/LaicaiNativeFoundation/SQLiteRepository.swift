@@ -10,6 +10,7 @@ public final class SQLiteRepository {
     private let path: String
     /// H3: Track last-saved timestamps to enable incremental saves
     private var lastSavedTimestamps: [UUID: TimeInterval] = [:]
+    private var lastSavedPayloads: [UUID: String] = [:]
 
     public init(path: String? = nil) {
         let base = path ?? (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory())
@@ -187,11 +188,13 @@ public final class SQLiteRepository {
 
     private func refreshThreadSaveCache() {
         lastSavedTimestamps.removeAll()
-        guard let stmt = prepare("SELECT id, updated_at FROM threads") else { return }
+        lastSavedPayloads.removeAll()
+        guard let stmt = prepare("SELECT id, updated_at, record_json FROM threads") else { return }
         while sqlite3_step(stmt) == SQLITE_ROW {
             let idText = String(cString: sqlite3_column_text(stmt, 0))
             guard let id = UUID(uuidString: idText) else { continue }
             lastSavedTimestamps[id] = sqlite3_column_double(stmt, 1)
+            lastSavedPayloads[id] = String(cString: sqlite3_column_text(stmt, 2))
         }
         sqlite3_finalize(stmt)
     }
@@ -215,6 +218,7 @@ extension SQLiteRepository: ThreadRepository {
         }
         sqlite3_finalize(stmt)
         lastSavedTimestamps = lastSavedTimestamps.filter { decodedIDs.contains($0.key) }
+        lastSavedPayloads = lastSavedPayloads.filter { decodedIDs.contains($0.key) }
         // If no threads in unified table, try migrating from legacy session/task tables
         if threads.isEmpty {
             return try migrateLegacyToThreads()
@@ -239,12 +243,14 @@ extension SQLiteRepository: ThreadRepository {
         let encoder = JSONEncoder()
         let currentIDs = Set(threads.map { $0.id })
 
-        // H3: Incremental save — only serialize and write threads that changed
-        var dirtyThreads: [Thread] = []
+        // H3: Incremental save — write threads whose timestamp or payload changed
+        var dirtyThreads: [(thread: Thread, timestamp: TimeInterval, json: String)] = []
         for thread in threads {
             let ts = thread.updatedAt.timeIntervalSince1970
-            if lastSavedTimestamps[thread.id] != ts {
-                dirtyThreads.append(thread)
+            let data = (try? encoder.encode(thread)) ?? Data()
+            let json = String(data: data, encoding: .utf8) ?? "{}"
+            if lastSavedTimestamps[thread.id] != ts || lastSavedPayloads[thread.id] != json {
+                dirtyThreads.append((thread, ts, json))
             }
         }
 
@@ -262,18 +268,19 @@ extension SQLiteRepository: ThreadRepository {
                 _ = step(stmt)
             }
             lastSavedTimestamps.removeValue(forKey: id)
+            lastSavedPayloads.removeValue(forKey: id)
         }
 
         // Upsert dirty threads
-        for thread in dirtyThreads {
+        for record in dirtyThreads {
+            let thread = record.thread
             guard let stmt = prepare("INSERT OR REPLACE INTO threads (id, updated_at, record_json) VALUES (?, ?, ?)") else { continue }
             bindText(stmt, index: 1, value: thread.id.uuidString)
-            let ts = thread.updatedAt.timeIntervalSince1970
-            sqlite3_bind_double(stmt, 2, ts)
-            let data = (try? encoder.encode(thread)) ?? Data()
-            bindText(stmt, index: 3, value: String(data: data, encoding: .utf8) ?? "{}")
+            sqlite3_bind_double(stmt, 2, record.timestamp)
+            bindText(stmt, index: 3, value: record.json)
             _ = step(stmt)
-            lastSavedTimestamps[thread.id] = ts
+            lastSavedTimestamps[thread.id] = record.timestamp
+            lastSavedPayloads[thread.id] = record.json
         }
 
         exec("COMMIT")

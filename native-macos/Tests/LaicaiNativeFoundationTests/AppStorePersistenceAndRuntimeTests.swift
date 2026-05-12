@@ -111,6 +111,30 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         let loaded = try XCTUnwrap(SQLiteRepository(path: base.path).loadThreads())
         XCTAssertEqual(loaded.map(\.id), [first.id])
     }
+
+    func testSQLiteRepositorySavesPayloadChangesWithoutTimestampChange() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        var thread = Thread(
+            title: "历史会话",
+            preview: "hello",
+            updatedAt: Date(timeIntervalSince1970: 10),
+            source: .session
+        )
+        let repository = SQLiteRepository(path: base.path)
+        try repository.saveThreads([thread])
+
+        thread.source = .task
+        try repository.saveThreads([thread])
+
+        let loaded = try XCTUnwrap(SQLiteRepository(path: base.path).loadThreads())
+        XCTAssertEqual(loaded.first?.source, .task)
+        XCTAssertEqual(loaded.first?.updatedAt, Date(timeIntervalSince1970: 10))
+    }
+
     func testThreadDecodingToleratesMissingMigrationFields() throws {
         let id = UUID()
         let json = """

@@ -540,6 +540,7 @@ private struct ExpandedThreadRow: View {
     @State private var dotPhase: Bool = false
     @State private var cachedTokenLabel: String?
     @State private var didLoadTokens = false
+    @State private var isLoadingTokenLabel = false
 
     private var isRunning: Bool { item.status == .running }
 
@@ -615,6 +616,9 @@ private struct ExpandedThreadRow: View {
     }
 
     private func loadTokenLabel() {
+        if isLoadingTokenLabel { return }
+        if didLoadTokens && !isRunning { return }
+        isLoadingTokenLabel = true
         let threadID = item.id.uuidString
         DispatchQueue.global(qos: .utility).async {
             let usage = UsageTracker.shared.threadUsage(threadID: threadID)
@@ -628,6 +632,7 @@ private struct ExpandedThreadRow: View {
             DispatchQueue.main.async {
                 cachedTokenLabel = label
                 didLoadTokens = true
+                isLoadingTokenLabel = false
             }
         }
     }

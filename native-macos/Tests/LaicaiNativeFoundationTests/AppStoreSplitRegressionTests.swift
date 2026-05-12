@@ -146,4 +146,45 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(AppStore.enrichVagueMessage("做", thread: thread).contains("帮我生成 README"))
         XCTAssertTrue(AppStore.enrichVagueMessage("重试", thread: thread).contains("注意避免之前的失败原因"))
     }
+
+    func testBootstrapPromotesHistoricalSessionWithToolCallsToTask() {
+        let historical = Thread(
+            title: "生成一个雪碧的介绍图",
+            preview: "Request failed",
+            status: .failed,
+            steps: [
+                TaskStep(kind: .userInput, text: "生成一个雪碧的介绍图"),
+                TaskStep(kind: .toolCall, text: "生成图片", toolName: "image.generate")
+            ],
+            source: .session
+        )
+        let environment = makeTestEnvironment(threadRepository: FixedThreadRepository(threads: [historical]))
+
+        let state = AppState.bootstrap(environment: environment)
+
+        XCTAssertEqual(state.threads.first?.source, .task)
+        XCTAssertEqual(state.selectedTaskID, historical.id)
+    }
+
+    func testBootstrapClearsProjectFromPlainHistoricalSession() {
+        let projectID = UUID()
+        let plain = Thread(
+            title: "普通问题",
+            preview: "你好",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "你好"),
+                TaskStep(kind: .textOutput, text: "你好")
+            ],
+            source: .session,
+            projectID: projectID
+        )
+        let environment = makeTestEnvironment(threadRepository: FixedThreadRepository(threads: [plain]))
+
+        let state = AppState.bootstrap(environment: environment)
+
+        XCTAssertEqual(state.threads.first?.source, .session)
+        XCTAssertNil(state.threads.first?.projectID)
+        XCTAssertEqual(state.selectedSessionID, plain.id)
+    }
 }

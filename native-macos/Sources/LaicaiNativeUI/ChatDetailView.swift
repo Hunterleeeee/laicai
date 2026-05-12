@@ -539,6 +539,11 @@ struct ChatDetailView: View {
 
     private func refreshGauge() {
         let threadID = store.state.selectedThread?.id.uuidString ?? ""
+        guard !threadID.isEmpty else {
+            gaugeTokens = 0
+            gaugePct = 0
+            return
+        }
         let connMode = store.state.settings.contextMode
         let conn = store.state.activeConnector
         DispatchQueue.global(qos: .utility).async {

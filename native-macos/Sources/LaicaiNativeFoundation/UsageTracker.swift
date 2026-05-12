@@ -10,9 +10,7 @@ import SQLite3
 public final class UsageTracker {
     public static let shared = UsageTracker()
 
-    private var db: OpaquePointer?
     private let queue = DispatchQueue(label: "laicai.usage-tracker", qos: .utility)
-    private let queueKey = DispatchSpecificKey<Bool>()
     private let path: String
 
     public init(path: String? = nil) {
@@ -20,71 +18,91 @@ public final class UsageTracker {
         let dir = (base as NSString).appendingPathComponent("Laicai")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         self.path = (dir as NSString).appendingPathComponent("usage.sqlite3")
-        queue.setSpecific(key: queueKey, value: true)
-        open()
         migrate()
     }
 
-    deinit {
-        withDatabase { db in
-            sqlite3_close(db)
-        }
-    }
-
-    private func open() {
-        if sqlite3_open(path, &db) != SQLITE_OK { db = nil }
-    }
-
-    private func exec(_ sql: String) {
-        guard let db else { return }
-        sqlite3_exec(db, sql, nil, nil, nil)
-    }
-
     private func withDatabase<T>(_ fallback: T, _ body: (OpaquePointer) -> T) -> T {
-        if DispatchQueue.getSpecific(key: queueKey) == true {
-            guard let db else { return fallback }
-            return body(db)
-        }
-        return queue.sync {
-            guard let db else { return fallback }
+        queue.sync {
+            guard let db = openDatabase(readOnly: false) else { return fallback }
+            defer { sqlite3_close(db) }
             return body(db)
         }
     }
 
-    private func withDatabase(_ body: (OpaquePointer) -> Void) {
-        if DispatchQueue.getSpecific(key: queueKey) == true {
-            guard let db else { return }
-            body(db)
-            return
-        }
+    private func withReadOnlyDatabase<T>(_ fallback: T, _ body: (OpaquePointer) -> T) -> T {
         queue.sync {
-            guard let db else { return }
+            guard let db = openDatabase(readOnly: true) else { return fallback }
+            defer { sqlite3_close(db) }
+            return body(db)
+        }
+    }
+
+    private func withDatabaseAsync(_ body: @escaping (OpaquePointer) -> Void) {
+        let dbPath = path
+        queue.async {
+            guard let db = Self.openDatabase(at: dbPath, readOnly: false) else { return }
+            defer { sqlite3_close(db) }
             body(db)
         }
+    }
+
+    private func openDatabase(readOnly: Bool) -> OpaquePointer? {
+        Self.openDatabase(at: path, readOnly: readOnly)
+    }
+
+    private static func openDatabase(at path: String, readOnly: Bool) -> OpaquePointer? {
+        var db: OpaquePointer?
+        let flags = readOnly
+            ? (SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX)
+            : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX)
+        guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK, let opened = db else {
+            if let db { sqlite3_close(db) }
+            return nil
+        }
+        sqlite3_busy_timeout(opened, 5_000)
+        configure(opened, readOnly: readOnly)
+        return opened
+    }
+
+    private static func configure(_ db: OpaquePointer, readOnly: Bool) {
+        exec("PRAGMA busy_timeout = 5000;", on: db)
+        exec("PRAGMA temp_store = MEMORY;", on: db)
+        if !readOnly {
+            exec("PRAGMA journal_mode = WAL;", on: db)
+            exec("PRAGMA synchronous = NORMAL;", on: db)
+        }
+    }
+
+    @discardableResult
+    private static func exec(_ sql: String, on db: OpaquePointer) -> Bool {
+        sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK
     }
 
     private func migrate() {
-        exec("""
-        CREATE TABLE IF NOT EXISTS usage_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp REAL NOT NULL,
-            date_key TEXT NOT NULL,
-            model_name TEXT NOT NULL DEFAULT '',
-            connector_name TEXT NOT NULL DEFAULT '',
-            project_name TEXT NOT NULL DEFAULT '',
-            thread_id TEXT NOT NULL DEFAULT '',
-            input_tokens INTEGER NOT NULL DEFAULT 0,
-            output_tokens INTEGER NOT NULL DEFAULT 0,
-            duration_seconds REAL NOT NULL DEFAULT 0,
-            tokens_per_second REAL NOT NULL DEFAULT 0,
-            is_streaming INTEGER NOT NULL DEFAULT 0,
-            intent TEXT NOT NULL DEFAULT ''
-        );
-        """)
-        exec("CREATE INDEX IF NOT EXISTS idx_usage_date ON usage_records(date_key);")
-        exec("CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_records(model_name);")
-        exec("CREATE INDEX IF NOT EXISTS idx_usage_project ON usage_records(project_name);")
-        exec("CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_records(timestamp);")
+        withDatabase(()) { db in
+            Self.exec("""
+            CREATE TABLE IF NOT EXISTS usage_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                date_key TEXT NOT NULL,
+                model_name TEXT NOT NULL DEFAULT '',
+                connector_name TEXT NOT NULL DEFAULT '',
+                project_name TEXT NOT NULL DEFAULT '',
+                thread_id TEXT NOT NULL DEFAULT '',
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                duration_seconds REAL NOT NULL DEFAULT 0,
+                tokens_per_second REAL NOT NULL DEFAULT 0,
+                is_streaming INTEGER NOT NULL DEFAULT 0,
+                intent TEXT NOT NULL DEFAULT ''
+            );
+            """, on: db)
+            Self.exec("CREATE INDEX IF NOT EXISTS idx_usage_date ON usage_records(date_key);", on: db)
+            Self.exec("CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_records(model_name);", on: db)
+            Self.exec("CREATE INDEX IF NOT EXISTS idx_usage_project ON usage_records(project_name);", on: db)
+            Self.exec("CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_records(timestamp);", on: db)
+            Self.exec("CREATE INDEX IF NOT EXISTS idx_usage_thread ON usage_records(thread_id);", on: db)
+        }
     }
 
     // MARK: - Record
@@ -101,8 +119,7 @@ public final class UsageTracker {
         isStreaming: Bool = false,
         intent: String = ""
     ) {
-        queue.async { [weak self] in
-            guard let self, let db else { return }
+        withDatabaseAsync { db in
             let now = Date()
             let dateKey = Self.dateKey(from: now)
             let sql = """
@@ -135,7 +152,7 @@ public final class UsageTracker {
 
     /// Daily usage for the last N days
     public func dailyUsage(days: Int = 30) -> [DailyUsageRow] {
-        withDatabase([]) { db in
+        withReadOnlyDatabase([]) { db in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT date_key,
@@ -170,7 +187,7 @@ public final class UsageTracker {
 
     /// Per-model usage breakdown
     public func modelBreakdown(days: Int = 30) -> [ModelUsageRow] {
-        withDatabase([]) { db in
+        withReadOnlyDatabase([]) { db in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT model_name,
@@ -203,7 +220,7 @@ public final class UsageTracker {
 
     /// Per-project usage breakdown
     public func projectBreakdown(days: Int = 30) -> [ProjectUsageRow] {
-        withDatabase([]) { db in
+        withReadOnlyDatabase([]) { db in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT project_name,
@@ -234,7 +251,7 @@ public final class UsageTracker {
 
     /// Totals for a period
     public func totals(days: Int = 30) -> UsageTotals {
-        withDatabase(UsageTotals()) { db in
+        withReadOnlyDatabase(UsageTotals()) { db in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT SUM(input_tokens), SUM(output_tokens), COUNT(*),
@@ -259,7 +276,7 @@ public final class UsageTracker {
 
     /// Hourly pattern for today
     public func hourlyToday() -> [HourlyUsageRow] {
-        withDatabase([]) { db in
+        withReadOnlyDatabase([]) { db in
             let startOfDay = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
             let sql = """
             SELECT CAST(strftime('%H', timestamp, 'unixepoch', 'localtime') AS INTEGER) as hour,
@@ -290,7 +307,7 @@ public final class UsageTracker {
 
     /// Top threads by token usage (for session ranking)
     public func topThreads(days: Int = 30, limit: Int = 10) -> [ThreadUsageRow] {
-        withDatabase([]) { db in
+        withReadOnlyDatabase([]) { db in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT thread_id,
@@ -326,7 +343,7 @@ public final class UsageTracker {
 
     /// Intent breakdown (chat vs task vs research)
     public func intentBreakdown(days: Int = 30) -> [IntentUsageRow] {
-        withDatabase([]) { db in
+        withReadOnlyDatabase([]) { db in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT CASE WHEN intent = '' THEN 'chat' ELSE intent END as intent_label,
@@ -360,7 +377,7 @@ public final class UsageTracker {
     /// Quick lookup: total tokens + cost for a single thread
     public func threadUsage(threadID: String) -> (inputTokens: Int, outputTokens: Int, requestCount: Int, estimatedCost: Double) {
         guard !threadID.isEmpty else { return (0, 0, 0, 0) }
-        return withDatabase((0, 0, 0, 0)) { db in
+        return withReadOnlyDatabase((0, 0, 0, 0)) { db in
             let sql = "SELECT SUM(input_tokens), SUM(output_tokens), COUNT(*) FROM usage_records WHERE thread_id = ?;"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return (0, 0, 0, 0) }

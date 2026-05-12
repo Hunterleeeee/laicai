@@ -1,8 +1,25 @@
 import XCTest
 @testable import LaicaiNativeFoundation
 
+#if canImport(SQLite3)
+import SQLite3
+#endif
+
 @MainActor
 final class UsageTrackerTests: LaicaiNativeFoundationTestCase {
+    func testEmptyThreadUsageDoesNotTouchDatabase() throws {
+        let base = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let tracker = UsageTracker(path: base.path)
+
+        let usage = tracker.threadUsage(threadID: "")
+
+        XCTAssertEqual(usage.inputTokens, 0)
+        XCTAssertEqual(usage.outputTokens, 0)
+        XCTAssertEqual(usage.requestCount, 0)
+        XCTAssertEqual(usage.estimatedCost, 0)
+    }
+
     func testUsageTrackerSerializesConcurrentThreadUsageReadsAndWrites() async throws {
         let base = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: base) }
@@ -25,8 +42,30 @@ final class UsageTrackerTests: LaicaiNativeFoundationTestCase {
             }
         }
 
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await Task.sleep(nanoseconds: 1_000_000_000)
         let usage = tracker.threadUsage(threadID: threadID)
         XCTAssertEqual(usage.requestCount, 80)
+    }
+
+    func testUsageTrackerCreatesThreadIndex() throws {
+        let base = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: base) }
+        _ = UsageTracker(path: base.path)
+
+        let dbPath = base.appendingPathComponent("Laicai/usage.sqlite3").path
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+
+        var stmt: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(
+            db,
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_usage_thread';",
+            -1,
+            &stmt,
+            nil
+        ), SQLITE_OK)
+        defer { sqlite3_finalize(stmt) }
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
     }
 }

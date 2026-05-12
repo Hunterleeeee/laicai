@@ -81,13 +81,46 @@ public extension AppState {
             WorkspaceSandbox.shared.workspaceRoot = workspacePath
         }
 
-        for index in state.threads.indices where state.threads[index].source == .session {
-            if state.threads[index].title.isEmpty || state.threads[index].title == "新对话" || state.threads[index].title == "新会话" {
-                let firstMsg = state.threads[index].steps.first(where: { $0.kind == .userInput })?.text ?? ""
-                let title = String(firstMsg.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
-                if !title.isEmpty { state.threads[index].title = title }
+        var normalizedThreads = false
+        for index in state.threads.indices {
+            if state.threads[index].source == .session,
+               isTaskLikeHistoricalSession(state.threads[index]) {
+                state.threads[index].source = .task
+                state.threads[index].preview = normalizedSessionPreview(state.threads[index].preview)
+                normalizedThreads = true
             }
-            state.threads[index].preview = normalizedSessionPreview(state.threads[index].preview)
+
+            if state.threads[index].source == .session {
+                if state.threads[index].title.isEmpty || state.threads[index].title == "新对话" || state.threads[index].title == "新会话" {
+                    let firstMsg = state.threads[index].steps.first(where: { $0.kind == .userInput })?.text ?? ""
+                    let title = String(firstMsg.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
+                    if !title.isEmpty { state.threads[index].title = title }
+                }
+                state.threads[index].preview = normalizedSessionPreview(state.threads[index].preview)
+            } else if state.threads[index].status == .running {
+                state.threads[index].status = .cancelled
+                if !state.threads[index].steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) {
+                    state.threads[index].steps.append(TaskStep(
+                        kind: .error,
+                        text: "上次运行被中断，已自动标记为已暂停。",
+                        isFailure: false,
+                        recoverable: true,
+                        retryAction: "继续执行"
+                    ))
+                }
+                normalizedThreads = true
+            }
+
+            if state.threads[index].source == .session,
+               state.threads[index].projectID != nil,
+               !threadNeedsProjectScope(state.threads[index]) {
+                state.threads[index].projectID = nil
+                normalizedThreads = true
+            }
+        }
+
+        if normalizedThreads {
+            try? environment.threadRepository.saveThreads(state.threads)
         }
 
         if let latest = state.threads.first {
@@ -122,4 +155,28 @@ private func normalizedBootstrapConnector(_ connector: ConnectorProfile) -> Conn
     normalized.note = connector.note.trimmingCharacters(in: .whitespacesAndNewlines)
     normalized.kind = LiveChatRuntime.normalizedConnectorKind(normalized.kind, endpoint: normalized.endpoint)
     return normalized
+}
+
+func isTaskLikeHistoricalSession(_ thread: Thread) -> Bool {
+    guard thread.source == .session else { return false }
+    if thread.workflowName != nil { return true }
+    return thread.steps.contains { step in
+        if let toolName = step.toolName?.trimmingCharacters(in: .whitespacesAndNewlines), !toolName.isEmpty {
+            return true
+        }
+        switch step.kind {
+        case .toolCall, .toolResult, .reviewRequest, .reviewResult:
+            return true
+        case .userInput, .aiThinking, .textOutput, .error:
+            return false
+        }
+    }
+}
+
+private func threadNeedsProjectScope(_ thread: Thread) -> Bool {
+    if thread.source == .task { return true }
+    return thread.workflowName != nil
+        || thread.steps.contains { step in
+            step.kind == .toolCall || step.kind == .toolResult || step.kind == .reviewRequest || step.kind == .reviewResult
+        }
 }
