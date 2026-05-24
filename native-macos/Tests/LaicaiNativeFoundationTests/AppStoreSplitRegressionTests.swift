@@ -41,7 +41,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(state.estimatedProgress ?? -1, 0.25, accuracy: 0.001)
     }
 
-    func testFilteredThreadRecordSummariesSearchesStepText() {
+    func testFilteredThreadRecordSummariesUsesLightweightIndex() {
         let session = ChatSession(title: "闲聊", preview: "你好", modelName: "test")
         let task = AgentTask(title: "任务", steps: [
             TaskStep(kind: .toolResult, text: "发现 SplitRegressionNeedle")
@@ -51,28 +51,142 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         state.searchText = "SplitRegressionNeedle"
 
         XCTAssertEqual(state.filteredThreadRecordSummaries.map(\.id), [task.id])
-        XCTAssertEqual(state.filteredThreadRecordSummaries.first?.events.first?.text, "发现 SplitRegressionNeedle")
+        XCTAssertTrue(state.filteredThreadRecordSummaries.first?.events.isEmpty ?? true)
+    }
+
+    func testFilteredThreadRecordSummariesDoesNotScanDeepStepHistory() {
+        let oldNeedleStep = TaskStep(kind: .toolResult, text: "发现 OldDeepNeedle")
+        let recentStep = TaskStep(kind: .textOutput, text: "普通收尾")
+        let task = AgentTask(title: "任务", steps: [oldNeedleStep, recentStep])
+        var state = testState(tasks: [task])
+
+        state.searchText = "OldDeepNeedle"
+
+        XCTAssertEqual(state.filteredThreadRecordSummaries.map(\.id), [])
     }
 
     func testThreadRecordsHideQueuedEmptyPlaceholdersEvenWithTypedTitle() {
         let placeholder = Thread(
             title: "前段时间比较火的酒馆 是什么东西",
+            preview: "",
             status: .queued,
             steps: [],
-            preview: "",
             source: .session
         )
         let real = Thread(
             title: "真实会话",
+            preview: "你好",
             status: .completed,
             steps: [TaskStep(kind: .userInput, text: "你好")],
-            preview: "你好",
             source: .session
         )
         let state = testState(threads: [placeholder, real])
 
         XCTAssertTrue(placeholder.isEmptyPlaceholder)
         XCTAssertEqual(state.threadRecordSummaries.map(\.id), [real.id])
+    }
+
+    func testSelectedEmptyPlaceholderStaysVisibleAsDraftAgent() {
+        let placeholder = Thread(
+            title: "新 Agent",
+            preview: "",
+            status: .queued,
+            steps: [],
+            source: .session,
+            agentState: .idle
+        )
+        let real = Thread(
+            title: "真实会话",
+            preview: "你好",
+            status: .completed,
+            steps: [TaskStep(kind: .userInput, text: "你好")],
+            source: .session
+        )
+        let state = testState(threads: [placeholder, real], selectedSessionID: placeholder.id)
+
+        XCTAssertTrue(placeholder.isEmptyPlaceholder)
+        XCTAssertTrue(state.threadRecordSummaries.contains { $0.id == placeholder.id })
+        XCTAssertEqual(state.selectedAgent?.id, placeholder.id)
+    }
+
+    func testSelectedEmptyRunningThreadIsNotTreatedAsDraftPlaceholder() {
+        let running = Thread(
+            title: "你了解易经吗",
+            preview: "",
+            status: .running,
+            steps: [],
+            source: .task,
+            agentState: .running,
+            agentGoal: "你了解易经吗"
+        )
+        var state = testState(threads: [running], selectedTaskID: running.id)
+        state.isGenerating = true
+
+        XCTAssertFalse(running.isEmptyPlaceholder)
+        XCTAssertEqual(state.threadRecordSummaries.map(\.id), [running.id])
+        XCTAssertEqual(state.selectedThread?.id, running.id)
+        XCTAssertEqual(state.selectedThread?.agentState, .running)
+    }
+
+    func testMultiAgentStartCreatesVisibleInitialSteps() {
+        let connector = makeConnector(modelName: "gpt-5.5")
+        let store = AppStore(
+            state: testState(
+                workspacePath: "/tmp/laicai-project",
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment()
+        )
+        let decision = PlannerDecision(
+            intent: .task,
+            confidence: 0.9,
+            reason: "测试多 Agent",
+            routeLabel: "Agent 执行",
+            expectedCapabilities: ["读取工作区", "提出文件修改"]
+        )
+        let plan = MultiAgentPlan(
+            title: "规划 → 编码",
+            agents: [
+                AgentNode(role: .planner, connectorID: connector.id),
+                AgentNode(role: .coder, connectorID: connector.id)
+            ]
+        )
+
+        store.executeMultiAgent(
+            message: "优化项目 UI 并运行验证",
+            context: TaskContext(workspaceRoot: "/tmp/laicai-project"),
+            connector: connector,
+            plan: plan,
+            intent: .task,
+            decision: decision
+        )
+
+        XCTAssertEqual(store.state.selectedThread?.source, .task)
+        XCTAssertEqual(store.state.selectedThread?.steps.first?.kind, .userInput)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .aiThinking && $0.text.contains("多 Agent 协同已创建") } == true)
+        XCTAssertNotNil(store.state.selectedThread?.taskProtocol)
+        XCTAssertNotNil(store.state.selectedThread?.executionLedger)
+        store.stopGenerating()
+    }
+
+    func testNewAgentClearsSearchAndDraftState() {
+        let store = AppStore(state: testState())
+        store.updateSearchText("旧搜索")
+        store.updateDraft("旧草稿")
+        store.addDraftAttachments(["/tmp/a.swift"])
+        store.addDraftImage(ImageAttachment(data: Data([1]), thumbnailName: "a.png", width: 1, height: 1))
+        store.queueFollowUp("继续")
+
+        store.newTask()
+
+        XCTAssertEqual(store.state.searchText, "")
+        XCTAssertEqual(store.state.draftMessage, "")
+        XCTAssertEqual(store.state.draftAttachments, [])
+        XCTAssertEqual(store.state.draftImages, [])
+        XCTAssertNil(store.state.pendingFollowUp)
+        XCTAssertEqual(store.state.selectedAgent?.title, "新 Agent")
+        XCTAssertTrue(store.state.threadRecordSummaries.contains { $0.id == store.state.selectedThreadID })
     }
 
     func testDraftAttachmentAndFollowUpActionsSurviveSplit() {
@@ -92,12 +206,17 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         store.removeDraftImage(id: image.id)
         XCTAssertTrue(store.state.draftImages.isEmpty)
 
-        store.queueFollowUp("继续执行")
+        store.updateDraft("继续执行")
         store.submitFollowUp()
 
+        XCTAssertEqual(store.state.pendingFollowUp, "继续执行")
+        XCTAssertEqual(store.state.draftMessage, "")
+        XCTAssertEqual(store.state.selectedThread?.executionLedger?.pendingFollowUp, "继续执行")
+        XCTAssertEqual(store.state.selectedTask?.steps.map(\.text), [])
+
+        store.clearPendingFollowUp()
         XCTAssertNil(store.state.pendingFollowUp)
         XCTAssertEqual(store.state.draftMessage, "")
-        XCTAssertEqual(store.state.selectedTask?.steps.map(\.text), ["继续执行"])
     }
 
     func testAutoResumeInterruptedTaskAddsSingleRecoverableHint() {
@@ -141,7 +260,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertEqual(
             AppStore.enrichVagueMessage("继续", thread: thread),
-            "继续处理当前任务，优先基于已有证据形成结论；不要重复已完成的读取、搜索或执行步骤。"
+            "继续处理当前 Agent，优先基于已有证据形成结论；不要重复已完成的读取、搜索或执行步骤。"
         )
         XCTAssertTrue(AppStore.enrichVagueMessage("做", thread: thread).contains("帮我生成 README"))
         XCTAssertTrue(AppStore.enrichVagueMessage("重试", thread: thread).contains("注意避免之前的失败原因"))
@@ -225,7 +344,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             intent: .task,
             confidence: 0.9,
             reason: "测试任务路由",
-            routeLabel: "任务",
+            routeLabel: "Agent 执行",
             expectedCapabilities: []
         )
 

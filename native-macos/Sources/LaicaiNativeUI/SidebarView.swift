@@ -9,66 +9,61 @@ import LaicaiNativeFoundation
 struct SidebarView: View {
     @EnvironmentObject private var store: AppStore
     @Binding var showingSettings: Bool
+    @Binding var showingCommandPalette: Bool
+    @Binding var showWorkbench: Bool
     @Binding var isVisible: Bool
 
-    @State private var renamingSessionID: UUID?
+    @State private var renamingAgentID: UUID?
     @State private var renameText = ""
-    @State private var deletingSessionID: UUID?
-    @State private var deletingTaskID: UUID?
+    @State private var deletingAgentID: UUID?
     @State private var showingAddConnector = false
     @State private var showingNewProjectSheet = false
     @State private var deletingProjectID: UUID?
     @State private var collapsedProjects: Set<UUID> = []
     @State private var expandedProjects: Set<UUID> = []
-    @State private var isHoveringProject: UUID?
+    @State private var recentHistoryLimit = 8
+    @State private var olderHistoryLimit = 16
+    @State private var projectHistoryLimits: [UUID: Int] = [:]
     @ObservedObject private var projectManager = ProjectManager.shared
+    private let compactRailHistoryLimit = 32
 
     var body: some View {
         VStack(spacing: 0) {
-            // Logo/brand at top
-            brandMark
-
-            // Thread list — compact or expanded
             if isVisible {
+                sidebarHeader
                 expandedList
             } else {
                 compactRail
             }
-
-            // Bottom actions
             bottomBar
         }
-        .alert("删除会话", isPresented: Binding(
-            get: { deletingSessionID != nil || deletingTaskID != nil },
+        .alert("删除 Agent", isPresented: Binding(
+            get: { deletingAgentID != nil },
             set: {
                 if !$0 {
-                    deletingSessionID = nil
-                    deletingTaskID = nil
+                    deletingAgentID = nil
                 }
             }
         )) {
             Button("取消", role: .cancel) {
-                deletingSessionID = nil
-                deletingTaskID = nil
+                deletingAgentID = nil
             }
             Button("删除", role: .destructive) {
-                if let id = deletingSessionID { store.deleteSession(id: id) }
-                if let id = deletingTaskID { store.deleteTask(id: id) }
-                deletingSessionID = nil
-                deletingTaskID = nil
+                if let id = deletingAgentID { store.deleteAgent(id: id) }
+                deletingAgentID = nil
             }
-        } message: { Text("确定要删除这个会话吗？") }
+        } message: { Text("确定要删除这个 Agent 吗？") }
         .alert("重命名", isPresented: Binding(
-            get: { renamingSessionID != nil },
-            set: { if !$0 { renamingSessionID = nil } }
+            get: { renamingAgentID != nil },
+            set: { if !$0 { renamingAgentID = nil } }
         )) {
             TextField("标题", text: $renameText)
-            Button("取消", role: .cancel) { renamingSessionID = nil }
+            Button("取消", role: .cancel) { renamingAgentID = nil }
             Button("确定") {
-                if let id = renamingSessionID, !renameText.isEmpty {
-                    store.renameSession(id: id, title: renameText)
+                if let id = renamingAgentID, !renameText.isEmpty {
+                    store.renameAgent(id: id, title: renameText)
                 }
-                renamingSessionID = nil
+                renamingAgentID = nil
             }
         }
         .sheet(isPresented: $showingAddConnector) {
@@ -84,51 +79,122 @@ struct SidebarView: View {
         }
     }
 
-    // MARK: - Brand Mark
+    // MARK: - Expanded Navigation Header
 
-    private var brandMark: some View {
-        Group {
-            if isVisible {
-                // Expanded: logo + name + collapse button
-                HStack(spacing: AppSpace.sm) {
-                    brandCircle
+    private var sidebarHeader: some View {
+        return VStack(alignment: .leading, spacing: AppSpace.md) {
+            HStack(alignment: .center, spacing: AppSpace.sm) {
+                BrandLogo(size: 24)
+
+                VStack(alignment: .leading, spacing: 1) {
                     Text("来财")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(TextGrade.primary)
-                    Spacer()
-                    IconButton(icon: "sidebar.left", tooltip: "收起") {
-                        isVisible = false
-                    }
+                    Text(brandSubtitle)
+                        .font(AppFont.tiny)
+                        .foregroundStyle(TextGrade.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                .padding(.horizontal, AppSpace.md)
-                .padding(.vertical, AppSpace.md)
-            } else {
-                // Compact: just logo circle, tap to expand
+
+                Spacer(minLength: AppSpace.xs)
+
+                IconButton(icon: "sidebar.left", tooltip: "收起侧栏") {
+                    isVisible = false
+                }
+            }
+            .padding(.top, AppSpace.xs)
+
+            VStack(spacing: AppSpace.xs) {
+                PrimaryNavButton(icon: "plus.square", title: "新任务", isSelected: false) {
+                    store.newTask()
+                }
+
+                PrimaryNavButton(icon: "bubble.left.and.bubble.right", title: "新会话", isSelected: false) {
+                    store.newSession()
+                }
+
+                PrimaryNavButton(icon: "magnifyingglass", title: "搜索", isSelected: false) {
+                    showingCommandPalette = true
+                }
+
+                PrimaryNavButton(icon: "sparkles", title: "技能", isSelected: store.state.workbenchTab == .skills && showWorkbench) {
+                    openWorkbench(.skills)
+                }
+
+                PrimaryNavButton(icon: "cpu", title: "模型连接", isSelected: store.state.workbenchTab == .context && showWorkbench) {
+                    openWorkbench(.context)
+                }
+
+                PrimaryNavButton(icon: "alarm", title: "定时 Agent", isSelected: store.state.workbenchTab == .schedules && showWorkbench) {
+                    openWorkbench(.schedules)
+                }
+            }
+
+            HStack(spacing: AppSpace.xs) {
+                Text("历史记录")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(TextGrade.ghost)
+                    .textCase(.uppercase)
+                Spacer()
                 Button {
-                    isVisible = true
+                    showingNewProjectSheet = true
                 } label: {
-                    brandCircle
+                    Image(systemName: "folder.badge.plus")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(TextGrade.ghost)
+                        .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain)
-                .padding(.vertical, AppSpace.md)
-                .help("展开侧栏")
+                .help("新建项目")
             }
+            .padding(.top, AppSpace.xs)
         }
-    }
-
-    @State private var brandRingAngle: Double = 0
-
-    private var brandCircle: some View {
-        BrandLogo(size: 30)
-            .shadow(color: Brand.primary.opacity(0.4), radius: 8, y: 0)
+        .padding(.horizontal, AppSpace.md)
+        .padding(.top, AppSpace.sm)
+        .padding(.bottom, AppSpace.xs)
     }
 
     // MARK: - Compact Rail (60px mode)
 
     private var compactRail: some View {
-        ScrollView(.vertical, showsIndicators: false) {
+        let items = Array(filteredThreadItems.prefix(compactRailHistoryLimit))
+        return ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: AppSpace.xs) {
-                ForEach(filteredThreadItems) { item in
+                Button {
+                    isVisible = true
+                } label: {
+                    BrandLogo(size: 28)
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, AppSpace.sm)
+                .help("展开导航")
+
+                CompactRailButton(icon: "plus.square", tooltip: "新任务") {
+                    store.newTask()
+                }
+
+                CompactRailButton(icon: "bubble.left.and.bubble.right", tooltip: "新会话") {
+                    store.newSession()
+                }
+
+                CompactRailButton(icon: "magnifyingglass", tooltip: "搜索") {
+                    showingCommandPalette = true
+                }
+
+                CompactRailButton(icon: "sparkles", tooltip: "技能") {
+                    openWorkbench(.skills)
+                }
+
+                CompactRailButton(icon: "cpu", tooltip: "模型连接") {
+                    openWorkbench(.context)
+                }
+
+                CompactRailButton(icon: "alarm", tooltip: "定时 Agent") {
+                    openWorkbench(.schedules)
+                }
+
+                ForEach(items) { item in
                     Button { selectThread(item) } label: {
                         CompactThreadDot(
                             item: item,
@@ -141,91 +207,130 @@ struct SidebarView: View {
             }
             .padding(.horizontal, AppSpace.sm)
             .padding(.vertical, AppSpace.xs)
+            .frame(maxWidth: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Expanded List (project-grouped, Codex style)
 
     private var expandedList: some View {
-        List {
-            Section {
-                Button {
-                    store.newSession()
-                } label: {
-                    HStack(spacing: AppSpace.sm) {
-                        Image(systemName: "plus.message")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Brand.primary)
-                            .frame(width: 18)
-                        Text("新会话")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(TextGrade.primary)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.plain)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 0, leading: AppSpace.xs, bottom: 3, trailing: AppSpace.xs))
-            } header: {
-                Text("开始")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(TextGrade.ghost)
-                    .textCase(.uppercase)
-            }
+        let sections = SidebarHistorySections(
+            items: filteredThreadItems,
+            olderHistoryLimit: olderHistoryLimit,
+            recentHistoryLimit: recentHistoryLimit
+        )
 
-            // Section: 项目 (projects with nested threads)
-            if !projectManager.projects.isEmpty {
-                Section {
-                    ForEach(projectManager.projects) { project in
-                        projectGroupView(project)
-                    }
-                } header: {
-                    HStack {
-                        Text("项目")
-                            .font(.system(size: 10, weight: .semibold))
+        return ScrollView(.vertical, showsIndicators: false) {
+            LazyVStack(alignment: .leading, spacing: AppSpace.xs) {
+                if sections.isEmpty {
+                    VStack(alignment: .leading, spacing: AppSpace.xs) {
+                        Text("暂无内容")
+                            .font(AppFont.captionMedium)
+                            .foregroundStyle(TextGrade.secondary)
+                        Text("从上方新建任务或会话开始。")
+                            .font(AppFont.tiny)
                             .foregroundStyle(TextGrade.ghost)
-                            .textCase(.uppercase)
-                        Spacer()
-                        Button {
-                            showingNewProjectSheet = true
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(TextGrade.ghost)
-                        }
-                        .buttonStyle(.plain)
                     }
-                    .padding(.top, 4)
+                    .padding(.horizontal, AppSpace.sm)
+                    .padding(.vertical, AppSpace.md)
                 }
-            }
 
-            // Section: 其他对话 (threads not belonging to any project)
-            let orphanThreads = filteredThreadItems.filter { $0.projectID == nil }
-            if !orphanThreads.isEmpty {
-                Section {
-                    ForEach(orphanThreads) { item in
-                        Button { selectThread(item) } label: {
-                            ExpandedThreadRow(item: item, isSelected: isSelected(item))
+                if !sections.recentItems.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        sidebarSectionHeader("最近")
+                        ForEach(sections.visibleRecentItems) { item in
+                            Button { selectThread(item) } label: {
+                                ExpandedThreadRow(item: item, isSelected: isSelected(item))
+                                    .equatable()
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu { threadMenu(for: item) }
                         }
-                        .buttonStyle(.plain)
-                        .contextMenu { threadMenu(for: item) }
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 1, leading: AppSpace.xs, bottom: 1, trailing: AppSpace.xs))
+                        if sections.hiddenRecentCount > 0 {
+                            Button {
+                                recentHistoryLimit += 8
+                            } label: {
+                                HStack(spacing: AppSpace.xs) {
+                                    Image(systemName: "ellipsis.circle")
+                                        .font(.system(size: 11, weight: .medium))
+                                    Text("显示更多最近")
+                                    Text("\(sections.hiddenRecentCount)")
+                                        .foregroundStyle(TextGrade.ghost)
+                                }
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(TextGrade.muted)
+                                .padding(.horizontal, AppSpace.sm)
+                                .frame(height: 28)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                } header: {
-                    Text("其他对话")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(TextGrade.ghost)
-                        .textCase(.uppercase)
-                        .padding(.top, 4)
+                }
+
+                if !projectManager.projects.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            sidebarSectionHeader("项目")
+                            Spacer()
+                            Button {
+                                showingNewProjectSheet = true
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(TextGrade.ghost)
+                                    .frame(width: 22, height: 22)
+                            }
+                            .buttonStyle(.plain)
+                            .help("新建项目")
+                        }
+                            .padding(.top, AppSpace.xs)
+
+                        ForEach(projectManager.projects) { project in
+                            projectGroupView(project, projectThreads: sections.projectThreadsByID[project.id] ?? [])
+                        }
+                    }
+                }
+
+                if sections.hasOlderItems {
+                    VStack(alignment: .leading, spacing: 2) {
+                        sidebarSectionHeader("更早")
+                        ForEach(sections.visibleOlderOrphanItems) { item in
+                            Button { selectThread(item) } label: {
+                                ExpandedThreadRow(item: item, isSelected: isSelected(item))
+                                    .equatable()
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu { threadMenu(for: item) }
+                        }
+                        if sections.hiddenOlderCount > 0 {
+                            Button {
+                                olderHistoryLimit += 16
+                            } label: {
+                                HStack(spacing: AppSpace.xs) {
+                                    Image(systemName: "ellipsis.circle")
+                                        .font(.system(size: 11, weight: .medium))
+                                    Text("显示更多历史")
+                                    Text("\(sections.hiddenOlderCount)")
+                                        .foregroundStyle(TextGrade.ghost)
+                                }
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(TextGrade.muted)
+                                .padding(.horizontal, AppSpace.sm)
+                                .frame(height: 28)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
             }
+            .padding(.horizontal, AppSpace.md)
+            .padding(.bottom, AppSpace.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $showingNewProjectSheet) {
             NewProjectSheet()
         }
@@ -246,14 +351,16 @@ struct SidebarView: View {
     // MARK: - Project Group (collapsible header + nested threads)
 
     @ViewBuilder
-    private func projectGroupView(_ project: Project) -> some View {
-        let isActive = project.id == projectManager.activeProjectID
+    private func projectGroupView(_ project: Project, projectThreads: [ThreadRecord]) -> some View {
+        let isActive = project.id == selectedProjectIDForDisplay
         let isCollapsed = collapsedProjects.contains(project.id)
         let isShowingAll = expandedProjects.contains(project.id)
-        let projectThreads = filteredThreadItems.filter { $0.projectID == project.id }
-            .sorted { $0.updatedAt > $1.updatedAt }
-        let displayThreads = isCollapsed ? [] : (isShowingAll ? projectThreads : Array(projectThreads.prefix(5)))
-        let hasMore = projectThreads.count > 5 && !isCollapsed && !isShowingAll
+        let projectLimit = projectHistoryLimits[project.id, default: 8]
+        let collapsedLimit = 2
+        let visibleLimit = isShowingAll ? projectLimit : collapsedLimit
+        let displayThreads = isCollapsed ? [] : Array(projectThreads.prefix(visibleLimit))
+        let hiddenCount = max(0, projectThreads.count - displayThreads.count)
+        let hasMore = hiddenCount > 0 && !isCollapsed
 
         // Project header — tap activates project + expands; tap again collapses
         Button {
@@ -282,7 +389,7 @@ struct SidebarView: View {
 
                 Image(systemName: isActive ? "folder.fill" : "folder")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(isActive ? Brand.primary : TextGrade.muted)
+                    .foregroundStyle(isActive ? Brand.jade : TextGrade.muted)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(project.name)
@@ -290,10 +397,15 @@ struct SidebarView: View {
                         .foregroundStyle(isActive ? TextGrade.primary : TextGrade.secondary)
                         .lineLimit(1)
                     if isActive {
-                        Text("当前项目")
-                            .font(AppFont.tiny)
-                            .foregroundStyle(Brand.primary.opacity(0.8))
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Brand.jade)
+                                .frame(width: 5, height: 5)
+                            Text("已打开")
+                                .font(AppFont.tiny)
+                                .foregroundStyle(TextGrade.muted)
+                                .lineLimit(1)
+                        }
                     }
                 }
 
@@ -302,63 +414,50 @@ struct SidebarView: View {
                 if !projectThreads.isEmpty {
                     Text("\(projectThreads.count)")
                         .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(TextGrade.ghost)
+                        .foregroundStyle(isActive ? Brand.jade : TextGrade.ghost)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(isActive ? Brand.jade.opacity(0.12) : SurfaceGrade.sunken.opacity(0.62))
+                        )
                 }
             }
             .padding(.vertical, 3)
+            .padding(.horizontal, AppSpace.sm)
+            .threadRailItem(isSelected: isActive)
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .trailing) {
-            Button {
-                projectManager.openProject(id: project.id)
-                store.switchWorkspace(to: project.rootPath)
-                collapsedProjects.remove(project.id)
-                expandedProjects.remove(project.id)
-                store.newSessionInProject(project.id)
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(TextGrade.muted)
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .opacity(isHoveringProject == project.id ? 1 : 0)
-            .offset(x: -2)
-        }
-        .onHover { hovering in
-            isHoveringProject = hovering ? project.id : nil
-        }
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
-        .listRowInsets(EdgeInsets(top: 0, leading: AppSpace.xs, bottom: 0, trailing: AppSpace.xs))
         .contextMenu { projectContextMenu(for: project) }
 
         // Nested threads
         ForEach(displayThreads) { item in
             Button { selectThread(item) } label: {
                 ExpandedThreadRow(item: item, isSelected: isSelected(item))
+                    .equatable()
             }
             .buttonStyle(.plain)
             .contextMenu { threadMenu(for: item) }
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 1, leading: AppSpace.xl, bottom: 1, trailing: AppSpace.xs))
+            .padding(.leading, AppSpace.lg)
         }
 
         // "展开显示" link
         if hasMore {
             Button {
                 expandedProjects.insert(project.id)
+                projectHistoryLimits[project.id, default: 8] += 8
             } label: {
-                Text("展开显示")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Brand.primary)
+                HStack(spacing: AppSpace.xs) {
+                    Text(isShowingAll ? "继续显示" : "展开显示")
+                    Text("\(hiddenCount)")
+                        .foregroundStyle(TextGrade.ghost)
+                }
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Brand.primary)
             }
             .buttonStyle(.plain)
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 0, leading: AppSpace.xl, bottom: 2, trailing: AppSpace.xs))
+            .padding(.leading, AppSpace.xl)
+            .padding(.vertical, 2)
         }
     }
 
@@ -375,6 +474,10 @@ struct SidebarView: View {
 
         Divider()
 
+        Button {
+            store.newSessionInProject(project.id)
+        } label: { Label("新建会话", systemImage: "bubble.left.and.bubble.right") }
+
         Button(role: .destructive) {
             deletingProjectID = project.id
         } label: { Label("删除项目", systemImage: "trash") }
@@ -385,56 +488,32 @@ struct SidebarView: View {
     private var bottomBar: some View {
         Group {
             if isVisible {
-                // Expanded: new session + new project + settings
                 HStack(spacing: AppSpace.sm) {
-                    Button {
-                        store.newSession()
-                    } label: {
-                        HStack(spacing: AppSpace.xs) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 11, weight: .bold))
-                            Text("新会话")
-                                .font(AppFont.captionMedium)
-                        }
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, AppSpace.sm)
-                        .background(
-                            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                                .fill(Brand.premiumGradient)
-                        )
-                        .shadow(color: Brand.primary.opacity(0.3), radius: 8, y: 2)
-                    }
-                    .buttonStyle(.plain)
+                    Circle()
+                        .fill(store.state.activeConnector?.health.color ?? TextGrade.ghost)
+                        .frame(width: 6, height: 6)
 
-                    IconButton(icon: "folder.badge.plus", tooltip: "新项目") {
-                        showingNewProjectSheet = true
-                    }
-                    IconButton(icon: "gearshape", tooltip: "设置") {
-                        showingSettings = true
-                    }
+                    Text(store.state.activeConnector?.modelName.isEmpty == false ? store.state.activeConnector?.modelName ?? "未连接" : store.state.activeConnector?.name ?? "未连接")
+                        .font(AppFont.caption)
+                        .foregroundStyle(TextGrade.muted)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, AppSpace.md)
-                .padding(.vertical, AppSpace.sm)
+                .padding(.top, AppSpace.sm)
+                .padding(.bottom, AppSpace.sm + 2)
             } else {
-                // Compact: icon buttons stacked
-                VStack(spacing: AppSpace.sm) {
-                    CompactRailButton(icon: "plus", tooltip: "新会话") {
-                        store.newSession()
-                    }
-                    CompactRailButton(icon: "folder.badge.plus", tooltip: "新项目") {
-                        showingNewProjectSheet = true
-                    }
-                    CompactRailButton(icon: "gearshape", tooltip: "设置") {
-                        showingSettings = true
-                    }
-                }
-                .padding(.vertical, AppSpace.sm)
+                Circle()
+                    .fill(store.state.activeConnector?.health.color ?? TextGrade.ghost)
+                    .frame(width: 7, height: 7)
+                    .padding(.vertical, AppSpace.md)
+                    .help(store.state.activeConnector?.modelName.isEmpty == false ? store.state.activeConnector?.modelName ?? "未连接" : store.state.activeConnector?.name ?? "未连接")
             }
         }
+        .background(SurfaceGrade.panel.opacity(0.92))
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(SurfaceGrade.divider)
+                .fill(SurfaceGrade.hairline.opacity(0.72))
                 .frame(height: 0.5)
         }
     }
@@ -449,70 +528,145 @@ struct SidebarView: View {
         let isArchived = thread?.isArchived ?? item.isArchived
         let hasContent = thread?.steps.isEmpty == false || item.hasContent
 
-        switch item.source {
-        case .session:
-            Button { store.pinSession(id: item.id) } label: {
-                Label(isPinned ? "取消置顶" : "置顶", systemImage: isPinned ? "pin.slash" : "pin")
-            }
-            Button { renamingSessionID = item.id; renameText = title } label: {
-                Label("重命名", systemImage: "pencil")
-            }
-            Divider()
-            Button { store.cloneSession(id: item.id) } label: {
-                Label("克隆", systemImage: "doc.on.doc")
-            }
-            Button {
-                if let json = store.exportSession(id: item.id) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(json, forType: .string)
-                    ToastCenter.shared.success("已复制到剪贴板")
-                }
-            } label: { Label("导出", systemImage: "arrow.up.doc") }
-            Divider()
-            Button { store.clearSessionTurns(id: item.id) } label: { Label("清空", systemImage: "eraser") }.disabled(!hasContent)
-            Button { store.archiveThread(id: item.id) } label: { Label(isArchived ? "取消归档" : "归档", systemImage: "archivebox") }
-            Button { deletingSessionID = item.id } label: { Label("删除", systemImage: "trash") }
-        case .task:
-            Button { store.pinSession(id: item.id) } label: {
-                Label(isPinned ? "取消置顶" : "置顶", systemImage: isPinned ? "pin.slash" : "pin")
-            }
-            Button { renamingSessionID = item.id; renameText = title } label: {
-                Label("重命名", systemImage: "pencil")
-            }
-            Divider()
-            Button { store.prepareTaskContinuation(id: item.id) } label: { Label("继续处理", systemImage: "arrow.turn.down.right") }
-            Button { store.cloneThread(id: item.id) } label: {
-                Label("克隆", systemImage: "doc.on.doc")
-            }
-            Button {
-                if let json = store.exportTask(id: item.id) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(json, forType: .string)
-                    ToastCenter.shared.success("已复制到剪贴板")
-                }
-            } label: { Label("导出", systemImage: "arrow.up.doc") }
-            Divider()
-            Button { store.clearSessionTurns(id: item.id) } label: { Label("清空", systemImage: "eraser") }.disabled(!hasContent)
-            Button { store.archiveThread(id: item.id) } label: { Label(isArchived ? "取消归档" : "归档", systemImage: "archivebox") }
-            Button { deletingTaskID = item.id } label: { Label("删除", systemImage: "trash") }
+        Button { store.pinAgent(id: item.id) } label: {
+            Label(isPinned ? "取消置顶" : "置顶", systemImage: isPinned ? "pin.slash" : "pin")
         }
+        Button { renamingAgentID = item.id; renameText = title } label: {
+            Label("重命名", systemImage: "pencil")
+        }
+        Divider()
+        if thread?.canContinueAgent == true {
+            Button { store.continueAgent(id: item.id) } label: { Label("继续 Agent", systemImage: "arrow.turn.down.right") }
+        }
+        Button { store.cloneAgent(id: item.id) } label: {
+            Label("克隆", systemImage: "doc.on.doc")
+        }
+        Button {
+            if let json = store.exportAgent(id: item.id) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(json, forType: .string)
+                ToastCenter.shared.success("已复制到剪贴板")
+            }
+        } label: { Label("导出", systemImage: "arrow.up.doc") }
+        Divider()
+        Button { store.clearAgentEvents(id: item.id) } label: { Label("清空", systemImage: "eraser") }.disabled(!hasContent)
+        Button { store.archiveThread(id: item.id) } label: { Label(isArchived ? "取消归档" : "归档", systemImage: "archivebox") }
+        Button { deletingAgentID = item.id } label: { Label("删除", systemImage: "trash") }
     }
 
     // MARK: - Data Helpers
 
     private var filteredThreadItems: [ThreadRecord] {
-        store.state.filteredThreadSummaries.filter { !$0.isArchived }
+        let query = (store.state.debouncedSearchText.isEmpty ? store.state.searchText : store.state.debouncedSearchText).trimmingCharacters(in: .whitespacesAndNewlines)
+        let records = query.isEmpty ? store.cachedThreadRecordSummaries : store.state.filteredThreadSummaries
+        return records.filter { !$0.isArchived }
+    }
+
+    private func sidebarSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(TextGrade.ghost)
+            .textCase(.uppercase)
+            .padding(.top, AppSpace.xs)
+            .padding(.leading, AppSpace.xs)
+    }
+
+    private var selectedProjectIDForDisplay: UUID? {
+        if let selectedID = store.state.selectedThreadID {
+            return store.state.threads.first(where: { $0.id == selectedID })?.projectID
+        }
+        return projectManager.activeProjectID
     }
 
     private func selectThread(_ item: ThreadRecord) {
-        switch item.source {
-        case .session: store.selectSession(id: item.id)
-        case .task: store.selectTask(id: item.id)
-        }
+        store.selectAgent(id: item.id)
     }
 
     private func isSelected(_ item: ThreadRecord) -> Bool {
-        store.state.selectedThreadID == item.id && store.state.selectedThreadSource == item.source
+        store.state.selectedThreadID == item.id
+    }
+
+    private func openWorkbench(_ tab: WorkbenchTab) {
+        store.selectWorkbenchTab(tab)
+        NotificationCenter.default.post(name: .laicaiOpenWorkbench, object: tab)
+    }
+
+    private var brandSubtitle: String {
+        if let project = projectManager.activeProject { return project.name }
+        return store.state.activeConnector?.modelName.isEmpty == false
+            ? (store.state.activeConnector?.modelName ?? "全局 Agent")
+            : "全局 Agent"
+    }
+}
+
+private struct SidebarHistorySections {
+    let recentItems: [ThreadRecord]
+    let visibleRecentItems: [ThreadRecord]
+    let hiddenRecentCount: Int
+    let visibleOlderOrphanItems: [ThreadRecord]
+    let hiddenOlderCount: Int
+    let projectThreadsByID: [UUID: [ThreadRecord]]
+    let isEmpty: Bool
+
+    var hasOlderItems: Bool {
+        !visibleOlderOrphanItems.isEmpty || hiddenOlderCount > 0
+    }
+
+    init(items: [ThreadRecord], olderHistoryLimit: Int, recentHistoryLimit: Int = 8) {
+        isEmpty = items.isEmpty
+        var recent: [ThreadRecord] = []
+        var olderOrphans: [ThreadRecord] = []
+        var groupedProjects: [UUID: [ThreadRecord]] = [:]
+
+        for item in items {
+            if recent.count < 8 {
+                recent.append(item)
+            } else if let projectID = item.projectID {
+                groupedProjects[projectID, default: []].append(item)
+            } else {
+                olderOrphans.append(item)
+            }
+        }
+
+        recentItems = recent
+        visibleRecentItems = Array(recent.prefix(recentHistoryLimit))
+        hiddenRecentCount = max(0, recent.count - visibleRecentItems.count)
+        visibleOlderOrphanItems = Array(olderOrphans.prefix(olderHistoryLimit))
+        hiddenOlderCount = max(0, olderOrphans.count - visibleOlderOrphanItems.count)
+        projectThreadsByID = groupedProjects
+    }
+}
+
+private struct PrimaryNavButton: View {
+    let icon: String
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: AppSpace.sm) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isSelected ? TextGrade.primary : TextGrade.secondary)
+                    .frame(width: 18)
+
+                Text(title)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? TextGrade.primary : TextGrade.secondary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, AppSpace.sm)
+            .frame(height: 32)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    .fill(isSelected ? SurfaceGrade.selected : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -521,162 +675,223 @@ struct SidebarView: View {
 private struct CompactThreadDot: View {
     let item: ThreadRecord
     let isSelected: Bool
-    @State private var isHovering = false
 
-    private var statusColor: Color {
-        if let s = item.status { return s.color }
-        return TextGrade.ghost
-    }
+    private var statusColor: Color { agentTint }
 
     private var initial: String {
         let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = title.first else { return "?" }
+        guard let first = title.first else { return "A" }
         return String(first)
+    }
+
+    private var agentTint: Color {
+        switch item.resolvedAgentState {
+        case .planning, .running: return Brand.primary
+        case .waitingForApproval: return Semantic.warning
+        case .blocked, .failed: return Semantic.error
+        case .paused: return TextGrade.muted
+        case .completed: return Semantic.success
+        case .archived: return TextGrade.ghost
+        case .idle: return TextGrade.muted
+        }
     }
 
     var body: some View {
         HStack(spacing: 0) {
-            // Selection indicator — glowing bar
-            RoundedRectangle(cornerRadius: 2)
-                .fill(isSelected ? Brand.premiumGradient : LinearGradient(colors: [Color.clear], startPoint: .top, endPoint: .bottom))
-                .frame(width: 3, height: isSelected ? 20 : 0)
-                .shadow(color: isSelected ? Brand.primary.opacity(0.5) : .clear, radius: 4)
+            // Selection indicator — flat tick on the left edge
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(isSelected ? Brand.primary : Color.clear)
+                .frame(width: 2.5, height: isSelected ? 18 : 0)
                 .padding(.trailing, 4)
 
             ZStack {
-                // Avatar circle
+                // Avatar tile
                 RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                    .fill(isSelected ? Brand.primary.opacity(0.12) : (isHovering ? Color.white.opacity(0.06) : SurfaceGrade.card.opacity(0.5)))
-                    .frame(width: 40, height: 40)
+                    .fill(isSelected ? SurfaceGrade.selected : SurfaceGrade.elevated)
+                    .frame(width: 34, height: 34)
                     .overlay(
                         RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                             .strokeBorder(
-                                isSelected ? Brand.primary.opacity(0.35) : Color.white.opacity(0.06),
-                                lineWidth: isSelected ? 1 : 0.5
+                                isSelected ? Brand.primary.opacity(0.30) : SurfaceGrade.hairline,
+                                lineWidth: 0.6
                             )
                     )
 
                 // Initial letter
                 Text(initial)
                     .font(AppFont.threadRail)
-                    .foregroundStyle(isSelected ? Brand.primaryLight : TextGrade.secondary)
+                    .foregroundStyle(isSelected ? Brand.primary : TextGrade.secondary)
 
-                // Status dot (bottom-right)
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 7, height: 7)
-                    .shadow(color: statusColor.opacity(0.5), radius: 2)
-                    .overlay(Circle().strokeBorder(SurfaceGrade.panel, lineWidth: 1.5))
-                    .offset(x: 14, y: 14)
+                // Status dot (bottom-right) — only when there's something interesting
+                if item.resolvedAgentState != .completed && item.resolvedAgentState != .idle {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+                        .overlay(Circle().strokeBorder(SurfaceGrade.panel, lineWidth: 1.5))
+                        .offset(x: 12, y: 12)
+                }
             }
         }
-        .frame(width: 52, height: 44)
+        .frame(width: 46, height: 40)
         .contentShape(Rectangle())
-        .onHover { h in withAnimation(AppAnimation.micro) { isHovering = h } }
-        .help(item.title)
+        .help(item.title.isEmpty ? "新 Agent" : item.title)
+    }
+}
+
+// MARK: - Sidebar Navigation Button
+
+private struct SidebarNavButton: View {
+    let icon: String
+    let title: String
+    let detail: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: AppSpace.sm) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isSelected ? Brand.primary : TextGrade.muted)
+                    .frame(width: 22, height: 22)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous)
+                            .fill(isSelected ? Brand.primary.opacity(0.12) : SurfaceGrade.elevated.opacity(0.45))
+                    )
+
+                Text(title)
+                    .font(AppFont.captionMedium)
+                    .foregroundStyle(isSelected ? TextGrade.primary : TextGrade.secondary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Text(detail)
+                    .font(AppFont.tiny)
+                    .foregroundStyle(isSelected ? Brand.primary : TextGrade.ghost)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, AppSpace.sm)
+            .frame(height: 30)
+            .background(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .fill(isSelected ? SurfaceGrade.selected : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
 // MARK: - Expanded Thread Row
 
-private struct ExpandedThreadRow: View {
-    @EnvironmentObject private var store: AppStore
+private struct ExpandedThreadRow: View, Equatable {
     let item: ThreadRecord
     let isSelected: Bool
-    @State private var isHovering = false
-    @State private var dotPhase: Bool = false
-    @State private var cachedTokenLabel: String?
-    @State private var didLoadTokens = false
-    @State private var isLoadingTokenLabel = false
 
-    private var isRunning: Bool { item.status == .running }
+    static func == (lhs: ExpandedThreadRow, rhs: ExpandedThreadRow) -> Bool {
+        lhs.isSelected == rhs.isSelected
+            && lhs.item.id == rhs.item.id
+            && lhs.item.title == rhs.item.title
+            && lhs.item.status == rhs.item.status
+            && lhs.item.updatedAt == rhs.item.updatedAt
+            && lhs.item.hasContent == rhs.item.hasContent
+            && lhs.item.projectID == rhs.item.projectID
+            && lhs.item.agentMode == rhs.item.agentMode
+            && lhs.item.resolvedAgentState == rhs.item.resolvedAgentState
+    }
 
-    private var liveActivity: String {
-        guard isRunning, isSelected else { return "" }
-        return store.state.liveActivity
+    private var isRunning: Bool {
+        item.resolvedAgentState == .running || item.resolvedAgentState == .planning
     }
 
     var body: some View {
         HStack(spacing: AppSpace.sm) {
-            // Status indicator — pulse when running
-            Circle()
-                .fill(item.status?.color ?? TextGrade.ghost)
-                .frame(width: 6, height: 6)
-                .scaleEffect(isRunning && dotPhase ? 1.3 : 1.0)
-                .opacity(isRunning && dotPhase ? 0.6 : 1.0)
-                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: dotPhase)
+            ZStack {
+                RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous)
+                    .fill(statusTint.opacity(isSelected ? 0.18 : 0.10))
+                    .frame(width: 24, height: 24)
+                Image(systemName: agentIcon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(statusTint)
+                if isRunning {
+                    Circle()
+                        .fill(statusTint)
+                        .frame(width: 5, height: 5)
+                        .offset(x: 9, y: 9)
+                }
+            }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(TextHelper.compactTitle(item.title))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(rowTitle)
                     .font(isSelected ? AppFont.bodyMedium : AppFont.body)
                     .foregroundStyle(isSelected ? TextGrade.primary : TextGrade.secondary)
                     .lineLimit(1)
 
                 if isRunning {
-                    Text(!liveActivity.isEmpty ? liveActivity : "进行中")
-                        .font(.system(size: 9, weight: .medium))
+                    Text(item.resolvedAgentState.title)
+                        .font(.system(size: 10))
                         .foregroundStyle(Brand.primary)
                         .lineLimit(1)
-                } else if item.status == .cancelled {
-                    Text("已暂停")
-                        .font(AppFont.tiny)
-                        .foregroundStyle(Semantic.warning)
-                } else if item.status == .failed {
-                    Text("执行失败")
-                        .font(AppFont.tiny)
-                        .foregroundStyle(Semantic.error)
+                } else if shouldShowStateLine {
+                    Text(item.resolvedAgentState.title)
+                        .font(.system(size: 10))
+                        .foregroundStyle(statusTint)
                 }
             }
 
             Spacer(minLength: 0)
 
-            VStack(alignment: .trailing, spacing: 1) {
-                if let label = cachedTokenLabel {
-                    Text(label)
-                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(TextGrade.ghost)
-                }
-                Text(RelativeTimeFormatter.string(for: item.updatedAt))
-                    .font(AppFont.tiny)
-                    .foregroundStyle(TextGrade.ghost)
-            }
+            Text(RelativeTimeFormatter.string(for: item.updatedAt))
+                .font(.system(size: 10, weight: .regular))
+                .foregroundStyle(TextGrade.ghost)
         }
         .padding(.horizontal, AppSpace.sm)
-        .padding(.vertical, AppSpace.sm)
-        .threadRailItem(isSelected: isSelected, isHovering: isHovering)
+        .padding(.vertical, AppSpace.xs)
+        .threadRailItem(isSelected: isSelected)
         .contentShape(Rectangle())
-        .onHover { h in withAnimation(AppAnimation.micro) { isHovering = h } }
-        .onAppear {
-            if isRunning { dotPhase = true }
-            loadTokenLabel()
-        }
-        .onChange(of: isRunning) { running in
-            dotPhase = running
-        }
-        .onChange(of: item.updatedAt) { _ in
-            loadTokenLabel()
+    }
+
+    private var statusTint: Color {
+        switch item.resolvedAgentState {
+        case .planning, .running: return Brand.primary
+        case .waitingForApproval: return Semantic.warning
+        case .blocked, .failed: return Semantic.error
+        case .paused: return Semantic.warning
+        case .completed: return Semantic.success
+        case .archived: return TextGrade.ghost
+        case .idle: return item.agentMode == .ask ? TextGrade.muted : Brand.jade
         }
     }
 
-    private func loadTokenLabel() {
-        if isLoadingTokenLabel { return }
-        if didLoadTokens && !isRunning { return }
-        isLoadingTokenLabel = true
-        let threadID = item.id.uuidString
-        DispatchQueue.global(qos: .utility).async {
-            let usage = UsageTracker.shared.threadUsage(threadID: threadID)
-            let total = usage.inputTokens + usage.outputTokens
-            let label: String? = {
-                guard total > 0 else { return nil }
-                if total >= 1_000_000 { return String(format: "%.1fM", Double(total) / 1_000_000) }
-                if total >= 1_000 { return "\(total / 1000)k" }
-                return "\(total)"
-            }()
-            DispatchQueue.main.async {
-                cachedTokenLabel = label
-                didLoadTokens = true
-                isLoadingTokenLabel = false
-            }
+    private var agentIcon: String {
+        switch item.resolvedAgentState {
+        case .planning: return "list.bullet.clipboard"
+        case .running: return "waveform.path.ecg"
+        case .waitingForApproval: return "hand.raised.fill"
+        case .blocked, .failed: return "exclamationmark.triangle.fill"
+        case .paused: return "pause.circle.fill"
+        case .completed: return "checkmark.circle.fill"
+        case .archived: return "archivebox.fill"
+        case .idle:
+            if item.hasContent { return "bubble.left.and.bubble.right" }
+            return item.source == .session ? "text.bubble" : "sparkles"
+        }
+    }
+
+    private var rowTitle: String {
+        let trimmed = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "新 Agent" || trimmed == "新线程" {
+            return item.source == .session ? "新会话" : "新 Agent"
+        }
+        return TextHelper.compactTitle(trimmed)
+    }
+
+    private var shouldShowStateLine: Bool {
+        switch item.resolvedAgentState {
+        case .waitingForApproval, .blocked, .paused, .failed:
+            return true
+        case .idle, .planning, .running, .completed, .archived:
+            return false
         }
     }
 }
@@ -687,21 +902,19 @@ private struct CompactRailButton: View {
     let icon: String
     var tooltip: String = ""
     let action: () -> Void
-    @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isHovering ? TextGrade.primary : TextGrade.muted)
-                .frame(width: 36, height: 36)
+                .foregroundStyle(TextGrade.muted)
+                .frame(width: 34, height: 30)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                        .fill(isHovering ? SurfaceGrade.hover : Color.clear)
+                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                        .fill(Color.clear)
                 )
         }
         .buttonStyle(.plain)
-        .onHover { h in withAnimation(AppAnimation.micro) { isHovering = h } }
         .help(tooltip)
     }
 }
@@ -719,19 +932,15 @@ struct IconButton: View {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(isHovered ? TextGrade.primary : TextGrade.muted)
-                .frame(width: 30, height: 30)
+                .frame(width: 28, height: 28)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                        .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                        .strokeBorder(isHovered ? Color.white.opacity(0.10) : Color.clear, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                        .fill(isHovered ? SurfaceGrade.hover : Color.clear)
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { h in withAnimation(AppAnimation.quick) { isHovered = h } }
+        .onHover { isHovered = $0 }
         .help(tooltip)
     }
 }
@@ -862,7 +1071,7 @@ struct NewProjectSheet: View {
                         .padding(.vertical, AppSpace.sm)
                         .background(
                             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                                .fill(canCreate ? Brand.premiumGradient : LinearGradient(colors: [TextGrade.ghost], startPoint: .leading, endPoint: .trailing))
+                                .fill(canCreate ? AnyShapeStyle(Brand.primary) : AnyShapeStyle(TextGrade.ghost))
                         )
                 }
                 .buttonStyle(.plain)

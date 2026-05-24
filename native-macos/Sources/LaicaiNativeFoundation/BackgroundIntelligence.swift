@@ -12,6 +12,7 @@ public final class MenuBarAgent: NSObject, ObservableObject {
     @Published public private(set) var isActive: Bool = true
     
     private var statusBarButton: NSStatusBarButton?
+    private var openMainWindowHandler: (() -> Void)?
     
     private override init() { super.init() }
     
@@ -24,8 +25,8 @@ public final class MenuBarAgent: NSObject, ObservableObject {
         let menu = NSMenu()
         menu.addItem(makeItem("打开来财", action: #selector(activateApp)))
         menu.addItem(.separator())
-        menu.addItem(makeItem("新建会话", action: #selector(newThread), key: "n"))
-        menu.addItem(makeItem("继续最近任务", action: #selector(continueLastTask), key: "r"))
+        menu.addItem(makeItem("新建 Agent", action: #selector(newThread), key: "n"))
+        menu.addItem(makeItem("继续最近 Agent", action: #selector(continueLastTask), key: "r"))
         menu.addItem(.separator())
         let toggleItem = makeItem(isActive ? "暂停后台智能" : "恢复后台智能", action: #selector(toggleActive))
         toggleItem.tag = 100
@@ -44,22 +45,32 @@ public final class MenuBarAgent: NSObject, ObservableObject {
         let title = isActive ? "来财" : "来财⏸"
         statusBarButton?.title = title
     }
+
+    public func setOpenMainWindowHandler(_ handler: @escaping () -> Void) {
+        openMainWindowHandler = handler
+    }
     
-    @objc private func activateApp() {
+    public func showMainWindow() {
         NSApp.activate(ignoringOtherApps: true)
         if let window = NSApp.windows.first(where: { $0.isVisible }) {
             window.makeKeyAndOrderFront(nil)
+        } else {
+            openMainWindowHandler?()
         }
+    }
+
+    @objc private func activateApp() {
+        showMainWindow()
     }
     
     @objc private func newThread() {
         NotificationCenter.default.post(name: .laicaiNewThread, object: nil)
-        activateApp()
+        showMainWindow()
     }
     
     @objc private func continueLastTask() {
         NotificationCenter.default.post(name: .laicaiContinueLastTask, object: nil)
-        activateApp()
+        showMainWindow()
     }
     
     @objc private func toggleActive() {
@@ -93,6 +104,7 @@ extension MenuBarAgent: NSMenuDelegate {
 
 extension Notification.Name {
     public static let laicaiNewThread = Notification.Name("laicai.newThread")
+    public static let laicaiNewSession = Notification.Name("laicai.newSession")
     public static let laicaiContinueLastTask = Notification.Name("laicai.continueLastTask")
     public static let laicaiBackgroundTaskCompleted = Notification.Name("laicai.backgroundTaskCompleted")
     public static let laicaiProactiveSuggestion = Notification.Name("laicai.proactiveSuggestion")
@@ -100,7 +112,9 @@ extension Notification.Name {
     public static let laicaiToggleSearch = Notification.Name("laicai.toggleSearch")
     public static let laicaiGlobalSearch = Notification.Name("laicai.globalSearch")
     public static let laicaiPanelToggled = Notification.Name("laicai.panelToggled")
+    public static let laicaiOpenWorkbench = Notification.Name("laicai.openWorkbench")
     public static let laicaiScrollToBottom = Notification.Name("laicai.scrollToBottom")
+    public static let laicaiOpenMainWindow = Notification.Name("laicai.openMainWindow")
     public static let laicaiOpenSettings = Notification.Name("laicai.openSettings")
 }
 
@@ -118,23 +132,21 @@ public final class GlobalShortcutManager {
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
             // Cmd+Shift+L
             if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) && event.keyCode == 37 {
-                NSApp.activate(ignoringOtherApps: true)
-                if let window = NSApp.windows.first(where: { $0.isVisible }) {
-                    window.makeKeyAndOrderFront(nil)
-                }
+                MenuBarAgent.shared.showMainWindow()
             }
             // Cmd+Shift+N: new thread
             if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) && event.keyCode == 45 {
+                MenuBarAgent.shared.showMainWindow()
                 NotificationCenter.default.post(name: .laicaiNewThread, object: nil)
             }
             // Cmd+Shift+Space: toggle command palette (Spotlight-style quick launch)
             if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) && event.keyCode == 49 {
-                NSApp.activate(ignoringOtherApps: true)
+                MenuBarAgent.shared.showMainWindow()
                 NotificationCenter.default.post(name: .laicaiToggleCommandPalette, object: nil)
             }
             // Cmd+Shift+F: global search across conversations, wiki, skills
             if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) && event.keyCode == 3 {
-                NSApp.activate(ignoringOtherApps: true)
+                MenuBarAgent.shared.showMainWindow()
                 NotificationCenter.default.post(name: .laicaiGlobalSearch, object: nil)
             }
         }
@@ -156,12 +168,23 @@ public final class NotificationManager {
     private init() {}
     
     public func requestPermission() {
+        guard !Self.isRunningTests else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
-    
-    public func post(title: String, body: String, identifier: String = UUID().uuidString, threadID: String? = nil) {
+
+    public func post(
+        title: String,
+        subtitle: String? = nil,
+        body: String,
+        identifier: String = UUID().uuidString,
+        threadID: String? = nil
+    ) {
+        guard !Self.isRunningTests else { return }
         let content = UNMutableNotificationContent()
         content.title = title
+        if let subtitle {
+            content.subtitle = subtitle
+        }
         content.body = body
         content.sound = .default
         if let threadID {
@@ -170,9 +193,15 @@ public final class NotificationManager {
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
+
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
+            || NSClassFromString("XCTest.XCTestCase") != nil
+    }
     
     public func notifyBackgroundTaskCompleted(taskTitle: String, threadID: String) {
-        post(title: "后台任务完成", body: taskTitle, threadID: threadID)
+        post(title: "后台 Agent 完成", body: taskTitle, threadID: threadID)
         NotificationCenter.default.post(name: .laicaiBackgroundTaskCompleted, object: nil, userInfo: ["threadID": threadID])
     }
 }
@@ -240,11 +269,9 @@ public struct ReportGenerator {
         let today = Calendar.current.startOfDay(for: Date())
         let todayThreads = threads.filter { $0.updatedAt >= today }
             .sorted { $0.updatedAt > $1.updatedAt }
-        let tasks = todayThreads.filter { $0.source == .task }
-        let chats = todayThreads.filter { $0.source == .session }
-        let completedTasks = tasks.filter { $0.status == .completed }
-        let failedTasks = tasks.filter { $0.status == .failed }
-        let runningTasks = tasks.filter { $0.status == .running }
+        let completedAgents = todayThreads.filter { $0.agentState == .completed }
+        let failedAgents = todayThreads.filter { $0.agentState == .failed || $0.agentState == .blocked }
+        let runningAgents = todayThreads.filter { $0.agentState == .running || $0.agentState == .planning }
 
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd (EEEE)"
@@ -257,9 +284,8 @@ public struct ReportGenerator {
             "",
             "| 指标 | 数量 |",
             "|------|------|",
-            "| 活跃会话 | \(todayThreads.count) |",
-            "| 任务 | \(tasks.count)（✅ \(completedTasks.count)　❌ \(failedTasks.count)　🔄 \(runningTasks.count)）|",
-            "| 会话 | \(chats.count) |",
+            "| 活跃 Agent | \(todayThreads.count) |",
+            "| Agent 状态 | ✅ \(completedAgents.count)　❌ \(failedAgents.count)　🔄 \(runningAgents.count) |",
             "| 工具调用 | \(countToolCalls(todayThreads)) 次 |",
             "| 文件变更 | \(countFileChanges(todayThreads)) 个文件 |",
         ]
@@ -272,7 +298,7 @@ public struct ReportGenerator {
             let timeFmt = DateFormatter()
             timeFmt.dateFormat = "HH:mm"
             for thread in todayThreads {
-                let icon = thread.source == .task ? (statusIcon(thread.status)) : "💬"
+                let icon = agentStatusIcon(thread.agentState)
                 let time = timeFmt.string(from: thread.createdAt)
                 lines.append("### \(icon) \(thread.title)  `\(time)`")
                 lines.append("")
@@ -336,7 +362,7 @@ public struct ReportGenerator {
         let wikiSuggestions = extractWikiSuggestions(todayThreads)
         if !wikiSuggestions.isEmpty {
             lines += ["## 📝 建议存入 Wiki", ""]
-            lines.append("以下内容来自今天的会话和任务，可能值得沉淀为知识库条目：")
+            lines.append("以下内容来自今天的 Agent，可能值得沉淀为知识库条目：")
             lines.append("")
             for suggestion in wikiSuggestions {
                 lines.append("### \(suggestion.topic)")
@@ -364,10 +390,8 @@ public struct ReportGenerator {
         let weekAgo = cal.date(byAdding: .day, value: -7, to: Date()) ?? Date()
         let weekThreads = threads.filter { $0.updatedAt >= weekAgo }
             .sorted { $0.updatedAt > $1.updatedAt }
-        let tasks = weekThreads.filter { $0.source == .task }
-        let chats = weekThreads.filter { $0.source == .session }
-        let completedTasks = tasks.filter { $0.status == .completed }
-        let failedTasks = tasks.filter { $0.status == .failed }
+        let completedAgents = weekThreads.filter { $0.agentState == .completed }
+        let failedAgents = weekThreads.filter { $0.agentState == .failed || $0.agentState == .blocked }
 
         let fmt = DateFormatter()
         fmt.dateFormat = "MM/dd"
@@ -379,10 +403,9 @@ public struct ReportGenerator {
             "",
             "| 指标 | 数量 |",
             "|------|------|",
-            "| 总会话 | \(weekThreads.count) |",
-            "| 完成任务 | \(completedTasks.count) |",
-            "| 失败任务 | \(failedTasks.count) |",
-            "| 会话 | \(chats.count) |",
+            "| 总 Agent | \(weekThreads.count) |",
+            "| 完成 Agent | \(completedAgents.count) |",
+            "| 失败 Agent | \(failedAgents.count) |",
             "| 工具调用 | \(countToolCalls(weekThreads)) 次 |",
             "| 文件变更 | \(countFileChanges(weekThreads)) 个文件 |",
         ]
@@ -398,11 +421,10 @@ public struct ReportGenerator {
             let dayFmt = DateFormatter()
             dayFmt.dateFormat = "MM/dd (E)"
             dayFmt.locale = Locale(identifier: "zh_CN")
-            let dayTasks = dayThreads.filter { $0.source == .task }
-            let dayCompleted = dayTasks.filter { $0.status == .completed }
-            lines.append("**\(dayFmt.string(from: day))**：\(dayThreads.count) 会话，\(dayCompleted.count)/\(dayTasks.count) 任务完成")
+            let dayCompleted = dayThreads.filter { $0.agentState == .completed }
+            lines.append("**\(dayFmt.string(from: day))**：\(dayThreads.count) 个 Agent，\(dayCompleted.count) 个完成")
             for t in dayThreads.prefix(5) {
-                let icon = t.source == .task ? statusIcon(t.status) : "💬"
+                let icon = agentStatusIcon(t.agentState)
                 lines.append("  - \(icon) \(t.title)")
             }
             if dayThreads.count > 5 {
@@ -412,9 +434,9 @@ public struct ReportGenerator {
         }
 
         // Completed tasks detail
-        if !completedTasks.isEmpty {
-            lines += ["## 完成的任务", ""]
-            for task in completedTasks.prefix(20) {
+        if !completedAgents.isEmpty {
+            lines += ["## 完成的 Agent", ""]
+            for task in completedAgents.prefix(20) {
                 let files = extractChangedFiles(task)
                 let fileSuffix = files.isEmpty ? "" : "（涉及 \(files.count) 个文件）"
                 lines.append("- ✅ **\(task.title)**\(fileSuffix)")
@@ -423,9 +445,9 @@ public struct ReportGenerator {
         }
 
         // Failed tasks
-        if !failedTasks.isEmpty {
+        if !failedAgents.isEmpty {
             lines += ["## 失败/需关注", ""]
-            for task in failedTasks.prefix(10) {
+            for task in failedAgents.prefix(10) {
                 let errorSteps = task.steps.filter { $0.isFailure }
                 let errorHint = errorSteps.first.map { "：" + String($0.text.prefix(80)) } ?? ""
                 lines.append("- ❌ **\(task.title)**\(errorHint)")
@@ -481,6 +503,18 @@ public struct ReportGenerator {
         case .queued: return "⏳"
         case .cancelled: return "⛔"
         case .waitingReview: return "👁️"
+        }
+    }
+
+    private static func agentStatusIcon(_ state: AgentThreadState) -> String {
+        switch state {
+        case .completed: return "✅"
+        case .failed, .blocked: return "❌"
+        case .running, .planning: return "🔄"
+        case .waitingForApproval: return "👁️"
+        case .paused: return "⏸"
+        case .archived: return "📦"
+        case .idle: return "✨"
         }
     }
 
@@ -551,7 +585,7 @@ public struct ReportGenerator {
                 }
             }
 
-            // New knowledge from chat sessions (long conversations)
+            // New knowledge from long-running Agents
             if thread.source == .session {
                 let userSteps = thread.steps.filter { $0.kind == .userInput }
                 let aiSteps = thread.steps.filter { $0.kind == .textOutput }
@@ -559,8 +593,8 @@ public struct ReportGenerator {
                     let topics = extractTopicsFromText(userSteps.map(\.text).joined(separator: " "))
                     if !topics.isEmpty {
                         suggestions.append(WikiSuggestion(
-                            topic: topics.first ?? "会话知识点",
-                            reason: "多轮深度会话，讨论了 \(topics.joined(separator: "、")) 等话题",
+                            topic: topics.first ?? "Agent 知识点",
+                            reason: "这个 Agent 多轮讨论了 \(topics.joined(separator: "、")) 等话题",
                             keyContent: String((aiSteps.last?.text ?? "").prefix(200)),
                             sourceThread: thread.title
                         ))

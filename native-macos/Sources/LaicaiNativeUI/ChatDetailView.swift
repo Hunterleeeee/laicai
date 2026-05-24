@@ -7,312 +7,74 @@ import LaicaiNativeFoundation
 struct ChatDetailView: View {
     @EnvironmentObject private var store: AppStore
     @Binding var showingSettings: Bool
-    @Binding var showSidebar: Bool
-    @Binding var showWorkbench: Bool
     @ObservedObject private var skillRegistry = SkillRegistry.shared
-    @ObservedObject private var projectManager = ProjectManager.shared
 
     @State private var composerFocused = false
+    @State private var composerTextHeight: CGFloat = 28
     @State private var gaugeTokens: Int = 0
     @State private var gaugePct: Double = 0
     @State private var gaugeLastThread: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             composer
         }
         .background(SurfaceGrade.base)
         .onAppear { PasteImageMonitor.install(store: store) }
         .onReceive(NotificationCenter.default.publisher(for: .laicaiNewThread)) { _ in
+            store.newTask()
+            composerFocused = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .laicaiNewSession)) { _ in
             store.newSession()
             composerFocused = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .laicaiContinueLastTask)) { _ in
-            if let lastTask = store.state.threads.filter({ $0.source == .task }).sorted(by: { $0.updatedAt > $1.updatedAt }).first {
-                store.selectTask(id: lastTask.id)
+            if let agent = store.state.continuableAgents.first {
+                store.selectAgent(id: agent.id)
             }
         }
-    }
-
-    // MARK: - Toolbar
-
-    private var toolbar: some View {
-        HStack(spacing: AppSpace.sm) {
-            // Left: title/status
-            Group {
-                if let thread = store.state.selectedThread {
-                    HStack(spacing: AppSpace.sm) {
-                        if let task = store.state.selectedTask {
-                            Circle()
-                                .fill(task.status.color)
-                                .frame(width: 6, height: 6)
-                        }
-                        Text(TextHelper.compactTitle(thread.title))
-                            .font(AppFont.bodyMedium)
-                            .foregroundStyle(thread.source == .task ? TextGrade.primary : TextGrade.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: 300, alignment: .leading)
-                        if let task = store.state.selectedTask {
-                            statusBadge(for: task.status)
-                        }
-                    }
-                } else {
-                    Text("来财")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(TextGrade.secondary)
-                }
-            }
-
-            Spacer()
-
-            // G5: Cumulative token usage
-            if let task = store.state.selectedTask {
-                tokenUsageBadge(steps: task.steps)
-            }
-
-            // Actions
-            if store.state.isGenerating {
-                Button {
-                    store.stopGenerating()
-                } label: {
-                    HStack(spacing: AppSpace.xs) {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 9, weight: .bold))
-                        Text("停止")
-                            .font(AppFont.captionMedium)
-                    }
-                    .foregroundStyle(Semantic.error)
-                    .padding(.horizontal, AppSpace.md)
-                    .padding(.vertical, AppSpace.sm - 1)
-                    .background(
-                        Capsule()
-                            .fill(Semantic.errorMuted)
-                    )
-                }
-                .buttonStyle(.plain)
-            } else if store.state.selectedTask != nil || store.state.selectedSession?.turns.isEmpty == false {
-                ToolbarButton(icon: "arrow.clockwise", tooltip: "重试") {
-                    store.retryLastMessage()
-                }
-                Menu {
-                    Button { store.undoLastCheckpoint() } label: {
-                        Label("回滚检查点", systemImage: "arrow.uturn.backward")
-                    }
-                    Divider()
-                    Button(role: .destructive) {
-                        store.clearSelectedThread()
-                    } label: {
-                        Label("清空", systemImage: "eraser")
-                    }
-                } label: {
-                    MenuIconLabel(icon: "ellipsis", tooltip: "更多")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-            }
-
-            ToolbarButton(icon: "sidebar.right", tooltip: "切换工作台") {
-                showWorkbench.toggle()
-            }
-        }
-        .padding(.horizontal, AppSpace.lg)
-        .frame(height: LayoutConst.toolbarHeight)
-        .background(SurfaceGrade.base.opacity(0.8))
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(SurfaceGrade.divider).frame(height: 0.5)
-        }
-    }
-
-    private func statusBadge(for status: TaskStatus) -> some View {
-        Text(status.label)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(status.color)
-            .padding(.horizontal, AppSpace.sm)
-            .padding(.vertical, 3)
-            .background(
-                Capsule()
-                    .fill(status.color.opacity(0.15))
-                    .overlay(Capsule().strokeBorder(status.color.opacity(0.25), lineWidth: 0.5))
-            )
-    }
-
-    // G5: Token usage summary badge
-    @ViewBuilder
-    private func tokenUsageBadge(steps: [TaskStep]) -> some View {
-        let metrics = steps.compactMap(\.metrics)
-        let totalIn = metrics.compactMap(\.inputTokens).reduce(0, +)
-        let totalOut = metrics.compactMap(\.outputTokens).reduce(0, +)
-        if totalIn + totalOut > 0 {
-            let costEstimate = Double(totalIn) * 0.003 / 1000.0 + Double(totalOut) * 0.015 / 1000.0  // typical pricing
-            HStack(spacing: 3) {
-                Image(systemName: "chart.bar.fill")
-                    .font(.system(size: 8))
-                Text("\(formatTokenCount(totalIn))/\(formatTokenCount(totalOut))")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                if costEstimate >= 0.001 {
-                    Text("≈$\(String(format: "%.3f", costEstimate))")
-                        .font(.system(size: 9, design: .monospaced))
-                }
-            }
-            .foregroundStyle(TextGrade.ghost)
-            .padding(.horizontal, AppSpace.sm)
-            .padding(.vertical, 3)
-            .background(
-                Capsule()
-                    .fill(SurfaceGrade.elevated.opacity(0.55))
-            )
-            .help("输入 \(totalIn) / 输出 \(totalOut) tokens")
-        }
-    }
-
-    private func formatTokenCount(_ count: Int) -> String {
-        if count >= 1_000_000 { return "\(String(format: "%.1f", Double(count) / 1_000_000))M" }
-        if count >= 1000 { return "\(String(format: "%.1f", Double(count) / 1000))K" }
-        return "\(count)"
-    }
-
-    @ViewBuilder
-    private var modelPicker: some View {
-        if let connector = store.state.activeConnector {
-            Menu {
-                ForEach(store.state.connectors) { c in
-                    Button {
-                        store.selectConnector(id: c.id)
-                    } label: {
-                        HStack(alignment: .center, spacing: AppSpace.sm) {
-                            Circle()
-                                .fill(c.health.color)
-                                .frame(width: 7, height: 7)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(c.name)
-                                Text(modelMenuDetail(for: c))
-                                    .font(AppFont.tiny)
-                                    .foregroundStyle(TextGrade.muted)
-                            }
-                            if c.id == store.state.activeConnectorID {
-                                Spacer()
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-                Divider()
-                Button {
-                    store.checkConnectorHealth(id: connector.id)
-                } label: {
-                    Label("测试当前模型", systemImage: "waveform.path.ecg")
-                }
-                Button { showingSettings = true } label: {
-                    Label("管理连接器", systemImage: "gearshape")
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(connector.health.color)
-                        .frame(width: 6, height: 6)
-                    Text(connector.modelName.isEmpty ? connector.name : connector.modelName)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(TextGrade.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 150, alignment: .leading)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 7, weight: .bold))
-                        .foregroundStyle(TextGrade.ghost)
-                }
-                .padding(.horizontal, AppSpace.sm + 2)
-                .frame(height: 26)
-                .background(
-                    Capsule()
-                        .fill(SurfaceGrade.card.opacity(0.6))
-                )
-                .overlay(
-                    Capsule()
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
-                )
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-        } else {
-            Button { showingSettings = true } label: {
-                HStack(spacing: AppSpace.xs) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 9))
-                    Text("未配置模型")
-                        .font(AppFont.captionMedium)
-                }
-                .foregroundStyle(Semantic.warning)
-                .padding(.horizontal, AppSpace.sm + 2)
-                .padding(.vertical, AppSpace.xs + 2)
-                .background(
-                    Capsule()
-                        .fill(Semantic.warningMuted)
-                )
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private func modelMenuDetail(for connector: ConnectorProfile) -> String {
-        let profile = ConnectorCapabilityProfile.infer(for: connector, mode: store.state.settings.contextMode)
-        let location = profile.isLocal ? "本地" : "API"
-        let context = compactTokenCount(profile.contextWindow)
-        let tools = profile.supportsToolCalling ? "支持工具调用" : "不支持工具调用"
-        let health = connector.health == .ready ? "就绪" : connector.health.title
-        return "\(location) · \(context) 上下文 · \(tools) · \(profile.toolCallingSourceDetail) · \(health)"
-    }
-
-    private func compactTokenCount(_ value: Int) -> String {
-        if value >= 1000 {
-            return "\(value / 1000)k"
-        }
-        return "\(value)"
     }
 
     // MARK: - Content
 
     @ViewBuilder
     private var content: some View {
-        if let thread = store.state.selectedThread, !thread.steps.isEmpty {
-            ThreadTimelineView(thread: ThreadRecord(thread: thread, includeEvents: true))
+        if let thread = store.state.selectedThread, shouldShowTimeline(for: thread) {
+            ThreadTimelineView(thread: thread)
                 .id("\(thread.source.rawValue)-\(thread.id)")
-                .transition(.opacity.animation(.easeInOut(duration: 0.15)))
         } else {
             WelcomeView(showingSettings: $showingSettings)
-                .transition(.opacity.animation(.easeInOut(duration: 0.15)))
         }
+    }
+
+    private func shouldShowTimeline(for thread: Thread) -> Bool {
+        if !thread.steps.isEmpty { return true }
+        if thread.status == .running || thread.agentState == .running { return true }
+        if store.state.isGenerating, thread.id == store.state.selectedThreadID { return true }
+        if thread.multiAgentPlan != nil { return true }
+        return false
     }
 
     // MARK: - Composer
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: AppSpace.sm) {
             if !store.state.draftAttachments.isEmpty {
                 attachmentChips
-                    .padding(.horizontal, AppSpace.md)
-                    .padding(.top, AppSpace.sm)
             }
             if !store.state.draftImages.isEmpty {
                 imagePreviewStrip
-                    .padding(.horizontal, AppSpace.md)
-                    .padding(.top, AppSpace.sm)
             }
 
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 ComposerTextView(
                     text: Binding(
-                        get: { store.state.isGenerating ? (store.state.pendingFollowUp ?? "") : store.state.draftMessage },
+                        get: { store.state.draftMessage },
                         set: { newValue in
-                            if store.state.isGenerating {
-                                store.queueFollowUp(newValue)
-                            } else {
-                                store.updateDraft(newValue)
-                            }
+                            store.updateDraft(newValue)
                         }
                     ),
                     placeholder: composerPlaceholder,
@@ -332,76 +94,67 @@ struct ChatDetailView: View {
                         )
                         store.addDraftImage(attachment)
                     },
-                    isFocused: $composerFocused
+                    isFocused: $composerFocused,
+                    measuredHeight: $composerTextHeight
                 )
-                .frame(maxWidth: .infinity, minHeight: 36, idealHeight: 40, maxHeight: 140, alignment: .topLeading)
+                .frame(height: max(52, composerTextHeight), alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .clipped()
                 .disabled(store.state.activeConnector == nil)
                 .opacity(store.state.activeConnector == nil ? 0.4 : 1)
 
-                HStack(spacing: 0) {
-                    // Left: model picker + context gauge + skill picker
-                    HStack(spacing: AppSpace.xs) {
-                        modelPicker
-                        modeIndicator
-                        contextGauge
-                        skillPickerMenu
-                    }
+                HStack(alignment: .center, spacing: AppSpace.sm) {
+                    attachImageButton
+                    attachFileButton
+                    skillPickerMenu
+                    contextGauge
 
-                    Spacer()
+                    Spacer(minLength: AppSpace.sm)
 
-                    // Right: attach + send
-                    HStack(spacing: AppSpace.sm) {
-                        attachImageButton
-                        attachFileButton
-                        if store.state.isGenerating {
-                            appendInstructionButton
-                        } else {
-                            sendButton
-                        }
+                    if store.state.isGenerating {
+                        appendInstructionButton
+                    } else {
+                        sendButton
                     }
                 }
-                .padding(.horizontal, AppSpace.md)
-                .padding(.bottom, AppSpace.sm)
-                .padding(.top, AppSpace.xs)
+                .padding(.top, AppSpace.sm)
             }
+            .padding(.horizontal, AppSpace.lg)
+            .padding(.top, AppSpace.md + 2)
+            .padding(.bottom, AppSpace.sm + 2)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.xxl, style: .continuous)
-                    .fill(SurfaceGrade.elevated)
+                RoundedRectangle(cornerRadius: LayoutConst.composerCornerRadius, style: .continuous)
+                    .fill(SurfaceGrade.card)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.xxl, style: .continuous)
+                RoundedRectangle(cornerRadius: LayoutConst.composerCornerRadius, style: .continuous)
                     .strokeBorder(
-                        composerFocused
-                        ? LinearGradient(
-                            colors: [Brand.primary.opacity(0.60), Brand.purple.opacity(0.35)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                          )
-                        : LinearGradient(
-                            colors: [Color.white.opacity(0.12), Color.white.opacity(0.06)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                          ),
-                        lineWidth: composerFocused ? 1.5 : 1
+                        composerFocused ? Brand.primary.opacity(0.54) : SurfaceGrade.border.opacity(0.72),
+                        lineWidth: composerFocused ? 1.1 : 0.7
                     )
             )
-            .shadow(
-                color: composerFocused ? Brand.primary.opacity(0.12) : Color.black.opacity(0.20),
-                radius: composerFocused ? 20 : 8,
-                y: composerFocused ? 4 : 2
-            )
+            .shadow(color: Color.black.opacity(0.10), radius: 24, y: 10)
 
-            if store.state.activeConnector == nil || store.state.isGenerating || currentScopeLabel != nil {
+            if store.state.activeConnector == nil || store.state.isGenerating {
                 composerStatusBar
-                    .padding(.top, AppSpace.sm)
             }
         }
         .frame(maxWidth: LayoutConst.composerMaxWidth)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, AppSpace.xl)
-        .padding(.top, AppSpace.sm)
-        .padding(.bottom, AppSpace.lg)
+        .padding(.top, AppSpace.xs)
+        .padding(.bottom, AppSpace.xl)
+        .background(
+            LinearGradient(
+                colors: [
+                    SurfaceGrade.base.opacity(0.0),
+                    SurfaceGrade.base.opacity(0.82),
+                    SurfaceGrade.base
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             var paths: [String] = []
             let group = DispatchGroup()
@@ -437,8 +190,6 @@ struct ChatDetailView: View {
                     if let thread = store.state.selectedThread {
                         composerChip(icon: "target", text: TextHelper.compactTitle(thread.title), tone: .neutral)
                     }
-                } else if let scope = currentScopeLabel {
-                    composerChip(icon: currentScopeIcon, text: scope, tone: .neutral)
                 }
             }
             .padding(.vertical, 1)
@@ -459,17 +210,17 @@ struct ChatDetailView: View {
             }
         } label: {
             Image(systemName: "sparkles")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(TextGrade.muted)
                 .padding(.horizontal, AppSpace.sm)
-                .frame(height: 28)
+                .frame(height: 24)
                 .background(
                     Capsule()
-                        .fill(Color.white.opacity(0.05))
+                        .fill(SurfaceGrade.elevated)
                 )
                 .overlay(
                     Capsule()
-                        .strokeBorder(SurfaceGrade.border.opacity(0.25), lineWidth: 0.5)
+                        .strokeBorder(SurfaceGrade.hairline, lineWidth: 0.6)
                 )
                 .contentShape(Capsule())
         }
@@ -477,26 +228,6 @@ struct ChatDetailView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("技能快捷入口")
-    }
-
-    private var modeIndicator: some View {
-        HStack(spacing: AppSpace.xs) {
-            Image(systemName: "wand.and.stars")
-                .font(.system(size: 12, weight: .medium))
-            Text(store.state.modeLabel.isEmpty ? "自动" : store.state.modeLabel)
-                .font(AppFont.captionMedium)
-        }
-        .foregroundStyle(TextGrade.muted)
-        .padding(.horizontal, AppSpace.sm + 2)
-        .frame(height: 28)
-        .background(
-            Capsule()
-                .fill(TextGrade.muted.opacity(0.12))
-        )
-        .overlay(
-            Capsule()
-                .strokeBorder(TextGrade.muted.opacity(0.28), lineWidth: 0.8)
-        )
     }
 
     @ViewBuilder
@@ -508,12 +239,12 @@ struct ChatDetailView: View {
             HStack(spacing: 3) {
                 ZStack {
                     Circle()
-                        .stroke(color.opacity(0.15), lineWidth: 2)
-                        .frame(width: 12, height: 12)
+                        .stroke(color.opacity(0.18), lineWidth: 2)
+                        .frame(width: 11, height: 11)
                     Circle()
                         .trim(from: 0, to: gaugePct)
                         .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                        .frame(width: 12, height: 12)
+                        .frame(width: 11, height: 11)
                         .rotationEffect(.degrees(-90))
                 }
                 Text(label)
@@ -521,10 +252,10 @@ struct ChatDetailView: View {
                     .foregroundStyle(color)
             }
             .padding(.horizontal, 6)
-            .frame(height: 28)
-            .background(Capsule().fill(color.opacity(0.08)))
-            .overlay(Capsule().strokeBorder(color.opacity(0.2), lineWidth: 0.5))
-            .help("本会话已用 \(gaugeTokens.formatted()) token · 约占上下文 \(Int(gaugePct * 100))%")
+            .frame(height: 24)
+            .background(Capsule().fill(color.opacity(0.10)))
+            .overlay(Capsule().strokeBorder(color.opacity(0.22), lineWidth: 0.6))
+            .help("当前 Agent 已用 \(gaugeTokens.formatted()) token · 约占模型窗口 \(Int(gaugePct * 100))%")
             .onAppear { refreshGauge() }
             .onChange(of: store.state.selectedThread?.id) { _ in refreshGauge() }
             .onChange(of: store.state.isGenerating) { gen in if !gen { refreshGauge() } }
@@ -565,7 +296,7 @@ struct ChatDetailView: View {
         if let workflow = skill.workflowName {
             template = "请执行\(workflow)工作流"
         } else if !skill.tools.isEmpty {
-            template = "请使用\(skill.tools.joined(separator: "、"))完成以下任务："
+            template = "请使用\(skill.tools.joined(separator: "、"))处理以下目标："
         }
         if !template.isEmpty {
             store.updateDraft(template)
@@ -591,8 +322,13 @@ struct ChatDetailView: View {
             Image(systemName: "photo")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(TextGrade.muted)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
+                .frame(width: 26, height: 26)
+                .background(
+                    Circle()
+                        .fill(SurfaceGrade.elevated)
+                )
+                .overlay(Circle().strokeBorder(SurfaceGrade.hairline, lineWidth: 0.6))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .help("添加图片（也可直接粘贴 ⌘V）")
@@ -665,8 +401,13 @@ struct ChatDetailView: View {
             Image(systemName: "paperclip")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(TextGrade.muted)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
+                .frame(width: 26, height: 26)
+                .background(
+                    Circle()
+                        .fill(SurfaceGrade.elevated)
+                )
+                .overlay(Circle().strokeBorder(SurfaceGrade.hairline, lineWidth: 0.6))
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .help("添加附件")
@@ -710,8 +451,8 @@ struct ChatDetailView: View {
     private func contextBudgetIcon(for label: String) -> String {
         switch label {
         case "当前输入": return "text.cursor"
-        case "项目上下文": return "folder"
-        case "任务记忆": return "brain"
+        case "项目资料", "项目上下文": return "folder"
+        case "任务记忆", "Agent 记忆": return "brain"
         case "工具结果": return "wrench.and.screwdriver"
         case "附件线索": return "paperclip"
         default: return "slider.horizontal.3"
@@ -727,8 +468,8 @@ struct ChatDetailView: View {
     private var contextBudgetHint: some View {
         HStack(spacing: AppSpace.sm) {
             // Agent context: read files
-            if let task = store.state.selectedTask {
-                let readFiles = task.steps.filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }.count
+            if let agent = store.state.selectedThread {
+                let readFiles = agent.steps.filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }.count
                 if readFiles > 0 {
                     HStack(spacing: 3) {
                         Image(systemName: "doc.text")
@@ -740,8 +481,7 @@ struct ChatDetailView: View {
                     .help("Agent 已读取 \(readFiles) 个文件")
                 }
 
-                // Task memory indicator
-                let hasMemory = task.steps.contains { $0.kind == .toolResult && $0.toolName == "workspace.index" && !$0.isFailure }
+                let hasMemory = agent.steps.contains { $0.kind == .toolResult && $0.toolName == "workspace.index" && !$0.isFailure }
                 if hasMemory {
                     Image(systemName: "brain.head.profile")
                         .font(.system(size: 9))
@@ -777,30 +517,25 @@ struct ChatDetailView: View {
                     ZStack {
                         Circle()
                             .fill(hasPendingFollowUp ? Brand.primary.opacity(0.22) : SurfaceGrade.elevated)
-                            .frame(width: 30, height: 30)
+                            .frame(width: 27, height: 27)
                             .overlay(
-                                Circle().strokeBorder(hasPendingFollowUp ? Brand.primary.opacity(0.40) : SurfaceGrade.border.opacity(0.35), lineWidth: 1)
+                                Circle().strokeBorder(hasPendingFollowUp ? Brand.primary.opacity(0.40) : SurfaceGrade.border.opacity(0.45), lineWidth: 0.7)
                             )
                         Image(systemName: "plus.bubble.fill")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(hasPendingFollowUp ? Brand.primaryLight : TextGrade.ghost)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(hasPendingFollowUp ? Brand.primary : TextGrade.ghost)
                     }
-                    .shadow(color: hasPendingFollowUp ? Brand.primary.opacity(0.25) : .clear, radius: 6)
                 } else {
                     ZStack {
                         Circle()
-                            .fill(
-                                canSend
-                                ? LinearGradient(colors: [Brand.gradientStart, Brand.gradientEnd], startPoint: .topLeading, endPoint: .bottomTrailing)
-                                : LinearGradient(colors: [SurfaceGrade.elevated, SurfaceGrade.elevated], startPoint: .top, endPoint: .bottom)
-                            )
-                            .frame(width: 30, height: 30)
+                            .fill(canSend ? AnyShapeStyle(Brand.primary) : AnyShapeStyle(SurfaceGrade.sunken))
+                            .frame(width: 27, height: 27)
 
                         Image(systemName: "arrow.up")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(canSend ? .white : TextGrade.ghost)
                     }
-                    .shadow(color: canSend ? Brand.primary.opacity(0.40) : .clear, radius: 8, y: 2)
+                    .shadow(color: canSend ? Brand.primary.opacity(0.30) : .clear, radius: 6, y: 2)
                 }
             }
         }
@@ -817,7 +552,7 @@ struct ChatDetailView: View {
     }
 
     private var hasPendingFollowUp: Bool {
-        let text = store.state.pendingFollowUp ?? ""
+        let text = store.state.draftMessage
         return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -848,8 +583,8 @@ struct ChatDetailView: View {
         if store.state.activeConnector == nil { return "先连接模型…" }
         let base = "输入问题或目标…"
         if store.state.isGenerating { return "补充一句，让它调整方向…" }
-        if let task = store.state.selectedTask {
-            switch task.status {
+        if let agent = store.state.selectedThread, agent.canContinueAgent {
+            switch agent.status {
             case .cancelled: return "继续处理，或输入新的处理方式…"
             case .failed: return "描述如何处理失败，或直接重试…"
             case .waitingReview: return "审查完成后继续…"
@@ -857,7 +592,7 @@ struct ChatDetailView: View {
             default: break
             }
         }
-        return "\(base)    ⌘K 命令面板"
+        return "\(base)  ⌘K"
     }
 
     private func chooseFileForDraft() {
@@ -918,7 +653,6 @@ struct ChatDetailView: View {
                     .help(path)
                 }
             }
-            .padding(.horizontal, AppSpace.md)
         }
     }
 
@@ -935,40 +669,8 @@ struct ChatDetailView: View {
         return count > 0 ? "\(count) 项 · \(parent)" : parent
     }
 
-    private var workspaceDisplayName: String {
-        let last = URL(fileURLWithPath: store.state.settings.workspacePath).lastPathComponent
-        return last.isEmpty ? store.state.workspaceName : last
-    }
-
     private var selectedContext: TaskContext? {
         store.state.selectedThread?.context
-    }
-
-    private var selectionChipIcon: String {
-        store.state.selectedTask == nil ? "text.bubble" : store.state.selectedTask?.status.icon ?? "text.bubble"
-    }
-
-    private var selectionChipText: String {
-        if let task = store.state.selectedTask {
-            return task.status == .running ? "执行中" : task.status.label
-        }
-        return store.state.selectedSession == nil ? "新会话" : "会话"
-    }
-
-    private var currentScopeLabel: String? {
-        if let projectID = store.state.selectedThread?.projectID,
-           let project = projectManager.projects.first(where: { $0.id == projectID }) {
-            return "项目：\(project.name)"
-        }
-        if store.state.selectedThread?.source == .session { return "会话" }
-        if store.state.selectedThread?.source == .task { return "任务" }
-        return nil
-    }
-
-    private var currentScopeIcon: String {
-        if store.state.selectedThread?.projectID != nil { return "folder" }
-        if store.state.selectedThread?.source == .task { return "hammer" }
-        return "text.bubble"
     }
 
 }
