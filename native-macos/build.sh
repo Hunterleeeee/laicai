@@ -9,6 +9,7 @@ K="$(xcrun --sdk macosx --show-sdk-path)"
 DIST="$NATIVE_ROOT/dist"
 APP="$DIST/Laicai.app"
 ICON="$ROOT/assets/laicai.icns"
+LOGO_PNG="$ROOT/assets/laicai-logo.png"
 MIN_MACOS_VERSION="${LAICAI_MIN_MACOS_VERSION:-14.0}"
 ARCHS="${LAICAI_ARCHS:-arm64 x86_64}"
 
@@ -26,6 +27,8 @@ while IFS= read -r f; do
   bn=$(basename "$f")
   sed -E 's/^import LaicaiNative(Domain|Foundation|UI)$/\/\/ flat-build/' "$f" > "$B/src/$bn"
 done < <(find "$S" -type f -name '*.swift' -not -path '*/LaicaiNativeCLI/*' | sort)
+# In flat build, all types share one namespace — remove module-bridging typealiases
+sed -i '' '/^public typealias Thread = LaicaiThread$/d' "$B/src/ChatTimelineView.swift" "$B/src/Services.swift"
 
 echo "=== Compile App ==="
 APP_BINARIES=()
@@ -102,6 +105,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$B/LaicaiNativeApp" "$APP/Contents/MacOS/"
 if [ -f "$ICON" ]; then
   cp "$ICON" "$APP/Contents/Resources/laicai.icns"
+fi
+if [ -f "$LOGO_PNG" ]; then
+  cp "$LOGO_PNG" "$APP/Contents/Resources/laicai-logo.png"
 fi
 
 cat > "$APP/Contents/Info.plist" << EOF
