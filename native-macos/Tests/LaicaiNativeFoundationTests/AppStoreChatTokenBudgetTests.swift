@@ -55,6 +55,6 @@ final class AppStoreChatTokenBudgetTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertEqual(runtime.requests.last?.maxOutputTokens, 7000)
+        XCTAssertEqual(runtime.requests.last?.maxOutputTokens, 65536)
     }
 }

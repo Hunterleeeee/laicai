@@ -109,6 +109,12 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
         let contextLen = inferContextLength(model: model, isLocal: local)
         let speed = inferSpeedTier(model: model, isLocal: local)
         let stability = inferStability(connector: connector, isLocal: local)
+        let maxTokensPerTurn: Int
+        if local {
+            maxTokensPerTurn = min(mode.maxTokensPerTurn, 1400)
+        } else {
+            maxTokensPerTurn = mode.maxTokensPerTurn
+        }
         return ConnectorCapabilityProfile(
             isLocal: local,
             supportsToolCalling: toolCallingResolution.supports,
@@ -118,8 +124,8 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
             learnedToolCallingLearnedAt: connector?.toolCallingCapabilityLearnedAt,
             toolCallingConflict: connector.flatMap { Self.toolCallingConflict(for: $0) },
             maxIterations: local ? iterationCap : mode.maxIterations,
-            maxTokensPerTurn: local ? min(mode.maxTokensPerTurn, 32768) : mode.maxTokensPerTurn,
-            directOutputLimit: nil,
+            maxTokensPerTurn: maxTokensPerTurn,
+            directOutputLimit: local ? 512 : nil,
             relevantFileLimit: mode.relevantFileLimit,
             contextWindow: local ? max(32768, mode.tokenBudget) : max(mode.tokenBudget, contextLen),
             estimatedContextLength: contextLen,
@@ -155,7 +161,7 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
     public static func imageOnlyModelChatMessage(modelName: String) -> String {
         let displayName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
         let modelLabel = displayName.isEmpty ? "当前模型" : "`\(displayName)`"
-        return "当前选择的是图片生成模型 \(modelLabel)，不能作为聊天/任务模型使用。生成图片请直接发送“生成图片/画一张…”，或切换到聊天模型（如 gpt-5.5、gpt-4o、Claude）处理文字任务。"
+        return "当前选择的是图片生成模型 \(modelLabel)，不能作为通用 Agent 模型使用。生成图片请直接发送“生成图片”，或切换到支持文字和工具的模型（如 gpt-5.5、gpt-4o、Claude）处理文字目标。"
     }
 
     public static func resolveToolCalling(for connector: ConnectorProfile) -> (supports: Bool, source: ConnectorToolCallingResolutionSource) {

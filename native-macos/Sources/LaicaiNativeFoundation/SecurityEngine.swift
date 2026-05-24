@@ -116,7 +116,11 @@ public final class AuditLog: ObservableObject {
         sqlite3_bind_text_safe(insertStmt, 6, entry.output)
         sqlite3_bind_int(insertStmt, 7, entry.success ? 1 : 0)
         sqlite3_bind_text_safe(insertStmt, 8, entry.userID)
-        sqlite3_step(insertStmt)
+        let stepResult = sqlite3_step(insertStmt)
+        if stepResult != SQLITE_DONE && stepResult != SQLITE_ROW {
+            let errMsg = String(cString: sqlite3_errmsg(db))
+            NSLog("[AuditLog] persistEntry failed: \(errMsg) (code \(stepResult))")
+        }
         sqlite3_finalize(insertStmt)
         // Prune old entries
         var pruneStmt: OpaquePointer?
@@ -428,6 +432,18 @@ public final class WorkspaceSandbox: ObservableObject {
         let dangerousPaths: Set<String> = ["/", "/Users", "/var", "/tmp", "/private", home]
         return dangerousPaths.contains(standardized)
     }
+
+    /// Development smoke-test workspaces are intentionally disposable. They must
+    /// never become the user's real default workspace through persisted settings.
+    public nonisolated static func isDisposableSmokeWorkspace(_ path: String) -> Bool {
+        let cleaned = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return false }
+        let standardized = URL(fileURLWithPath: cleaned).standardizedFileURL.path
+        let lower = standardized.lowercased()
+        let last = URL(fileURLWithPath: standardized).lastPathComponent.lowercased()
+        return (lower.hasPrefix("/tmp/laicai-") || lower.hasPrefix("/private/tmp/laicai-"))
+            && (last.contains("smoke") || lower.contains("-smoke"))
+    }
     
     /// Set permission override for a specific action
     public func setPermissionOverride(for action: SandboxAction, level: PermissionLevel) {
@@ -540,6 +556,9 @@ public extension SecurityManager {
 public func ShellSecurityCheck(command: String, policy: SandboxPolicy) -> String? {
     let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
     let normalized = trimmed.lowercased()
+    if let dangerous = DangerousOperationGuard.shellViolation(command: trimmed) {
+        return dangerous
+    }
     if let denied = policy.deniedShellPatterns.first(where: { normalized.contains($0.lowercased()) }) {
         return "命令包含危险模式：\(denied)"
     }
@@ -567,4 +586,112 @@ public func ShellSecurityCheck(command: String, policy: SandboxPolicy) -> String
         return "工具策略拦截：这看起来是在用 shell 生成文件清单。请改用 workspace.index。"
     }
     return nil
+}
+
+public enum DangerousOperationGuard {
+    public static func shellViolation(command: String) -> String? {
+        let normalized = command
+            .replacingOccurrences(of: #"\\\s*\n"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return nil }
+
+        let exactOrPrefixPatterns = [
+            #"(^|[;&|]\s*)sudo(\s|$)"#,
+            #"(^|[;&|]\s*)su(\s|$)"#,
+            #"(^|[;&|]\s*)rm\s+(-[a-z]*r[a-z]*f|-rf|-fr)(\s|$)"#,
+            #"(^|[;&|]\s*)git\s+reset\s+--hard(\s|$)"#,
+            #"(^|[;&|]\s*)git\s+clean\s+-[a-z]*f"#,
+            #"(^|[;&|]\s*)git\s+push(\s+\S+)*\s+--force"#,
+            #"(^|[;&|]\s*)git\s+push(\s+\S+)*\s+-f(\s|$)"#,
+            #"(^|[;&|]\s*)git\s+rebase(\s|$)"#,
+            #"(^|[;&|]\s*)brew\s+(install|uninstall|upgrade|tap|services)(\s|$)"#,
+            #"(^|[;&|]\s*)curl\s+[^|;&]+[|]\s*(sh|bash|zsh)(\s|$)"#,
+            #"(^|[;&|]\s*)wget\s+[^|;&]+[|]\s*(sh|bash|zsh)(\s|$)"#,
+            #">\s*(/etc/|/usr/|/bin/|/sbin/|/var/|/private/|~/.ssh|.*\.env)"#
+        ]
+        if exactOrPrefixPatterns.contains(where: { normalized.range(of: $0, options: .regularExpression) != nil }) {
+            return "危险操作已拦截：删除、重置、系统安装、强制发布、密钥/系统路径写入等操作需要用户明确审查，不能由 Agent 自动执行。"
+        }
+        return nil
+    }
+
+    public static func writeViolation(path: String, oldContent: String, context: TaskContext) -> String? {
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        let lower = standardized.lowercased()
+        let sensitiveMarkers = ["/.ssh/", "/.gnupg/", "/keychain", ".env", "secret", "token", "credential", "id_rsa", "id_ed25519", ".pem", ".key"]
+        if sensitiveMarkers.contains(where: { lower.contains($0) }) {
+            return "危险写入已拦截：目标看起来包含密钥、凭据或敏感配置，默认不允许 Agent 自动准备覆盖。"
+        }
+        let systemPrefixes = ["/etc/", "/usr/", "/bin/", "/sbin/", "/var/", "/private/etc/"]
+        if systemPrefixes.contains(where: { standardized.hasPrefix($0) }),
+           !standardized.hasPrefix("/var/folders/"),
+           !standardized.hasPrefix("/var/tmp/"),
+           !standardized.hasPrefix("/private/var/folders/"),
+           !standardized.hasPrefix("/private/var/tmp/") {
+            return "危险写入已拦截：目标位于系统目录，必须由用户手动确认处理。"
+        }
+        let fileExists = FileManager.default.fileExists(atPath: standardized)
+        if fileExists, hasUncommittedChange(path: standardized, workspaceRoot: context.workspaceRoot) {
+            let readKeys = [standardized, path, relativePath(standardized, workspaceRoot: context.workspaceRoot)]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let hasCurrentRead = !oldContent.isEmpty
+                ? readKeys.contains { key in
+                    context.memory.fileContentCache[key] == oldContent || context.memory.readFiles.contains(key)
+                }
+                : readKeys.contains { context.memory.readFiles.contains($0) }
+            if !hasCurrentRead {
+                return "工作区保护已拦截：\(relativePath(standardized, workspaceRoot: context.workspaceRoot)) 已有未提交改动。请先用 file.read 读取当前磁盘内容，再基于最新内容生成 diff，避免覆盖用户改动。"
+            }
+        }
+        return nil
+    }
+
+    public static func documentWriteViolation(path: String, context: TaskContext) -> String? {
+        writeViolation(path: path, oldContent: existingContentIfText(path), context: context)
+    }
+
+    private static func existingContentIfText(_ path: String) -> String {
+        guard FileManager.default.fileExists(atPath: path),
+              let data = FileManager.default.contents(atPath: path),
+              data.count <= 1_000_000,
+              let text = String(data: data, encoding: .utf8) else { return "" }
+        return text
+    }
+
+    private static func hasUncommittedChange(path: String, workspaceRoot: String) -> Bool {
+        let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !root.isEmpty, GitTool.isGitRepository(root) else { return false }
+        let relative = relativePath(path, workspaceRoot: root)
+        guard !relative.isEmpty else { return false }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git", "-C", root, "status", "--porcelain", "--", relative]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return false }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } catch {
+            return false
+        }
+    }
+
+    private static func relativePath(_ path: String, workspaceRoot: String) -> String {
+        let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !root.isEmpty else { return path }
+        let standardizedRoot = URL(fileURLWithPath: root).standardizedFileURL.path
+        if path == standardizedRoot { return "." }
+        if path.hasPrefix(standardizedRoot + "/") {
+            return String(path.dropFirst(standardizedRoot.count + 1))
+        }
+        return path
+    }
 }

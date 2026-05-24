@@ -12,7 +12,7 @@ extension AppStore {
         let selectedConnector = customAgent?.preferredConnectorID.flatMap { id in
             state.connectors.first(where: { $0.id == id })
         } ?? (requestedImageGeneration ? Self.imageGenerationConnector(from: state.connectors, activeID: state.activeConnectorID) : nil)
-            ?? state.activeConnector
+            ?? switchFromUnhealthyActiveConnectorIfNeeded()
         guard let connector = selectedConnector else {
             notify("请先选择一个连接器", style: .error)
             return
@@ -25,7 +25,7 @@ extension AppStore {
                 intent: .task,
                 confidence: max(decision.confidence, 0.84),
                 reason: decision.reason,
-                routeLabel: "图片生成",
+                routeLabel: "Agent 图片",
                 expectedCapabilities: Array(Set(decision.expectedCapabilities + ["生成图片", "整理交付"]))
             )
             if imageConnector.id != state.activeConnectorID {
@@ -43,20 +43,42 @@ extension AppStore {
             notify(ConnectorCapabilityProfile.imageOnlyModelChatMessage(modelName: connector.modelName), style: .error)
             recordToolActivity(
                 name: "chat.model_unsupported",
-                summary: "图片生成模型不能用于聊天",
+                summary: "图片生成模型不能用于通用 Agent",
                 statusLine: connector.modelName,
                 isFailure: true
             )
             return
         }
-        if decision.intent != .chat {
+        let intent = decision.intent
+        let workflowName: String? = { if case .workflow(let name) = intent { return name } else { return nil } }()
+
+        let selectedThreadProjectID = projectIDForExistingThreadSelection(allowRunningThread: true)
+        let continuationTargetID = continuationTargetThreadID(message: message, intent: intent)
+        let shouldContinueSelectedThread = continuationTargetID != nil
+        let selectedPlaceholderID = state.selectedThreadID.flatMap { selectedID in
+            state.threads.first { thread in
+                thread.id == selectedID
+                    && thread.steps.isEmpty
+                    && Thread.isPlaceholderTitle(thread.title)
+            }?.id
+        }
+        let shouldPromoteSelectedPlaceholder = continuationTargetID == nil
+            && decision.intent != .chat
+            && selectedPlaceholderID != nil
+        let shouldStartBesideRunningProjectThread = continuationTargetID == nil
+            && state.selectedThread?.status == .running
+            && selectedThreadProjectID != nil
+        let newThreadProjectID = shouldContinueSelectedThread || shouldPromoteSelectedPlaceholder || shouldStartBesideRunningProjectThread ? selectedThreadProjectID : nil
+
+        if decision.intent != .chat && !shouldContinueSelectedThread {
             let wp = state.settings.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
             if wp.isEmpty {
-                notify("请先在设置中指定工作区目录，再执行任务。", style: .error)
+                notify("请先在设置中指定工作区目录，再执行 Agent。", style: .error)
                 return
             }
-            if WorkspaceSandbox.isOverlyBroadWorkspace(wp) {
-                notify("工作区不能设为 home 目录或根目录，请指定一个具体的项目文件夹。", style: .error)
+            if !Self.isRunningTests && (WorkspaceSandbox.isOverlyBroadWorkspace(wp)
+                || WorkspaceSandbox.isDisposableSmokeWorkspace(wp)) {
+                notify("工作区不能设为 home、/tmp 或来财测试目录，请指定一个真实项目文件夹。", style: .error)
                 return
             }
         }
@@ -78,11 +100,6 @@ extension AppStore {
             context.imageGenerationAPIKey = imageConnector.note
         }
 
-        let intent = decision.intent
-        let workflowName: String? = { if case .workflow(let name) = intent { return name } else { return nil } }()
-
-        let selectedThreadProjectID = projectIDForNewThreadFromSelection(allowRunningThread: true)
-
         if let wfName = workflowName, let workflow = WorkflowLibrary.find(named: wfName, workspaceRoot: state.settings.workspacePath) {
             executeWorkflow(
                 taskTitle: message,
@@ -90,7 +107,8 @@ extension AppStore {
                 context: context,
                 message: message,
                 decision: decision,
-                projectID: selectedThreadProjectID
+                projectID: newThreadProjectID,
+                reuseThreadID: selectedPlaceholderID
             )
             return
         }
@@ -98,7 +116,7 @@ extension AppStore {
         if customAgent == nil,
            MultiAgentOrchestrator.shouldUseMultiAgent(message: message, intent: intent),
            let plan = MultiAgentOrchestrator.createPlan(for: message, intent: intent, connectors: state.connectors, activeConnectorID: state.activeConnectorID) {
-            executeMultiAgent(message: message, context: context, connector: connector, plan: plan, intent: intent, decision: decision, projectID: selectedThreadProjectID)
+            executeMultiAgent(message: message, context: context, connector: connector, plan: plan, intent: intent, decision: decision, projectID: newThreadProjectID, reuseThreadID: selectedPlaceholderID)
             return
         }
 
@@ -111,7 +129,7 @@ extension AppStore {
             var steps = [userStep]
             let planStep = TaskStep(
                 kind: .aiThinking,
-                text: Self.plannerStepText(for: decision),
+                text: continuationTargetID == nil ? "正在理解 Agent 目标并准备执行。" : Self.plannerStepText(for: decision),
                 isCollapsible: true,
                 isCollapsed: true
             )
@@ -130,10 +148,13 @@ extension AppStore {
 
         let targetTaskID: UUID
         let loopPriorSteps: [TaskStep]
-        if let selectedID = state.selectedThreadID,
+        var shouldRemoveEmptyPlaceholdersAfterContinuation = false
+        if let selectedID = continuationTargetID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }),
-           state.threads[threadIndex].status != .running {
+           state.threads[threadIndex].status != .running,
+           shouldContinueSelectedThread {
             let isEmptyPlaceholder = state.threads[threadIndex].steps.isEmpty
+            shouldRemoveEmptyPlaceholdersAfterContinuation = state.threads[threadIndex].source == .task
             if !isEmptyPlaceholder {
                 if !state.threads[threadIndex].context.memory.isEmpty {
                     context.memory = state.threads[threadIndex].context.memory
@@ -145,16 +166,42 @@ extension AppStore {
                 }
             }
             let currentTitle = state.threads[threadIndex].title
-            if isEmptyPlaceholder || currentTitle.isEmpty || currentTitle == "新会话" || currentTitle == "新对话" {
+            if isEmptyPlaceholder || Thread.isPlaceholderTitle(currentTitle) {
                 state.threads[threadIndex].title = String(message.prefix(32))
             }
-            state.threads[threadIndex].status = .running
+            let isExplicitTaskContinuation = Self.isContinuationCommand(message) || Self.isExplicitRecentTaskFollowUp(message)
+            Self.markAgentRunning(
+                &state.threads[threadIndex],
+                goal: Self.agentGoal(for: state.threads[threadIndex], incomingMessage: message, isContinuation: !isEmptyPlaceholder),
+                plan: Self.agentPlanLines(for: decision, message: message),
+                source: isChatIntent && !isExplicitTaskContinuation ? nil : .task
+            )
+            let plan = state.threads[threadIndex].currentPlan
+            if state.threads[threadIndex].taskProtocol == nil || state.threads[threadIndex].taskProtocol?.threadID != selectedID {
+                state.threads[threadIndex].taskProtocol = Self.makeTaskProtocol(
+                    threadID: selectedID,
+                    message: state.threads[threadIndex].agentGoal ?? message,
+                    context: context,
+                    decision: decision
+                )
+            }
+            if state.threads[threadIndex].executionLedger == nil {
+                state.threads[threadIndex].executionLedger = Self.makeExecutionLedger(
+                    threadID: selectedID,
+                    message: state.threads[threadIndex].agentGoal ?? message,
+                    context: context,
+                    decision: decision,
+                    plan: plan
+                )
+            }
+            state.threads[threadIndex].executionLedger?.goal = state.threads[threadIndex].agentGoal ?? message
+            state.threads[threadIndex].executionLedger?.plan = plan
+            state.threads[threadIndex].executionLedger?.pendingFollowUp = nil
+            state.threads[threadIndex].executionLedger?.nextAction = "继续处理当前 Agent：\(message)"
+            state.threads[threadIndex].executionLedger?.transition(to: isChatIntent ? .planning : .gatheringEvidence, reason: "用户续跑或追问")
             state.threads[threadIndex].connectorID = connector.id
             state.threads[threadIndex].workflowName = workflowName
             state.threads[threadIndex].context = context
-            if !isChatIntent {
-                state.threads[threadIndex].source = .task
-            }
             for step in initialSteps {
                 state.threads[threadIndex].steps.append(step)
             }
@@ -170,8 +217,57 @@ extension AppStore {
             }
             state.threads[threadIndex].updatedAt = .now
             targetTaskID = selectedID
+        } else if shouldPromoteSelectedPlaceholder,
+                  let selectedID = selectedPlaceholderID,
+                  let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }) {
+            let plan = Self.agentPlanLines(for: decision, message: message)
+            let taskProtocol = Self.makeTaskProtocol(
+                threadID: selectedID,
+                message: message,
+                context: context,
+                decision: decision
+            )
+            let ledger = Self.makeExecutionLedger(
+                threadID: selectedID,
+                message: message,
+                context: context,
+                decision: decision,
+                plan: plan
+            )
+            state.threads[threadIndex].title = String(message.prefix(32))
+            state.threads[threadIndex].status = .running
+            state.threads[threadIndex].steps = initialSteps
+            state.threads[threadIndex].connectorID = connector.id
+            state.threads[threadIndex].workflowName = workflowName
+            state.threads[threadIndex].context = context
+            state.threads[threadIndex].source = .task
+            state.threads[threadIndex].projectID = newThreadProjectID
+            state.threads[threadIndex].agentState = .running
+            state.threads[threadIndex].agentGoal = message
+            state.threads[threadIndex].currentPlan = plan
+            state.threads[threadIndex].taskProtocol = taskProtocol
+            state.threads[threadIndex].executionLedger = ledger
+            state.threads[threadIndex].updatedAt = .now
+            targetTaskID = selectedID
+            loopPriorSteps = state.threads[threadIndex].steps
         } else {
+            let newThreadID = UUID()
+            let plan = Self.agentPlanLines(for: decision, message: message)
+            let taskProtocol = Self.makeTaskProtocol(
+                threadID: newThreadID,
+                message: message,
+                context: context,
+                decision: decision
+            )
+            let ledger = Self.makeExecutionLedger(
+                threadID: newThreadID,
+                message: message,
+                context: context,
+                decision: decision,
+                plan: plan
+            )
             let thread = Thread(
+                id: newThreadID,
                 title: String(message.prefix(32)),
                 status: .running,
                 steps: initialSteps,
@@ -179,11 +275,25 @@ extension AppStore {
                 workflowName: workflowName,
                 context: context,
                 source: isChatIntent ? .session : .task,
-                projectID: isChatIntent ? nil : selectedThreadProjectID
+                projectID: isChatIntent ? nil : newThreadProjectID,
+                agentState: .running,
+                agentGoal: message,
+                currentPlan: plan,
+                taskProtocol: taskProtocol,
+                executionLedger: ledger
             )
             state.threads.insert(thread, at: 0)
             targetTaskID = thread.id
             loopPriorSteps = thread.steps
+        }
+        if shouldRemoveEmptyPlaceholdersAfterContinuation {
+            state.threads.removeAll { thread in
+                thread.id != targetTaskID
+                    && thread.source == .session
+                    && thread.steps.isEmpty
+                    && thread.preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && (Thread.isPlaceholderTitle(thread.title) || thread.title.trimmingCharacters(in: .whitespacesAndNewlines) == "新线程")
+            }
         }
         state.selectThread(id: targetTaskID)
         state.modeLabel = decision.routeLabel
@@ -192,7 +302,7 @@ extension AppStore {
         let capturedImages = state.draftImages
         state.isGenerating = true
         state.generationStartedAt = Date()
-        state.liveActivity = isChatIntent ? "思考中…" : "正在分析任务…"
+        state.liveActivity = isChatIntent ? "思考中…" : "Agent 正在分析…"
         state.draftMessage = ""
         state.draftAttachments = []
         state.draftImages = []
@@ -205,6 +315,10 @@ extension AppStore {
                 if AgentLoop.expectsWikiOutput(message) {
                     loopConfig.allowedTools?.formUnion(["file.read", "file.extract", "wiki.build"])
                 }
+                if AgentLoop.expectsOfficeDocumentDelivery(message) {
+                    loopConfig.allowedTools?.formUnion(["file.read", "file.extract", "document.transform"])
+                }
+                loopConfig.allowedTools?.insert("skill.manage")
             }
         }
         if customAgent == nil, let match = matchedSkill {
@@ -219,6 +333,17 @@ extension AppStore {
             let intentStr: String = { switch intent { case .chat: return "chat"; case .research: return "research"; case .task: return "task"; case .workflow(let n): return "workflow:\(n)" } }()
             let avgIter = TaskOutcomeRecorder.shared.avgIterations(intent: intentStr) ?? Double(loopConfig.maxIterations)
             state.threads[threadIdx].context.metadata["expectedIterations"] = "\(Int(ceil(avgIter)))"
+            if let taskProtocol = state.threads[threadIdx].taskProtocol,
+               let data = try? JSONEncoder().encode(taskProtocol),
+               let json = String(data: data, encoding: .utf8) {
+                state.threads[threadIdx].context.metadata["taskProtocolJSON"] = json
+            }
+            if let ledger = state.threads[threadIdx].executionLedger,
+               let data = try? JSONEncoder().encode(ledger),
+               let json = String(data: data, encoding: .utf8) {
+                state.threads[threadIdx].context.metadata["executionLedgerJSON"] = json
+            }
+            context = state.threads[threadIdx].context
         }
 
         let loop = AgentLoop(config: loopConfig, runtime: environment.runtimeClient)
@@ -286,15 +411,23 @@ extension AppStore {
                         TaskStep(kind: .error, text: errorText, isFailure: true, recoverable: true, retryAction: "重试")
                     )
                     self.state.threads[threadIndex].status = .failed
+                    self.syncAgentSnapshot(at: threadIndex)
+                    Self.ensureCheckpointIfNeeded(&self.state.threads[threadIndex])
                     self.state.threads[threadIndex].updatedAt = Date()
                     self.persistThreadsNow()
                 }
-                self.recordToolActivity(name: "task.error", summary: "任务执行失败", statusLine: error.localizedDescription, isFailure: true)
+                self.recordToolActivity(name: "task.error", summary: "Agent 执行失败", statusLine: error.localizedDescription, isFailure: true)
             }
 
             self.appendPendingFollowUp(to: targetTaskID)
             self.finishGenerationTask(targetTaskID)
         }
+    }
+
+    static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
+            || NSClassFromString("XCTest.XCTestCase") != nil
     }
 
     private static func looksLikeImageGenerationRequest(_ message: String) -> Bool {
@@ -327,10 +460,179 @@ extension AppStore {
             ?? imageConnectors.first
     }
 
-    func projectIDForNewThreadFromSelection(allowRunningThread: Bool = false) -> UUID? {
+    func projectIDForExistingThreadSelection(allowRunningThread: Bool = false) -> UUID? {
         guard let selectedID = state.selectedThreadID,
               let thread = state.threads.first(where: { $0.id == selectedID }) else { return nil }
         if thread.status == .running && !allowRunningThread { return nil }
         return thread.projectID
+    }
+
+    func shouldContinueCurrentSelectedThread(message: String, intent: UserIntent) -> Bool {
+        guard let selectedID = state.selectedThreadID,
+              let thread = state.threads.first(where: { $0.id == selectedID }) else { return false }
+        if thread.status == .running && generationTasks[selectedID] != nil { return false }
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !thread.steps.isEmpty else {
+            return !Self.canRecoverRecentThread(for: trimmed, intent: intent)
+        }
+        let selectedSourceIsExecution = thread.isExecutionAgent || thread.steps.contains { $0.kind == .toolCall }
+        if !selectedSourceIsExecution {
+            if intent == .chat {
+                if Self.isContinuationCommand(trimmed) || Self.isContextualFollowUp(trimmed, thread: thread) {
+                    return true
+                }
+                return !Self.isStandaloneCapabilityOrConceptQuestion(trimmed)
+                    && !Self.isStandaloneInfoQuestion(trimmed)
+                    && !Self.isStandaloneGeneralQuestion(trimmed)
+                    && !Self.isTaskStatusQuestion(trimmed)
+            }
+            return true
+        }
+        if selectedSourceIsExecution, Self.taskHasTruncatedOutput(AgentTask(thread: thread)), Self.isTruncationContinuation(trimmed) {
+            return true
+        }
+        if selectedSourceIsExecution, intent == .chat, Self.isStandaloneGeneralQuestion(trimmed) {
+            return false
+        }
+        if Self.isContinuationCommand(trimmed)
+            || Self.isContextualFollowUp(trimmed, thread: thread)
+            || UserFrustrationDetector.shouldRecoverRecentTask(trimmed) {
+            return true
+        }
+        if intent == .chat {
+            return !selectedSourceIsExecution
+        }
+        let hasExplicitThreadReference = Self.isContextualTaskReference(trimmed)
+        return selectedSourceIsExecution && (hasExplicitThreadReference || Self.isContextualFollowUp(trimmed, thread: thread))
+    }
+
+    func continuationTargetThreadID(message: String, intent: UserIntent) -> UUID? {
+        if shouldContinueCurrentSelectedThread(message: message, intent: intent) {
+            return state.selectedThreadID
+        }
+
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.canRecoverRecentThread(for: trimmed, intent: intent) else { return nil }
+
+        let selectedID = state.selectedThreadID
+        return state.threads
+            .filter { thread in
+                thread.id != selectedID
+                    && !thread.isEmptyPlaceholder
+                    && thread.status != .running
+                    && thread.canContinueAgent
+            }
+            .sorted { lhs, rhs in lhs.updatedAt > rhs.updatedAt }
+            .first { thread in
+                Self.shouldRecoverIntoRecentThread(message: trimmed, thread: thread)
+            }?
+            .id
+    }
+
+    static func canRecoverRecentThread(for message: String, intent: UserIntent) -> Bool {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        if isStandaloneCapabilityOrConceptQuestion(normalized)
+            || isStandaloneInfoQuestion(normalized)
+            || isStandaloneGeneralQuestion(normalized) {
+            return false
+        }
+        if isTinyFollowUp(normalized) && !isExplicitRecentTaskFollowUp(normalized) {
+            return false
+        }
+        return isContinuationCommand(normalized)
+            || isExplicitRecentTaskFollowUp(normalized)
+            || isContextualTaskReference(normalized)
+            || isTaskStatusQuestion(normalized)
+            || UserFrustrationDetector.shouldRecoverRecentTask(normalized)
+    }
+
+    static func shouldRecoverIntoRecentThread(message: String, thread: Thread) -> Bool {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        if isExplicitRecentTaskFollowUp(normalized)
+            || isContinuationCommand(normalized)
+            || isContextualTaskReference(normalized)
+            || isTaskStatusQuestion(normalized)
+            || UserFrustrationDetector.shouldRecoverRecentTask(normalized) {
+            return true
+        }
+        if isContextualFollowUp(normalized, thread: thread) {
+            return true
+        }
+        let lastUserInput = thread.steps.reversed().first { $0.kind == .userInput }?.text ?? thread.title
+        let sharedKeywords = semanticOverlapKeywords(in: normalized).intersection(semanticOverlapKeywords(in: lastUserInput))
+        return sharedKeywords.count >= 2 && isLikelyTaskFollowUp(normalized)
+    }
+
+    static func isExplicitRecentTaskFollowUp(_ message: String) -> Bool {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        let explicitMarkers = [
+            "在哪", "到哪", "在哪里", "预览", "打开看看", "看一下产物", "看下产物",
+            "文件在哪", "产物在哪", "继续这个", "接着这个", "继续当前", "接着当前",
+            "刚才那个", "上个任务", "上一轮", "这个任务", "这个 Agent", "这个agent",
+            "没发完", "被截断", "没写完", "没说完"
+        ]
+        return explicitMarkers.contains { normalized.localizedCaseInsensitiveContains($0) }
+    }
+
+    static func isContextualFollowUp(_ message: String, thread: Thread) -> Bool {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        if taskHasTruncatedOutput(AgentTask(thread: thread)), isTruncationContinuation(normalized) {
+            return true
+        }
+        if isStandaloneCapabilityOrConceptQuestion(normalized) || isStandaloneInfoQuestion(normalized) || isStandaloneGeneralQuestion(normalized) {
+            return false
+        }
+        let contextualMarkers = [
+            "刚才", "上面", "前面", "这个", "那个", "这里", "它", "这些", "那些",
+            "还有", "还要", "继续", "接着", "为什么", "为啥",
+            "对吗", "不对", "没反应", "没生效", "还是", "又", "仍然",
+            "这个逻辑", "这个页面", "这个按钮", "这个 Agent", "这个agent", "这个任务", "当前",
+            "窗口", "页面", "按钮", "bug", "Bug", "卡顿", "历史任务", "左边", "右边", "追问", "新会话"
+        ]
+        if contextualMarkers.contains(where: { normalized.contains($0) }) { return true }
+
+        let lastUserInput = thread.steps.reversed().first { $0.kind == .userInput }?.text ?? thread.title
+        let sharedKeywords = semanticOverlapKeywords(in: normalized).intersection(semanticOverlapKeywords(in: lastUserInput))
+        if normalized.count <= 18 {
+            return sharedKeywords.count >= 1 && !isStandaloneGeneralQuestion(normalized)
+        }
+        return sharedKeywords.count >= 2
+    }
+
+    static func agentGoal(for thread: Thread, incomingMessage: String, isContinuation: Bool) -> String {
+        let trimmed = incomingMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isContinuation,
+           let existing = thread.agentGoal?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !existing.isEmpty {
+            return existing
+        }
+        if isContinuation,
+           let firstUser = thread.steps.first(where: { $0.kind == .userInput })?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+           !firstUser.isEmpty {
+            return firstUser
+        }
+        return trimmed
+    }
+
+    static func agentPlanLines(for decision: PlannerDecision, message: String) -> [String] {
+        var lines = ["理解目标：\(String(message.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)))"]
+        if !decision.expectedCapabilities.isEmpty {
+            lines.append("准备能力：\(decision.expectedCapabilities.prefix(4).joined(separator: "、"))")
+        }
+        switch decision.intent {
+        case .chat:
+            lines.append("直接回答或澄清，保持轻量问答姿态")
+        case .research:
+            lines.append("检索证据并汇总来源")
+        case .task:
+            lines.append("执行工具，形成可验证结果")
+        case .workflow(let name):
+            lines.append("运行工作流：\(name)")
+        }
+        return lines
     }
 }
