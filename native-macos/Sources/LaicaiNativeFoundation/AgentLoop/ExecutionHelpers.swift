@@ -21,13 +21,25 @@ extension AgentLoop {
         }
     }
 
+    static func circuitBreakerTarget(for step: TaskStep) -> String {
+        guard let params = step.toolParams else { return "unknown" }
+        let candidates = [
+            params["path"],
+            params["sourcePath"],
+            params["outputPath"],
+            params["pdfPath"],
+            params["query"],
+            params["command"]
+        ]
+        return candidates.compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? "unknown"
+    }
+
     nonisolated static var fileChangeTools: Set<String> {
         ["file.write", "file.edit", "diff.apply"]
     }
 
-    nonisolated static var explicitApprovalSideEffectTools: Set<String> {
-        ["browser.real", "computer"]
-    }
+    nonisolated static var explicitApprovalSideEffectTools: Set<String> { [] }
 
     nonisolated static func isFileChangeTool(_ toolName: String) -> Bool {
         fileChangeTools.contains(ToolNameCodec.canonicalName(toolName))
@@ -60,6 +72,20 @@ extension AgentLoop {
         return canonicalToolSet(allowedTools)?.contains(ToolNameCodec.canonicalName(toolName)) ?? false
     }
 
+    func hydrateRuntimeContract(from context: TaskContext, into task: inout AgentTask) {
+        if let protocolJSON = context.metadata["taskProtocolJSON"],
+           let data = protocolJSON.data(using: .utf8),
+           let taskProtocol = try? JSONDecoder().decode(AgentTaskProtocol.self, from: data) {
+            task.taskProtocol = taskProtocol
+        }
+        if let ledgerJSON = context.metadata["executionLedgerJSON"],
+           let data = ledgerJSON.data(using: .utf8),
+           var ledger = try? JSONDecoder().decode(AgentExecutionLedger.self, from: data) {
+            ledger.transition(to: .gatheringEvidence, reason: "AgentLoop 开始运行")
+            task.executionLedger = ledger
+        }
+    }
+
     nonisolated static func approvalRequiredToolResult(toolName: String) -> ToolResult {
         ToolResult(
             output: "已阻止工具调用：\(toolName)。该工具会影响真实系统或外部应用，必须由用户显式确认后才能执行。",
@@ -70,7 +96,12 @@ extension AgentLoop {
     }
 
     nonisolated static func pathForFileChange(callStep: TaskStep, toolResult: ToolResult? = nil) -> String {
-        toolResult?.data?["path"] ?? callStep.toolParams?["path"] ?? ""
+        toolResult?.data?["path"]
+            ?? toolResult?.data?["outputPath"]
+            ?? callStep.toolParams?["outputPath"]
+            ?? callStep.toolParams?["path"]
+            ?? callStep.toolParams?["sourcePath"]
+            ?? ""
     }
 
     // G9: Allow file edits on DIFFERENT files to run in parallel
@@ -168,11 +199,41 @@ extension AgentLoop {
         let hasWrite = Self.hasSuccessfulWrite(in: task)
         let hasSavedWiki = Self.hasSavedWiki(in: task)
         let expectsWikiOutput = Self.expectsWikiOutput(message)
+        let riskPolicy = task.taskProtocol?.riskPolicy
+        let ledgerHasEvidence = task.executionLedger?.hasToolEvidence == true
+        let hasEvidence = ledgerHasEvidence || !successfulResults.isEmpty || task.steps.contains { $0.kind == .reviewRequest && $0.approved == true }
+        let missingDeliverables = expectedDeliverablePaths(from: message, workspaceRoot: task.context.workspaceRoot).filter { path in
+            var isDirectory: ObjCBool = false
+            return !FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) || isDirectory.boolValue
+        }
         let hasUnrecoveredFailure = !failedResults.isEmpty && !Self.hasRecoveryAfterLastFailure(task)
         let hasVerificationFailure = task.steps.contains { $0.toolName == "verify.build" && $0.isFailure }
+        let requiresUIEvidence = Self.expectsUIEvidence(message: message, protocolCriteria: task.taskProtocol?.completionCriteria ?? [])
+        let hasUIEvidence = Self.hasUIEvidence(in: task)
+        let requiresEvidence = intent != .chat
+            && riskPolicy != .ask
+            && configRequiresEvidence(task: task, isReadOnlyRun: isReadOnlyRun)
 
+        if riskPolicy == .dangerous {
+            return false
+        }
         if Self.hasSatisfiedImageGenerationRequest(task) {
             return !hasVerificationFailure
+        }
+        if !missingDeliverables.isEmpty && !isReadOnlyRun {
+            return false
+        }
+        if requiresEvidence && !hasEvidence {
+            return false
+        }
+        if requiresUIEvidence && !hasUIEvidence {
+            return false
+        }
+        if riskPolicy == .inspect && hasWrite {
+            return false
+        }
+        if task.taskProtocol != nil && task.taskProtocol?.isExecutable != true {
+            return false
         }
         if expectsWikiOutput {
             return hasFinalOutput && (hasSavedWiki || hasWrite) && !hasUnrecoveredFailure
@@ -187,18 +248,46 @@ extension AgentLoop {
         case .research:
             let hasSearch = task.steps.contains { $0.kind == .toolCall && $0.toolName == "web.search" }
             let hasFetch = task.steps.contains { $0.kind == .toolCall && $0.toolName == "web.fetch" }
-            return hasFinalOutput && hasSearch && hasFetch && failedResults.isEmpty
+            let hasFetchedPage = task.executionLedger?.pages.isEmpty == false
+                || task.steps.contains { $0.kind == .toolResult && $0.toolName == "web.fetch" && !$0.isFailure }
+            return hasFinalOutput && hasSearch && hasFetch && hasFetchedPage && failedResults.isEmpty
         case .task, .workflow:
             if isReadOnlyRun {
-                return hasFinalOutput
+                return hasFinalOutput && (!requiresEvidence || hasEvidence)
+            }
+            if hasFinalOutput && hasEvidence && !expectsWriteOutput(message) && !expectsWikiOutput {
+                return true
             }
             if hasVerificationFailure { return false }
+            if expectsOfficeDocumentDelivery(message), hasSuccessfulDocumentWrite(in: task) {
+                return hasFinalOutput && hasSatisfiedDocumentDelivery(in: task, originalMessage: message)
+            }
             if hadFailure && failedResults.count >= successfulResults.count { return false }
             if hasWrite {
                 return hasFinalOutput || successfulResults.contains { isFileChangeTool($0.toolName ?? "") }
             }
             return hasFinalOutput && (!hadFailure || successfulResults.count >= 2)
         }
+    }
+
+    private static func configRequiresEvidence(task: AgentTask, isReadOnlyRun: Bool) -> Bool {
+        if let policy = task.taskProtocol?.riskPolicy {
+            return policy != .ask
+        }
+        guard !task.context.workspaceRoot.isEmpty else { return false }
+        let message = task.steps
+            .filter { $0.kind == .userInput }
+            .map(\.text)
+            .joined(separator: "\n")
+            .lowercased()
+        let evidenceMarkers = [
+            "项目", "代码", "文件", "工作区", "仓库", "repo", "repository",
+            "页面", "按钮", "bug", "报错", "异常", "卡顿", "卡死", "性能",
+            "优化", "修复", "调整", "改进", "实现", "创建", "修改", "读取",
+            "查看", "检查", "排查", "诊断", "不生效", "测试", "构建", "编译",
+            "workspace", "code", "file", "bug", "error", "fix", "implement", "optimize", "performance", "test", "build"
+        ]
+        return evidenceMarkers.contains { message.contains($0) } || expectsWriteOutput(message) || isReadOnlyRun
     }
 
     static func hasRecoveryAfterLastFailure(_ task: AgentTask) -> Bool {
@@ -208,7 +297,7 @@ extension AgentLoop {
         let later = task.steps.dropFirst(lastFailureIndex + 1)
         return later.contains { step in
             if step.kind == .toolResult, !step.isFailure {
-                let recoveryTools: Set<String> = ["file.extract", "file.read", "wiki.build", "file.write", "file.edit", "diff.apply", "workspace.index", "code.search", "shell.exec", "web.fetch", "web.search"]
+                let recoveryTools: Set<String> = ["file.extract", "document.transform", "file.read", "wiki.build", "file.write", "file.edit", "diff.apply", "workspace.index", "code.search", "shell.exec", "web.fetch", "web.search"]
                 return recoveryTools.contains(step.toolName ?? "")
             }
             if step.kind == .reviewRequest, step.approved == true {
@@ -218,19 +307,112 @@ extension AgentLoop {
         }
     }
 
-    static func resultStepParams(toolName: String, arguments: [String: String], result: ToolResult) -> [String: String] {
-        guard toolName == "image.generate", let data = result.data else {
+    nonisolated static func expectsUIEvidence(message: String, protocolCriteria: [String] = []) -> Bool {
+        let haystack = ([message] + protocolCriteria).joined(separator: "\n").lowercased()
+        let markers = [
+            "ui", "页面", "界面", "按钮", "窗口", "截图", "可访问性", "accessibility",
+            "browser", "浏览器", "前端", "视觉", "布局", "样式", "点击", "scroll", "滚动"
+        ]
+        return markers.contains { haystack.contains($0.lowercased()) }
+    }
+
+    nonisolated static func hasUIEvidence(in task: AgentTask) -> Bool {
+        if task.executionLedger?.pages.contains(where: { page in
+            let lower = page.lowercased()
+            return lower.contains("screenshot")
+                || lower.contains(".png")
+                || lower.contains("accessibility")
+                || lower.hasPrefix("http://")
+                || lower.hasPrefix("https://")
+                || lower.hasPrefix("file://")
+        }) == true {
+            return true
+        }
+        return task.steps.contains { step in
+            let tool = step.toolName ?? ""
+            let action = step.toolParams?["action"]?.lowercased() ?? ""
+            let text = step.text.lowercased()
+            guard step.kind == .toolResult || step.kind == .toolCall else { return false }
+            if ["browser", "browser.real", "computer"].contains(tool) {
+                if action == "screenshot" || action == "extract" || action == "windows" || action == "frontmost" {
+                    return !step.isFailure
+                }
+                if text.contains("截图") || text.contains("页面") || text.contains("窗口") || text.contains("accessibility") {
+                    return !step.isFailure
+                }
+            }
+            if tool == "web.fetch" && !step.isFailure {
+                return true
+            }
+            return false
+        }
+    }
+
+    nonisolated static func resultStepParams(toolName: String, arguments: [String: String], result: ToolResult) -> [String: String] {
+        let canonical = ToolNameCodec.canonicalName(toolName)
+        guard ["image.generate", "document.transform"].contains(canonical), let data = result.data else {
             return arguments
         }
         return arguments.merging(data) { _, resultValue in resultValue }
     }
 
-    static func hasSuccessfulWrite(in task: AgentTask) -> Bool {
+    nonisolated static func hasSuccessfulWrite(in task: AgentTask) -> Bool {
         return task.steps.contains { step in
+            if isSuccessfulDocumentWrite(step) { return true }
             guard isFileChangeTool(step.toolName ?? "") else { return false }
             if step.kind == .reviewRequest, step.approved == true { return true }
             return step.kind == .toolResult && !step.isFailure
         }
+    }
+
+    nonisolated static func isSuccessfulDocumentWrite(_ step: TaskStep) -> Bool {
+        guard step.kind == .toolResult,
+              step.toolName == "document.transform",
+              !step.isFailure else { return false }
+        let action = step.toolParams?["action"] ?? ""
+        guard ["apply", "copy", "render"].contains(action) else { return false }
+        let path: String?
+        if action == "render" {
+            path = step.toolParams?["pdfPath"] ?? step.toolParams?["outputPath"] ?? step.toolParams?["path"]
+        } else {
+            path = step.toolParams?["outputPath"] ?? step.toolParams?["path"]
+        }
+        guard let path, !path.isEmpty else { return false }
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && !isDirectory.boolValue
+    }
+
+    nonisolated static func hasSuccessfulDocumentWrite(in task: AgentTask) -> Bool {
+        task.steps.contains { isSuccessfulDocumentWrite($0) }
+    }
+
+    nonisolated static func expectsOfficeDocumentDelivery(_ message: String) -> Bool {
+        guard messageContainsDeliverableIntent(message) else { return false }
+        let paths = extractAbsolutePaths(from: message)
+        return paths.contains { ["pptx", "docx", "xlsx", "xlsm"].contains(($0 as NSString).pathExtension.lowercased()) }
+    }
+
+    nonisolated static func hasSatisfiedDocumentDelivery(in task: AgentTask, originalMessage: String) -> Bool {
+        let writes = task.steps.filter { isSuccessfulDocumentWrite($0) }
+        guard !writes.isEmpty else { return false }
+
+        let expectsTranslation = originalMessage.contains("翻译")
+            || originalMessage.contains("英文")
+            || originalMessage.localizedCaseInsensitiveContains("english")
+        guard expectsTranslation else { return true }
+
+        let verifyResults = task.steps.filter {
+            $0.kind == .toolResult
+                && $0.toolName == "document.transform"
+                && !$0.isFailure
+                && $0.toolParams?["action"] == "verify"
+        }
+        guard let latestVerify = verifyResults.last else { return false }
+        if latestVerify.toolParams?["complete"] == "true" { return true }
+        if let remaining = latestVerify.toolParams?["remainingCJK"].flatMap(Int.init) {
+            return remaining == 0
+        }
+        return false
     }
 
     static func hasSatisfiedImageGenerationRequest(_ task: AgentTask) -> Bool {
@@ -256,7 +438,7 @@ extension AgentLoop {
         let lower = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !lower.isEmpty else { return false }
         let actionMarkers = [
-            "生成", "创建", "做一张", "做张", "做个", "画一张", "画张", "画个",
+            "生成", "重新生成", "创建", "做一张", "做张", "做个", "画一张", "画张", "画个",
             "设计", "出一张", "出张", "出个", "来一张", "来张", "来个", "制作",
             "generate", "create", "draw", "design", "make"
         ]
@@ -304,6 +486,7 @@ extension AgentLoop {
         let wroteCode = task.steps.contains { step in
             guard step.kind == .toolCall, isFileChangeTool(step.toolName ?? "") else { return false }
             let codeExts: Set<String> = ["swift", "py", "js", "ts", "tsx", "jsx", "rs", "go", "java", "c", "cpp", "h", "m", "mm"]
+            if step.toolName == "document.transform" { return false }
             return codeExts.contains((pathForFileChange(callStep: step) as NSString).pathExtension.lowercased())
         }
         let hadVerify = task.steps.contains { $0.kind == .toolCall && $0.toolName == "verify.build" }
@@ -316,10 +499,107 @@ extension AgentLoop {
         if expectsWrite && !hasWritten {
             issues.append("用户要求创建/修改文件，但没有任何写入操作")
         }
+        let missingDeliverables = expectedDeliverablePaths(from: message, workspaceRoot: workspaceRoot).filter { path in
+            var isDirectory: ObjCBool = false
+            return !FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) || isDirectory.boolValue
+        }
+        if !missingDeliverables.isEmpty {
+            let names = missingDeliverables.prefix(3).map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "、")
+            issues.append("用户要求交付的目标文件尚未生成：\(names)")
+        }
         if expectsWiki && !hasSavedWiki(in: task) && !hasWritten {
             issues.append("用户要求整理到 Wiki/知识库，但没有保存任何 Wiki 笔记")
         }
         return issues
+    }
+
+    static func expectedDeliverablePaths(from message: String, workspaceRoot: String) -> [String] {
+        guard messageContainsDeliverableIntent(message) else { return [] }
+        var paths = explicitDeliverablePaths(from: message)
+        paths.append(contentsOf: inferredDesktopDeliverables(from: message))
+        var seen: Set<String> = []
+        return paths.compactMap { raw in
+            let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !path.isEmpty else { return nil }
+            let absolute = path.hasPrefix("/")
+                ? path
+                : (workspaceRoot.isEmpty ? path : (workspaceRoot as NSString).appendingPathComponent(path))
+            guard likelyDeliverablePath(absolute), seen.insert(absolute).inserted else { return nil }
+            return absolute
+        }
+    }
+
+    nonisolated private static func messageContainsDeliverableIntent(_ message: String) -> Bool {
+        let markers = ["输出", "导出", "保存", "存到", "放到", "生成", "创建", "副本", "转化", "转换", "翻译"]
+        return markers.contains { message.localizedCaseInsensitiveContains($0) }
+    }
+
+    private static func likelyDeliverablePath(_ path: String) -> Bool {
+        let ext = (path as NSString).pathExtension.lowercased()
+        guard !ext.isEmpty else { return false }
+        let deliverableExts: Set<String> = [
+            "pptx", "ppt", "pdf", "docx", "xlsx", "csv", "txt", "md", "json",
+            "png", "jpg", "jpeg", "webp", "html", "zip"
+        ]
+        return deliverableExts.contains(ext)
+    }
+
+    private static func explicitDeliverablePaths(from message: String) -> [String] {
+        extractAbsolutePaths(from: message).filter { path in
+            let name = URL(fileURLWithPath: path).lastPathComponent.lowercased()
+            if name.contains("_english") || name.contains("_en.") || name.contains("english") || name.contains("英文") {
+                return true
+            }
+            guard let range = message.range(of: path) else { return false }
+            let prefix = String(message[..<range.lowerBound].suffix(24))
+            let markers = ["输出", "导出", "保存", "存到", "放到", "生成", "创建", "副本", "写到"]
+            return markers.contains { prefix.contains($0) }
+        }
+    }
+
+    private static func inferredDesktopDeliverables(from message: String) -> [String] {
+        guard message.contains("桌面") || message.localizedCaseInsensitiveContains("desktop") else { return [] }
+
+        let explicitNamePatterns = [
+            #"([^\s\n，。；;：:「」"'`]+(?:_English|_EN)[^\s\n，。；;：:「」"'`]*)"#,
+            #"([^\s\n，。；;：:「」"'`]*(?:英文版|English|EN)[^\s\n，。；;：:「」"'`]*)"#
+        ]
+        for pattern in explicitNamePatterns {
+            if let match = firstDeliverableName(in: message, pattern: pattern) {
+                return [desktopPath(fileName: match)]
+            }
+        }
+
+        guard (message.contains("英文") || message.localizedCaseInsensitiveContains("english")),
+              let sourcePath = extractAbsolutePaths(from: message).first(where: { likelyDeliverablePath($0) }) else {
+            return []
+        }
+        let url = URL(fileURLWithPath: sourcePath)
+        let base = url.deletingPathExtension().lastPathComponent
+        let ext = url.pathExtension
+        guard !base.isEmpty, !ext.isEmpty else { return [] }
+        return [
+            desktopPath(fileName: "\(base)_English.\(ext)"),
+            desktopPath(fileName: "\(base)_EN.\(ext)")
+        ]
+    }
+
+    private static func firstDeliverableName(in text: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        for match in regex.matches(in: text, range: range) {
+            guard match.numberOfRanges > 1,
+                  let swiftRange = Range(match.range(at: 1), in: text) else { continue }
+            let name = String(text[swiftRange])
+                .trimmingCharacters(in: CharacterSet(charactersIn: "。，、；;：:）)]}>\"'`"))
+            guard likelyDeliverablePath(name), !name.contains("/") else { continue }
+            return name
+        }
+        return nil
+    }
+
+    private static func desktopPath(fileName: String) -> String {
+        (NSHomeDirectory() as NSString).appendingPathComponent("Desktop/\(fileName)")
     }
 
     func runFallbackWikiBuildIfNeeded(
@@ -339,7 +619,7 @@ extension AgentLoop {
             guard emitMissingMaterialFailure else { return nil }
             let noMaterialStep = TaskStep(
                 kind: .error,
-                text: "Wiki 任务没有可落盘的已读材料；请先读取或提取附件后继续。",
+                text: "Wiki会话没有可落盘的已读材料；请先读取或提取附件后继续。",
                 isFailure: true,
                 recoverable: true,
                 retryAction: "继续处理"
@@ -352,7 +632,7 @@ extension AgentLoop {
         guard isToolAllowed("wiki.build") else {
             let blockedStep = TaskStep(
                 kind: .error,
-                text: "Wiki 任务必须保存笔记，但当前 Agent 工具权限不包含 wiki.build，无法完成落盘。",
+                text: "Wiki会话必须保存笔记，但当前会话 工具权限不包含 wiki.build，无法完成落盘。",
                 isFailure: true,
                 recoverable: true,
                 retryAction: "允许 wiki.build 后重试"
@@ -364,7 +644,7 @@ extension AgentLoop {
         guard let wikiTool = toolRegistry.tool(named: "wiki_build") ?? toolRegistry.tool(named: "wiki.build") else {
             let missingStep = TaskStep(
                 kind: .error,
-                text: "Wiki 任务必须保存笔记，但工具注册表中没有 wiki.build。",
+                text: "Wiki会话必须保存笔记，但工具注册表中没有 wiki.build。",
                 isFailure: true,
                 recoverable: true
             )
@@ -375,7 +655,7 @@ extension AgentLoop {
 
         let gateStep = TaskStep(
             kind: .aiThinking,
-            text: "编排层兜底：模型未完成 Wiki 保存，正在基于已提取材料自动调用 wiki_build(save=true)。",
+            text: "编排层兜底：正在保存 Wiki 笔记。",
             isCollapsible: true,
             isCollapsed: true
         )
@@ -450,7 +730,7 @@ extension AgentLoop {
         let callId = "call_fallback_wiki_\(mode)_\(UUID().uuidString.prefix(8))"
         let callStep = TaskStep(
             kind: .toolCall,
-            text: "编排层兜底：" + ToolStepFormatter.callText(toolName: "wiki.build", arguments: params),
+            text: ToolStepFormatter.callText(toolName: "wiki.build", arguments: params),
             toolName: "wiki.build",
             toolParams: params,
             toolCallId: callId,
@@ -513,7 +793,7 @@ extension AgentLoop {
             for variant in variants {
                 guard let content = taskContext.memory.fileContentCache[variant] ?? taskContext.memory.fileContentCache[path] else { continue }
                 let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard trimmed.count > 20 else { continue }
+                guard !trimmed.isEmpty else { continue }
                 return FallbackWikiSource(
                     path: variant,
                     title: URL(fileURLWithPath: variant).lastPathComponent,
@@ -526,19 +806,10 @@ extension AgentLoop {
 
     private static func fallbackWikiTopic(message: String, sourcePath: String) -> String {
         if let path = firstLocalPath(in: message) ?? (sourcePath.isEmpty ? nil : sourcePath) {
-            let url = URL(fileURLWithPath: path)
-            var parts = url.pathComponents
-            let fileBase = url.deletingPathExtension().lastPathComponent
+            let fileBase = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
                 .replacingOccurrences(of: #"[\s_-]?(20\d{2}|[01]?\d[0-3]?\d)$"#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !parts.isEmpty { parts.removeLast() }
-            let parentNames = parts.suffix(2).filter { part in
-                !["Desktop", "Downloads", "Documents", "文件"].contains(part)
-            }
-            let prefix = parentNames.joined()
-            let topic = prefix.isEmpty || fileBase.contains(prefix) ? fileBase : prefix + fileBase
-            let cleaned = topic.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleaned.isEmpty { return String(cleaned.prefix(80)) }
+            if !fileBase.isEmpty { return String(fileBase.prefix(80)) }
         }
         let compact = message
             .components(separatedBy: .newlines)
@@ -607,7 +878,7 @@ extension AgentLoop {
             limit: maxTokens
         )
         let instruction = toolResult.success
-            ? "我已直接提取用户提供的表格/文档。请基于真实提取结果继续完成任务；如果用户要求整理到 Wiki，必须调用 wiki_build(save=true) 保存笔记。"
+            ? "我已直接提取用户提供的表格/文档。请基于真实提取结果继续推进当前会话目标；如果用户要求整理到 Wiki，必须调用 wiki_build(save=true) 保存笔记。"
             : "我尝试提取用户提供的表格/文档但失败。请明确说明失败原因，不能编造文件内容。"
         return ChatMessage(
             role: "user",
@@ -689,9 +960,9 @@ extension AgentLoop {
     ) async throws -> String? {
         let modeLabel: String
         switch intent {
-        case .task: modeLabel = "任务"
-        case .research: modeLabel = "研究"
-        case .workflow(let name): modeLabel = "工作流(\(name))"
+        case .task: modeLabel = "会话 执行"
+        case .research: modeLabel = "会话 研究"
+        case .workflow(let name): modeLabel = "会话 工作流(\(name))"
         default: return nil
         }
 
@@ -718,6 +989,8 @@ extension AgentLoop {
         规则：
         - 每步必须是具体可执行的动作（读取X文件、搜索Y、编辑Z函数、运行命令W）
         - 不要写"理解需求"、"制定计划"这类废话
+        - 如果请求是继续/追问/修复已有会话，不要重新探索全项目；先沿用已有检查点、最近失败和已读文件，从断点推进
+        - 如果用户问“为什么/还有什么/哪里不对”，先基于当前会话 现场解释或补一小步验证，不要新开目标
         - 优先 file_edit 而非 file_write
         - 最后一步必须是验证或总结
         """
@@ -756,10 +1029,28 @@ extension AgentLoop {
         return String(plan.prefix(800))
     }
 
-    // Legacy static plan (kept for backward compat with stagePlan references)
     static func stagePlan(for message: String, intent: UserIntent) -> String {
-        // Planning is now done by generatePlan() via LLM call
-        return ""
+        guard intent != .chat else { return "" }
+        let lowered = message.lowercased()
+        let needsProjectPass = ["全量", "全部", "整个", "整体", "项目", "工作区", "代码", "repo", "repository"]
+            .contains { lowered.localizedCaseInsensitiveContains($0) }
+        let needsDebugPass = ["找问题", "排查", "检查", "审查", "优化", "修复", "bug", "error"]
+            .contains { lowered.localizedCaseInsensitiveContains($0) }
+        guard needsProjectPass || needsDebugPass || expectsWriteOutput(message) else { return "" }
+
+        var lines = ["执行计划"]
+        if needsProjectPass {
+            lines.append("1. 建立工作区索引，确认入口、配置、测试和风险文件。")
+        } else {
+            lines.append("1. 先定位与请求最相关的文件和上下文。")
+        }
+        if needsDebugPass {
+            lines.append("2. 搜索可疑模式并读取高相关文件，形成问题证据。")
+        } else {
+            lines.append("2. 基于真实文件内容执行用户目标。")
+        }
+        lines.append("3. 验证结果并输出阶段总结与证据清单。")
+        return lines.joined(separator: "\n")
     }
 
     static func stageSummaryStep(for task: AgentTask, didComplete: Bool, hadFailure: Bool, wasTruncated: Bool) -> TaskStep {
@@ -798,7 +1089,7 @@ extension AgentLoop {
             return false
         }
         return task.steps.contains { step in
-            isFileChangeTool(step.toolName ?? "") || ["shell.exec", "verify.build"].contains(step.toolName ?? "") || step.kind == .error
+            isFileChangeTool(step.toolName ?? "") || ["document.transform", "shell.exec", "verify.build"].contains(step.toolName ?? "") || step.kind == .error
         }
     }
 
@@ -806,9 +1097,10 @@ extension AgentLoop {
         let toolCalls = task.steps.filter { $0.kind == .toolCall }
         guard !toolCalls.isEmpty || hadFailure || wasTruncated else { return nil }
         let hasWriteOrCommand = toolCalls.contains {
-            isFileChangeTool($0.toolName ?? "") || ["shell.exec", "verify.build"].contains($0.toolName ?? "")
+            isFileChangeTool($0.toolName ?? "") || ["document.transform", "shell.exec", "verify.build"].contains($0.toolName ?? "")
         }
-        guard hadFailure || wasTruncated || hasWriteOrCommand || (!isReadOnlyRun && toolCalls.count >= 4) else { return nil }
+        let hasPlan = task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("执行计划") }
+        guard hadFailure || wasTruncated || hasWriteOrCommand || hasPlan || (!isReadOnlyRun && toolCalls.count >= 4) else { return nil }
 
         let readFiles = uniqueValues(task.steps
             .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
@@ -820,6 +1112,9 @@ extension AgentLoop {
         let commands = uniqueValues(toolCalls
             .filter { $0.toolName == "shell.exec" || $0.toolName == "verify.build" }
             .compactMap { $0.toolParams?["command"] })
+        let documents = uniqueValues(task.steps
+            .filter { $0.kind == .toolResult && $0.toolName == "document.transform" && !$0.isFailure }
+            .compactMap { $0.toolParams?["outputPath"] ?? $0.toolParams?["sourcePath"] ?? $0.toolParams?["path"] })
         let writeReviews = task.steps.filter { $0.kind == .reviewRequest }.compactMap(\.diffFilePath)
         let failedTools = Dictionary(grouping: task.steps.filter { $0.kind == .toolResult && $0.isFailure }, by: { $0.toolName ?? "tool" })
             .map { "\($0.key) ×\($0.value.count)" }
@@ -831,9 +1126,10 @@ extension AgentLoop {
         if !readFiles.isEmpty { lines.append("已读文件：\(readFiles.prefix(12).joined(separator: "、"))") }
         if !searchQueries.isEmpty { lines.append("已搜索：\(searchQueries.prefix(8).joined(separator: "、"))") }
         if !commands.isEmpty { lines.append("已运行命令：\(commands.prefix(6).joined(separator: "、"))") }
+        if !documents.isEmpty { lines.append("已处理文档：\(documents.prefix(8).joined(separator: "、"))") }
         if !writeReviews.isEmpty { lines.append("待审查/已审查文件：\(uniqueValues(writeReviews).prefix(8).joined(separator: "、"))") }
         if !failedTools.isEmpty { lines.append("失败工具：\(failedTools.joined(separator: "、"))") }
-        if wasTruncated { lines.append("未验证：输出仍可能被截断，需要沿用本任务继续。") }
+        if wasTruncated { lines.append("未验证：输出仍可能被截断，需要沿用当前会话 继续。") }
         if hadFailure { lines.append("未验证：存在未恢复失败，需要重试或换路径。") }
         if lines.count == 2 && !indexed {
             lines.append("已调用工具：\(uniqueValues(toolCalls.compactMap(\.toolName)).joined(separator: "、"))")
@@ -904,7 +1200,7 @@ extension AgentLoop {
             sessionID: taskID,
             message: "继续输出被截断的上一段",
             connector: connector,
-            modeLabel: "任务",
+            modeLabel: "会话 执行",
             history: [],
             systemPrompt: nil,
             tools: nil,
@@ -914,7 +1210,7 @@ extension AgentLoop {
         let text = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !looksLikeProviderError(text) else { return nil }
         let finalText = response.finishReason == "length"
-            ? text + "\n\n（回复仍被截断，可以继续在本任务里发送“接着说”。）"
+            ? text + "\n\n（回复仍被截断，可以继续在当前会话 里发送“接着说”。）"
             : text
         return TaskStep(
             kind: .textOutput,
@@ -1005,7 +1301,7 @@ extension AgentLoop {
         messages.append(ChatMessage(
             role: "user",
             content: """
-            自动恢复工具 \(canonicalName) 执行结果如下。请基于这些真实结果继续完成用户任务，不要重复已经失败的工具路径。
+            自动恢复工具 \(canonicalName) 执行结果如下。请基于这些真实结果继续推进当前会话目标，不要重复已经失败的工具路径。
 
             \(resultContent)
             """
@@ -1033,6 +1329,13 @@ extension AgentLoop {
         }
 
         let cmd = params.command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cmd.isEmpty else {
+            return ToolResult(
+                output: "shell.exec 缺少 command 参数。不要重试空命令；请根据原始用户目标、已读文件和最近失败，构造一个具体命令，或改用更合适的工具（workspace.index/code.search/file.read/document.transform）。",
+                success: false,
+                error: "missing_command"
+            )
+        }
         let policySnapshot = SecurityManager.shared.policySnapshot
         if let securityError = ShellSecurityCheck(command: cmd, policy: policySnapshot) {
             return ToolResult(output: securityError, success: false, error: "security_denied")
@@ -1088,8 +1391,10 @@ extension AgentLoop {
                 return
             }
 
+            let requestedTimeout = params.timeout.map(TimeInterval.init)
+            let timeout = min(max(requestedTimeout ?? ValidationEngine.timeoutSeconds(for: "shell.exec"), 1), 300)
             let timer = DispatchSource.makeTimerSource(queue: .global())
-            timer.schedule(deadline: .now() + Double(params.timeout ?? 30))
+            timer.schedule(deadline: .now() + timeout)
             timer.setEventHandler {
                 if process.isRunning { process.terminate() }
             }
@@ -1263,7 +1568,7 @@ extension AgentLoop {
         let text: String
         let isFailure: Bool
         if wasTruncated {
-            text = "完成检查：回复被输出上限截断，尚未形成完整最终回复。请继续输出时沿用本任务上下文。"
+            text = "完成检查：回复被输出上限截断，尚未形成完整最终回复。请继续输出时沿用当前会话 上下文。"
             isFailure = false
         } else if hasSatisfiedImageGeneration {
             text = toolFailures > 0
@@ -1285,7 +1590,7 @@ extension AgentLoop {
             text = "完成检查：发现 \(toolFailures) 个工具失败，但已自动降级恢复并形成最终回复。"
             isFailure = false
         } else if !didComplete || !hasOutput {
-            text = "完成检查：任务没有形成明确输出，建议继续追问或补充目标。"
+            text = "完成检查：会话 没有形成明确输出，建议继续追问或补充目标。"
             isFailure = false
         } else {
             text = "完成检查：已形成最终回复，未发现失败工具。"
@@ -1331,7 +1636,7 @@ extension AgentLoop {
 
         // Check if any real execution happened
         let hasExecution = task.steps.contains { step in
-            step.kind == .toolCall && (isFileChangeTool(step.toolName ?? "") || step.toolName == "shell.exec")
+            step.kind == .toolCall && (isFileChangeTool(step.toolName ?? "") || step.toolName == "document.transform" || step.toolName == "shell.exec")
         }
 
         let prompt: String
@@ -1367,10 +1672,9 @@ extension AgentLoop {
             """
         }
 
-        let messages = [
-            ChatMessage(role: "system", content: systemPrompt),
-            ChatMessage(role: "user", content: prompt)
-        ]
+        var messages = Self.compactHistoryMessages(from: task.steps, contextMode: task.context.contextMode)
+        messages.insert(ChatMessage(role: "system", content: systemPrompt), at: 0)
+        messages.append(ChatMessage(role: "user", content: prompt))
 
         let response = try await runtime.sendMessage(SendMessageRequest(
             sessionID: task.id,
@@ -1398,19 +1702,10 @@ extension AgentLoop {
         let phaseDefs: [ToolDefinition]
         switch intent {
         case .chat:
-            // Chat still gets tools so the model can read files, search, or write
-            // when the user asks. Iteration cap keeps it from running away.
-            let chatAllowed: Set<String> = [
-                "file.read", "file.extract", "file.write", "file.edit", "diff.apply",
-                "code.search", "web.search", "web.fetch",
-                "wiki.build", "memory", "shell.exec", "skill.manage"
-            ]
-            phaseDefs = allDefs.filter { def in
-                chatAllowed.contains(ToolNameCodec.canonicalName(def.function.name))
-            }
+            phaseDefs = []
         case .research:
             let allowed: Set<String> = [
-                "web.search", "web.fetch", "file.read", "file.extract",
+                "web.search", "web.fetch", "file.read", "file.extract", "document.transform",
                 "code.search", "workspace.index"
             ]
             phaseDefs = allDefs.filter { def in
@@ -1449,10 +1744,11 @@ extension AgentLoop {
             return [
                 "file.read": 0,
                 "file.extract": 1,
-                "code.search": 2,
-                "web.search": 3,
-                "web.fetch": 4,
-                "workspace.index": 5
+                "document.transform": 2,
+                "code.search": 3,
+                "web.search": 4,
+                "web.fetch": 5,
+                "workspace.index": 6
             ][canonical] ?? 20
         case .task, .workflow:
             let base: [String: Int]
@@ -1463,41 +1759,48 @@ extension AgentLoop {
                     "code.search": 1,
                     "file.read": 2,
                     "file.extract": 3,
-                    "web.search": 4,
-                    "web.fetch": 5,
-                    "wiki.build": 6
+                    "document.transform": 4,
+                    "web.search": 5,
+                    "web.fetch": 6,
+                    "wiki.build": 7
                 ]
             case .execute:
                 base = [
                     "file.edit": 0,
                     "file.write": 1,
-                    "diff.apply": 2,
-                    "shell.exec": 3,
-                    "file.read": 4,
-                    "file.extract": 5,
-                    "code.search": 6,
-                    "wiki.build": 7,
-                    "web.fetch": 8,
-                    "web.search": 9
+                    "document.transform": 2,
+                    "diff.apply": 3,
+                    "shell.exec": 4,
+                    "file.read": 5,
+                    "file.extract": 6,
+                    "code.search": 7,
+                    "wiki.build": 8,
+                    "web.fetch": 9,
+                    "web.search": 10,
+                    "skill.manage": 11
                 ]
             case .verify:
                 base = [
                     "verify.build": 0,
                     "shell.exec": 1,
-                    "file.read": 2,
-                    "file.extract": 3,
-                    "code.search": 4,
-                    "file.edit": 5,
-                    "diff.apply": 6,
-                    "git": 7
+                    "document.transform": 2,
+                    "file.read": 3,
+                    "file.extract": 4,
+                    "code.search": 5,
+                    "file.edit": 6,
+                    "diff.apply": 7,
+                    "skill.manage": 8,
+                    "git": 9
                 ]
             case .summarize:
                 base = [
                     "git": 0,
-                    "file.read": 1,
-                    "file.extract": 2,
-                    "verify.build": 3,
-                    "code.search": 4
+                    "skill.manage": 1,
+                    "file.read": 2,
+                    "file.extract": 3,
+                    "document.transform": 4,
+                    "verify.build": 5,
+                    "code.search": 6
                 ]
             }
             return base[canonical] ?? 20
@@ -1507,7 +1810,9 @@ extension AgentLoop {
     /// Infer current task phase from accumulated steps.
     nonisolated public static func inferPhase(from steps: [TaskStep]) -> TaskPhase {
         // If there's been a file.write, we're past explore
-        let hasWrite = steps.contains { isFileChangeTool($0.toolName ?? "") }
+        let hasWrite = steps.contains { step in
+            isFileChangeTool(step.toolName ?? "") || isSuccessfulDocumentWrite(step)
+        }
         // If there's been a verify/complete check, we're in verify or summarize
         let hasVerifyCheck = steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("完成检查") }
         // If there's been a final text output after verify, we're summarizing

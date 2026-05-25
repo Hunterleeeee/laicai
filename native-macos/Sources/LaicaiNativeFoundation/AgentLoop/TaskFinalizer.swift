@@ -15,17 +15,13 @@ struct TaskFinalizer {
         runtime: any ChatRuntimeClient,
         onStep: @MainActor (TaskStep) -> Void
     ) async {
-        // ── Fallback wiki build ──
-        if !state.didComplete && !state.hadFailure && !state.wasTruncated && state.intent != .chat {
-            // Attempt fallback wiki save (deferred to AgentLoop helper)
-        }
-
         if AgentLoop.hasSatisfiedImageGenerationRequest(state.task) && !state.wasTruncated {
             state.didComplete = true
         }
 
         // ── Evidence-based finalization ──
-        if !state.didComplete && !state.wasTruncated {
+        let hasFinalOutput = state.task.steps.contains { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if !state.didComplete && !state.hadFailure && !state.wasTruncated && !hasFinalOutput {
             if let summaryStep = try? await AgentLoop.finalizeFromCollectedEvidence(
                 task: state.task,
                 originalMessage: state.message,
@@ -44,7 +40,7 @@ struct TaskFinalizer {
         if !state.didComplete && !state.hadFailure && !state.wasTruncated {
             let continueStep = TaskStep(
                 kind: .error,
-                text: "任务尚未完成，可以点击「继续」接着处理。",
+                text: "会话 尚未完成，可以点击「继续」接着处理。",
                 isFailure: false,
                 recoverable: true,
                 retryAction: "继续处理"
@@ -54,6 +50,7 @@ struct TaskFinalizer {
         }
 
         // ── Diagnostic audit (collapsed) ──
+        emitStageAudit(state: &state, onStep: onStep)
         emitDiagnosticAudit(state: &state, onStep: onStep)
 
         // ── Final status ──
@@ -67,6 +64,7 @@ struct TaskFinalizer {
         ) ? .completed : .failed
         state.task.status = finalStatus
         state.task.updatedAt = .now
+        updateExecutionLedger(state: &state, finalStatus: finalStatus)
 
         // ── Suggested next actions ──
         emitSuggestedActions(state: &state, finalStatus: finalStatus, onStep: onStep)
@@ -107,11 +105,45 @@ struct TaskFinalizer {
             )
         }
 
+        // ── Diff stat for review ──
+        captureDiffStat(state: &state, config: config, onStep: onStep)
+
         // ── Cleanup ──
         WorkspaceSandbox.shared.clearAllowedPaths()
     }
 
     // MARK: - Private Helpers
+
+    private static func emitStageAudit(state: inout PipelineState, onStep: @MainActor (TaskStep) -> Void) {
+        let hasPlan = state.task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("执行计划") }
+            || state.taskContext.memory.userDecisions.contains { $0.hasPrefix("执行计划：") }
+        if AgentLoop.shouldEmitStageSummary(
+            for: state.task,
+            hasPlan: hasPlan,
+            hadFailure: state.hadFailure,
+            wasTruncated: state.wasTruncated,
+            isReadOnlyRun: state.isReadOnlyRun
+        ) {
+            let summaryStep = AgentLoop.stageSummaryStep(
+                for: state.task,
+                didComplete: state.didComplete,
+                hadFailure: state.hadFailure,
+                wasTruncated: state.wasTruncated
+            )
+            state.task.steps.append(summaryStep)
+            onStep(summaryStep)
+        }
+        if let evidenceStep = AgentLoop.evidenceChecklistStep(
+            for: state.task,
+            didComplete: state.didComplete,
+            hadFailure: state.hadFailure,
+            wasTruncated: state.wasTruncated,
+            isReadOnlyRun: state.isReadOnlyRun
+        ) {
+            state.task.steps.append(evidenceStep)
+            onStep(evidenceStep)
+        }
+    }
 
     private static func emitDiagnosticAudit(state: inout PipelineState, onStep: @MainActor (TaskStep) -> Void) {
         let toolCallCount = state.task.steps.filter { $0.kind == .toolCall }.count
@@ -138,7 +170,9 @@ struct TaskFinalizer {
     ) {
         guard finalStatus == .completed && !state.isReadOnlyRun && state.intent != .chat else { return }
 
-        let hasFileEdits = state.task.steps.contains { AgentLoop.isFileChangeTool($0.toolName ?? "") && !$0.isFailure }
+        let hasFileEdits = state.task.steps.contains {
+            (AgentLoop.isFileChangeTool($0.toolName ?? "") || AgentLoop.isSuccessfulDocumentWrite($0)) && !$0.isFailure
+        }
         let hasVerify = state.task.steps.contains { $0.toolName == "verify.build" }
         let hasGitCommit = state.task.steps.contains { $0.toolName == "git" && ($0.toolParams?["subcommand"] ?? "").contains("commit") }
 
@@ -154,14 +188,109 @@ struct TaskFinalizer {
         }
         guard !suggestions.isEmpty else { return }
 
+        let firstSuggestion = suggestions[0]
         let nextStep = TaskStep(
             kind: .aiThinking,
             text: "建议下一步：\n" + suggestions.enumerated().map { "  \($0.offset + 1). \($0.element)" }.joined(separator: "\n"),
             isCollapsible: true,
-            isCollapsed: false
+            isCollapsed: false,
+            retryAction: firstSuggestion
         )
         state.task.steps.append(nextStep)
         onStep(nextStep)
+    }
+
+    private static func updateExecutionLedger(state: inout PipelineState, finalStatus: TaskStatus) {
+        if state.task.executionLedger == nil {
+            state.task.executionLedger = AgentExecutionLedger(
+                originalRequest: state.message,
+                goal: state.task.title,
+                state: .created,
+                plan: state.taskContext.memory.userDecisions.filter { $0.hasPrefix("执行计划：") },
+                nextAction: "继续处理当前会话"
+            )
+        }
+        guard var ledger = state.task.executionLedger else { return }
+        ledger.plan = ledger.plan.isEmpty ? state.taskContext.memory.userDecisions.filter { $0.hasPrefix("执行计划：") } : ledger.plan
+        ledger.readFiles = Array(Set(ledger.readFiles + state.taskContext.memory.readFiles)).sorted()
+        ledger.searches = Array(Set(ledger.searches + state.taskContext.memory.searchedQueries)).sorted()
+        ledger.failedTools = Array(Set(ledger.failedTools + state.taskContext.memory.failedTools)).sorted()
+        if let verification = state.taskContext.memory.verificationStatus, !verification.isEmpty {
+            ledger.appendUnique(verification, to: \.verification)
+        }
+        for step in state.task.steps {
+            if step.kind == .reviewRequest, let path = step.diffFilePath {
+                if step.approved == true {
+                    ledger.appendUnique(path, to: \.modifiedFiles)
+                } else {
+                    ledger.appendUnique(path, to: \.artifacts)
+                }
+            }
+            if step.toolName == "document.transform",
+               let path = step.toolParams?["outputPath"] ?? step.toolParams?["pdfPath"] ?? step.diffFilePath {
+                ledger.appendUnique(path, to: \.artifacts)
+            }
+            if step.toolName == "shell.exec" || step.toolName == "verify.build" {
+                if let command = step.toolParams?["command"] {
+                    ledger.appendUnique(command, to: \.commands)
+                }
+            }
+            if step.isFailure {
+                ledger.appendUnique(step.toolName ?? "unknown", to: \.failedTools)
+                ledger.appendUnique(String(step.text.prefix(500)), to: \.errorReasons)
+                if let recovery = recoveryPath(for: step.toolName ?? "unknown", step: step) {
+                    ledger.appendUnique(recovery, to: \.alternativePaths)
+                }
+            }
+        }
+        switch finalStatus {
+        case .completed:
+            ledger.transition(to: .completed, reason: "完成门禁通过")
+            ledger.nextAction = nil
+            ledger.unfinishedWork = []
+        case .failed:
+            ledger.transition(to: .failed, reason: "完成门禁未通过")
+            ledger.nextAction = "从失败点恢复或补齐证据"
+            if !ledger.hasToolEvidence && state.intent != .chat {
+                ledger.unfinishedWork.append("缺少真实工具证据")
+            }
+        case .cancelled:
+            ledger.transition(to: .paused, reason: "任务暂停")
+            ledger.nextAction = "从检查点继续"
+        case .waitingReview:
+            ledger.transition(to: .waitingUser, reason: "等待用户审查")
+            ledger.nextAction = "等待审查后继续"
+        case .queued, .running:
+            ledger.transition(to: .executing, reason: "任务仍在执行")
+        }
+        ledger.updatedAt = .now
+        state.task.executionLedger = ledger
+    }
+
+    private static func recoveryPath(for toolName: String, step: TaskStep) -> String? {
+        switch ToolNameCodec.canonicalName(toolName) {
+        case "file.edit":
+            return "file.edit 失败后改走 file.read + file.write，并基于最新磁盘内容生成 diff"
+        case "code.search":
+            return "code.search 失败后改走 workspace.index 或 shell.exec rg 精确搜索"
+        case "file.read":
+            return "file.read 失败后确认路径/类型；Office 或 PDF 改用 file.extract/document.transform"
+        case "web.fetch":
+            return "web.fetch 失败后换来源或先 web.search 找替代页面"
+        case "browser", "browser.real":
+            return "页面检查失败后改用 browser.extract/browser.screenshot 或 computer.screenshot 留证"
+        case "computer":
+            return "界面自动化失败后改用截图、窗口列表或让用户确认权限"
+        case "verify.build":
+            return "构建验证失败后读取关键错误文件，修复后再次 verify.build；环境问题需记录阻塞"
+        case "shell.exec":
+            if step.text.lowercased().contains("危险") || step.text.lowercased().contains("dangerous") {
+                return "危险 shell 操作被拦截；需要用户明确授权或选择非破坏性替代路径"
+            }
+            return "shell.exec 失败后缩小命令范围、改用结构化工具或记录环境阻塞"
+        default:
+            return nil
+        }
     }
 
     private static func persistCrossSessionMemory(state: PipelineState, config: AgentLoop.Config, finalStatus: TaskStatus) {
@@ -204,7 +333,7 @@ struct TaskFinalizer {
         TaskOutcomeRecorder.shared.record(
             taskID: state.task.id.uuidString,
             intent: state.intentString,
-            routeLabel: "task",
+            routeLabel: "会话 执行",
             executionMode: state.isReadOnlyRun ? "inspect" : (state.intent == .chat ? "ask" : "act"),
             iterations: state.iteration,
             status: finalStatus,
@@ -258,7 +387,7 @@ struct TaskFinalizer {
             rootCauseText = "工具执行中出现错误"
             instructionText = "类似请求曾出错，请更谨慎地验证工具参数和前置条件。"
         } else {
-            rootCauseText = "任务未能完成"
+            rootCauseText = "会话 未能完成"
             instructionText = "遇到类似意图时，优先确认用户需求范围，避免过度执行。"
         }
 
@@ -331,6 +460,38 @@ struct TaskFinalizer {
            let traceJSON = String(data: traceData, encoding: .utf8) {
             TaskOutcomeRecorder.shared.storeTrace(taskID: state.task.id.uuidString, traceJSON: traceJSON)
         }
+    }
+
+    private static func captureDiffStat(
+        state: inout PipelineState,
+        config: AgentLoop.Config,
+        onStep: @MainActor (TaskStep) -> Void
+    ) {
+        let workRoot = state.taskContext.metadata["worktreeOriginalRoot"] ?? config.workspaceRoot
+        guard !workRoot.isEmpty, state.intent != .chat else { return }
+
+        let diffProc = Process()
+        diffProc.launchPath = "/usr/bin/git"
+        diffProc.arguments = ["diff", "--stat"]
+        diffProc.currentDirectoryPath = state.taskContext.workspaceRoot
+        let diffPipe = Pipe()
+        diffProc.standardOutput = diffPipe
+        diffProc.standardError = diffPipe
+        try? diffProc.run()
+        diffProc.waitUntilExit()
+
+        let diffOutput = String(data: diffPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard !diffOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let diffStep = TaskStep(
+            kind: .toolResult,
+            text: "📋 文件变更：\n```\n\(String(diffOutput.prefix(2000)))\n```",
+            isCollapsible: true,
+            isCollapsed: true
+        )
+        state.task.steps.append(diffStep)
+        onStep(diffStep)
+        state.task.context.metadata["diffStat"] = String(diffOutput.prefix(1000))
     }
 
     // MARK: - Utility

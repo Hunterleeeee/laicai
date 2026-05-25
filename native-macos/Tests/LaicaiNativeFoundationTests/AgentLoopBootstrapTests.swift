@@ -25,7 +25,7 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(memory?.contains("已建立工作区索引：是") == true)
         XCTAssertTrue(memory?.contains("README.md") == true)
         XCTAssertTrue(memory?.contains("shell.exec ×1") == true)
-        XCTAssertTrue(messages.contains { $0.content?.contains("结构化任务记忆") == true })
+        XCTAssertTrue(messages.contains { $0.content?.contains("结构化会话记忆") == true })
         XCTAssertTrue(messages.contains { $0.content?.contains("不要重复已经成功的读取或搜索") == true })
     }
     func testTruncatedContinuationDoesNotBootstrapWorkspaceSearch() async throws {
@@ -76,7 +76,7 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
             priorSteps: [],
             context: context
         )
-        let combined = messages.map(\.content).joined(separator: "\n")
+        let combined = messages.compactMap(\.content).joined(separator: "\n")
 
         XCTAssertTrue(combined.contains("Sources/AppStore.swift"))
         XCTAssertTrue(combined.contains("selectedThreadID"))
@@ -213,6 +213,26 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(AgentLoop.bootstrapWorkspaceSearchQuery(for: "继续"), "")
         XCTAssertEqual(AgentLoop.bootstrapWorkspaceSearchQuery(for: "接着说"), "")
         XCTAssertEqual(AgentLoop.bootstrapWorkspaceSearchQuery(for: "没发完"), "")
+    }
+    func testGeneralDomainCorrectionsDoNotBootstrapWorkspaceSearch() throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let context = TaskContext(workspaceRoot: workspace.path)
+
+        let prompts = [
+            "你用易经算啊",
+            "数据不对",
+            "我说让你干啊 我只要结果",
+            "这个skill都能干嘛呢",
+            "我想知道拓日新能这个股票下午能涨到多少"
+        ]
+
+        for prompt in prompts {
+            XCTAssertFalse(
+                AgentLoop.shouldBootstrapWorkspaceSearch(for: prompt, intent: .task, context: context),
+                prompt
+            )
+        }
     }
     func testAgentLoopExtractsReadablePathFromSearchOutput() {
         let root = "/tmp/project"

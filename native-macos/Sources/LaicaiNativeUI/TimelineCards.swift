@@ -104,7 +104,9 @@ struct TaskStepCard: View {
 func isContinuationStrategy(_ step: TaskStep) -> Bool {
     guard step.kind == .userInput else { return false }
     let t = step.text
-    return t.hasPrefix("继续执行这个任务") || t == "继续执行"
+    return t.hasPrefix("继续执行这个会话")
+        || t.hasPrefix("继续执行这个任务")
+        || t == "继续执行"
 }
 
 // MARK: - Continuation Strategy Bar
@@ -133,9 +135,7 @@ struct ContinuationStrategyBar: View {
             }
 
             Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    isExpanded.toggle()
-                }
+                isExpanded.toggle()
             } label: {
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
@@ -156,54 +156,45 @@ struct ContinuationStrategyBar: View {
 
 struct UserInputCard: View {
     let text: String
-    @State private var isHovered = false
+    private let previewLimit = 1_200
 
     var body: some View {
         HStack {
             Spacer(minLength: 100)
 
-            ZStack(alignment: .topTrailing) {
-                Text(text)
-                    .font(AppFont.bubbleBody)
-                    .foregroundStyle(TextGrade.primary)
-                    .textSelection(.enabled)
-                    .lineSpacing(3)
-                    .multilineTextAlignment(.leading)
-                    .padding(.horizontal, AppSpace.lg)
-                    .padding(.vertical, AppSpace.md)
-                    .frame(maxWidth: 560, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .background(
-                        RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
-                            .fill(Semantic.userBubble)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
-                            .strokeBorder(Brand.primary.opacity(0.15), lineWidth: 0.5)
-                    )
-
-                if isHovered {
+            Text(displayText)
+                .font(AppFont.bubbleBody)
+                .foregroundStyle(TextGrade.primary)
+                .lineSpacing(3)
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, AppSpace.md + 2)
+                .padding(.vertical, AppSpace.sm + 2)
+                .frame(maxWidth: 620, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(
+                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        .fill(Semantic.userBubble)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        .strokeBorder(SurfaceGrade.hairline, lineWidth: 0.6)
+                )
+                .contextMenu {
                     Button {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(text, forType: .string)
                         ToastCenter.shared.success("已复制")
                     } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(TextGrade.muted)
-                            .frame(width: 22, height: 22)
-                            .background(
-                                RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous)
-                                    .fill(SurfaceGrade.elevated)
-                            )
+                        Label("复制", systemImage: "doc.on.doc")
                     }
-                    .buttonStyle(.plain)
-                    .offset(x: -6, y: 6)
-                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
                 }
-            }
-            .onHover { h in withAnimation(AppAnimation.quick) { isHovered = h } }
         }
+    }
+
+    private var displayText: String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > previewLimit else { return trimmed }
+        return String(trimmed.prefix(previewLimit)) + "\n\n… 共 \(trimmed.count) 字，已折叠"
     }
 }
 
@@ -212,7 +203,8 @@ struct ThinkingCard: View {
     let reasoningContent: String?
     let isRunning: Bool
 
-    @State private var showReasoning = true
+    @State private var showReasoning = false
+    private let reasoningPreviewLimit = 800
 
     var body: some View {
         HStack(alignment: .top, spacing: AppSpace.sm) {
@@ -232,14 +224,12 @@ struct ThinkingCard: View {
 
                     if hasReasoning {
                         Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                showReasoning.toggle()
-                            }
+                            showReasoning.toggle()
                         } label: {
                             HStack(spacing: 2) {
                                 Image(systemName: showReasoning ? "chevron.down" : "chevron.right")
                                     .font(.system(size: 8, weight: .semibold))
-                                Text("推理过程")
+                                Text(showReasoning ? "收起推理" : "查看推理")
                                     .font(AppFont.tiny)
                                 Text("(\(reasoningTokenCount))")
                                     .font(AppFont.tiny)
@@ -269,19 +259,13 @@ struct ThinkingCard: View {
                         Divider()
                             .background(Brand.purple.opacity(0.15))
 
-                        ScrollViewReader { proxy in
-                            ScrollView(.vertical, showsIndicators: true) {
-                                Text(reasoning)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(TextGrade.secondary.opacity(0.8))
-                                    .lineLimit(nil)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .textSelection(.enabled)
-                                    .padding(AppSpace.sm)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .id("reasoning_bottom")
-                            }
-                            .frame(maxHeight: 300)
+                        Text(reasoningDisplayText(reasoning))
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(TextGrade.secondary.opacity(0.8))
+                            .lineLimit(16)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(AppSpace.sm)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .background(
                                 RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                                     .fill(Brand.purple.opacity(0.04))
@@ -290,16 +274,7 @@ struct ThinkingCard: View {
                                 RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                                     .strokeBorder(Brand.purple.opacity(0.10), lineWidth: 0.5)
                             )
-                            .onChange(of: reasoning) { _ in
-                                if isRunning {
-                                    withAnimation(.easeOut(duration: 0.1)) {
-                                        proxy.scrollTo("reasoning_bottom", anchor: .bottom)
-                                    }
-                                }
-                            }
-                        }
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
 
@@ -318,6 +293,12 @@ struct ThinkingCard: View {
         let count = r.count / 4  // rough token estimate
         if count > 1000 { return "\(count / 1000)k" }
         return "\(count)"
+    }
+
+    private func reasoningDisplayText(_ reasoning: String) -> String {
+        let trimmed = reasoning.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > reasoningPreviewLimit else { return trimmed }
+        return String(trimmed.suffix(reasoningPreviewLimit)) + "\n\n… 共 \(trimmed.count) 字，已保留最近推理"
     }
 }
 
@@ -427,6 +408,9 @@ struct ToolCallCard: View {
         case "workspace.index": return "项目索引"
         case "file.read": return "读取文件"
         case "file.write": return "写入文件"
+        case "file.edit": return "编辑文件"
+        case "diff.apply": return "应用补丁"
+        case "verify.build": return "验证构建"
         case "code.search": return "搜索代码"
         case "shell.exec": return "执行命令"
         case "git": return "查看历史"
@@ -463,6 +447,15 @@ struct ToolCallCard: View {
         case "file.write":
             if let p = params?["path"] ?? params?["fullPath"] { return "写入 \(String(p.suffix(from: p.lastIndex(of: "/") ?? p.startIndex)))" }
             return "写入文件"
+        case "file.edit":
+            if let p = params?["path"] ?? params?["fullPath"] { return "编辑 \(String(p.suffix(from: p.lastIndex(of: "/") ?? p.startIndex)))" }
+            return "编辑文件"
+        case "diff.apply":
+            if let p = params?["path"] ?? params?["fullPath"] { return "补丁 \(String(p.suffix(from: p.lastIndex(of: "/") ?? p.startIndex)))" }
+            return "应用补丁"
+        case "verify.build":
+            if let cmd = params?["command"] { return "验证 \(String(cmd.prefix(30)))" }
+            return "验证构建"
         case "wiki.build":
             return "构建知识库页面"
         case "image.generate":
@@ -557,7 +550,6 @@ struct ToolResultCard: View {
         Text(displayText)
             .font(AppFont.codeSmall)
             .foregroundStyle(step.isFailure ? Semantic.error : TextGrade.muted)
-            .textSelection(.enabled)
             .lineLimit(step.isFailure ? 6 : 4)
             .padding(.horizontal, AppSpace.sm)
             .padding(.vertical, AppSpace.xs)
@@ -842,25 +834,22 @@ struct TerminalOutputCard: View {
             .padding(.vertical, AppSpace.xs)
             .background(SurfaceGrade.elevated.opacity(0.45))
 
-            ScrollView {
-                Text(text.isEmpty ? "命令无输出" : (text.count > 3000 ? String(text.prefix(3000)) + "\n\n… 共 \(text.count) 字，已截断" : text))
-                    .font(AppFont.codeSmall)
-                    .foregroundStyle(isFailure ? Semantic.error : TextGrade.secondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(AppSpace.sm)
-            }
-            .frame(maxHeight: isFailure ? 260 : 200)
+            Text(text.isEmpty ? "命令无输出" : (text.count > 1800 ? String(text.prefix(1800)) + "\n\n… 共 \(text.count) 字，已截断" : text))
+                .font(AppFont.codeSmall)
+                .foregroundStyle(isFailure ? Semantic.error : TextGrade.secondary)
+                .lineLimit(isFailure ? 12 : 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(AppSpace.sm)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .fill(Color(hex: "0F172A"))
+                .fill(SurfaceGrade.card)
         )
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .strokeBorder(SurfaceGrade.border.opacity(0.4), lineWidth: 0.5)
+                .strokeBorder(SurfaceGrade.border.opacity(0.55), lineWidth: 0.6)
         )
     }
 }
@@ -894,10 +883,10 @@ struct TextOutputCard: View {
     let text: String
     let metrics: ResponseMetrics?
     var isRunning: Bool = false
-    @State private var cursorVisible = true
-    @State private var isHovered = false
     @State private var showFullRunningOutput = false
-    private let runningPreviewLimit = 6_000
+    @State private var showFullCompletedOutput = false
+    private let runningPreviewLimit = 2_400
+    private let completedPreviewLimit = 2_200
 
     var body: some View {
         HStack(alignment: .top, spacing: AppSpace.sm) {
@@ -925,13 +914,13 @@ struct TextOutputCard: View {
 
                     VStack(alignment: .leading, spacing: 0) {
                         if isRunning {
-                            Text(runningDisplayText)
-                                .font(.system(size: 14, weight: .regular))
-                                .foregroundStyle(TextGrade.primary)
-                                .lineSpacing(6)
-                                .textSelection(.disabled)
+                            AdaptiveMarkdownText(
+                                markdown: runningDisplayText,
+                                fontSize: 14,
+                                enablesTextSelection: false,
+                                forceFast: true
+                            )
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .fixedSize(horizontal: false, vertical: true)
                                 .padding(.vertical, 4)
 
                             if isRunningLong {
@@ -946,20 +935,43 @@ struct TextOutputCard: View {
                                 .padding(.top, AppSpace.xs)
                             }
                         } else {
-                            MarkdownText(text, fontSize: 14)
+                            AdaptiveMarkdownText(
+                                markdown: completedDisplayText,
+                                fontSize: 14,
+                                enablesTextSelection: true
+                            )
                                 .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if isCompletedLong {
+                                HStack(spacing: AppSpace.sm) {
+                                    Button {
+                                        showFullCompletedOutput.toggle()
+                                    } label: {
+                                        HStack(spacing: 5) {
+                                            Image(systemName: showFullCompletedOutput ? "rectangle.compress.vertical" : "text.alignleft")
+                                                .font(.system(size: 10, weight: .semibold))
+                                            Text(showFullCompletedOutput ? "收起全文" : "展开全文")
+                                                .font(AppFont.captionMedium)
+                                        }
+                                        .foregroundStyle(Brand.primary)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Text("\(trimmedText.count) 字")
+                                        .font(AppFont.tiny)
+                                        .foregroundStyle(TextGrade.ghost)
+
+                                    Spacer()
+                                }
+                                .padding(.top, AppSpace.sm)
+                            }
                         }
 
                         if isRunning && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             RoundedRectangle(cornerRadius: 1)
                                 .fill(Brand.primary)
                                 .frame(width: 2, height: 16)
-                                .opacity(cursorVisible ? 1 : 0)
-                                .onAppear {
-                                    withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
-                                        cursorVisible = false
-                                    }
-                                }
+                                .opacity(0.82)
                                 .padding(.top, 2)
                         }
                     }
@@ -968,40 +980,16 @@ struct TextOutputCard: View {
                 .padding(.vertical, AppSpace.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
-                        .fill(SurfaceGrade.card.opacity(0.4))
+                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        .fill(SurfaceGrade.card)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
-                        .strokeBorder(SurfaceGrade.border.opacity(0.3), lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        .strokeBorder(SurfaceGrade.hairline, lineWidth: 0.6)
                 )
+                .shadow(color: Color.black.opacity(0.018), radius: 2, y: 1)
 
-                if isHovered && !isRunning && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(text, forType: .string)
-                        ToastCenter.shared.success("已复制")
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(TextGrade.muted)
-                            .frame(width: 22, height: 22)
-                            .background(
-                                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                                    .fill(SurfaceGrade.elevated.opacity(0.92))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                                    .strokeBorder(SurfaceGrade.divider, lineWidth: 0.5)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .offset(x: -6, y: 6)
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                }
             }
-            .onHover { isHovered = $0 }
-            .animation(.easeInOut(duration: 0.12), value: isHovered)
             .contextMenu {
                 if !trimmedText.isEmpty {
                     Button {
@@ -1063,11 +1051,20 @@ struct TextOutputCard: View {
         trimmedText.count > runningPreviewLimit
     }
 
+    private var isCompletedLong: Bool {
+        !isRunning && trimmedText.count > completedPreviewLimit
+    }
+
     private var runningDisplayText: String {
         guard isRunningLong, !showFullRunningOutput else { return trimmedText }
-        let headCount = 1_800
-        let tailCount = max(1_800, runningPreviewLimit - headCount)
+        let headCount = 800
+        let tailCount = max(800, runningPreviewLimit - headCount)
         return "\(trimmedText.prefix(headCount))\n\n... 正在生成，已折叠中间内容以保持滚动流畅 ...\n\n\(trimmedText.suffix(tailCount))"
+    }
+
+    private var completedDisplayText: String {
+        guard isCompletedLong, !showFullCompletedOutput else { return trimmedText }
+        return "\(trimmedText.prefix(completedPreviewLimit))\n\n... 已折叠长回复以保持滚动流畅，点击“展开全文”查看全部 ..."
     }
 
     @MainActor private func saveToWiki(_ content: String) {
@@ -1150,13 +1147,9 @@ struct PausedCard: View {
 
                 HStack(spacing: AppSpace.sm) {
                     Button {
-                        if step.retryAction == "继续执行" {
-                            store.continueTask()
-                        } else {
-                            store.retryLastMessage()
-                        }
+                        store.continueThread(id: taskID)
                     } label: {
-                        Label("继续任务", systemImage: "play.fill")
+                        Label("继续会话", systemImage: "play.fill")
                             .font(AppFont.captionMedium)
                             .foregroundStyle(.white)
                             .padding(.horizontal, AppSpace.md)
@@ -1273,7 +1266,7 @@ struct FailedCard: View {
         if isNetworkFailure { return "连接中途断开，可以直接重试或检查代理/网关。" }
         if isAuthFailure { return "API Key、模型名或兼容接口配置可能不正确。" }
         if isWorkspaceFailure { return "工作区目录为空、过宽或无权限。" }
-        if step.text.contains("超时") { return "任务可能仍在服务端排队，可以重试或换更快模型。" }
+        if step.text.contains("超时") { return "会话可能仍在服务端排队，可以重试或换更快模型。" }
         return "已保留详情，可复制后继续排查。"
     }
 
@@ -1353,7 +1346,7 @@ struct OrchestrationDebugCard: View {
 
     var body: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+            isExpanded.toggle()
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")

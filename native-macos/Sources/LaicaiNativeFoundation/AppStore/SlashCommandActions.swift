@@ -43,7 +43,7 @@ extension AppStore {
             if let threadID = state.selectedThreadID {
                 sendToBackground(threadID: threadID)
             } else {
-                notify("没有选中的任务可以转到后台", style: .error)
+                notify("没有选中的会话可以转到后台", style: .error)
             }
             state.draftMessage = ""
             return true
@@ -53,7 +53,7 @@ extension AppStore {
             let body = String(trimmed.dropFirst(10)).trimmingCharacters(in: .whitespaces)
             let parts = body.components(separatedBy: " ")
             guard parts.count >= 2 else {
-                notify("用法：/schedule <间隔分钟数> <任务消息>", style: .error)
+                notify("用法：/schedule <间隔分钟数> <会话 消息>", style: .error)
                 return true
             }
             if let minutes = Int(parts[0]) {
@@ -64,7 +64,7 @@ extension AppStore {
                     schedule: .interval(seconds: minutes * 60)
                 )
                 SchedulerEngine.shared.addTask(task)
-                notify("定时任务已创建：每 \(minutes) 分钟执行「\(taskMessage)」", style: .success)
+                notify("定时会话已创建：每 \(minutes) 分钟执行「\(taskMessage)」", style: .success)
             }
             state.draftMessage = ""
             return true
@@ -98,7 +98,7 @@ extension AppStore {
             if let pipeline = PipelineParser.parseBatch("/foreach " + body) {
                 state.draftMessage = ""
                 Task { await SkillCompositionEngine.shared.execute(pipeline, workspaceRoot: state.settings.workspacePath) }
-                notify("批量任务已启动：\(pipeline.name)", style: .success)
+                notify("批量会话已启动：\(pipeline.name)", style: .success)
             } else {
                 notify("用法：/foreach file in *.swift: 审查代码", style: .error)
             }

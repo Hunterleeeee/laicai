@@ -40,7 +40,7 @@ final class AppStoreConnectorLearningTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertEqual(store.state.selectedTask?.status, .failed)
+        XCTAssertEqual(store.state.selectedThread?.status, .failed)
         XCTAssertEqual(store.state.connectors.first?.health, .attention)
     }
     func testTaskCompatibilityFallbackDisablesToolsForFutureRuns() async throws {
@@ -66,7 +66,7 @@ final class AppStoreConnectorLearningTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(runtime.requests.count, 2)
         XCTAssertTrue(store.state.toolActivities.contains { $0.name == "connector.capability" })
 
-        store.selectTask(id: nil)
+        store.selectThread(id: nil)
         store.updateDraft("请再搜索 README")
         store.sendDraft()
         try await waitUntilIdle(store)
@@ -144,7 +144,7 @@ final class AppStoreConnectorLearningTests: LaicaiNativeFoundationTestCase {
             $0.name == "connector.capability" && $0.summary.contains("已清除")
         })
 
-        store.selectTask(id: nil)
+        store.selectThread(id: nil)
         store.updateDraft("请再搜索 README")
         store.sendDraft()
         try await waitUntilIdle(store)

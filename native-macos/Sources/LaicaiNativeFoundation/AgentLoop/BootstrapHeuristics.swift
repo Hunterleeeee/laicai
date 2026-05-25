@@ -67,6 +67,7 @@ extension AgentLoop {
         guard !shouldBootstrapWebSearch(for: message, intent: intent) else { return false }
         guard firstURL(in: message) == nil else { return false }
         guard !shouldBootstrapWorkspaceIndex(for: message, intent: intent) else { return false }
+        guard mentionsWorkspaceSearchDomain(message) else { return false }
         return !bootstrapWorkspaceSearchQuery(for: message).isEmpty
     }
 
@@ -114,14 +115,15 @@ extension AgentLoop {
 
     static func bootstrapWorkspaceSearchArgumentsJSON(for message: String) -> String {
         let query = bootstrapWorkspaceSearchQuery(for: message)
+        let scope = query.range(of: #"^[A-Za-z0-9_.-]+(\.[A-Za-z0-9_-]+)?$"#, options: .regularExpression) != nil ? "files" : "content"
         let payload: [String: Any] = [
             "query": query,
-            "scope": "content",
+            "scope": scope,
             "maxResults": 8
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else {
-            return #"{"query":"\#(query)","scope":"content","maxResults":8}"#
+            return #"{"query":"\#(query)","scope":"\#(scope)","maxResults":8}"#
         }
         return json
     }
@@ -224,6 +226,30 @@ extension AgentLoop {
         return candidates.first.map { String($0.prefix(40)) } ?? String(cleaned.prefix(40))
     }
 
+    private static func mentionsWorkspaceSearchDomain(_ message: String) -> Bool {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
+        if firstLocalPath(in: text) != nil { return true }
+        if firstMatch(in: text, pattern: #"`[^`]{2,80}`"#) != nil { return true }
+        if firstMatch(in: text, pattern: #"[A-Za-z0-9_./-]+\.(swift|py|ts|tsx|js|jsx|md|json|yaml|yml|toml|txt|html|css|scss|xml|plist)"#) != nil {
+            return true
+        }
+        let workspaceMarkers = [
+            "项目", "代码", "文件", "目录", "路径", "工作区", "仓库", "repo", "repository",
+            "模块", "函数", "类", "组件", "接口", "配置", "源码", "测试", "构建", "编译",
+            "readme", "package.json", "xcodeproj", "workspace", "swift", "typescript",
+            "搜索项目", "搜索代码", "查找文件", "读取文件", "打开文件", "定位"
+        ]
+        guard workspaceMarkers.contains(where: { text.localizedCaseInsensitiveContains($0) }) else {
+            return false
+        }
+        let generalNonWorkspaceMarkers = [
+            "股票", "股价", "涨到", "下午", "易经", "梅花易数", "大小六壬", "算命",
+            "skill都能干嘛", "技能都能干嘛", "数据不对", "我只要结果"
+        ]
+        return !generalNonWorkspaceMarkers.contains { text.localizedCaseInsensitiveContains($0) }
+    }
+
     private static func looksLikeBroadProjectImprovement(_ message: String) -> Bool {
         let lowered = message.lowercased()
         let projectMarkers = ["本地项目", "当前项目", "整个项目", "项目", "工作区"]
@@ -254,7 +280,12 @@ extension AgentLoop {
               let range = Range(match.range, in: message) else {
             return nil
         }
-        return String(message[range]).trimmingCharacters(in: CharacterSet(charactersIn: "。，、；;）)]}"))
+        let raw = String(message[range])
+        let separators = CharacterSet(charactersIn: "，,。；;）)]}<>")
+        let trimmed = raw.split(whereSeparator: { scalar in
+            scalar.unicodeScalars.allSatisfy { separators.contains($0) }
+        }).first.map(String.init) ?? raw
+        return trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "。，、；;）)]}"))
     }
 
     /// E2: Extract search keywords from user messages like "搜索 XXX" / "查找 XXX"
@@ -276,7 +307,7 @@ extension AgentLoop {
     }
 
     /// Extract all absolute paths from user message (for granting write access)
-    static func extractAbsolutePaths(from message: String) -> [String] {
+    nonisolated static func extractAbsolutePaths(from message: String) -> [String] {
         guard let regex = try? NSRegularExpression(pattern: #"/(?:Users|home|tmp|var|opt|mnt)[^\n\r\t\s，。、；;）)\]}>\"']*"#) else {
             return []
         }
@@ -289,7 +320,7 @@ extension AgentLoop {
         }
     }
 
-    static func firstLocalPath(in message: String) -> String? {
+    nonisolated static func firstLocalPath(in message: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: #"/[^\n\r\t ]+"#) else {
             return nil
         }
@@ -306,7 +337,7 @@ extension AgentLoop {
             "url": url,
             "maxCharacters": 8000
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.withoutEscapingSlashes]),
               let json = String(data: data, encoding: .utf8) else {
             return #"{"url":"\#(url)","maxCharacters":8000}"#
         }

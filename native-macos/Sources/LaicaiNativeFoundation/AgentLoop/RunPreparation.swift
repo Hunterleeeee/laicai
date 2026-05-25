@@ -23,6 +23,17 @@ extension AgentLoop {
         taskContext.imageGenerationEndpoint = taskContext.imageGenerationEndpoint ?? config.connectorEndpoint
         taskContext.imageGenerationModelName = taskContext.imageGenerationModelName ?? config.modelName
         taskContext.imageGenerationAPIKey = taskContext.imageGenerationAPIKey ?? config.apiKey
+        if let protocolJSON = taskContext.metadata["taskProtocolJSON"],
+           let data = protocolJSON.data(using: .utf8),
+           let taskProtocol = try? JSONDecoder().decode(AgentTaskProtocol.self, from: data) {
+            taskContext.metadata["taskProtocolGoal"] = taskProtocol.taskGoal
+            taskContext.metadata["taskProtocolRisk"] = taskProtocol.riskPolicy.rawValue
+        }
+        if let ledgerJSON = taskContext.metadata["executionLedgerJSON"],
+           let data = ledgerJSON.data(using: .utf8),
+           let ledger = try? JSONDecoder().decode(AgentExecutionLedger.self, from: data) {
+            taskContext.memory.appendDecision("[execution-ledger] state=\(ledger.state.rawValue); next=\(ledger.nextAction ?? "无"); read=\(ledger.readFiles.prefix(8).joined(separator: "、")); modified=\(ledger.modifiedFiles.prefix(8).joined(separator: "、")); failed=\(ledger.failedTools.prefix(5).joined(separator: "、"))")
+        }
 
         if let vault = taskContext.vaultRoot, !vault.isEmpty, !WorkspaceSandbox.isOverlyBroadWorkspace(vault) {
             WorkspaceSandbox.shared.addAllowedPath(vault)
@@ -75,11 +86,13 @@ extension AgentLoop {
         task: inout AgentTask,
         onStep: @MainActor (TaskStep) -> Void
     ) async {
-        await autoIndexWorkspaceIfNeeded(needsPlanning: needsPlanning, taskContext: &taskContext, task: &task, onStep: onStep)
+        await autoIndexWorkspaceIfNeeded(message: message, intent: intent, needsPlanning: needsPlanning, taskContext: &taskContext, task: &task, onStep: onStep)
         prefetchMentionedFilesIfNeeded(message: message, intent: intent, needsPlanning: needsPlanning, taskContext: &taskContext, task: &task, onStep: onStep)
     }
 
     private func autoIndexWorkspaceIfNeeded(
+        message: String,
+        intent: UserIntent,
         needsPlanning: Bool,
         taskContext: inout TaskContext,
         task: inout AgentTask,
@@ -88,19 +101,25 @@ extension AgentLoop {
         guard needsPlanning, !taskContext.workspaceRoot.isEmpty, taskContext.memory.readFiles.isEmpty else {
             return
         }
+        guard !Self.shouldBootstrapWorkspaceIndex(for: message, intent: intent),
+              !Self.shouldBootstrapWorkspaceSearch(for: message, intent: intent, context: taskContext) else {
+            return
+        }
         guard let indexTool = toolRegistry.tool(named: "workspace_index") ?? toolRegistry.tool(named: "workspace.index") else {
             return
         }
 
         let indexStep = TaskStep(
             kind: .toolCall,
-            text: "编排层自动索引工作区",
+            text: "索引工作区",
             toolName: "workspace.index",
             isCollapsible: true,
             isCollapsed: true
         )
-        task.steps.append(indexStep)
-        onStep(indexStep)
+        if config.emitDebugSteps {
+            task.steps.append(indexStep)
+            onStep(indexStep)
+        }
 
         let indexResult = try? await indexTool.execute(argumentsJSON: "{}", context: taskContext)
         if let result = indexResult, result.success {
@@ -111,8 +130,10 @@ extension AgentLoop {
                 isCollapsible: true,
                 isCollapsed: true
             )
-            task.steps.append(resultStep)
-            onStep(resultStep)
+            if config.emitDebugSteps {
+                task.steps.append(resultStep)
+                onStep(resultStep)
+            }
             taskContext.memory.appendDecision("工作区索引：\(String(result.output.prefix(2000)))")
         }
     }
@@ -134,14 +155,16 @@ extension AgentLoop {
         }
         guard !readablePaths.isEmpty else { return }
 
-        let prefetchStep = TaskStep(
-            kind: .aiThinking,
-            text: "编排层预读 \(readablePaths.count) 个文件",
-            isCollapsible: true,
-            isCollapsed: true
-        )
-        task.steps.append(prefetchStep)
-        onStep(prefetchStep)
+        if config.emitDebugSteps {
+            let prefetchStep = TaskStep(
+                kind: .aiThinking,
+                text: "预读 \(readablePaths.count) 个文件",
+                isCollapsible: true,
+                isCollapsed: true
+            )
+            task.steps.append(prefetchStep)
+            onStep(prefetchStep)
+        }
 
         var prefetchedContent: [String] = []
         for path in readablePaths.prefix(5) {

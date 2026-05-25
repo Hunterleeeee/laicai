@@ -2,6 +2,15 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
+    public func exportThread(id: UUID) -> String? {
+        guard let thread = state.threads.first(where: { $0.id == id }) else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(thread) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
     public func exportSession(id: UUID) -> String? {
         guard let thread = state.threads.first(where: { $0.id == id }) else { return nil }
         let session = ChatSession(thread: thread)
@@ -24,9 +33,16 @@ extension AppStore {
 
     public func exportSelectedThreadMarkdown() -> String? {
         guard let thread = state.selectedThread else { return nil }
-        var lines: [String] = ["# \(thread.title)", ""]
-        lines.append("- 类型：\(thread.source == .task ? "任务" : "会话")")
-        if thread.source == .task { lines.append("- 状态：\(thread.status.title)") }
+        let title = thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "新会话" : thread.title
+        var lines: [String] = ["# \(title)", ""]
+        lines.append("- 类型：会话")
+        lines.append("- 状态：\(thread.agentState.title)")
+        if let goal = thread.agentGoal?.trimmingCharacters(in: .whitespacesAndNewlines), !goal.isEmpty {
+            lines.append("- 目标：\(goal)")
+        }
+        if !thread.currentPlan.isEmpty {
+            lines.append("- 当前计划：\(thread.currentPlan.prefix(5).joined(separator: " / "))")
+        }
         lines.append("- 更新时间：\(thread.updatedAt)")
         lines.append("")
 
@@ -54,6 +70,7 @@ extension AppStore {
     public func archiveThread(id: UUID) {
         guard let index = state.threads.firstIndex(where: { $0.id == id }) else { return }
         state.threads[index].isArchived.toggle()
+        syncAgentSnapshot(at: index)
         state.invalidateThreadSummaryCache()
         if state.threads[index].isArchived && state.selectedThread?.id == id {
             state.selectedThreadID = nil
@@ -62,7 +79,7 @@ extension AppStore {
     }
 
     public func exportSelectedTaskEvidenceMarkdown() -> String? {
-        guard let thread = state.selectedThread, thread.source == .task else { return nil }
+        guard let thread = state.selectedThread, thread.canContinueAgent else { return nil }
         let steps = thread.steps
         let toolCalls = steps.filter { $0.kind == .toolCall }
         let readFiles = Self.uniqueMemoryValues(steps
@@ -82,8 +99,9 @@ extension AppStore {
             .sorted()
         let indexed = steps.contains { $0.kind == .toolResult && $0.toolName == "workspace.index" && !$0.isFailure }
 
-        var lines: [String] = ["# 证据清单：\(thread.title)", ""]
-        lines.append("- 状态：\(thread.status.title)")
+        let title = thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "新会话" : thread.title
+        var lines: [String] = ["# 会话证据清单：\(title)", ""]
+        lines.append("- 状态：\(thread.agentState.title)")
         lines.append("- 步骤：\(steps.count)")
         lines.append("- 更新时间：\(thread.updatedAt)")
         if indexed { lines.append("- 项目索引：已建立") }
@@ -96,7 +114,7 @@ extension AppStore {
             lines.append("- 验证状态：\(verification)")
         }
         if lines.count <= 4 {
-            lines.append("- 说明：这条任务还没有形成足够工具证据。")
+            lines.append("- 说明：这个会话还没有形成足够工具证据。")
         }
         return lines.joined(separator: "\n")
     }

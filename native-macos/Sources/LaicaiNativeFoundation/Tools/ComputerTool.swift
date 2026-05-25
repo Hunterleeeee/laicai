@@ -17,11 +17,13 @@ public struct ComputerTool: LaicaiTool {
             description: description,
             parameters: FunctionParameters(
                 properties: [
-                    "action": FunctionProperty(type: "string", description: "动作：open_app / open_url / keystroke / type_text / click / screenshot / clipboard_read / clipboard_write / frontmost / windows / system_info / notify / applescript"),
+                    "action": FunctionProperty(type: "string", description: "动作：open_app / open_url / keystroke / type_text / click / right_click / double_click / drag / screenshot / clipboard_read / clipboard_write / frontmost / windows / system_info / notify / applescript"),
                     "target": FunctionProperty(type: "string", description: "目标：应用名(open_app)、URL(open_url)、按键(keystroke, e.g. 'cmd+c')、文本(type_text)、AppleScript代码(applescript)"),
                     "text": FunctionProperty(type: "string", description: "文本内容（clipboard_write / type_text / notify 时用）"),
-                    "x": FunctionProperty(type: "integer", description: "屏幕 X 坐标（click 动作时用）"),
-                    "y": FunctionProperty(type: "integer", description: "屏幕 Y 坐标（click 动作时用）"),
+                    "x": FunctionProperty(type: "integer", description: "屏幕 X 坐标（click/right_click/double_click/drag 起点）"),
+                    "y": FunctionProperty(type: "integer", description: "屏幕 Y 坐标（click/right_click/double_click/drag 起点）"),
+                    "toX": FunctionProperty(type: "integer", description: "drag 终点 X 坐标"),
+                    "toY": FunctionProperty(type: "integer", description: "drag 终点 Y 坐标"),
                 ],
                 required: ["action"]
             )
@@ -31,6 +33,38 @@ public struct ComputerTool: LaicaiTool {
     public var requiresReview: Bool { true }
     public var executionPolicy: ToolExecutionPolicy { .explicitUserApproval }
 
+    private struct PasteboardSnapshot {
+        let items: [[NSPasteboard.PasteboardType: Data]]
+
+        init(_ pasteboard: NSPasteboard) {
+            items = (pasteboard.pasteboardItems ?? []).map { item in
+                var payload: [NSPasteboard.PasteboardType: Data] = [:]
+                for type in item.types {
+                    if let data = item.data(forType: type) {
+                        payload[type] = data
+                    } else if let string = item.string(forType: type) {
+                        payload[type] = string.data(using: .utf8)
+                    }
+                }
+                return payload
+            }
+        }
+
+        func restore(to pasteboard: NSPasteboard) {
+            pasteboard.clearContents()
+            let pasteboardItems = items.map { payload in
+                let item = NSPasteboardItem()
+                for (type, data) in payload {
+                    item.setData(data, forType: type)
+                }
+                return item
+            }
+            if !pasteboardItems.isEmpty {
+                pasteboard.writeObjects(pasteboardItems)
+            }
+        }
+    }
+
     public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
         struct Params: Codable {
             var action: String
@@ -38,6 +72,8 @@ public struct ComputerTool: LaicaiTool {
             var text: String?
             var x: Int?
             var y: Int?
+            var toX: Int?
+            var toY: Int?
         }
 
         let params: Params
@@ -78,7 +114,7 @@ public struct ComputerTool: LaicaiTool {
             guard !text.isEmpty else {
                 return ToolResult(output: "缺少 text 或 target", success: false, error: "missing_text")
             }
-            return typeText(text)
+            return await typeText(text)
 
         // MARK: - Click
         case "click":
@@ -86,6 +122,27 @@ public struct ComputerTool: LaicaiTool {
                 return ToolResult(output: "缺少 x 和 y 坐标", success: false, error: "missing_coords")
             }
             return simulateClick(x: x, y: y)
+
+        // MARK: - Right Click
+        case "right_click":
+            guard let x = params.x, let y = params.y else {
+                return ToolResult(output: "缺少 x 和 y 坐标", success: false, error: "missing_coords")
+            }
+            return simulateRightClick(x: x, y: y)
+
+        // MARK: - Double Click
+        case "double_click":
+            guard let x = params.x, let y = params.y else {
+                return ToolResult(output: "缺少 x 和 y 坐标", success: false, error: "missing_coords")
+            }
+            return simulateDoubleClick(x: x, y: y)
+
+        // MARK: - Drag
+        case "drag":
+            guard let x = params.x, let y = params.y, let toX = params.toX, let toY = params.toY else {
+                return ToolResult(output: "缺少起点(x,y)或终点(toX,toY)坐标", success: false, error: "missing_coords")
+            }
+            return await simulateDrag(fromX: x, fromY: y, toX: toX, toY: toY)
 
         // MARK: - Screenshot
         case "screenshot":
@@ -244,10 +301,10 @@ public struct ComputerTool: LaicaiTool {
         return ToolResult(output: "已发送按键：\(combo)")
     }
 
-    private func typeText(_ text: String) -> ToolResult {
+    private func typeText(_ text: String) async -> ToolResult {
         // Use clipboard + paste for reliable CJK input
         let pasteboard = NSPasteboard.general
-        let oldContents = pasteboard.string(forType: .string)
+        let snapshot = PasteboardSnapshot(pasteboard)
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
@@ -255,6 +312,8 @@ public struct ComputerTool: LaicaiTool {
         guard let source = CGEventSource(stateID: .hidSystemState),
               let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),  // V key
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
+            // Restore clipboard before returning on failure
+            snapshot.restore(to: pasteboard)
             return ToolResult(output: "无法模拟粘贴", success: false, error: "event_failed")
         }
 
@@ -263,13 +322,9 @@ public struct ComputerTool: LaicaiTool {
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
 
-        // Restore clipboard after a delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            if let old = oldContents {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(old, forType: .string)
-            }
-        }
+        // Wait for paste to complete, then restore clipboard
+        try? await Task.sleep(for: .milliseconds(600))
+        snapshot.restore(to: NSPasteboard.general)
 
         return ToolResult(output: "已输入 \(text.count) 个字符")
     }
@@ -286,6 +341,55 @@ public struct ComputerTool: LaicaiTool {
         mouseUp.post(tap: .cghidEventTap)
 
         return ToolResult(output: "已点击坐标 (\(x), \(y))")
+    }
+
+    private func simulateRightClick(x: Int, y: Int) -> ToolResult {
+        let point = CGPoint(x: x, y: y)
+        guard let source = CGEventSource(stateID: .hidSystemState),
+              let mouseDown = CGEvent(mouseEventSource: source, mouseType: .rightMouseDown, mouseCursorPosition: point, mouseButton: .right),
+              let mouseUp = CGEvent(mouseEventSource: source, mouseType: .rightMouseUp, mouseCursorPosition: point, mouseButton: .right) else {
+            return ToolResult(output: "无法创建鼠标事件", success: false, error: "event_failed")
+        }
+        mouseDown.post(tap: .cghidEventTap)
+        mouseUp.post(tap: .cghidEventTap)
+        return ToolResult(output: "已右键点击坐标 (\(x), \(y))")
+    }
+
+    private func simulateDoubleClick(x: Int, y: Int) -> ToolResult {
+        let point = CGPoint(x: x, y: y)
+        guard let source = CGEventSource(stateID: .hidSystemState),
+              let down1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+              let up1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left),
+              let down2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+              let up2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
+            return ToolResult(output: "无法创建鼠标事件", success: false, error: "event_failed")
+        }
+        down1.setIntegerValueField(.mouseEventClickState, value: 1)
+        up1.setIntegerValueField(.mouseEventClickState, value: 1)
+        down2.setIntegerValueField(.mouseEventClickState, value: 2)
+        up2.setIntegerValueField(.mouseEventClickState, value: 2)
+        down1.post(tap: .cghidEventTap)
+        up1.post(tap: .cghidEventTap)
+        down2.post(tap: .cghidEventTap)
+        up2.post(tap: .cghidEventTap)
+        return ToolResult(output: "已双击坐标 (\(x), \(y))")
+    }
+
+    private func simulateDrag(fromX: Int, fromY: Int, toX: Int, toY: Int) async -> ToolResult {
+        let from = CGPoint(x: fromX, y: fromY)
+        let to = CGPoint(x: toX, y: toY)
+        guard let source = CGEventSource(stateID: .hidSystemState),
+              let mouseDown = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left),
+              let mouseDrag = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: to, mouseButton: .left),
+              let mouseUp = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left) else {
+            return ToolResult(output: "无法创建鼠标事件", success: false, error: "event_failed")
+        }
+        mouseDown.post(tap: .cghidEventTap)
+        try? await Task.sleep(for: .milliseconds(100))
+        mouseDrag.post(tap: .cghidEventTap)
+        try? await Task.sleep(for: .milliseconds(100))
+        mouseUp.post(tap: .cghidEventTap)
+        return ToolResult(output: "已拖拽 (\(fromX),\(fromY)) → (\(toX),\(toY))")
     }
 
     private func captureScreen() async -> ToolResult {
@@ -402,7 +506,7 @@ public struct ComputerTool: LaicaiTool {
 
         // Battery
         let batteryScript = "do shell script \"pmset -g batt | grep -o '[0-9]*%'\""
-        if let result = try? NSAppleScript(source: batteryScript)?.executeAndReturnError(nil),
+        if let result = NSAppleScript(source: batteryScript)?.executeAndReturnError(nil),
            let battery = result.stringValue {
             lines.append("电量：\(battery)")
         }

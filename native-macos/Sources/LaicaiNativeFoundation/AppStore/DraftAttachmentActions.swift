@@ -3,23 +3,44 @@ import LaicaiNativeDomain
 
 extension AppStore {
     public func queueFollowUp(_ message: String) {
-        state.pendingFollowUp = message
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        state.pendingFollowUp = trimmed
+        guard let agentID = state.selectedAgentID,
+              let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }) else { return }
+        if state.threads[threadIndex].executionLedger == nil {
+            state.threads[threadIndex].executionLedger = AgentExecutionLedger(
+                originalRequest: state.threads[threadIndex].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[threadIndex].title,
+                goal: state.threads[threadIndex].agentGoal ?? state.threads[threadIndex].title,
+                state: .executing,
+                plan: state.threads[threadIndex].currentPlan
+            )
+        }
+        state.threads[threadIndex].executionLedger?.pendingFollowUp = trimmed
+        state.threads[threadIndex].executionLedger?.nextAction = "处理用户补充：\(trimmed)"
+        state.threads[threadIndex].executionLedger?.transition(to: .executing, reason: "运行中收到追问，已排队")
+        state.threads[threadIndex].updatedAt = .now
     }
 
     public func submitFollowUp() {
-        guard let followUp = state.pendingFollowUp, !followUp.isEmpty else { return }
-        state.pendingFollowUp = nil
+        let draft = state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let alreadyQueued = state.pendingFollowUp?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let followUp = draft.isEmpty ? alreadyQueued : draft
+        guard !followUp.isEmpty else { return }
+        queueFollowUp(followUp)
         state.draftMessage = ""
-        if let taskID = state.selectedTaskID,
-           let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) {
-            let step = TaskStep(kind: .userInput, text: followUp, isCollapsible: false, isCollapsed: false)
-            state.threads[threadIndex].steps.append(step)
-            persistThreads()
-        }
+        notify("补充指令已排队，会在当前会话 安全点继续处理。", style: .info)
+        persistThreads()
     }
 
     public func clearPendingFollowUp() {
         state.pendingFollowUp = nil
+        state.draftMessage = ""
+        if let agentID = state.selectedAgentID,
+           let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }) {
+            state.threads[threadIndex].executionLedger?.pendingFollowUp = nil
+            persistThreads()
+        }
     }
 
     public func addDraftAttachments(_ paths: [String]) {

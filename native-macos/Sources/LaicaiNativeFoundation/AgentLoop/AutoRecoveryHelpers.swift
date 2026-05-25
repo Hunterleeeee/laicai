@@ -51,6 +51,15 @@ extension AgentLoop {
             }
         }
 
+        if toolName == "document.transform" {
+            let sourcePath = callStep.toolParams?["sourcePath"] ?? callStep.toolParams?["path"] ?? callStep.toolParams?["outputPath"] ?? "目标文档"
+            return ToolResult(
+                output: "🔴 已熔断：document.transform 对 \(sourcePath) 已连续失败。不要再用相同参数重试；请改用 shell.exec 调系统工具/脚本生成交付物，或明确说明当前缺少可用的文档转换路径。",
+                success: false,
+                error: "document_transform_circuit_broken"
+            )
+        }
+
         return ToolResult(
             output: "🔴 已熔断：`\(toolName)` 对该目标已连续失败多次且自动修复失败。请使用其他工具完成此操作。",
             success: false,
@@ -110,7 +119,9 @@ extension AgentLoop {
         case "file.write":
             if toolResult.error == "security_denied", let path = callStep.toolParams?["path"] {
                 let dir = (path as NSString).deletingLastPathComponent
-                if !dir.isEmpty && dir != "/" && !WorkspaceSandbox.isOverlyBroadWorkspace(dir) {
+                let maxAutoAllowed = 5
+                if !dir.isEmpty && dir != "/" && !WorkspaceSandbox.isOverlyBroadWorkspace(dir)
+                    && WorkspaceSandbox.shared.allowedPaths.count < maxAutoAllowed {
                     WorkspaceSandbox.shared.addAllowedPath(dir)
                     if let tool = toolRegistry.tool(named: "file_write") {
                         let retryResult = try? await tool.execute(argumentsJSON: argumentsJSON, context: taskContext)

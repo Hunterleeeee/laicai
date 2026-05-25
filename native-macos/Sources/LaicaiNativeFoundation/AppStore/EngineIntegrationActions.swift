@@ -69,7 +69,7 @@ extension AppStore {
         let bgTaskID = BackgroundTaskManager.shared.startTask(title: title)
         state.threads[index].context.metadata["backgroundTaskID"] = bgTaskID.uuidString
         state.threads[index].context.metadata["isBackground"] = "true"
-        notify("任务已转入后台：\(title)", style: .info)
+        notify("会话 已转入后台：\(title)", style: .info)
     }
 
     public func isBackgroundThread(_ threadID: UUID) -> Bool {

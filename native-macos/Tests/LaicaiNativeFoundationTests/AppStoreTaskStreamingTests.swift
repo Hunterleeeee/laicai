@@ -18,7 +18,7 @@ final class AppStoreTaskStreamingTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        let outputs = store.state.selectedTask?.steps.filter { $0.kind == .textOutput } ?? []
+        let outputs = store.state.selectedThread?.steps.filter { $0.kind == .textOutput } ?? []
         XCTAssertEqual(outputs.count, 1)
         XCTAssertEqual(outputs.first?.text, "你好，世界")
         XCTAssertEqual(outputs.first?.metrics?.inputTokens, 12)
@@ -38,6 +38,6 @@ final class AppStoreTaskStreamingTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertEqual(store.state.selectedTask?.steps.filter { $0.kind == .textOutput }.map(\.text), ["你好，世界"])
+        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .textOutput }.map(\.text), ["你好，世界"])
     }
 }

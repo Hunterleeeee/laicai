@@ -201,11 +201,11 @@ public final class SQLiteRepository {
 }
 
 extension SQLiteRepository: ThreadRepository {
-    public func loadThreads() throws -> [Thread]? {
+    public func loadThreads() throws -> [LaicaiThread]? {
         guard let stmt = prepare("SELECT record_json FROM threads ORDER BY updated_at DESC") else {
             return nil
         }
-        var threads: [Thread] = []
+        var threads: [LaicaiThread] = []
         let decoder = JSONDecoder()
         var decodedIDs: Set<UUID> = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -226,7 +226,7 @@ extension SQLiteRepository: ThreadRepository {
         return threads
     }
 
-    public func saveThreads(_ threads: [Thread]) throws {
+    public func saveThreads(_ threads: [LaicaiThread]) throws {
         // Safety: never wipe a non-empty DB with an empty list (protects against decode-fail cascades)
         if threads.isEmpty {
             if let countStmt = prepare("SELECT count(*) FROM threads") {
@@ -244,7 +244,7 @@ extension SQLiteRepository: ThreadRepository {
         let currentIDs = Set(threads.map { $0.id })
 
         // H3: Incremental save — write threads whose timestamp or payload changed
-        var dirtyThreads: [(thread: Thread, timestamp: TimeInterval, json: String)] = []
+        var dirtyThreads: [(thread: LaicaiThread, timestamp: TimeInterval, json: String)] = []
         for thread in threads {
             let ts = thread.updatedAt.timeIntervalSince1970
             let data = (try? encoder.encode(thread)) ?? Data()
@@ -287,8 +287,8 @@ extension SQLiteRepository: ThreadRepository {
     }
 
     /// One-time migration: load sessions + tasks from legacy tables, convert to Thread, save to threads table.
-    private func migrateLegacyToThreads() throws -> [Thread] {
-        var threads: [Thread] = []
+    private func migrateLegacyToThreads() throws -> [LaicaiThread] {
+        var threads: [LaicaiThread] = []
         if let sessions = try? loadSessions() {
             threads += sessions.map(Thread.init(session:))
         }
@@ -299,6 +299,16 @@ extension SQLiteRepository: ThreadRepository {
             try saveThreads(threads)
         }
         return threads
+    }
+}
+
+extension SQLiteRepository: AgentRepository {
+    public func loadAgents() throws -> [LaicaiThread]? {
+        try loadThreads()
+    }
+
+    public func saveAgents(_ agents: [LaicaiThread]) throws {
+        try saveThreads(agents)
     }
 }
 

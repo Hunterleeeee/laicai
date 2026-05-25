@@ -50,7 +50,20 @@ final class MockURLProtocol: URLProtocol {
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest {
-        request
+        var canonical = request
+        if canonical.httpBody == nil, let stream = canonical.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(buffer, count: count)
+            }
+            canonical.httpBody = data
+        }
+        return canonical
     }
 
     override func startLoading() {

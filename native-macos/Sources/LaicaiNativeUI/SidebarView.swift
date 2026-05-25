@@ -13,9 +13,9 @@ struct SidebarView: View {
     @Binding var showWorkbench: Bool
     @Binding var isVisible: Bool
 
-    @State private var renamingAgentID: UUID?
+    @State private var renamingThreadID: UUID?
     @State private var renameText = ""
-    @State private var deletingAgentID: UUID?
+    @State private var deletingThreadID: UUID?
     @State private var showingAddConnector = false
     @State private var showingNewProjectSheet = false
     @State private var deletingProjectID: UUID?
@@ -37,33 +37,33 @@ struct SidebarView: View {
             }
             bottomBar
         }
-        .alert("删除 Agent", isPresented: Binding(
-            get: { deletingAgentID != nil },
+        .alert("删除对话", isPresented: Binding(
+            get: { deletingThreadID != nil },
             set: {
                 if !$0 {
-                    deletingAgentID = nil
+                    deletingThreadID = nil
                 }
             }
         )) {
             Button("取消", role: .cancel) {
-                deletingAgentID = nil
+                deletingThreadID = nil
             }
             Button("删除", role: .destructive) {
-                if let id = deletingAgentID { store.deleteAgent(id: id) }
-                deletingAgentID = nil
+                if let id = deletingThreadID { store.deleteThread(id: id) }
+                deletingThreadID = nil
             }
-        } message: { Text("确定要删除这个 Agent 吗？") }
+        } message: { Text("确定要删除这条对话吗？") }
         .alert("重命名", isPresented: Binding(
-            get: { renamingAgentID != nil },
-            set: { if !$0 { renamingAgentID = nil } }
+            get: { renamingThreadID != nil },
+            set: { if !$0 { renamingThreadID = nil } }
         )) {
             TextField("标题", text: $renameText)
-            Button("取消", role: .cancel) { renamingAgentID = nil }
+            Button("取消", role: .cancel) { renamingThreadID = nil }
             Button("确定") {
-                if let id = renamingAgentID, !renameText.isEmpty {
-                    store.renameAgent(id: id, title: renameText)
+                if let id = renamingThreadID, !renameText.isEmpty {
+                    store.renameThread(id: id, title: renameText)
                 }
-                renamingAgentID = nil
+                renamingThreadID = nil
             }
         }
         .sheet(isPresented: $showingAddConnector) {
@@ -106,12 +106,8 @@ struct SidebarView: View {
             .padding(.top, AppSpace.xs)
 
             VStack(spacing: AppSpace.xs) {
-                PrimaryNavButton(icon: "plus.square", title: "新任务", isSelected: false) {
-                    store.newTask()
-                }
-
-                PrimaryNavButton(icon: "bubble.left.and.bubble.right", title: "新会话", isSelected: false) {
-                    store.newSession()
+                PrimaryNavButton(icon: "plus.square", title: "新对话", isSelected: false) {
+                    store.newThread()
                 }
 
                 PrimaryNavButton(icon: "magnifyingglass", title: "搜索", isSelected: false) {
@@ -126,10 +122,13 @@ struct SidebarView: View {
                     openWorkbench(.context)
                 }
 
-                PrimaryNavButton(icon: "alarm", title: "定时 Agent", isSelected: store.state.workbenchTab == .schedules && showWorkbench) {
+                PrimaryNavButton(icon: "alarm", title: "定时会话", isSelected: store.state.workbenchTab == .schedules && showWorkbench) {
                     openWorkbench(.schedules)
                 }
             }
+
+            searchBar
+                .padding(.top, AppSpace.xs)
 
             HStack(spacing: AppSpace.xs) {
                 Text("历史记录")
@@ -170,12 +169,8 @@ struct SidebarView: View {
                 .padding(.vertical, AppSpace.sm)
                 .help("展开导航")
 
-                CompactRailButton(icon: "plus.square", tooltip: "新任务") {
-                    store.newTask()
-                }
-
-                CompactRailButton(icon: "bubble.left.and.bubble.right", tooltip: "新会话") {
-                    store.newSession()
+                CompactRailButton(icon: "plus.square", tooltip: "新对话") {
+                    store.newThread()
                 }
 
                 CompactRailButton(icon: "magnifyingglass", tooltip: "搜索") {
@@ -190,7 +185,7 @@ struct SidebarView: View {
                     openWorkbench(.context)
                 }
 
-                CompactRailButton(icon: "alarm", tooltip: "定时 Agent") {
+                CompactRailButton(icon: "alarm", tooltip: "定时会话") {
                     openWorkbench(.schedules)
                 }
 
@@ -475,12 +470,47 @@ struct SidebarView: View {
         Divider()
 
         Button {
-            store.newSessionInProject(project.id)
+            store.newThreadInProject(project.id)
         } label: { Label("新建会话", systemImage: "bubble.left.and.bubble.right") }
 
         Button(role: .destructive) {
             deletingProjectID = project.id
         } label: { Label("删除项目", systemImage: "trash") }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: AppSpace.xs) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(TextGrade.ghost)
+            TextField("搜索对话和任务", text: Binding(
+                get: { store.state.searchText },
+                set: { store.updateSearchText($0) }
+            ))
+            .textFieldStyle(.plain)
+            .font(.system(size: 11))
+            .foregroundStyle(TextGrade.primary)
+            if !store.state.searchText.isEmpty {
+                Button {
+                    store.updateSearchText("")
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(TextGrade.ghost)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, AppSpace.sm)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .fill(SurfaceGrade.sunken)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .strokeBorder(SurfaceGrade.border.opacity(0.5), lineWidth: 0.5)
+        )
     }
 
     // MARK: - Bottom Bar
@@ -528,30 +558,30 @@ struct SidebarView: View {
         let isArchived = thread?.isArchived ?? item.isArchived
         let hasContent = thread?.steps.isEmpty == false || item.hasContent
 
-        Button { store.pinAgent(id: item.id) } label: {
+        Button { store.pinThread(id: item.id) } label: {
             Label(isPinned ? "取消置顶" : "置顶", systemImage: isPinned ? "pin.slash" : "pin")
         }
-        Button { renamingAgentID = item.id; renameText = title } label: {
+        Button { renamingThreadID = item.id; renameText = title } label: {
             Label("重命名", systemImage: "pencil")
         }
         Divider()
         if thread?.canContinueAgent == true {
-            Button { store.continueAgent(id: item.id) } label: { Label("继续 Agent", systemImage: "arrow.turn.down.right") }
+            Button { store.continueThread(id: item.id) } label: { Label("继续", systemImage: "arrow.turn.down.right") }
         }
-        Button { store.cloneAgent(id: item.id) } label: {
+        Button { store.cloneThread(id: item.id) } label: {
             Label("克隆", systemImage: "doc.on.doc")
         }
         Button {
-            if let json = store.exportAgent(id: item.id) {
+            if let json = store.exportThread(id: item.id) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(json, forType: .string)
                 ToastCenter.shared.success("已复制到剪贴板")
             }
         } label: { Label("导出", systemImage: "arrow.up.doc") }
         Divider()
-        Button { store.clearAgentEvents(id: item.id) } label: { Label("清空", systemImage: "eraser") }.disabled(!hasContent)
+        Button { store.clearThreadEvents(id: item.id) } label: { Label("清空", systemImage: "eraser") }.disabled(!hasContent)
         Button { store.archiveThread(id: item.id) } label: { Label(isArchived ? "取消归档" : "归档", systemImage: "archivebox") }
-        Button { deletingAgentID = item.id } label: { Label("删除", systemImage: "trash") }
+        Button { deletingThreadID = item.id } label: { Label("删除", systemImage: "trash") }
     }
 
     // MARK: - Data Helpers
@@ -579,7 +609,7 @@ struct SidebarView: View {
     }
 
     private func selectThread(_ item: ThreadRecord) {
-        store.selectAgent(id: item.id)
+        store.selectThread(id: item.id)
     }
 
     private func isSelected(_ item: ThreadRecord) -> Bool {
@@ -594,8 +624,8 @@ struct SidebarView: View {
     private var brandSubtitle: String {
         if let project = projectManager.activeProject { return project.name }
         return store.state.activeConnector?.modelName.isEmpty == false
-            ? (store.state.activeConnector?.modelName ?? "全局 Agent")
-            : "全局 Agent"
+            ? (store.state.activeConnector?.modelName ?? "全局会话")
+            : "全局会话"
     }
 }
 
@@ -734,7 +764,7 @@ private struct CompactThreadDot: View {
         }
         .frame(width: 46, height: 40)
         .contentShape(Rectangle())
-        .help(item.title.isEmpty ? "新 Agent" : item.title)
+        .help(item.title.isEmpty ? item.title : item.title)
     }
 }
 
@@ -796,7 +826,6 @@ private struct ExpandedThreadRow: View, Equatable {
             && lhs.item.updatedAt == rhs.item.updatedAt
             && lhs.item.hasContent == rhs.item.hasContent
             && lhs.item.projectID == rhs.item.projectID
-            && lhs.item.agentMode == rhs.item.agentMode
             && lhs.item.resolvedAgentState == rhs.item.resolvedAgentState
     }
 
@@ -859,7 +888,7 @@ private struct ExpandedThreadRow: View, Equatable {
         case .paused: return Semantic.warning
         case .completed: return Semantic.success
         case .archived: return TextGrade.ghost
-        case .idle: return item.agentMode == .ask ? TextGrade.muted : Brand.jade
+        case .idle: return TextGrade.muted
         }
     }
 
@@ -874,14 +903,14 @@ private struct ExpandedThreadRow: View, Equatable {
         case .archived: return "archivebox.fill"
         case .idle:
             if item.hasContent { return "bubble.left.and.bubble.right" }
-            return item.source == .session ? "text.bubble" : "sparkles"
+            return "sparkles"
         }
     }
 
     private var rowTitle: String {
         let trimmed = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == "新 Agent" || trimmed == "新线程" {
-            return item.source == .session ? "新会话" : "新 Agent"
+        if trimmed.isEmpty || trimmed == "新 Agent" || trimmed == "新线程" || trimmed == "新对话" {
+            return "新对话"
         }
         return TextHelper.compactTitle(trimmed)
     }

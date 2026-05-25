@@ -33,13 +33,13 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
             diffNewContent: "approved"
         )
         let task = AgentTask(title: "写文件", steps: [step], context: TaskContext(workspaceRoot: workspace.path))
-        let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id, workspacePath: workspace.path))
+        let store = AppStore(state: testState(tasks: [task], selectedThreadID: task.id, workspacePath: workspace.path))
 
         store.approveReview(taskID: task.id, stepID: step.id)
 
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "approved")
-        XCTAssertEqual(store.state.selectedTask?.steps.first?.approved, true)
-        XCTAssertTrue(store.state.selectedTask?.steps.contains(where: { $0.kind == .reviewResult && $0.approved == true }) == true)
+        XCTAssertEqual(store.state.selectedThread?.steps.first?.approved, true)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains(where: { $0.kind == .reviewResult && $0.approved == true }) == true)
         XCTAssertTrue(AuditLog.shared.recentEntries.contains { $0.tool == "file.write" && $0.success })
     }
     func testRejectReviewDoesNotWriteFileAndRecordsAudit() throws {
@@ -57,12 +57,12 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
             diffNewContent: "rejected"
         )
         let task = AgentTask(title: "拒绝写入", steps: [step], context: TaskContext(workspaceRoot: workspace.path))
-        let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id, workspacePath: workspace.path))
+        let store = AppStore(state: testState(tasks: [task], selectedThreadID: task.id, workspacePath: workspace.path))
 
         store.rejectReview(taskID: task.id, stepID: step.id)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
-        XCTAssertEqual(store.state.selectedTask?.steps.first?.approved, false)
+        XCTAssertEqual(store.state.selectedThread?.steps.first?.approved, false)
         XCTAssertTrue(AuditLog.shared.recentEntries.contains { $0.tool == "file.write" && !$0.success })
     }
     func testRollbackLastApprovedWriteRestoresOldContent() throws {
@@ -81,7 +81,7 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
             diffNewContent: "new"
         )
         let task = AgentTask(title: "回滚写入", steps: [step], context: TaskContext(workspaceRoot: workspace.path))
-        let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id, workspacePath: workspace.path))
+        let store = AppStore(state: testState(tasks: [task], selectedThreadID: task.id, workspacePath: workspace.path))
 
         store.approveReview(taskID: task.id, stepID: step.id)
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "new")
@@ -89,7 +89,7 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
         store.rollbackLastApprovedWrite(taskID: task.id)
 
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "old")
-        XCTAssertTrue(store.state.selectedTask?.steps.contains { $0.kind == .reviewResult && $0.text.contains("已回滚") } == true)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .reviewResult && $0.text.contains("已回滚") } == true)
         XCTAssertTrue(AuditLog.shared.recentEntries.contains { $0.tool == "file.rollback" && $0.success })
     }
     func testApproveAllPendingReviewsWritesEveryFileAndRecordsBatchAudit() throws {
@@ -123,16 +123,16 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
             steps: [firstStep, secondStep],
             context: TaskContext(workspaceRoot: workspace.path)
         )
-        let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id, workspacePath: workspace.path))
+        let store = AppStore(state: testState(tasks: [task], selectedThreadID: task.id, workspacePath: workspace.path))
 
         store.approveAllPendingReviews(taskID: task.id)
 
         XCTAssertEqual(try String(contentsOf: first, encoding: .utf8), "first new")
         XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "second new")
-        let reviewSteps = store.state.selectedTask?.steps.filter { $0.kind == .reviewRequest } ?? []
+        let reviewSteps = store.state.selectedThread?.steps.filter { $0.kind == .reviewRequest } ?? []
         XCTAssertEqual(reviewSteps.count, 2)
         XCTAssertTrue(reviewSteps.allSatisfy { $0.approved == true })
-        XCTAssertTrue(store.state.selectedTask?.steps.contains {
+        XCTAssertTrue(store.state.selectedThread?.steps.contains {
             $0.kind == .reviewResult && $0.text.contains("批量写入成功：2 个文件")
         } == true)
         XCTAssertTrue(AuditLog.shared.recentEntries.contains { $0.tool == "batch.apply" && $0.success })
@@ -168,7 +168,7 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
             steps: [firstStep, secondStep],
             context: TaskContext(workspaceRoot: workspace.path)
         )
-        let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id, workspacePath: workspace.path))
+        let store = AppStore(state: testState(tasks: [task], selectedThreadID: task.id, workspacePath: workspace.path))
 
         store.approveAllPendingReviews(taskID: task.id)
         XCTAssertEqual(try String(contentsOf: first, encoding: .utf8), "first new")
@@ -178,10 +178,10 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertEqual(try String(contentsOf: first, encoding: .utf8), "first old")
         XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "second old")
-        let reviewSteps = store.state.selectedTask?.steps.filter { $0.kind == .reviewRequest } ?? []
+        let reviewSteps = store.state.selectedThread?.steps.filter { $0.kind == .reviewRequest } ?? []
         XCTAssertEqual(reviewSteps.count, 2)
         XCTAssertTrue(reviewSteps.allSatisfy { $0.approved == nil })
-        XCTAssertTrue(store.state.selectedTask?.steps.contains {
+        XCTAssertTrue(store.state.selectedThread?.steps.contains {
             $0.kind == .reviewResult && $0.text.contains("批量回滚完成：2/2 个文件已恢复")
         } == true)
         XCTAssertTrue(AuditLog.shared.recentEntries.contains { $0.tool == "batch.rollback" && $0.success })
@@ -202,14 +202,14 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
             diffNewContent: "new"
         )
         let task = AgentTask(title: "外部修改拦截", steps: [step], context: TaskContext(workspaceRoot: workspace.path))
-        let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id, workspacePath: workspace.path))
+        let store = AppStore(state: testState(tasks: [task], selectedThreadID: task.id, workspacePath: workspace.path))
         try "external".write(to: target, atomically: true, encoding: .utf8)
 
         store.approveReview(taskID: task.id, stepID: step.id)
 
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "external")
-        XCTAssertEqual(store.state.selectedTask?.steps.first?.approved, false)
-        XCTAssertTrue(store.state.selectedTask?.steps.contains {
+        XCTAssertEqual(store.state.selectedThread?.steps.first?.approved, false)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains {
             $0.kind == .reviewResult && $0.text.contains("文件在审查期间被外部修改")
         } == true)
         XCTAssertTrue(AuditLog.shared.recentEntries.contains { $0.tool == "file.write" && !$0.success })
@@ -233,7 +233,7 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
             diffHunks: [firstHunk, secondHunk]
         )
         let task = AgentTask(title: "Hunk 审查", steps: [step], context: TaskContext(workspaceRoot: workspace.path))
-        let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id, workspacePath: workspace.path))
+        let store = AppStore(state: testState(tasks: [task], selectedThreadID: task.id, workspacePath: workspace.path))
 
         store.approveHunk(taskID: task.id, stepID: step.id, hunkID: firstHunk.id)
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), oldContent)
@@ -241,9 +241,9 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
         store.rejectHunk(taskID: task.id, stepID: step.id, hunkID: secondHunk.id)
 
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "ALPHA\nbeta\ngamma\n")
-        XCTAssertEqual(store.state.selectedTask?.steps.first?.approved, true)
-        XCTAssertEqual(store.state.selectedTask?.steps.first?.diffHunks?.map { $0.approved == true }, [true, false])
-        XCTAssertTrue(store.state.selectedTask?.steps.contains {
+        XCTAssertEqual(store.state.selectedThread?.steps.first?.approved, true)
+        XCTAssertEqual(store.state.selectedThread?.steps.first?.diffHunks?.map { $0.approved == true }, [true, false])
+        XCTAssertTrue(store.state.selectedThread?.steps.contains {
             $0.kind == .reviewResult && $0.text.contains("接受 1 / 拒绝 1 个 hunk")
         } == true)
     }

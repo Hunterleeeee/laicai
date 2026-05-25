@@ -36,13 +36,13 @@ struct LaicaiNativeApp: App {
         .defaultSize(width: 1200, height: 760)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("新 Agent") {
-                    store.newTask()
+                Button("新任务") {
+                    store.newThread()
                 }
                 .keyboardShortcut("n", modifiers: [.command])
 
                 Button("新会话") {
-                    store.newSession()
+                    store.newThread()
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
 
@@ -52,7 +52,7 @@ struct LaicaiNativeApp: App {
                 .keyboardShortcut("3", modifiers: [.command])
             }
 
-            CommandMenu("Agent") {
+            CommandMenu("会话") {
                 Button("命令面板") {
                     NotificationCenter.default.post(name: .laicaiToggleCommandPalette, object: nil)
                 }

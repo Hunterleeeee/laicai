@@ -11,8 +11,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             state: .init(
                 workspaceName: "Test",
                 modeLabel: "Build",
-                sessions: [],
-                selectedSessionID: nil,
+                threads: [],
+                selectedThreadID: nil,
                 workbenchTab: .tools,
                 connectors: [connector],
                 activeConnectorID: connector.id,
@@ -34,23 +34,30 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         store.updateDraft("帮我生成一个 README")
         store.sendDraft()
         try await waitUntilIdle(store)
-        let threadID = try XCTUnwrap(store.state.selectedTaskID)
+        let threadID = try XCTUnwrap(store.state.selectedThreadID)
 
-        XCTAssertEqual(store.state.tasks.count, 1)
-        XCTAssertEqual(store.state.selectedTaskID, threadID)
-        XCTAssertEqual(store.state.selectedTask?.status, .completed)
-        XCTAssertEqual(store.state.selectedTask?.steps.filter { $0.kind == .aiThinking && $0.text == "正在理解任务并准备执行。" }.count, 1)
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(store.state.selectedThreadID, threadID)
+        XCTAssertEqual(store.state.selectedThread?.status, .completed)
+        XCTAssertEqual(store.state.selectedThread?.agentState, .completed)
+        XCTAssertEqual(store.state.selectedThread?.agentGoal, "帮我生成一个 README")
+        XCTAssertFalse(store.state.selectedThread?.currentPlan.isEmpty ?? true)
+        XCTAssertEqual(store.state.selectedThread?.taskProtocol?.taskGoal, "帮我生成一个 README")
+        XCTAssertEqual(store.state.selectedThread?.taskProtocol?.threadID, threadID)
+        XCTAssertEqual(store.state.selectedThread?.executionLedger?.goal, "帮我生成一个 README")
+        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .aiThinking && $0.text == "正在理解会话目标并准备执行。" }.count, 1)
 
         store.updateDraft("请继续这个话题")
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertEqual(store.state.tasks.count, 1)
-        XCTAssertEqual(store.state.selectedTaskID, threadID)
-        XCTAssertEqual(store.state.selectedTask?.steps.filter { $0.kind == .userInput }.map(\.text), ["帮我生成一个 README", "请继续这个话题"])
-        XCTAssertEqual(store.state.selectedTask?.steps.filter { $0.kind == .aiThinking && $0.text == "正在理解任务并准备执行。" }.count, 1)
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(store.state.selectedThreadID, threadID)
+        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .userInput }.map(\.text), ["帮我生成一个 README", "请继续这个话题"])
+        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .aiThinking && $0.text == "正在理解会话目标并准备执行。" }.count, 1)
         XCTAssertEqual(runtime.requests.last?.sessionID, threadID)
         XCTAssertTrue(runtime.requests.last?.messages?.contains { $0.role == "assistant" && ($0.content ?? "").contains("完成") } == true)
+        XCTAssertEqual(store.state.selectedThread?.taskProtocol?.threadID, threadID)
     }
     func testFailedTaskGetsCheckpointAndContinuationCarriesIt() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
@@ -59,8 +66,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             state: .init(
                 workspaceName: "Test",
                 modeLabel: "Build",
-                sessions: [],
-                selectedSessionID: nil,
+                threads: [],
+                selectedThreadID: nil,
                 workbenchTab: .tools,
                 connectors: [connector],
                 activeConnectorID: connector.id,
@@ -83,18 +90,18 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        let threadID = try XCTUnwrap(store.state.selectedTaskID)
-        XCTAssertEqual(store.state.selectedTask?.status, .failed)
-        XCTAssertTrue(store.state.selectedTask?.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("任务检查点") } == true)
+        let threadID = try XCTUnwrap(store.state.selectedThreadID)
+        XCTAssertEqual(store.state.selectedThread?.status, .failed)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("任务检查点") } == true)
 
         runtime.shouldFail = false
-        store.updateDraft("继续这个任务")
+        store.updateDraft("继续这个 Agent")
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertEqual(store.state.selectedTaskID, threadID)
+        XCTAssertEqual(store.state.selectedThreadID, threadID)
         XCTAssertTrue(runtime.requests.last?.messages?.contains { ($0.content ?? "").contains("任务检查点") } == true)
-        XCTAssertTrue(store.state.selectedTask?.steps.contains { $0.kind == .aiThinking && $0.text.contains("最近检查点") } == true)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .aiThinking && $0.text.contains("最近检查点") } == true)
     }
     func testSelectedLegacySessionPromotesToAgentThreadWhenContinued() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
@@ -108,13 +115,26 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 ChatTurn(role: .assistant, text: "旧回答")
             ]
         )
+        let thread = Thread(
+            id: session.id,
+            title: session.title,
+            preview: session.preview,
+            steps: session.turns.map { turn in
+                TaskStep(kind: turn.role == .user ? .userInput : .textOutput, text: turn.text)
+            },
+            modelName: session.modelName,
+            category: session.category,
+            isPinned: session.isPinned,
+            updatedAt: session.updatedAt,
+            agentState: .idle
+        )
         let runtime = CapturingToolsRuntime()
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
                 modeLabel: "Build",
-                sessions: [session],
-                selectedSessionID: session.id,
+                threads: [thread],
+                selectedThreadID: thread.id,
                 workbenchTab: .tools,
                 connectors: [connector],
                 activeConnectorID: connector.id,
@@ -137,11 +157,10 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertTrue(store.state.sessions.isEmpty)
-        XCTAssertEqual(store.state.tasks.count, 1)
-        XCTAssertEqual(store.state.selectedTaskID, session.id)
-        XCTAssertEqual(runtime.requests.first?.sessionID, session.id)
-        XCTAssertEqual(store.state.selectedTask?.steps.filter { $0.kind == .userInput }.map(\.text), ["旧问题", "请继续旧会话"])
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(store.state.selectedThreadID, thread.id)
+        XCTAssertEqual(runtime.requests.first?.sessionID, thread.id)
+        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .userInput }.map(\.text), ["旧问题", "请继续旧会话"])
         XCTAssertTrue(runtime.requests.first?.messages?.contains { $0.role == "assistant" && ($0.content ?? "").contains("旧回答") } == true)
     }
     func testRetrySelectedTaskCreatesReplacementThread() {
@@ -155,11 +174,26 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             ],
             connectorID: connector.id
         )
+        let thread = Thread(
+            id: failedTask.id,
+            title: failedTask.title,
+            preview: failedTask.preview,
+            status: failedTask.status,
+            steps: failedTask.steps,
+            connectorID: failedTask.connectorID,
+            workflowName: failedTask.workflowName,
+            context: failedTask.context,
+            updatedAt: failedTask.updatedAt,
+            agentState: Thread.inferAgentState(status: failedTask.status),
+            agentGoal: failedTask.steps.first(where: { $0.kind == .userInput })?.text,
+            taskProtocol: failedTask.taskProtocol,
+            executionLedger: failedTask.executionLedger
+        )
         let store = AppStore(state: .init(
             workspaceName: "Test",
             modeLabel: "Build",
-            sessions: [],
-            selectedSessionID: nil,
+            threads: [thread],
+            selectedThreadID: thread.id,
             workbenchTab: .tools,
             connectors: [connector],
             activeConnectorID: connector.id,
@@ -167,28 +201,40 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             workflowRuns: [],
             draftMessage: "",
             isGenerating: false,
-            settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
-            tasks: [failedTask],
-            selectedTaskID: failedTask.id
+            settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
         ))
 
         store.retryLastMessage()
 
-        XCTAssertEqual(store.state.tasks.count, 2)
-        XCTAssertEqual(store.state.tasks.first?.steps.first?.text, "重新整理今天的 AI 新闻")
-        XCTAssertEqual(store.state.selectedTaskID, store.state.tasks.first?.id)
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(store.state.threads.first?.steps.first?.text, "重新整理今天的 AI 新闻")
+        XCTAssertEqual(store.state.selectedThreadID, store.state.threads.first?.id)
         XCTAssertTrue(store.state.isGenerating)
     }
     func testPrepareTaskContinuationSelectsTaskAndPrefillsDraft() {
         let task = AgentTask(title: "任务", status: .completed)
-        let store = AppStore(state: testState(tasks: [task]))
+        let thread = Thread(
+            id: task.id,
+            title: task.title,
+            preview: task.preview,
+            status: task.status,
+            steps: task.steps,
+            connectorID: task.connectorID,
+            workflowName: task.workflowName,
+            context: task.context,
+            updatedAt: task.updatedAt,
+            agentState: Thread.inferAgentState(status: task.status),
+            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            taskProtocol: task.taskProtocol,
+            executionLedger: task.executionLedger
+        )
+        let store = AppStore(state: testState(threads: [thread], selectedThreadID: thread.id))
 
         store.prepareTaskContinuation(id: task.id)
 
-        XCTAssertEqual(store.state.selectedTaskID, task.id)
-        XCTAssertNil(store.state.selectedSessionID)
-        XCTAssertEqual(store.state.modeLabel, "任务")
-        XCTAssertEqual(store.state.draftMessage, "继续这个任务")
+        XCTAssertEqual(store.state.selectedThreadID, task.id)
+        XCTAssertEqual(store.state.modeLabel, "会话")
+        XCTAssertEqual(store.state.draftMessage, "继续这个会话")
     }
     func testShortFollowUpOnSelectedTaskContinuesTask() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
@@ -196,13 +242,28 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             TaskStep(kind: .userInput, text: "帮我生成 README"),
             TaskStep(kind: .textOutput, text: "完成")
         ])
+        let thread = Thread(
+            id: task.id,
+            title: task.title,
+            preview: task.preview,
+            status: task.status,
+            steps: task.steps,
+            connectorID: task.connectorID,
+            workflowName: task.workflowName,
+            context: task.context,
+            updatedAt: task.updatedAt,
+            agentState: Thread.inferAgentState(status: task.status),
+            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            taskProtocol: task.taskProtocol,
+            executionLedger: task.executionLedger
+        )
         let runtime = CapturingToolsRuntime()
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "任务",
-                sessions: [],
-                selectedSessionID: nil,
+                modeLabel: "Agent",
+                threads: [thread],
+                selectedThreadID: thread.id,
                 workbenchTab: .tools,
                 connectors: [connector],
                 activeConnectorID: connector.id,
@@ -210,9 +271,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
-                tasks: [task],
-                selectedTaskID: task.id
+                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -227,9 +286,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertNil(store.state.selectedSessionID)
-        XCTAssertEqual(store.state.selectedTaskID, task.id)
-        XCTAssertEqual(store.state.selectedTask?.steps.filter { $0.kind == .userInput }.map(\.text), ["帮我生成 README", "这个呢"])
+        XCTAssertEqual(store.state.selectedThreadID, task.id)
+        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .userInput }.map(\.text), ["帮我生成 README", "这个呢"])
     }
     func testReplyOnIdleRunningTaskContinuesSameTask() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
@@ -237,13 +295,28 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             TaskStep(kind: .userInput, text: "读取本地项目并优化"),
             TaskStep(kind: .toolCall, text: "正在搜索项目内容", toolName: "code.search")
         ])
+        let thread = Thread(
+            id: task.id,
+            title: task.title,
+            preview: task.preview,
+            status: task.status,
+            steps: task.steps,
+            connectorID: task.connectorID,
+            workflowName: task.workflowName,
+            context: task.context,
+            updatedAt: task.updatedAt,
+            agentState: Thread.inferAgentState(status: task.status),
+            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            taskProtocol: task.taskProtocol,
+            executionLedger: task.executionLedger
+        )
         let runtime = CapturingToolsRuntime()
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "任务",
-                sessions: [],
-                selectedSessionID: nil,
+                modeLabel: "Agent",
+                threads: [thread],
+                selectedThreadID: thread.id,
                 workbenchTab: .tools,
                 connectors: [connector],
                 activeConnectorID: connector.id,
@@ -251,9 +324,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
-                tasks: [task],
-                selectedTaskID: task.id
+                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -268,11 +339,10 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertNil(store.state.selectedSessionID)
-        XCTAssertEqual(store.state.selectedTaskID, task.id)
-        XCTAssertEqual(store.state.tasks.count, 1)
-        XCTAssertTrue(store.state.selectedTask?.steps.contains { $0.text.contains("上次执行没有正常结束") } == true)
-        XCTAssertTrue(store.state.selectedTask?.steps.contains { $0.kind == .userInput && $0.text.contains("继续刚才这个任务") } == true)
+        XCTAssertEqual(store.state.selectedThreadID, task.id)
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.text.contains("上次执行没有正常结束") } == true)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .userInput && $0.text.contains("继续刚才这个任务") } == true)
     }
 
     func testTaskCreatedWithoutSelectionIgnoresGlobalActiveProject() async throws {
@@ -286,8 +356,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertEqual(store.state.selectedThread?.source, .task)
-        XCTAssertNil(store.state.selectedThread?.projectID)
+                XCTAssertNil(store.state.selectedThread?.projectID)
     }
 
     func testProjectPlaceholderKeepsProjectIDWhenPromotedToTask() async throws {
@@ -295,14 +364,173 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         let connector = makeConnector()
         let store = makeTestStore(connectors: [connector], activeConnectorID: connector.id)
 
-        store.newSessionInProject(projectID)
+        store.newThreadInProject(projectID)
         let threadID = try XCTUnwrap(store.state.selectedThreadID)
         store.updateDraft("帮我生成一个 README")
         store.sendDraft()
         try await waitUntilIdle(store)
 
         XCTAssertEqual(store.state.selectedThreadID, threadID)
-        XCTAssertEqual(store.state.selectedThread?.source, .task)
-        XCTAssertEqual(store.state.selectedThread?.projectID, projectID)
+                XCTAssertEqual(store.state.selectedThread?.projectID, projectID)
+    }
+
+    func testContinueButtonUsesLedgerNextAction() async throws {
+        let connector = makeConnector()
+        var ledger = AgentExecutionLedger(
+            originalRequest: "修复继续按钮",
+            goal: "修复继续按钮",
+            state: .paused,
+            plan: ["读取账本", "继续执行"],
+            nextAction: "恢复 pendingFollowUp 并继续验证"
+        )
+        ledger.appendUnique("Sources/AppStore.swift", to: \.readFiles)
+        let task = AgentTask(
+            title: "修复继续按钮",
+            status: .cancelled,
+            steps: [
+                TaskStep(kind: .userInput, text: "修复继续按钮"),
+                TaskStep(kind: .toolResult, text: "读取完成", toolName: "file.read", toolParams: ["path": "Sources/AppStore.swift"])
+            ],
+            connectorID: connector.id,
+            context: TaskContext(workspaceRoot: "/tmp"),
+            executionLedger: ledger
+        )
+        let runtime = CapturingToolsRuntime()
+        let thread = Thread(
+            id: task.id,
+            title: task.title,
+            preview: task.preview,
+            status: task.status,
+            steps: task.steps,
+            connectorID: task.connectorID,
+            workflowName: task.workflowName,
+            context: task.context,
+            updatedAt: task.updatedAt,
+            agentState: Thread.inferAgentState(status: task.status),
+            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            taskProtocol: task.taskProtocol,
+            executionLedger: task.executionLedger
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [thread],
+                selectedThreadID: thread.id,
+                workspacePath: "/tmp",
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+
+        store.continueTask()
+        try await waitUntilIdle(store)
+
+        XCTAssertEqual(store.state.selectedThreadID, task.id)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .userInput && $0.text.contains("恢复 pendingFollowUp 并继续验证") } == true)
+        XCTAssertTrue(runtime.requests.last?.messages?.contains { ($0.content ?? "").contains("execution-ledger") } == true)
+    }
+
+    func testRunningThreadFollowUpQueuesInsteadOfDropping() {
+        let connector = makeConnector()
+        let task = AgentTask(title: "运行任务", status: .running, steps: [
+            TaskStep(kind: .userInput, text: "优化性能")
+        ])
+        let thread = Thread(
+            id: task.id,
+            title: task.title,
+            preview: task.preview,
+            status: task.status,
+            steps: task.steps,
+            connectorID: task.connectorID,
+            workflowName: task.workflowName,
+            context: task.context,
+            updatedAt: task.updatedAt,
+            agentState: Thread.inferAgentState(status: task.status),
+            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            taskProtocol: task.taskProtocol,
+            executionLedger: task.executionLedger
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [thread],
+                selectedThreadID: thread.id,
+                connectors: [connector],
+                activeConnectorID: connector.id
+            )
+        )
+        store.state.isGenerating = true
+        store.updateDraft("左边历史任务还是卡")
+
+        XCTAssertNil(store.state.pendingFollowUp)
+        XCTAssertNil(store.state.selectedThread?.executionLedger?.pendingFollowUp)
+        XCTAssertEqual(store.state.selectedThread?.steps.map(\.text), ["优化性能"])
+
+        store.sendDraft()
+
+        XCTAssertEqual(store.state.pendingFollowUp, "左边历史任务还是卡")
+        XCTAssertEqual(store.state.draftMessage, "")
+        XCTAssertEqual(store.state.selectedThread?.executionLedger?.pendingFollowUp, "左边历史任务还是卡")
+        XCTAssertEqual(store.state.selectedThread?.executionLedger?.state, .executing)
+        XCTAssertEqual(store.state.selectedThread?.steps.map(\.text), ["优化性能"])
+    }
+
+    func testTwentyFollowUpsStayOnSelectedThread() {
+        let connector = makeConnector()
+        let task = AgentTask(title: "修复会话归属", status: .running, steps: [
+            TaskStep(kind: .userInput, text: "修复继续追问新建会话 bug")
+        ])
+        let thread = Thread(
+            id: task.id,
+            title: task.title,
+            preview: task.preview,
+            status: task.status,
+            steps: task.steps,
+            connectorID: task.connectorID,
+            workflowName: task.workflowName,
+            context: task.context,
+            updatedAt: task.updatedAt,
+            agentState: Thread.inferAgentState(status: task.status),
+            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            taskProtocol: task.taskProtocol,
+            executionLedger: task.executionLedger
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [thread],
+                selectedThreadID: thread.id,
+                connectors: [connector],
+                activeConnectorID: connector.id
+            )
+        )
+        store.state.isGenerating = true
+
+        for index in 1...20 {
+            store.updateDraft("继续，第 \(index) 次")
+            store.sendDraft()
+            XCTAssertEqual(store.state.selectedThreadID, task.id)
+            XCTAssertEqual(store.state.threads.count, 1)
+        }
+
+        XCTAssertEqual(store.state.selectedThread?.executionLedger?.pendingFollowUp, "继续，第 20 次")
+        XCTAssertEqual(store.state.selectedThread?.executionLedger?.state, .executing)
+    }
+
+    func testFailedToolWritesRecoveryPathIntoLedger() {
+        var thread = Thread(
+            title: "修复编辑失败",
+            status: .failed,
+            steps: [
+                TaskStep(kind: .userInput, text: "修复文件"),
+                TaskStep(kind: .toolResult, text: "oldText 匹配失败", toolName: "file.edit", isFailure: true)
+            ],
+            agentState: .failed,
+            agentGoal: "修复文件"
+        )
+
+        AppStore.rebuildExecutionLedger(&thread)
+
+        XCTAssertTrue(thread.executionLedger?.alternativePaths.contains {
+            $0.contains("file.read + file.write")
+        } == true)
     }
 }

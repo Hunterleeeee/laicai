@@ -260,6 +260,8 @@ public struct VerifyBuildTool: LaicaiTool {
 // MARK: - Write File Tool (with diff generation)
 
 public struct WriteFileTool: LaicaiTool {
+    public init() {}
+
     public var name: String { "file.write" }
     public var description: String { "写入文件内容（需用户审查确认）" }
     public var requiresReview: Bool { true }
@@ -319,6 +321,9 @@ public struct WriteFileTool: LaicaiTool {
             oldContent = try String(contentsOfFile: fullPath, encoding: .utf8)
         } else {
             oldContent = ""
+        }
+        if let dangerousError = DangerousOperationGuard.writeViolation(path: fullPath, oldContent: oldContent, context: context) {
+            return ToolResult(output: dangerousError, success: false, error: "dangerous_operation")
         }
 
         // Determine write mode: patch vs full
@@ -590,68 +595,47 @@ public struct ShellTool: LaicaiTool {
         process.standardOutput = stdout
         process.standardError = stderr
 
-        let processBox = Locked(process)
-        let stdoutBox = Locked(stdout)
-        let stderrBox = Locked(stderr)
-        let toolName = name
-
-        return await withCheckedContinuation { continuation in
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(returning: ToolResult(output: "无法启动命令：\(error.localizedDescription)", success: false, error: "launch_failed"))
-                return
-            }
-
-            let timer = DispatchSource.makeTimerSource(queue: .global())
-            timer.schedule(deadline: .now() + timeout)
-            timer.setEventHandler {
-                processBox.withValue {
-                    if $0.isRunning { $0.terminate() }
-                }
-            }
-            timer.resume()
-
-            // Async wait for process exit via NotificationCenter
-            let observer = NotificationCenter.default.addObserver(
-                forName: Process.didTerminateNotification,
-                object: process,
-                queue: .main
-            ) { _ in
-                timer.cancel()
-                let exitCode = processBox.withValue { $0.terminationStatus }
-                let outData = stdoutBox.withValue { $0.fileHandleForReading.readDataToEndOfFile() }
-                let errData = stderrBox.withValue { $0.fileHandleForReading.readDataToEndOfFile() }
-                let output = String(data: outData, encoding: .utf8) ?? ""
-                let errorOutput = String(data: errData, encoding: .utf8) ?? ""
-
-                Task { @MainActor in
-                    let auditOutput = exitCode == 0
-                        ? "exit code 0"
-                        : "exit code \(exitCode)：\(String(errorOutput.prefix(300)))"
-                    AuditLog.shared.record(
-                        tool: toolName,
-                        input: command,
-                        output: auditOutput,
-                        success: exitCode == 0
-                    )
-                }
-
-                continuation.resume(returning: Self.makeShellResult(exitCode: exitCode, stdout: output, stderr: errorOutput))
-            }
-
-            // If process already exited before observer was set
-            if !process.isRunning {
-                NotificationCenter.default.removeObserver(observer)
-                timer.cancel()
-                let exitCode = process.terminationStatus
-                let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-                let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: outData, encoding: .utf8) ?? ""
-                let errorOutput = String(data: errData, encoding: .utf8) ?? ""
-                continuation.resume(returning: Self.makeShellResult(exitCode: exitCode, stdout: output, stderr: errorOutput))
-            }
+        do {
+            try process.run()
+        } catch {
+            return ToolResult(output: "无法启动命令：\(error.localizedDescription)", success: false, error: "launch_failed")
         }
+
+        return await Task.detached(priority: .utility) {
+            let deadline = Date().addingTimeInterval(timeout)
+            while process.isRunning && Date() < deadline {
+                usleep(50_000)
+            }
+            if process.isRunning {
+                process.terminate()
+                process.waitUntilExit()
+            } else {
+                process.waitUntilExit()
+            }
+
+            let exitCode = process.terminationStatus
+            let outData = stdout.fileHandleForReading.readDataToEndOfFile()
+            let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: outData, encoding: .utf8) ?? ""
+            let errorOutput = String(data: errData, encoding: .utf8) ?? ""
+
+            Task { @MainActor in
+                let auditOutput = exitCode == 0
+                    ? "exit code 0"
+                    : "exit code \(exitCode)：\(String(errorOutput.prefix(300)))"
+                AuditLog.shared.record(
+                    tool: name,
+                    input: command,
+                    output: auditOutput,
+                    success: exitCode == 0
+                )
+            }
+
+            if Date() >= deadline && exitCode != 0 {
+                return ToolResult(output: "命令执行超时（\(Int(timeout))秒）：\(command)", success: false, error: "timeout")
+            }
+            return Self.makeShellResult(exitCode: exitCode, stdout: output, stderr: errorOutput)
+        }.value
     }
 
     static let retryablePatterns = ["command not found", "No such file or directory", "not found in PATH"]

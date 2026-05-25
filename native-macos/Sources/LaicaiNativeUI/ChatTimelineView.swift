@@ -3,6 +3,8 @@ import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
 
+public typealias Thread = LaicaiThread
+
 // MARK: - Toolbar Button
 
 struct ToolbarButton: View {
@@ -15,11 +17,15 @@ struct ToolbarButton: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isHovered ? TextGrade.primary : TextGrade.ghost)
-                .frame(width: 28, height: 28)
+                .foregroundStyle(isHovered ? TextGrade.primary : TextGrade.muted)
+                .frame(width: 30, height: 30)
                 .background(
                     RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                        .fill(isHovered ? SurfaceGrade.hover : Color.clear)
+                        .fill(isHovered ? SurfaceGrade.hover : SurfaceGrade.elevated.opacity(0.72))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                        .strokeBorder(isHovered ? SurfaceGrade.border.opacity(0.8) : SurfaceGrade.hairline, lineWidth: 0.6)
                 )
                 .contentShape(Rectangle())
         }
@@ -47,27 +53,34 @@ struct MenuIconLabel: View {
 
 struct ThreadTimelineView: View {
     @EnvironmentObject private var store: AppStore
-    let thread: ThreadRecord
+    let thread: Thread
     private let bottomID = "thread-bottom-anchor"
-    private let compactStepLimit = 72
+    private let compactStepLimit = 12
+    private let runningStepLimit = 8
+    private let heavyStepLimit = 4
+    private let heavyThreadThreshold = 80
     @State private var scrollToken = 0
     @State private var showFullHistory = false
     @State private var userScrolledAway = false
     @State private var expandedPhases: Set<String> = []
-    @State private var lastContentWidth: CGFloat = 0
 
     var body: some View {
-        ScrollViewReader { proxy in
+        let executionSteps = thread.isExecutionAgent ? visibleSteps(for: thread) : []
+        let executionStats = thread.isExecutionAgent ? TaskStepStats(thread: thread, visibleSteps: executionSteps) : nil
+        let sessionSteps = thread.isExecutionAgent ? [] : visibleSessionSteps
+        let showsEmptyRunningState = thread.steps.isEmpty
+
+        return ScrollViewReader { proxy in
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: AppSpace.lg) {
-                        if let task = thread.task {
-                            TaskSummaryCard(task: task)
-                            if task.status == .completed || task.status == .failed {
-                                TaskCompletionSummaryCard(task: task)
+                    LazyVStack(alignment: .leading, spacing: AppSpace.xl) {
+                        if thread.isExecutionAgent, let executionStats {
+                            TaskSummaryCard(thread: thread, stats: executionStats)
+                            if thread.status == .completed || thread.status == .failed {
+                                TaskCompletionSummaryCard(thread: thread)
                                 TaskRatingBar(threadID: thread.id, currentRating: store.state.threads.first(where: { $0.id == thread.id })?.userRating ?? 0)
                             }
-                            if let plan = task.multiAgentPlan {
+                            if let plan = thread.multiAgentPlan {
                                 if plan.isEditable {
                                     MultiAgentPlanEditorView(
                                         plan: Binding(
@@ -89,78 +102,69 @@ struct ThreadTimelineView: View {
                                     MultiAgentFlowView(plan: plan)
                                     ResumePlanButton(plan: plan) {
                                         store.resumeFailedPlan(threadID: thread.id)
-                                    }
                                 }
                             }
-                        if shouldCompact(task) {
+                        }
+                        if showsEmptyRunningState {
+                            EmptyRunningThreadCard(thread: thread)
+                        }
+                        if shouldCompact(thread) {
                             TaskHistoryFoldCard(
-                                hiddenCount: hiddenStepCount(task),
+                                hiddenCount: hiddenStepCount(thread),
                                 showFullHistory: $showFullHistory
                             )
                         }
-                        ForEach(phaseGroups(for: visibleSteps(for: task))) { group in
+                        ForEach(phaseGroups(for: executionSteps)) { group in
                             if group.isToolPhase {
                                 PhaseGroupCard(
                                     group: group,
-                                    taskID: task.id,
-                                    isRunning: task.status == .running,
+                                    taskID: thread.id,
+                                    isRunning: thread.status == .running,
                                     isCollapsed: !expandedPhases.contains(group.id),
-                                    onToggle: { withAnimation(.easeInOut(duration: 0.15)) {
+                                    onToggle: {
                                         if expandedPhases.contains(group.id) {
                                             expandedPhases.remove(group.id)
                                         } else {
                                             expandedPhases.insert(group.id)
                                         }
-                                    }}
+                                    }
                                 )
                             } else {
                                 ForEach(group.steps) { step in
                                     TaskStepCard(
                                         step: step,
-                                        taskID: task.id,
-                                        isRunning: task.status == .running
+                                        taskID: thread.id,
+                                        isRunning: thread.status == .running
                                     )
                                     .id(step.id)
                                 }
                             }
                         }
                     } else {
-                        ForEach(thread.events) { event in
-                            ThreadEventCard(event: event)
-                                .id(event.id)
+                        if shouldCompact(thread) {
+                            TaskHistoryFoldCard(
+                                hiddenCount: hiddenStepCount(thread),
+                                showFullHistory: $showFullHistory
+                            )
+                        }
+                        ForEach(sessionSteps) { step in
+                            SessionStepCard(step: step)
+                                .id(step.id)
                         }
                     }
 
                     if store.state.isGenerating {
                         TypingIndicator()
-                            .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     }
 
                     Color.clear
                         .frame(height: 1)
                         .id(bottomID)
-                        .background(
-                            GeometryReader { geo in
-                                // Quantize to reduce onChange firing frequency (every ~50pt instead of every pixel)
-                                let frame = geo.frame(in: .named("timeline-scroll"))
-                                let quantized = Int(frame.minY / 50)
-                                Color.clear
-                                    .onChange(of: quantized) { _ in
-                                        let scrollViewHeight = geo.frame(in: .global).height
-                                        let isNearBottom = frame.minY < scrollViewHeight + 120
-                                        if !isNearBottom && !userScrolledAway {
-                                            userScrolledAway = true
-                                        } else if isNearBottom && userScrolledAway {
-                                            userScrolledAway = false
-                                        }
-                                    }
-                            }
-                        )
                 }
-                .frame(maxWidth: LayoutConst.composerMaxWidth + 60, alignment: .leading)
-                .padding(.horizontal, AppSpace.xl)
-                .padding(.top, AppSpace.md)
-                .padding(.bottom, AppSpace.lg)
+                .frame(maxWidth: LayoutConst.conversationMaxWidth, alignment: .leading)
+                .padding(.horizontal, AppSpace.xxl)
+                .padding(.top, AppSpace.xxl)
+                .padding(.bottom, AppSpace.xl)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
             .coordinateSpace(name: "timeline-scroll")
@@ -168,12 +172,11 @@ struct ThreadTimelineView: View {
             .onAppear {
                 scrollToBottom(proxy)
             }
-            .onChange(of: thread.events.count) { _ in scheduleScrollToBottom(proxy) }
-            .onChange(of: thread.task?.steps.count) { _ in scheduleScrollToBottom(proxy) }
+            .onChange(of: thread.steps.count) { _ in scheduleScrollToBottom(proxy) }
             .onChange(of: store.state.isGenerating) { isGen in
                 if isGen { userScrolledAway = false; scheduleScrollToBottom(proxy) }
             }
-            .onChange(of: thread.task?.status) { newStatus in
+            .onChange(of: thread.status) { newStatus in
                 if newStatus == .running { userScrolledAway = false; scheduleScrollToBottom(proxy) }
             }
             .onChange(of: streamingTextLength) { _ in scheduleScrollToBottom(proxy) }
@@ -187,34 +190,19 @@ struct ThreadTimelineView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .laicaiScrollToBottom)) { _ in
                 userScrolledAway = false
-                withAnimation(.easeOut(duration: 0.25)) {
-                    proxy.scrollTo(bottomID, anchor: .bottom)
-                }
+                proxy.scrollTo(bottomID, anchor: .bottom)
             }
-            // 宽度变化检测：侧边栏/工作台切换后自动滚回底部
-            .background(alignment: .topLeading) {
-                GeometryReader { geo in
-                    Color.clear
-                        .onAppear { lastContentWidth = geo.size.width }
-                        .onChange(of: geo.size.width) { newWidth in
-                            guard abs(newWidth - lastContentWidth) > 5 else { return }
-                            lastContentWidth = newWidth
-                            scheduleScrollToBottom(proxy)
-                        }
-                }
-            }
-
                 // Batch review floating bar
-                if let task = thread.task {
-                    let pendingReviews = task.steps.filter { $0.kind == .reviewRequest && $0.approved == nil }
-                    if pendingReviews.count >= 2 {
+                if let executionStats {
+                    if executionStats.pendingReviewIDs.count >= 2 {
                         BatchReviewBar(
-                            pendingCount: pendingReviews.count,
-                            taskID: task.id,
-                            stepIDs: pendingReviews.map(\.id)
+                            pendingCount: executionStats.pendingReviewIDs.count,
+                            taskID: thread.id,
+                            stepIDs: executionStats.pendingReviewIDs
                         )
-                        .padding(.bottom, AppSpace.sm)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .padding(.bottom, AppSpace.xl)
+                        .padding(.trailing, AppSpace.xxl)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
 
@@ -222,31 +210,27 @@ struct ThreadTimelineView: View {
                 if userScrolledAway {
                     Button {
                         userScrolledAway = false
-                        withAnimation(.easeOut(duration: 0.25)) {
-                            proxy.scrollTo(bottomID, anchor: .bottom)
-                        }
+                        proxy.scrollTo(bottomID, anchor: .bottom)
                     } label: {
-                        HStack(spacing: 4) {
+                        ZStack {
                             Image(systemName: "arrow.down")
                                 .font(.system(size: 10, weight: .bold))
-                            Text("最新")
-                                .font(.system(size: 11, weight: .medium))
                         }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, AppSpace.md)
-                        .padding(.vertical, AppSpace.sm)
+                        .foregroundStyle(TextGrade.inverted)
+                        .frame(width: 32, height: 32)
                         .background(
-                            Capsule()
-                                .fill(Brand.primary.opacity(0.9))
-                                .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+                            Circle()
+                                .fill(Brand.primary)
+                                .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
                         )
                     }
                     .buttonStyle(.plain)
-                    .padding(.bottom, AppSpace.lg)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .animation(.easeInOut(duration: 0.2), value: userScrolledAway)
+                    .padding(.bottom, AppSpace.xl)
+                    .padding(.trailing, AppSpace.xxl)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -255,7 +239,7 @@ struct ThreadTimelineView: View {
         scrollToken += 1
         let token = scrollToken
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(90))
+            try? await Task.sleep(for: .milliseconds(120))
             guard token == scrollToken else { return }
             proxy.scrollTo(bottomID, anchor: .bottom)
         }
@@ -272,24 +256,21 @@ struct ThreadTimelineView: View {
     /// Quantized to ~200 chars to avoid firing on every single character append.
     private var streamingTextLength: Int {
         let raw: Int
-        if let task = thread.task {
-            raw = task.steps.last?.text.count ?? 0
-        } else {
-            raw = thread.events.last?.text.count ?? 0
-        }
+        raw = thread.steps.last?.text.count ?? 0
         return raw / 200
     }
 
-    private func shouldCompact(_ task: AgentTask) -> Bool {
-        !showFullHistory && task.steps.count > compactStepLimit
+    private func shouldCompact(_ thread: Thread) -> Bool {
+        !showFullHistory && thread.steps.count > stepLimit(for: thread)
     }
 
-    private func hiddenStepCount(_ task: AgentTask) -> Int {
-        max(task.steps.count - compactStepLimit, 0)
+    private func hiddenStepCount(_ thread: Thread) -> Int {
+        max(thread.steps.count - stepLimit(for: thread), 0)
     }
 
-    private func visibleSteps(for task: AgentTask) -> [TaskStep] {
-        let steps = shouldCompact(task) ? Array(task.steps.suffix(compactStepLimit)) : task.steps
+    private func visibleSteps(for thread: Thread) -> [TaskStep] {
+        let limit = stepLimit(for: thread)
+        let steps = (!showFullHistory && thread.steps.count > limit) ? Array(thread.steps.suffix(limit)) : thread.steps
         // Merge continuation textOutput steps into their originals
         let continuations = steps.filter { $0.continuationOf != nil && $0.kind == .textOutput }
         guard !continuations.isEmpty else { return steps }
@@ -306,6 +287,74 @@ struct ThreadTimelineView: View {
             }
         }
         return merged
+    }
+
+    private func stepLimit(for thread: Thread) -> Int {
+        if thread.steps.count > heavyThreadThreshold { return heavyStepLimit }
+        return thread.status == .running ? runningStepLimit : compactStepLimit
+    }
+
+    private var visibleSessionSteps: [TaskStep] {
+        let limit = thread.status == .running ? runningStepLimit : compactStepLimit
+        return (!showFullHistory && thread.steps.count > limit) ? Array(thread.steps.suffix(limit)) : thread.steps
+    }
+}
+
+private struct EmptyRunningThreadCard: View {
+    let thread: Thread
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.md) {
+                ZStack {
+                    Circle()
+                        .fill(Semantic.toolRunning.opacity(0.12))
+                        .frame(width: 30, height: 30)
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.72)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(TextHelper.compactTitle(thread.title))
+                        .font(AppFont.headline)
+                        .foregroundStyle(TextGrade.primary)
+                        .lineLimit(2)
+                    Text(statusLine)
+                        .font(AppFont.caption)
+                        .foregroundStyle(TextGrade.muted)
+                }
+            }
+
+            if let goal = visibleGoal {
+                Text(goal)
+                    .font(AppFont.body)
+                    .foregroundStyle(TextGrade.secondary)
+                    .lineLimit(3)
+            }
+        }
+        .padding(AppSpace.lg)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                .fill(SurfaceGrade.card.opacity(0.84))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                .strokeBorder(Semantic.toolRunning.opacity(0.20), lineWidth: 0.7)
+        )
+    }
+
+    private var statusLine: String {
+        if thread.multiAgentPlan != nil { return "多会话计划已创建，正在启动第一步…" }
+        if thread.status == .running || thread.agentState == .running { return "会话已创建，正在准备上下文…" }
+        return "正在准备…"
+    }
+
+    private var visibleGoal: String? {
+        let raw = thread.agentGoal?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? thread.executionLedger?.goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let raw, !raw.isEmpty else { return nil }
+        return raw
     }
 }
 
@@ -360,18 +409,18 @@ private struct ThreadSummaryCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpace.sm) {
             HStack(spacing: AppSpace.sm) {
-                Image(systemName: thread.isPinned ? "pin.fill" : "text.bubble.fill")
+                Image(systemName: thread.isPinned ? "pin.fill" : agentIcon)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(thread.isPinned ? Semantic.warning : Brand.primary)
+                    .foregroundStyle(thread.isPinned ? Semantic.warning : agentTint)
                     .frame(width: 24, height: 24)
-                    .background(Circle().fill((thread.isPinned ? Semantic.warning : Brand.primary).opacity(0.12)))
+                    .background(Circle().fill((thread.isPinned ? Semantic.warning : agentTint).opacity(0.12)))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(thread.title)
                         .font(AppFont.headline)
                         .foregroundStyle(TextGrade.primary)
                         .lineLimit(2)
-                    Text("会话 · \(thread.events.count) 条记录 · \(RelativeTimeFormatter.string(for: thread.updatedAt))")
+                    Text("会话 · \(thread.resolvedAgentState.title) · \(thread.events.count) 条记录 · \(RelativeTimeFormatter.string(for: thread.updatedAt))")
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.muted)
                 }
@@ -403,32 +452,60 @@ private struct ThreadSummaryCard: View {
                 .strokeBorder(SurfaceGrade.divider, lineWidth: 0.75)
         )
     }
+
+    private var agentIcon: String {
+        switch thread.resolvedAgentState {
+        case .planning: return "list.bullet.clipboard"
+        case .running: return "waveform.path.ecg"
+        case .waitingForApproval: return "hand.raised.fill"
+        case .blocked, .failed: return "exclamationmark.triangle.fill"
+        case .paused: return "pause.circle.fill"
+        case .completed: return "checkmark.circle.fill"
+        case .archived: return "archivebox.fill"
+        case .idle: return thread.hasContent ? "bubble.left.and.bubble.right.fill" : "sparkles"
+        }
+    }
+
+    private var agentTint: Color {
+        switch thread.resolvedAgentState {
+        case .planning, .running: return Brand.primary
+        case .waitingForApproval: return Semantic.warning
+        case .blocked, .failed: return Semantic.error
+        case .paused: return TextGrade.muted
+        case .completed: return Semantic.success
+        case .archived: return TextGrade.ghost
+        case .idle: return Brand.primary
+        }
+    }
 }
 
-private struct ThreadEventCard: View {
-    let event: ThreadEvent
+private struct SessionStepCard: View {
+    let step: TaskStep
 
     var body: some View {
-        switch event.kind {
-        case .user:
-            UserInputCard(text: event.text)
-        case .assistant:
-            TextOutputCard(text: event.text, metrics: event.metrics, isRunning: false)
-        case .thinking:
-            ThinkingCard(text: event.text, reasoningContent: nil, isRunning: false)
+        switch step.kind {
+        case .userInput:
+            UserInputCard(text: step.text)
+        case .textOutput:
+            TextOutputCard(text: step.text, metrics: step.metrics, isRunning: step.metrics == nil && step.toolCallId == AppStore.streamingOutputID)
+        case .aiThinking:
+            ThinkingCard(text: step.text, reasoningContent: step.reasoningContent, isRunning: false)
         case .toolCall:
-            timelineSystemCard(icon: "wrench.and.screwdriver.fill", title: "工具调用", text: event.text, color: Semantic.toolCall)
+            timelineSystemCard(icon: "wrench.and.screwdriver.fill", title: "工具调用", text: step.text, color: Semantic.toolCall)
         case .toolResult:
-            timelineSystemCard(icon: "checkmark.circle.fill", title: "工具结果", text: event.text, color: Semantic.success)
-        case .review:
-            timelineSystemCard(icon: "eye.fill", title: "审查", text: event.text, color: Semantic.warning)
+            timelineSystemCard(icon: "checkmark.circle.fill", title: "工具结果", text: step.text, color: step.isFailure ? Semantic.error : Semantic.success)
+        case .reviewRequest:
+            timelineSystemCard(icon: "eye.fill", title: "审查", text: step.text, color: Semantic.warning)
+        case .reviewResult:
+            timelineSystemCard(icon: "checkmark.seal.fill", title: "审查结果", text: step.text, color: Semantic.success)
         case .error:
-            timelineSystemCard(icon: "exclamationmark.triangle.fill", title: "错误", text: event.text, color: Semantic.error)
+            timelineSystemCard(icon: "exclamationmark.triangle.fill", title: "错误", text: step.text, color: Semantic.error)
         }
     }
 
     private func timelineSystemCard(icon: String, title: String, text: String, color: Color) -> some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+        let display = text.count > 800 ? String(text.prefix(800)) + "\n\n… 共 \(text.count) 字，已折叠" : text
+        return HStack(alignment: .top, spacing: AppSpace.sm) {
             AvatarBadge(icon: icon, color: color)
 
             VStack(alignment: .leading, spacing: AppSpace.xs) {
@@ -436,10 +513,10 @@ private struct ThreadEventCard: View {
                     .font(AppFont.captionMedium)
                     .foregroundStyle(color)
 
-                Text(text)
+                Text(display)
                     .font(AppFont.body)
                     .foregroundStyle(TextGrade.secondary)
-                    .textSelection(.enabled)
+                    .lineLimit(8)
                     .padding(AppSpace.md)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
@@ -478,10 +555,10 @@ struct MultiAgentFlowView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("多Agent协同编排")
+                    Text("多会话协同编排")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(TextGrade.primary)
-                    Text("\(plan.agents.count) 个Agent · \(plan.progress)")
+                    Text("\(plan.agents.count) 个会话 · \(plan.progress)")
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.muted)
                 }
@@ -510,9 +587,7 @@ struct MultiAgentFlowView: View {
                     ForEach(Array(plan.agents.enumerated()), id: \.element.id) { index, agent in
                         flowNodeCard(agent: agent, index: index)
                             .onTapGesture {
-                                withAnimation(AppAnimation.spring) {
-                                    selectedAgentID = selectedAgentID == agent.id ? nil : agent.id
-                                }
+                                selectedAgentID = selectedAgentID == agent.id ? nil : agent.id
                             }
 
                         if index < plan.agents.count - 1 {
@@ -529,7 +604,7 @@ struct MultiAgentFlowView: View {
                let agent = plan.agents.first(where: { $0.id == selectedID }) {
                 Rectangle().fill(SurfaceGrade.divider).frame(height: 0.5)
                 flowAgentDetail(agent: agent)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.opacity)
             }
         }
         .background(
@@ -547,7 +622,7 @@ struct MultiAgentFlowView: View {
                     lineWidth: 0.5
                 )
         )
-        .shadow(color: Brand.purple.opacity(0.08), radius: 20, y: 8)
+        .shadow(color: Brand.purple.opacity(0.035), radius: 6, y: 2)
         .onAppear { pulsePhase = true }
     }
 
@@ -565,23 +640,10 @@ struct MultiAgentFlowView: View {
                     .fill(nodeColor.opacity(0.10))
                     .frame(width: 52, height: 52)
 
-                // Running ring animation
                 if isRunning {
                     Circle()
-                        .trim(from: 0, to: 0.7)
-                        .stroke(
-                            AngularGradient(
-                                colors: [nodeColor.opacity(0), nodeColor],
-                                center: .center
-                            ),
-                            style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
-                        )
+                        .stroke(nodeColor.opacity(0.35), lineWidth: 2)
                         .frame(width: 52, height: 52)
-                        .rotationEffect(.degrees(pulsePhase ? 360 : 0))
-                        .animation(
-                            .linear(duration: 1.5).repeatForever(autoreverses: false),
-                            value: pulsePhase
-                        )
                 }
 
                 // Completed checkmark ring
@@ -655,17 +717,10 @@ struct MultiAgentFlowView: View {
                     )
                     .frame(width: 32, height: 2)
 
-                // Active pulse dot
                 if isActive {
                     Circle()
                         .fill(Brand.primary)
                         .frame(width: 6, height: 6)
-                        .shadow(color: Brand.primary.opacity(0.5), radius: 4)
-                        .offset(x: pulsePhase ? 12 : -12)
-                        .animation(
-                            .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
-                            value: pulsePhase
-                        )
                 }
 
                 // Arrow head
@@ -789,11 +844,6 @@ struct MultiAgentFlowView: View {
                 Circle()
                     .fill(flowColor(for: status))
                     .frame(width: 6, height: 6)
-                    .scaleEffect(pulsePhase ? 1.3 : 0.8)
-                    .animation(
-                        .easeInOut(duration: 0.8).repeatForever(autoreverses: true),
-                        value: pulsePhase
-                    )
             } else {
                 Circle()
                     .fill(flowColor(for: status))
@@ -936,46 +986,226 @@ struct PhaseGroupCard: View {
     }
 }
 
+private struct TaskStepStats {
+    let completedSteps: Int
+    let failureCount: Int
+    let recoveryCount: Int
+    let recoverySuccessCount: Int
+    let readCount: Int
+    let pendingReviewIDs: [UUID]
+    let currentPhase: TaskPhase
+    let phaseCounts: [TaskPhase: Int]
+    let phaseTools: [TaskPhase: [String]]
+    let memoryPills: [String]
+
+    init(thread: Thread, visibleSteps: [TaskStep]) {
+        let steps = visibleSteps
+        var completedSteps = 0
+        var failureCount = 0
+        var recoveryCount = 0
+        var recoverySuccessCount = 0
+        var readCount = 0
+        var pendingReviewIDs: [UUID] = []
+        var phaseCounts: [TaskPhase: Int] = [:]
+        var phaseToolSets: [TaskPhase: Set<String>] = [:]
+
+        var readFiles: [String] = []
+        var seenReadFiles: Set<String> = []
+        var hasWorkspaceIndex = false
+        var failedToolCounts: [String: Int] = [:]
+        var searches: [String] = []
+        var seenSearches: Set<String> = []
+
+        var hasFileChange = false
+        var hasVerifyCheck = false
+        var successfulReadCount = 0
+        var searchCount = 0
+
+        func addPhase(_ phase: TaskPhase, toolName: String? = nil) {
+            phaseCounts[phase, default: 0] += 1
+            guard let toolName, !toolName.isEmpty else { return }
+            phaseToolSets[phase, default: []].insert(ToolNameCodec.canonicalName(toolName))
+        }
+
+        for step in steps {
+            let toolName = step.toolName.map(ToolNameCodec.canonicalName)
+
+            if step.kind != .userInput {
+                completedSteps += 1
+            }
+            if step.isFailure || step.kind == .error {
+                failureCount += 1
+            }
+
+            let isRecovery = (step.toolCallId ?? "").hasPrefix("call_recovery_") || step.text.hasPrefix("自动恢复")
+            if isRecovery {
+                recoveryCount += 1
+                if !step.isFailure && step.kind == .toolResult {
+                    recoverySuccessCount += 1
+                }
+            }
+
+            if step.kind == .reviewRequest && step.approved == nil {
+                pendingReviewIDs.append(step.id)
+            }
+
+            if let toolName {
+                if ["workspace.index", "file.read", "code.search", "git"].contains(toolName),
+                   step.kind == .toolCall || step.kind == .toolResult {
+                    addPhase(.explore, toolName: toolName)
+                }
+
+                if step.kind == .toolCall,
+                   ["file.write", "file.edit", "diff.apply", "shell.exec"].contains(toolName) {
+                    addPhase(.execute, toolName: toolName)
+                }
+
+                if step.kind == .toolCall, toolName == "verify.build" {
+                    addPhase(.verify, toolName: toolName)
+                }
+
+                if step.kind == .toolCall,
+                   toolName == "shell.exec",
+                   step.toolParams?["command"]?.contains("test") == true {
+                    addPhase(.verify, toolName: toolName)
+                }
+
+                if ["file.write", "file.edit", "diff.apply"].contains(toolName)
+                    || Self.isSuccessfulDocumentTransform(step, canonicalToolName: toolName) {
+                    hasFileChange = true
+                }
+
+                if step.kind == .toolResult, toolName == "file.read", !step.isFailure {
+                    readCount += 1
+                    successfulReadCount += 1
+                    if let path = step.toolParams?["path"] {
+                        Self.appendUnique(path, to: &readFiles, seen: &seenReadFiles)
+                    }
+                }
+
+                if step.kind == .toolResult, toolName == "workspace.index", !step.isFailure {
+                    hasWorkspaceIndex = true
+                }
+
+                if step.kind == .toolResult, step.isFailure {
+                    failedToolCounts[toolName, default: 0] += 1
+                }
+
+                if step.kind == .toolCall, toolName == "code.search" {
+                    searchCount += 1
+                    if let query = step.toolParams?["query"] {
+                        Self.appendUnique(query, to: &searches, seen: &seenSearches)
+                    }
+                }
+            }
+
+            if step.kind == .reviewRequest {
+                addPhase(.execute)
+            }
+            if step.kind == .aiThinking, step.text.hasPrefix("完成检查") {
+                hasVerifyCheck = true
+                addPhase(.verify)
+            }
+            if step.kind == .textOutput || (step.kind == .aiThinking && step.text.hasPrefix("阶段总结")) {
+                addPhase(.summarize)
+            }
+        }
+
+        let currentPhase: TaskPhase
+        if steps.last?.kind == .textOutput && hasVerifyCheck {
+            currentPhase = .summarize
+        } else if hasVerifyCheck || hasFileChange {
+            currentPhase = .verify
+        } else if successfulReadCount + searchCount >= 3 {
+            currentPhase = .execute
+        } else {
+            currentPhase = .explore
+        }
+
+        var memoryPills: [String] = []
+        if let first = readFiles.first {
+            let extra = readFiles.count > 1 ? " +\(readFiles.count - 1)" : ""
+            memoryPills.append("已读 \(Self.shortPath(first))\(extra)")
+        }
+        if hasWorkspaceIndex {
+            memoryPills.append("已有索引")
+        }
+        if let firstFailure = failedToolCounts
+            .map({ "\($0.key) ×\($0.value)" })
+            .sorted()
+            .first {
+            memoryPills.append("失败 \(firstFailure)")
+        }
+        if let firstSearch = searches.first {
+            memoryPills.append("搜过 \(String(firstSearch.prefix(18)))")
+        }
+        if recoveryCount > 0 {
+            memoryPills.append("自动恢复 ×\(recoveryCount)")
+        }
+
+        self.completedSteps = completedSteps
+        self.failureCount = failureCount
+        self.recoveryCount = recoveryCount
+        self.recoverySuccessCount = recoverySuccessCount
+        self.readCount = readCount
+        self.pendingReviewIDs = pendingReviewIDs
+        self.currentPhase = currentPhase
+        self.phaseCounts = phaseCounts
+        self.phaseTools = phaseToolSets.mapValues { $0.sorted() }
+        self.memoryPills = memoryPills
+    }
+
+    func tools(for phase: TaskPhase) -> [String] {
+        phaseTools[phase] ?? []
+    }
+
+    private static func appendUnique(_ value: String, to values: inout [String], seen: inout Set<String>) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !seen.contains(trimmed) else { return }
+        seen.insert(trimmed)
+        values.append(trimmed)
+    }
+
+    private static func isSuccessfulDocumentTransform(_ step: TaskStep, canonicalToolName: String) -> Bool {
+        guard step.kind == .toolResult,
+              canonicalToolName == "document.transform",
+              !step.isFailure else { return false }
+        let action = step.toolParams?["action"] ?? ""
+        guard ["apply", "copy", "render"].contains(action) else { return false }
+        let path: String?
+        if action == "render" {
+            path = step.toolParams?["pdfPath"] ?? step.toolParams?["outputPath"] ?? step.toolParams?["path"]
+        } else {
+            path = step.toolParams?["outputPath"] ?? step.toolParams?["path"]
+        }
+        return path?.isEmpty == false
+    }
+
+    private static func shortPath(_ path: String) -> String {
+        let parts = path.split(separator: "/")
+        if parts.count <= 2 { return path }
+        return parts.suffix(2).joined(separator: "/")
+    }
+}
+
 private struct TaskSummaryCard: View {
-    let task: AgentTask
-
-    private var completedSteps: Int {
-        task.steps.filter { $0.kind != .userInput }.count
-    }
-
-    private var failureCount: Int {
-        task.steps.filter { $0.isFailure || $0.kind == .error }.count
-    }
-
-    private var recoveryCount: Int {
-        task.steps.filter { ($0.toolCallId ?? "").hasPrefix("call_recovery_") || $0.text.hasPrefix("自动恢复") }.count
-    }
-
-    private var recoverySuccessCount: Int {
-        task.steps.filter {
-            (($0.toolCallId ?? "").hasPrefix("call_recovery_") || $0.text.hasPrefix("自动恢复"))
-            && !$0.isFailure && $0.kind == .toolResult
-        }.count
-    }
-
-    private var readCount: Int {
-        task.steps.filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }.count
-    }
+    let thread: Thread
+    let stats: TaskStepStats
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpace.md) {
             HStack(alignment: .center, spacing: AppSpace.md) {
                 ZStack {
                     Circle()
-                        .fill(task.status.color.opacity(0.10))
+                        .fill(thread.status.color.opacity(0.10))
                         .frame(width: 28, height: 28)
-                    Image(systemName: task.status.icon)
+                    Image(systemName: thread.status.icon)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(task.status.color)
+                        .foregroundStyle(thread.status.color)
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(TextHelper.compactTitle(task.title))
+                    Text(TextHelper.compactTitle(thread.title))
                         .font(AppFont.headline)
                         .foregroundStyle(TextGrade.primary)
                         .lineLimit(2)
@@ -983,9 +1213,9 @@ private struct TaskSummaryCard: View {
                     Text(summaryLine)
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.muted)
-                    if !memoryPills.isEmpty {
+                    if !stats.memoryPills.isEmpty {
                         HStack(spacing: AppSpace.xs) {
-                            ForEach(memoryPills.prefix(3), id: \.self) { pill in
+                            ForEach(stats.memoryPills.prefix(3), id: \.self) { pill in
                                 Text(pill)
                                     .font(AppFont.tiny)
                                     .foregroundStyle(TextGrade.secondary)
@@ -1016,33 +1246,31 @@ private struct TaskSummaryCard: View {
             RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
                 .strokeBorder(
                     LinearGradient(
-                        colors: [task.status.color.opacity(0.18), task.status.color.opacity(0.06)],
+                        colors: [thread.status.color.opacity(0.18), thread.status.color.opacity(0.06)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
                     lineWidth: 0.5
                 )
         )
-        .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+        .shadow(color: .black.opacity(0.035), radius: 3, y: 1)
     }
 
     private var currentPhase: TaskPhase {
-        AgentLoop.inferPhase(from: task.steps)
+        stats.currentPhase
     }
-
-    @State private var phasePulse = false
 
     private var phaseProgressBar: some View {
         let phases: [TaskPhase] = [.explore, .execute, .verify, .summarize]
         let currentIndex = phases.firstIndex(of: currentPhase) ?? 0
-        let isRunning = task.status == .running
+        let isRunning = thread.status == .running
 
         return VStack(alignment: .leading, spacing: AppSpace.xs) {
             // Phase indicator row
             HStack(spacing: 2) {
                 ForEach(Array(phases.enumerated()), id: \.offset) { index, phase in
-                    let stepCount = stepsForPhase(phase).count
-                    let isActive = index == currentIndex && isRunning
+                    let stepCount = stats.phaseCounts[phase] ?? 0
+                    let tools = stats.tools(for: phase)
                     let isDone = index < currentIndex || (!isRunning && index <= currentIndex)
 
                     VStack(spacing: 2) {
@@ -1064,30 +1292,20 @@ private struct TaskSummaryCard: View {
                             RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
                                 .fill(index <= currentIndex ? Brand.primary.opacity(0.12) : Color.clear)
                         )
-                        .overlay(
-                            isActive ?
-                            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                                .strokeBorder(Brand.primary.opacity(phasePulse ? 0.5 : 0.15), lineWidth: 0.7)
-                                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: phasePulse)
-                            : nil
-                        )
-                        .help(phaseTooltip(phase, stepCount: stepCount))
+                        .help(phaseTooltip(phase, stepCount: stepCount, tools: tools))
 
                         // Tool mini-badges
-                        if stepCount > 0 {
-                            let tools = uniqueToolNames(for: phase)
-                            if !tools.isEmpty {
-                                HStack(spacing: 2) {
-                                    ForEach(tools.prefix(3), id: \.self) { tool in
-                                        Text(shortToolName(tool))
-                                            .font(.system(size: 7))
-                                            .foregroundStyle(TextGrade.ghost)
-                                            .padding(.horizontal, 3)
-                                            .padding(.vertical, 1)
-                                            .background(
-                                                Capsule().fill(SurfaceGrade.sunken.opacity(0.5))
-                                            )
-                                    }
+                        if stepCount > 0 && !tools.isEmpty {
+                            HStack(spacing: 2) {
+                                ForEach(tools.prefix(3), id: \.self) { tool in
+                                    Text(shortToolName(tool))
+                                        .font(.system(size: 7))
+                                        .foregroundStyle(TextGrade.ghost)
+                                        .padding(.horizontal, 3)
+                                        .padding(.vertical, 1)
+                                        .background(
+                                            Capsule().fill(SurfaceGrade.sunken.opacity(0.5))
+                                        )
                                 }
                             }
                         }
@@ -1105,17 +1323,10 @@ private struct TaskSummaryCard: View {
                     RoundedRectangle(cornerRadius: 1.5)
                         .fill(Brand.primary.opacity(0.6))
                         .frame(width: geo.size.width * CGFloat(isRunning ? progress - 0.05 : progress), height: 3)
-                        .animation(.easeInOut(duration: 0.4), value: currentIndex)
                 }
             }
             .frame(height: 3)
         }
-        .onAppear { phasePulse = true }
-    }
-
-    private func uniqueToolNames(for phase: TaskPhase) -> [String] {
-        let tools = Set(stepsForPhase(phase).compactMap { $0.toolName })
-        return tools.sorted()
     }
 
     private func shortToolName(_ name: String) -> String {
@@ -1125,6 +1336,7 @@ private struct TaskSummaryCard: View {
         case "code.search": return "搜索"
         case "file.write": return "写入"
         case "file.edit": return "编辑"
+        case "diff.apply": return "补丁"
         case "shell.exec": return "命令"
         case "verify.build": return "验证"
         case "git": return "Git"
@@ -1132,104 +1344,20 @@ private struct TaskSummaryCard: View {
         }
     }
 
-    private func stepsForPhase(_ phase: TaskPhase) -> [TaskStep] {
-        switch phase {
-        case .explore:
-            return task.steps.filter { step in
-                (step.kind == .toolCall && ["workspace.index", "file.read", "code.search", "git"].contains(step.toolName))
-                || (step.kind == .toolResult && ["workspace.index", "file.read", "code.search", "git"].contains(step.toolName))
-            }
-        case .execute:
-            return task.steps.filter { step in
-                (step.kind == .toolCall && ["file.write", "file.edit", "shell.exec"].contains(step.toolName))
-                || (step.kind == .reviewRequest)
-            }
-        case .verify:
-            return task.steps.filter { step in
-                step.kind == .aiThinking && step.text.hasPrefix("完成检查")
-                || (step.kind == .toolCall && step.toolName == "verify.build")
-                || (step.kind == .toolCall && step.toolName == "shell.exec" && step.toolParams?["command"]?.contains("test") == true)
-            }
-        case .summarize:
-            return task.steps.filter { $0.kind == .textOutput || ($0.kind == .aiThinking && $0.text.hasPrefix("阶段总结")) }
-        }
-    }
-
-    private func phaseTooltip(_ phase: TaskPhase, stepCount: Int) -> String {
+    private func phaseTooltip(_ phase: TaskPhase, stepCount: Int, tools: [String]) -> String {
         if stepCount == 0 { return "\(phase.title)阶段：暂无步骤" }
-        let names = Array(Set(stepsForPhase(phase).compactMap { $0.toolName })).sorted()
-        return "\(phase.title)阶段：\(stepCount) 步" + (names.isEmpty ? "" : "（\(names.joined(separator: "、"))）")
-    }
-
-    private func compactTitle(_ title: String) -> String {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed), let host = url.host else { return trimmed }
-        let leaf = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
-        return leaf.isEmpty ? host : "\(host)/\(leaf)"
+        return "\(phase.title)阶段：\(stepCount) 步" + (tools.isEmpty ? "" : "（\(tools.joined(separator: "、"))）")
     }
 
     private var summaryLine: String {
-        var parts = ["\(task.status.label)", "\(completedSteps) 步"]
-        if readCount > 0 { parts.append("读 \(readCount) 个文件") }
-        if failureCount > 0 { parts.append("失败 \(failureCount) 项") }
-        if recoveryCount > 0 {
-            parts.append("恢复 \(recoverySuccessCount)/\(recoveryCount)")
+        var parts = ["\(thread.status.label)", "\(stats.completedSteps) 步"]
+        if stats.readCount > 0 { parts.append("读 \(stats.readCount) 个文件") }
+        if stats.failureCount > 0 { parts.append("失败 \(stats.failureCount) 项") }
+        if stats.recoveryCount > 0 {
+            parts.append("恢复 \(stats.recoverySuccessCount)/\(stats.recoveryCount)")
         }
-        parts.append(RelativeTimeFormatter.string(for: task.updatedAt))
+        parts.append(RelativeTimeFormatter.string(for: thread.updatedAt))
         return parts.joined(separator: " · ")
-    }
-
-    private var memoryPills: [String] {
-        var pills: [String] = []
-        let readFiles = uniqueValues(task.steps
-            .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] })
-        if let first = readFiles.first {
-            let extra = readFiles.count > 1 ? " +\(readFiles.count - 1)" : ""
-            pills.append("已读 \(shortPath(first))\(extra)")
-        }
-
-        if task.steps.contains(where: { $0.kind == .toolResult && $0.toolName == "workspace.index" && !$0.isFailure }) {
-            pills.append("已有索引")
-        }
-
-        let failedTools = Dictionary(grouping: task.steps.filter { $0.kind == .toolResult && $0.isFailure }, by: { $0.toolName ?? "tool" })
-            .map { "\($0.key) ×\($0.value.count)" }
-            .sorted()
-        if let first = failedTools.first {
-            pills.append("失败 \(first)")
-        }
-
-        let searches = uniqueValues(task.steps
-            .filter { $0.kind == .toolCall && $0.toolName == "code.search" }
-            .compactMap { $0.toolParams?["query"] })
-        if let first = searches.first {
-            pills.append("搜过 \(String(first.prefix(18)))")
-        }
-
-        if recoveryCount > 0 {
-            pills.append("自动恢复 ×\(recoveryCount)")
-        }
-
-        return pills
-    }
-
-    private func uniqueValues(_ values: [String]) -> [String] {
-        var seen: Set<String> = []
-        var result: [String] = []
-        for value in values {
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, !seen.contains(trimmed) else { continue }
-            seen.insert(trimmed)
-            result.append(trimmed)
-        }
-        return result
-    }
-
-    private func shortPath(_ path: String) -> String {
-        let parts = path.split(separator: "/")
-        if parts.count <= 2 { return path }
-        return parts.suffix(2).joined(separator: "/")
     }
 }
 
@@ -1267,7 +1395,6 @@ private struct TypingIndicator: View {
                     .font(AppFont.captionMedium)
                     .foregroundStyle(TextGrade.secondary)
                     .lineLimit(1)
-                    .animation(.easeInOut(duration: 0.2), value: activityText)
 
                 if elapsed > 0 {
                     Text(elapsedLabel)
@@ -1288,7 +1415,7 @@ private struct TypingIndicator: View {
                     .fill(SurfaceGrade.card)
                     .overlay(Capsule().strokeBorder(Brand.primary.opacity(0.12), lineWidth: 1))
             )
-            .shadow(color: .black.opacity(0.10), radius: 6, y: 3)
+            .shadow(color: .black.opacity(0.035), radius: 3, y: 1)
 
             Spacer()
         }
@@ -1305,9 +1432,7 @@ private struct TypingIndicator: View {
     private func startTimers() {
         guard pulseTimer == nil else { return }
         pulseTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { _ in
-            withAnimation(.easeInOut(duration: 0.4)) {
-                phase = phase == 0 ? 1 : 0
-            }
+            phase = phase == 0 ? 1 : 0
         }
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             tick += 1
@@ -1404,7 +1529,7 @@ struct BatchReviewBar: View {
         .background(
             RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
                 .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.30), radius: 16, y: 4)
+                .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
@@ -1413,36 +1538,41 @@ struct BatchReviewBar: View {
         .padding(.horizontal, AppSpace.xl)
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity, alignment: .center)
-        .animation(.spring(response: 0.3), value: pendingCount)
     }
 }
 
 // MARK: - Task Completion Summary Card
 
 private struct TaskCompletionSummaryCard: View {
-    let task: AgentTask
+    let thread: Thread
 
     private var writtenFiles: [String] {
-        let reviewApproved = task.steps.filter { $0.kind == .reviewRequest && $0.approved == true }
+        let reviewApproved = thread.steps.filter { $0.kind == .reviewRequest && $0.approved == true }
             .compactMap { $0.diffFilePath }
-        let directWrites = task.steps.filter { $0.kind == .toolResult && $0.toolName == "file.write" && !$0.isFailure }
+        let directWrites = thread.steps.filter { $0.kind == .toolResult && $0.toolName == "file.write" && !$0.isFailure }
             .compactMap { $0.toolParams?["path"] }
-        let edits = task.steps.filter { $0.kind == .toolResult && $0.toolName == "file.edit" && !$0.isFailure }
+        let edits = thread.steps.filter { $0.kind == .toolResult && $0.toolName == "file.edit" && !$0.isFailure }
             .compactMap { $0.toolParams?["path"] }
-        return Array(Set(reviewApproved + directWrites + edits)).sorted()
+        let patches = thread.steps.filter { $0.kind == .toolResult && $0.toolName == "diff.apply" && !$0.isFailure }
+            .compactMap { $0.toolParams?["path"] ?? $0.toolParams?["file"] }
+        return Array(Set(reviewApproved + directWrites + edits + patches)).sorted()
     }
 
     private var failedSteps: [TaskStep] {
-        task.steps.filter { ($0.isFailure || $0.kind == .error) && $0.kind != .userInput }
+        thread.steps.filter { ($0.isFailure || $0.kind == .error) && $0.kind != .userInput }
     }
 
     private var shellCommands: [String] {
-        task.steps.filter { $0.kind == .toolCall && $0.toolName == "shell.exec" }
+        thread.steps.filter { $0.kind == .toolCall && $0.toolName == "shell.exec" }
             .compactMap { $0.toolParams?["command"] }
     }
 
+    private var verifyCount: Int {
+        thread.steps.filter { $0.kind == .toolResult && $0.toolName == "verify.build" }.count
+    }
+
     private var duration: String? {
-        let interval = task.updatedAt.timeIntervalSince(task.createdAt)
+        let interval = thread.updatedAt.timeIntervalSince(thread.createdAt)
         guard interval > 1 else { return nil }
         if interval < 60 { return "\(Int(interval))秒" }
         if interval < 3600 { return "\(Int(interval / 60))分\(Int(interval.truncatingRemainder(dividingBy: 60)))秒" }
@@ -1453,12 +1583,12 @@ private struct TaskCompletionSummaryCard: View {
         VStack(alignment: .leading, spacing: AppSpace.md) {
             // Header
             HStack(spacing: AppSpace.sm) {
-                Image(systemName: task.status == .completed ? "checkmark.seal.fill" : "xmark.seal.fill")
+                Image(systemName: thread.status == .completed ? "checkmark.seal.fill" : "xmark.seal.fill")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(task.status == .completed ? Semantic.success : Semantic.error)
-                Text(task.status == .completed ? "任务完成" : "任务失败")
+                    .foregroundStyle(thread.status == .completed ? Semantic.success : Semantic.error)
+                Text(thread.agentState == .completed || thread.status == .completed ? "会话完成" : "会话失败")
                     .font(AppFont.subheadline)
-                    .foregroundStyle(task.status == .completed ? Semantic.success : Semantic.error)
+                    .foregroundStyle(thread.status == .completed ? Semantic.success : Semantic.error)
                 if let dur = duration {
                     Text("· \(dur)")
                         .font(AppFont.caption)
@@ -1546,6 +1676,17 @@ private struct TaskCompletionSummaryCard: View {
                         .foregroundStyle(TextGrade.muted)
                 }
             }
+
+            if verifyCount > 0 {
+                HStack(spacing: AppSpace.xs) {
+                    Image(systemName: "checkmark.shield")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Semantic.success)
+                    Text("验证了 \(verifyCount) 次")
+                        .font(AppFont.caption)
+                        .foregroundStyle(TextGrade.muted)
+                }
+            }
         }
         .padding(AppSpace.lg)
         .frame(maxWidth: 580, alignment: .leading)
@@ -1556,7 +1697,7 @@ private struct TaskCompletionSummaryCard: View {
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
                 .strokeBorder(
-                    task.status == .completed
+                    thread.status == .completed
                     ? Semantic.success.opacity(0.20)
                     : Semantic.error.opacity(0.20),
                     lineWidth: 0.7

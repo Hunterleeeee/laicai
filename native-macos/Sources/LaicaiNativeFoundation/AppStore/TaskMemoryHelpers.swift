@@ -17,16 +17,16 @@ extension AppStore {
             .suffix(3)
             .map { compactMemoryText($0.text, limit: 240) }
         let checkpoints = thread.steps
-            .filter { $0.kind == .aiThinking && ($0.text.hasPrefix("任务检查点") || $0.text.hasPrefix("阶段总结")) }
+            .filter { $0.kind == .aiThinking && ($0.text.hasPrefix("会话 检查点") || $0.text.hasPrefix("任务检查点") || $0.text.hasPrefix("阶段总结")) }
             .suffix(2)
             .map { compactMemoryText($0.text, limit: 360) }
         let verification: String?
         if thread.status == .completed {
             verification = "已形成最终回复，需以后续验证命令为准。"
         } else if thread.status == .failed {
-            verification = "任务失败或未完成，继续时优先恢复失败工具或补齐证据。"
+            verification = "会话 失败或未完成，继续时优先恢复失败工具或补齐证据。"
         } else if thread.status == .cancelled {
-            verification = "任务被取消，继续时沿用已读上下文并从未完成处推进。"
+            verification = "会话 被取消，继续时沿用已读上下文并从未完成处推进。"
         } else {
             verification = nil
         }
@@ -95,5 +95,38 @@ extension AppStore {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleaned.count > limit else { return cleaned }
         return "\(cleaned.prefix(limit))…"
+    }
+
+    nonisolated static func agentArtifacts(from thread: Thread) -> [AgentArtifact] {
+        var artifacts: [AgentArtifact] = []
+        var seen: Set<String> = []
+        for step in thread.steps {
+            guard !step.isFailure else { continue }
+            let path: String?
+            let kind: String
+            if step.toolName == "document.transform" {
+                path = step.toolParams?["pdfPath"] ?? step.toolParams?["outputPath"]
+                kind = "document"
+            } else if step.kind == .reviewRequest {
+                path = step.diffFilePath ?? step.toolParams?["path"]
+                kind = "file"
+            } else if step.toolName == "image.generate" {
+                path = step.toolParams?["imagePath"]
+                kind = "image"
+            } else {
+                path = nil
+                kind = "file"
+            }
+            guard let path,
+                  !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  seen.insert(path).inserted else { continue }
+            artifacts.append(AgentArtifact(
+                title: URL(fileURLWithPath: path).lastPathComponent,
+                path: path,
+                kind: kind,
+                createdAt: step.createdAt
+            ))
+        }
+        return artifacts
     }
 }

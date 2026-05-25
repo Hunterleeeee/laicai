@@ -25,7 +25,7 @@ extension AppStore {
                 intent: .task,
                 confidence: max(decision.confidence, 0.84),
                 reason: decision.reason,
-                routeLabel: "Agent 图片",
+                routeLabel: "会话 图片",
                 expectedCapabilities: Array(Set(decision.expectedCapabilities + ["生成图片", "整理交付"]))
             )
             if imageConnector.id != state.activeConnectorID {
@@ -43,7 +43,7 @@ extension AppStore {
             notify(ConnectorCapabilityProfile.imageOnlyModelChatMessage(modelName: connector.modelName), style: .error)
             recordToolActivity(
                 name: "chat.model_unsupported",
-                summary: "图片生成模型不能用于通用 Agent",
+                summary: "图片生成模型不能用于通用会话",
                 statusLine: connector.modelName,
                 isFailure: true
             )
@@ -73,7 +73,7 @@ extension AppStore {
         if decision.intent != .chat && !shouldContinueSelectedThread {
             let wp = state.settings.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
             if wp.isEmpty {
-                notify("请先在设置中指定工作区目录，再执行 Agent。", style: .error)
+                notify("请先在设置中指定工作区目录，再执行会话。", style: .error)
                 return
             }
             if !Self.isRunningTests && (WorkspaceSandbox.isOverlyBroadWorkspace(wp)
@@ -129,7 +129,7 @@ extension AppStore {
             var steps = [userStep]
             let planStep = TaskStep(
                 kind: .aiThinking,
-                text: continuationTargetID == nil ? "正在理解 Agent 目标并准备执行。" : Self.plannerStepText(for: decision),
+                text: continuationTargetID == nil ? "正在理解会话目标并准备执行。" : Self.plannerStepText(for: decision),
                 isCollapsible: true,
                 isCollapsed: true
             )
@@ -154,7 +154,7 @@ extension AppStore {
            state.threads[threadIndex].status != .running,
            shouldContinueSelectedThread {
             let isEmptyPlaceholder = state.threads[threadIndex].steps.isEmpty
-            shouldRemoveEmptyPlaceholdersAfterContinuation = state.threads[threadIndex].source == .task
+            shouldRemoveEmptyPlaceholdersAfterContinuation = true
             if !isEmptyPlaceholder {
                 if !state.threads[threadIndex].context.memory.isEmpty {
                     context.memory = state.threads[threadIndex].context.memory
@@ -169,12 +169,10 @@ extension AppStore {
             if isEmptyPlaceholder || Thread.isPlaceholderTitle(currentTitle) {
                 state.threads[threadIndex].title = String(message.prefix(32))
             }
-            let isExplicitTaskContinuation = Self.isContinuationCommand(message) || Self.isExplicitRecentTaskFollowUp(message)
             Self.markAgentRunning(
                 &state.threads[threadIndex],
                 goal: Self.agentGoal(for: state.threads[threadIndex], incomingMessage: message, isContinuation: !isEmptyPlaceholder),
-                plan: Self.agentPlanLines(for: decision, message: message),
-                source: isChatIntent && !isExplicitTaskContinuation ? nil : .task
+                plan: Self.agentPlanLines(for: decision, message: message)
             )
             let plan = state.threads[threadIndex].currentPlan
             if state.threads[threadIndex].taskProtocol == nil || state.threads[threadIndex].taskProtocol?.threadID != selectedID {
@@ -197,7 +195,7 @@ extension AppStore {
             state.threads[threadIndex].executionLedger?.goal = state.threads[threadIndex].agentGoal ?? message
             state.threads[threadIndex].executionLedger?.plan = plan
             state.threads[threadIndex].executionLedger?.pendingFollowUp = nil
-            state.threads[threadIndex].executionLedger?.nextAction = "继续处理当前 Agent：\(message)"
+            state.threads[threadIndex].executionLedger?.nextAction = "继续处理当前会话：\(message)"
             state.threads[threadIndex].executionLedger?.transition(to: isChatIntent ? .planning : .gatheringEvidence, reason: "用户续跑或追问")
             state.threads[threadIndex].connectorID = connector.id
             state.threads[threadIndex].workflowName = workflowName
@@ -240,7 +238,6 @@ extension AppStore {
             state.threads[threadIndex].connectorID = connector.id
             state.threads[threadIndex].workflowName = workflowName
             state.threads[threadIndex].context = context
-            state.threads[threadIndex].source = .task
             state.threads[threadIndex].projectID = newThreadProjectID
             state.threads[threadIndex].agentState = .running
             state.threads[threadIndex].agentGoal = message
@@ -274,8 +271,7 @@ extension AppStore {
                 connectorID: connector.id,
                 workflowName: workflowName,
                 context: context,
-                source: isChatIntent ? .session : .task,
-                projectID: isChatIntent ? nil : newThreadProjectID,
+                projectID: newThreadProjectID,
                 agentState: .running,
                 agentGoal: message,
                 currentPlan: plan,
@@ -289,7 +285,6 @@ extension AppStore {
         if shouldRemoveEmptyPlaceholdersAfterContinuation {
             state.threads.removeAll { thread in
                 thread.id != targetTaskID
-                    && thread.source == .session
                     && thread.steps.isEmpty
                     && thread.preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     && (Thread.isPlaceholderTitle(thread.title) || thread.title.trimmingCharacters(in: .whitespacesAndNewlines) == "新线程")
@@ -302,7 +297,7 @@ extension AppStore {
         let capturedImages = state.draftImages
         state.isGenerating = true
         state.generationStartedAt = Date()
-        state.liveActivity = isChatIntent ? "思考中…" : "Agent 正在分析…"
+        state.liveActivity = isChatIntent ? "思考中…" : "会话 正在分析…"
         state.draftMessage = ""
         state.draftAttachments = []
         state.draftImages = []
@@ -416,7 +411,7 @@ extension AppStore {
                     self.state.threads[threadIndex].updatedAt = Date()
                     self.persistThreadsNow()
                 }
-                self.recordToolActivity(name: "task.error", summary: "Agent 执行失败", statusLine: error.localizedDescription, isFailure: true)
+                self.recordToolActivity(name: "task.error", summary: "会话 执行失败", statusLine: error.localizedDescription, isFailure: true)
             }
 
             self.appendPendingFollowUp(to: targetTaskID)
@@ -571,7 +566,7 @@ extension AppStore {
         let explicitMarkers = [
             "在哪", "到哪", "在哪里", "预览", "打开看看", "看一下产物", "看下产物",
             "文件在哪", "产物在哪", "继续这个", "接着这个", "继续当前", "接着当前",
-            "刚才那个", "上个任务", "上一轮", "这个任务", "这个 Agent", "这个agent",
+            "刚才那个", "上个任务", "上一轮", "这个任务", "这个会话", "这个agent",
             "没发完", "被截断", "没写完", "没说完"
         ]
         return explicitMarkers.contains { normalized.localizedCaseInsensitiveContains($0) }
@@ -590,7 +585,7 @@ extension AppStore {
             "刚才", "上面", "前面", "这个", "那个", "这里", "它", "这些", "那些",
             "还有", "还要", "继续", "接着", "为什么", "为啥",
             "对吗", "不对", "没反应", "没生效", "还是", "又", "仍然",
-            "这个逻辑", "这个页面", "这个按钮", "这个 Agent", "这个agent", "这个任务", "当前",
+            "这个逻辑", "这个页面", "这个按钮", "这个会话", "这个agent", "这个任务", "当前",
             "窗口", "页面", "按钮", "bug", "Bug", "卡顿", "历史任务", "左边", "右边", "追问", "新会话"
         ]
         if contextualMarkers.contains(where: { normalized.contains($0) }) { return true }

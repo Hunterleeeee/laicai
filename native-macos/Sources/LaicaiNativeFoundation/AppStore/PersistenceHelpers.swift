@@ -21,8 +21,8 @@ extension AppStore {
         lastPersistedAt = Date()
         updateSummaryCaches()
         let persistableThreads = state.threads.filter { !$0.isEmptyPlaceholder }
-        do { try environment.threadRepository.saveThreads(persistableThreads) }
-        catch { recordToolActivity(name: "threads.save", summary: "会话持久化失败", statusLine: error.localizedDescription, isFailure: true) }
+        do { try environment.agentRepository.saveAgents(persistableThreads) }
+        catch { recordToolActivity(name: "agents.save", summary: "Agent 持久化失败", statusLine: error.localizedDescription, isFailure: true) }
     }
 
     func updateSummaryCaches() {

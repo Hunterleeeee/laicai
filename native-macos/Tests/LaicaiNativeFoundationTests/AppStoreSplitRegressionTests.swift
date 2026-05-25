@@ -26,16 +26,14 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
 
         var state = testState(
             tasks: [task],
-            selectedTaskID: task.id,
+            selectedThreadID: task.id,
             connectors: [connector],
             activeConnectorID: connector.id
         )
         state.isGenerating = true
 
-        XCTAssertEqual(state.selectedThreadSource, .task)
-        XCTAssertEqual(state.selectedTaskID, task.id)
-        XCTAssertNil(state.selectedSessionID)
-        XCTAssertEqual(state.selectedTask?.title, "Refactor task")
+        XCTAssertEqual(state.selectedThreadID, task.id)
+        XCTAssertEqual(state.selectedThread?.title, "Refactor task")
         XCTAssertEqual(state.activeConnector?.id, connector.id)
         XCTAssertEqual(state.pendingReviewCount, 1)
         XCTAssertEqual(state.estimatedProgress ?? -1, 0.25, accuracy: 0.001)
@@ -71,19 +69,24 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             preview: "",
             status: .queued,
             steps: [],
-            source: .session
         )
         let real = Thread(
             title: "真实会话",
             preview: "你好",
             status: .completed,
-            steps: [TaskStep(kind: .userInput, text: "你好")],
-            source: .session
+            steps: [TaskStep(kind: .userInput, text: "你好")]
         )
         let state = testState(threads: [placeholder, real])
 
         XCTAssertTrue(placeholder.isEmptyPlaceholder)
         XCTAssertEqual(state.threadRecordSummaries.map(\.id), [real.id])
+    }
+
+    func testThreadDefaultTitleUsesNewSessionLabel() {
+        let thread = Thread()
+
+        XCTAssertEqual(thread.title, "新会话")
+        XCTAssertTrue(Thread.isPlaceholderTitle("新 Agent"))
     }
 
     func testSelectedEmptyPlaceholderStaysVisibleAsDraftAgent() {
@@ -92,7 +95,6 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             preview: "",
             status: .queued,
             steps: [],
-            source: .session,
             agentState: .idle
         )
         let real = Thread(
@@ -100,7 +102,6 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             preview: "你好",
             status: .completed,
             steps: [TaskStep(kind: .userInput, text: "你好")],
-            source: .session
         )
         let state = testState(threads: [placeholder, real], selectedSessionID: placeholder.id)
 
@@ -115,11 +116,10 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             preview: "",
             status: .running,
             steps: [],
-            source: .task,
             agentState: .running,
             agentGoal: "你了解易经吗"
         )
-        var state = testState(threads: [running], selectedTaskID: running.id)
+        var state = testState(threads: [running], selectedThreadID: running.id)
         state.isGenerating = true
 
         XCTAssertFalse(running.isEmptyPlaceholder)
@@ -142,7 +142,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             intent: .task,
             confidence: 0.9,
             reason: "测试多 Agent",
-            routeLabel: "Agent 执行",
+            routeLabel: "会话 执行",
             expectedCapabilities: ["读取工作区", "提出文件修改"]
         )
         let plan = MultiAgentPlan(
@@ -162,9 +162,8 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             decision: decision
         )
 
-        XCTAssertEqual(store.state.selectedThread?.source, .task)
         XCTAssertEqual(store.state.selectedThread?.steps.first?.kind, .userInput)
-        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .aiThinking && $0.text.contains("多 Agent 协同已创建") } == true)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .aiThinking && $0.text.contains("多会话协同已创建") } == true)
         XCTAssertNotNil(store.state.selectedThread?.taskProtocol)
         XCTAssertNotNil(store.state.selectedThread?.executionLedger)
         store.stopGenerating()
@@ -178,20 +177,20 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         store.addDraftImage(ImageAttachment(data: Data([1]), thumbnailName: "a.png", width: 1, height: 1))
         store.queueFollowUp("继续")
 
-        store.newTask()
+        store.newThread()
 
         XCTAssertEqual(store.state.searchText, "")
         XCTAssertEqual(store.state.draftMessage, "")
         XCTAssertEqual(store.state.draftAttachments, [])
         XCTAssertEqual(store.state.draftImages, [])
         XCTAssertNil(store.state.pendingFollowUp)
-        XCTAssertEqual(store.state.selectedAgent?.title, "新 Agent")
+        XCTAssertEqual(store.state.selectedAgent?.title, "新对话")
         XCTAssertTrue(store.state.threadRecordSummaries.contains { $0.id == store.state.selectedThreadID })
     }
 
     func testDraftAttachmentAndFollowUpActionsSurviveSplit() {
         let task = AgentTask(title: "任务", status: .running)
-        let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id))
+        let store = AppStore(state: testState(tasks: [task], selectedThreadID: task.id))
 
         store.addDraftAttachments([" /tmp/a.swift ", "", "/tmp/a.swift", "/tmp/b.swift"])
         XCTAssertEqual(store.state.draftAttachments, ["/tmp/a.swift", "/tmp/b.swift"])
@@ -212,7 +211,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.pendingFollowUp, "继续执行")
         XCTAssertEqual(store.state.draftMessage, "")
         XCTAssertEqual(store.state.selectedThread?.executionLedger?.pendingFollowUp, "继续执行")
-        XCTAssertEqual(store.state.selectedTask?.steps.map(\.text), [])
+        XCTAssertEqual(store.state.selectedThread?.steps.map(\.text), [])
 
         store.clearPendingFollowUp()
         XCTAssertNil(store.state.pendingFollowUp)
@@ -238,12 +237,8 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         store.autoResumeInterruptedTask()
         store.autoResumeInterruptedTask()
 
-        XCTAssertEqual(store.state.selectedTaskID, interrupted.id)
-        let resumeHints = store.state.selectedTask?.steps.filter {
-            $0.kind == .error && $0.text.contains("自动恢复")
-        } ?? []
-        XCTAssertEqual(resumeHints.count, 1)
-        XCTAssertEqual(resumeHints.first?.retryAction, "继续执行")
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertTrue(store.state.threads.first?.steps.contains(where: { $0.text.contains("已自动标记") }) == true)
     }
 
     func testPreviewAndVagueMessageHelpersStayAvailableAfterSplit() {
@@ -255,12 +250,11 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             steps: [
                 TaskStep(kind: .userInput, text: "帮我生成 README")
             ],
-            source: .task
         )
 
         XCTAssertEqual(
             AppStore.enrichVagueMessage("继续", thread: thread),
-            "继续处理当前 Agent，优先基于已有证据形成结论；不要重复已完成的读取、搜索或执行步骤。"
+            "继续处理当前会话，优先基于已有证据形成结论；不要重复已完成的读取、搜索或执行步骤。"
         )
         XCTAssertTrue(AppStore.enrichVagueMessage("做", thread: thread).contains("帮我生成 README"))
         XCTAssertTrue(AppStore.enrichVagueMessage("重试", thread: thread).contains("注意避免之前的失败原因"))
@@ -274,15 +268,13 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             steps: [
                 TaskStep(kind: .userInput, text: "生成一个雪碧的介绍图"),
                 TaskStep(kind: .toolCall, text: "生成图片", toolName: "image.generate")
-            ],
-            source: .session
+            ]
         )
         let environment = makeTestEnvironment(threadRepository: FixedThreadRepository(threads: [historical]))
 
         let state = AppState.bootstrap(environment: environment)
 
-        XCTAssertEqual(state.threads.first?.source, .task)
-        XCTAssertEqual(state.selectedTaskID, historical.id)
+        XCTAssertEqual(state.selectedThreadID, historical.id)
     }
 
     func testBootstrapClearsProjectFromPlainHistoricalSession() {
@@ -295,16 +287,14 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .userInput, text: "你好"),
                 TaskStep(kind: .textOutput, text: "你好")
             ],
-            source: .session,
             projectID: projectID
         )
         let environment = makeTestEnvironment(threadRepository: FixedThreadRepository(threads: [plain]))
 
         let state = AppState.bootstrap(environment: environment)
 
-        XCTAssertEqual(state.threads.first?.source, .session)
         XCTAssertNil(state.threads.first?.projectID)
-        XCTAssertEqual(state.selectedSessionID, plain.id)
+        XCTAssertEqual(state.selectedThreadID, plain.id)
     }
 
     func testPlainNewSessionNeverInheritsActiveProject() {
@@ -313,9 +303,8 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         defer { ProjectManager.shared.activeProjectID = previousActiveProjectID }
         let store = AppStore(state: testState())
 
-        store.newSession()
+        store.newThread()
 
-        XCTAssertEqual(store.state.selectedThread?.source, .session)
         XCTAssertNil(store.state.selectedThread?.projectID)
     }
 
@@ -325,14 +314,13 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             title: "项目里正在执行",
             status: .running,
             steps: [TaskStep(kind: .userInput, text: "修复项目问题")],
-            source: .task,
             projectID: projectID
         )
         let connector = makeConnector(modelName: "gpt-5.5")
         let store = AppStore(
             state: testState(
                 threads: [runningProjectThread],
-                selectedTaskID: runningProjectThread.id,
+                selectedThreadID: runningProjectThread.id,
                 workspacePath: "/tmp/laicai-project",
                 connectors: [connector],
                 activeConnectorID: connector.id
@@ -344,14 +332,13 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             intent: .task,
             confidence: 0.9,
             reason: "测试任务路由",
-            routeLabel: "Agent 执行",
+            routeLabel: "会话 执行",
             expectedCapabilities: []
         )
 
         store.sendTaskDraft(message: "整理 README", decision: decision)
 
         XCTAssertNotEqual(store.state.selectedThreadID, runningProjectThread.id)
-        XCTAssertEqual(store.state.selectedThread?.source, .task)
         XCTAssertEqual(store.state.selectedThread?.projectID, projectID)
         store.stopGenerating()
     }

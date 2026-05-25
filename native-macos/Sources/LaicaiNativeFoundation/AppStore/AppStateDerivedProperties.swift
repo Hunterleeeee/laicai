@@ -2,29 +2,73 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppState {
-    public var selectedThreadSource: ThreadSource? {
-        threads.first(where: { $0.id == selectedThreadID })?.source
+    private static let summarySearchRecentStepLimit = 1
+
+    private var visibleThreads: [Thread] {
+        threads.filter { thread in
+            !thread.isEmptyPlaceholder || thread.id == selectedThreadID
+        }
     }
 
-    public var sessions: [ChatSession] {
-        threads.filter { $0.source == .session }.map { ChatSession(thread: $0) }
+    private static func lightweightSearchIndex(for thread: Thread) -> String {
+        var parts = [
+            thread.title,
+            thread.preview,
+            thread.agentGoal ?? "",
+            thread.modelName,
+            thread.status.title,
+            thread.agentState.title,
+            thread.context.workspaceRoot
+        ]
+        let recentStepParts = thread.steps.suffix(summarySearchRecentStepLimit).flatMap { step in
+            [step.text, step.toolName ?? ""]
+        }
+        parts.append(contentsOf: recentStepParts)
+        return parts.joined(separator: " ").lowercased()
     }
 
-    public var selectedSessionID: UUID? {
-        threads.first(where: { $0.id == selectedThreadID })?.source == .session ? selectedThreadID : nil
+    public var agents: [AgentRecord] {
+        visibleThreads
+            .map { AgentRecord(thread: $0, includeEvents: true) }
+            .sorted { lhs, rhs in
+                if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
+                return lhs.updatedAt > rhs.updatedAt
+            }
     }
 
-    public var tasks: [AgentTask] {
-        threads.filter { $0.source == .task }.map { AgentTask(thread: $0) }
+    public var agentSummaries: [AgentRecord] {
+        visibleThreads
+            .map { AgentRecord(thread: $0, includeEvents: false) }
+            .sorted { lhs, rhs in
+                if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
+                return lhs.updatedAt > rhs.updatedAt
+            }
     }
 
-    public var selectedTaskID: UUID? {
-        threads.first(where: { $0.id == selectedThreadID })?.source == .task ? selectedThreadID : nil
+    public var selectedAgentID: UUID? { selectedThreadID }
+
+    public var selectedAgent: AgentRecord? {
+        guard let id = selectedThreadID,
+              let thread = threads.first(where: { $0.id == id }) else { return nil }
+        return AgentRecord(thread: thread, includeEvents: true)
     }
 
-    public var selectedSession: ChatSession? {
-        guard let id = selectedThreadID, let thread = threads.first(where: { $0.id == id }), thread.source == .session else { return nil }
-        return ChatSession(thread: thread)
+    public var activeAgents: [AgentRecord] {
+        agents.filter { [.planning, .running, .waitingForApproval, .blocked, .paused].contains($0.state) }
+    }
+
+    public var continuableAgents: [AgentRecord] {
+        visibleThreads.filter { !$0.isEmptyPlaceholder && $0.canContinueAgent }
+            .map { AgentRecord(thread: $0, includeEvents: false) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    public var completedAgents: [AgentRecord] {
+        agents.filter { $0.state == .completed }
+    }
+
+    public var archivedAgents: [AgentRecord] {
+        agents.filter(\.isArchived)
     }
 
     public var activeConnector: ConnectorProfile? {
@@ -40,17 +84,11 @@ extension AppState {
     /// Estimated progress (0.0-1.0) for the currently running task based on tool call iterations.
     public var estimatedProgress: Double? {
         guard isGenerating, let id = selectedThreadID,
-              let thread = threads.first(where: { $0.id == id }),
-              thread.source == .task else { return nil }
+              let thread = threads.first(where: { $0.id == id }) else { return nil }
         let toolCalls = thread.steps.filter { $0.kind == .toolCall }.count
         guard toolCalls > 0 else { return nil }
         let expectedIterations = max(3.0, Double(thread.context.metadata["expectedIterations"] ?? "8") ?? 8.0)
         return min(0.95, Double(toolCalls) / expectedIterations)
-    }
-
-    public var selectedTask: AgentTask? {
-        guard let id = selectedThreadID, let thread = threads.first(where: { $0.id == id }), thread.source == .task else { return nil }
-        return AgentTask(thread: thread)
     }
 
     public var selectedThread: Thread? {
@@ -59,20 +97,61 @@ extension AppState {
     }
 
     public var threadRecords: [ThreadRecord] {
-        threads.filter { !$0.isEmptyPlaceholder }.map { ThreadRecord(thread: $0, includeEvents: true) }.sorted { lhs, rhs in
+        visibleThreads.map { ThreadRecord(thread: $0, includeEvents: true) }.sorted { lhs, rhs in
             if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
             return lhs.updatedAt > rhs.updatedAt
         }
     }
 
     public var threadRecordSummaries: [ThreadRecord] {
-        threads.filter { !$0.isEmptyPlaceholder }.map { ThreadRecord(thread: $0, includeEvents: false) }.sorted { lhs, rhs in
+        visibleThreads.map { ThreadRecord(thread: $0, includeEvents: false) }.sorted { lhs, rhs in
             if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
             return lhs.updatedAt > rhs.updatedAt
         }
     }
 
     public var filteredThreadRecords: [ThreadRecord] {
+        let query = (debouncedSearchText.isEmpty ? searchText : debouncedSearchText).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return threadRecords }
+        let lower = query.lowercased()
+        return visibleThreads.compactMap { thread in
+            let metadata = [
+                thread.title,
+                thread.preview,
+                thread.agentGoal ?? "",
+                thread.steps.last?.text ?? "",
+                thread.modelName,
+                    thread.status.title,
+                thread.agentState.title,
+                thread.context.workspaceRoot
+            ].joined(separator: " ").lowercased()
+            guard metadata.contains(lower) || thread.steps.suffix(12).contains(where: { step in
+                step.text.lowercased().contains(lower)
+                    || step.toolName?.lowercased().contains(lower) == true
+            }) else {
+                return nil
+            }
+            return ThreadRecord(thread: thread, includeEvents: true)
+        }.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+    }
+
+    public var filteredThreadRecordSummaries: [ThreadRecord] {
+        let query = (debouncedSearchText.isEmpty ? searchText : debouncedSearchText).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return threadRecordSummaries }
+        let lower = query.lowercased()
+        let visible = visibleThreads.filter { thread in
+            Self.lightweightSearchIndex(for: thread).contains(lower)
+        }
+        return visible.map { ThreadRecord(thread: $0, includeEvents: false) }.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+    }
+
+    public var legacyFilteredThreadRecords: [ThreadRecord] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return threadRecords }
         return threadRecords.filter { record in
@@ -84,10 +163,20 @@ extension AppState {
         }
     }
 
-    public var filteredThreadRecordSummaries: [ThreadRecord] {
+    public var legacyFilteredThreadRecordSummaries: [ThreadRecord] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return threadRecordSummaries }
-        return filteredThreadRecords
+        let visible = visibleThreads.filter { thread in
+            thread.title.localizedCaseInsensitiveContains(query)
+                || thread.preview.localizedCaseInsensitiveContains(query)
+                || thread.steps.suffix(8).contains { step in
+                    step.text.localizedCaseInsensitiveContains(query)
+                }
+        }
+        return visible.map { ThreadRecord(thread: $0, includeEvents: false) }.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
+            return lhs.updatedAt > rhs.updatedAt
+        }
     }
 
     public var threads_legacy: [ThreadRecord] { threadRecords }

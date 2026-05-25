@@ -9,7 +9,7 @@ import LaicaiNativeDomain
 /// the user sees, enabling true browser automation.
 public struct RealBrowserTool: LaicaiTool {
     public var name: String { "browser.real" }
-    public var description: String { "操控真实浏览器（Safari/Chrome）：打开URL、获取标签页、提取页面内容、执行JS、点击元素、填写表单、截屏" }
+    public var description: String { "操控真实浏览器（Safari/Chrome）：打开URL、获取标签页、提取页面内容、执行JS、点击元素、填写表单、截屏、等待页面或元素" }
 
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(
@@ -17,13 +17,14 @@ public struct RealBrowserTool: LaicaiTool {
             description: description,
             parameters: FunctionParameters(
                 properties: [
-                    "action": FunctionProperty(type: "string", description: "动作：open / tabs / extract / js / click / fill / screenshot / scroll / back / forward / close_tab / switch_tab"),
+                    "action": FunctionProperty(type: "string", description: "动作：open / tabs / extract / js / click / fill / screenshot / scroll / back / forward / close_tab / switch_tab / wait_for"),
                     "url": FunctionProperty(type: "string", description: "目标 URL（open 时必填）"),
                     "selector": FunctionProperty(type: "string", description: "CSS 选择器（extract/click/fill 时用）"),
                     "script": FunctionProperty(type: "string", description: "JavaScript 代码（js 动作时必填）"),
                     "text": FunctionProperty(type: "string", description: "文本内容（fill 动作时用）"),
                     "browser": FunctionProperty(type: "string", description: "浏览器：safari / chrome（默认自动检测）"),
                     "tab_index": FunctionProperty(type: "integer", description: "标签页索引（switch_tab/close_tab 时用，从1开始）"),
+                    "timeout": FunctionProperty(type: "integer", description: "wait_for 超时秒数（默认 10）"),
                 ],
                 required: ["action"]
             )
@@ -41,6 +42,7 @@ public struct RealBrowserTool: LaicaiTool {
             var script: String?
             var text: String?
             var browser: String?
+            var timeout: Int?
             var tab_index: Int?
         }
 
@@ -109,9 +111,14 @@ public struct RealBrowserTool: LaicaiTool {
             }
             return await switchTab(index: idx, browser: browser)
 
+        case "wait_for":
+            let sel = params.selector ?? ""
+            let timeoutSec = params.timeout ?? 10
+            return await waitForElement(selector: sel, timeout: timeoutSec, browser: browser)
+
         default:
             return ToolResult(
-                output: "未知动作 '\(params.action)'，支持：open / tabs / extract / js / click / fill / screenshot / scroll / back / forward / close_tab / switch_tab",
+                output: "未知动作 '\(params.action)'，支持：open / tabs / extract / js / click / fill / screenshot / scroll / back / forward / close_tab / switch_tab / wait_for",
                 success: false,
                 error: "unknown_action"
             )
@@ -334,6 +341,36 @@ public struct RealBrowserTool: LaicaiTool {
         return result
     }
 
+    private func waitForElement(selector: String, timeout: Int, browser: BrowserType) async -> ToolResult {
+        let clampedTimeout = min(max(1, timeout), 30)  // hard cap at 30s
+        let actualAttempts = clampedTimeout * 2        // poll every 500ms
+
+        if selector.isEmpty {
+            // No selector: wait for page load (document.readyState == 'complete')
+            for attempt in 1...actualAttempts {
+                let js = "document.readyState"
+                let result = await executeJS(js, browser: browser)
+                if result.output.trimmingCharacters(in: .whitespacesAndNewlines) == "complete" {
+                    return ToolResult(output: "页面加载完成（第 \(attempt) 次检查）")
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            return ToolResult(output: "等待页面加载超时（\(clampedTimeout)秒）", success: false, error: "timeout")
+        }
+
+        // Wait for CSS selector to appear
+        for attempt in 1...actualAttempts {
+            let js = "(function(){ var el = document.querySelector('\(escapeJS(selector))'); return el ? 'FOUND:' + (el.tagName||'') + ' ' + (el.innerText||'').substring(0,50) : 'NOT_FOUND'; })()"
+            let result = await executeJS(js, browser: browser)
+            if result.output.hasPrefix("FOUND:") {
+                let detail = String(result.output.dropFirst("FOUND:".count))
+                return ToolResult(output: "元素已出现（第 \(attempt) 次检查）：\(detail)")
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        return ToolResult(output: "等待元素 '\(selector)' 超时（\(clampedTimeout)秒）", success: false, error: "timeout")
+    }
+
     private func screenshotBrowser(browser: BrowserType) async -> ToolResult {
         // Activate browser first, then use screencapture on the frontmost window
         let activateScript: String
@@ -352,10 +389,9 @@ public struct RealBrowserTool: LaicaiTool {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        process.arguments = ["-x", "-l", windowID(for: browser) ?? "", path]
-
-        // Fallback to full window capture if windowID fails
-        if windowID(for: browser) == nil {
+        if let wid = windowID(for: browser) {
+            process.arguments = ["-x", "-l", wid, path]
+        } else {
             process.arguments = ["-x", "-w", "-o", path]
         }
 

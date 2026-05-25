@@ -8,6 +8,8 @@ import SQLite3
 public final class FailurePatternDB {
     public static let shared = FailurePatternDB()
 
+    private static let queueKey = DispatchSpecificKey<Void>()
+
     private var db: OpaquePointer?
     private let queue = DispatchQueue(label: "laicai.patterns", qos: .utility)
     private let path: String
@@ -17,8 +19,10 @@ public final class FailurePatternDB {
         let dir = (base as NSString).appendingPathComponent("Laicai")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         self.path = (dir as NSString).appendingPathComponent("patterns.sqlite3")
+        queue.setSpecific(key: Self.queueKey, value: ())
         open()
         migrate()
+        pruneStalePatterns()
     }
 
     deinit {
@@ -26,14 +30,31 @@ public final class FailurePatternDB {
     }
 
     private func open() {
-        if sqlite3_open(path, &db) != SQLITE_OK {
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
+        if sqlite3_open_v2(path, &db, flags, nil) != SQLITE_OK {
             db = nil
+            return
         }
+        sqlite3_busy_timeout(db, 2500)
+        exec("PRAGMA journal_mode = WAL;")
+        exec("PRAGMA foreign_keys = ON;")
     }
 
     private func exec(_ sql: String) {
         guard let db else { return }
         sqlite3_exec(db, sql, nil, nil, nil)
+    }
+
+    private func syncOnQueue<T>(_ work: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: Self.queueKey) != nil {
+            return work()
+        }
+        return queue.sync(execute: work)
+    }
+
+    private static func columnText(_ stmt: OpaquePointer?, _ index: Int32) -> String {
+        guard let text = sqlite3_column_text(stmt, index) else { return "" }
+        return String(cString: text)
     }
 
     private func migrate() {
@@ -72,7 +93,7 @@ public final class FailurePatternDB {
         modelName: String = ""
     ) {
         queue.async { [weak self] in
-            guard let self, let db else { return }
+            guard let self, let db = self.db else { return }
             let hash = Self.hash(intent: intent, tools: triggerTools, keywords: triggerKeywords, modelName: modelName)
             let tools = triggerTools.joined(separator: ",")
             let keywords = triggerKeywords.joined(separator: ",")
@@ -87,11 +108,11 @@ public final class FailurePatternDB {
             """
             var updateStmt: OpaquePointer?
             if sqlite3_prepare_v2(db, updateSQL, -1, &updateStmt, nil) == SQLITE_OK {
+                defer { sqlite3_finalize(updateStmt) }
                 sqlite3_bind_double(updateStmt, 1, now)
                 sqlite3_bind_text_safe(updateStmt, 2, hash)
                 sqlite3_step(updateStmt)
                 let rowsChanged = sqlite3_changes(db)
-                sqlite3_finalize(updateStmt)
                 if rowsChanged > 0 { return }
             }
 
@@ -99,11 +120,12 @@ public final class FailurePatternDB {
             let insertSQL = """
             INSERT INTO failure_patterns (
                 pattern_hash, intent, trigger_tools, trigger_keywords,
-                root_cause, preemptive_instruction, frequency, last_seen, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?);
+                root_cause, preemptive_instruction, frequency, last_seen, created_at, model_name
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?);
             """
             var insertStmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, insertSQL, -1, &insertStmt, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(insertStmt) }
             sqlite3_bind_text_safe(insertStmt, 1, hash)
             sqlite3_bind_text_safe(insertStmt, 2, intent)
             sqlite3_bind_text_safe(insertStmt, 3, tools)
@@ -112,8 +134,8 @@ public final class FailurePatternDB {
             sqlite3_bind_text_safe(insertStmt, 6, preemptiveInstruction)
             sqlite3_bind_double(insertStmt, 7, now)
             sqlite3_bind_double(insertStmt, 8, now)
+            sqlite3_bind_text_safe(insertStmt, 9, modelName)
             sqlite3_step(insertStmt)
-            sqlite3_finalize(insertStmt)
         }
     }
 
@@ -122,77 +144,79 @@ public final class FailurePatternDB {
     /// patterns older than 14 days are deprioritized.
     /// Patterns that have been fixed (high successAfterFix) are also skipped.
     public func matches(intent: String, recentTools: [String], message: String, modelName: String = "") -> [FailurePattern] {
-        guard let db else { return [] }
-        let maxAgeDays: Double = 30
-        let cutoff = Date().addingTimeInterval(-maxAgeDays * 86400).timeIntervalSince1970
-        // Prefer model-specific patterns; also include model-agnostic ones
-        let sql = """
-        SELECT id, pattern_hash, intent, trigger_tools, trigger_keywords,
-               root_cause, preemptive_instruction, frequency, success_after_fix, last_seen, model_name
-        FROM failure_patterns
-        WHERE intent = ? AND frequency >= 2 AND last_seen > ? AND (model_name = '' OR model_name = ?)
-        ORDER BY CASE WHEN model_name = ? THEN 0 ELSE 1 END, frequency DESC, last_seen DESC
-        LIMIT 10;
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_text_safe(stmt, 1, intent)
-        sqlite3_bind_double(stmt, 2, cutoff)
-        sqlite3_bind_text_safe(stmt, 3, modelName)
-        sqlite3_bind_text_safe(stmt, 4, modelName)
-        let now = Date()
-        let decayThreshold: TimeInterval = 14 * 86400
-        var results: [FailurePattern] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let successCount = Int(sqlite3_column_int(stmt, 8))
-            let freq = Int(sqlite3_column_int(stmt, 7))
-            // Skip patterns already confirmed as fixed (success rate > 60%)
-            if successCount > 0 && freq > 0 && Double(successCount) / Double(freq) > 0.6 {
-                continue
-            }
-            let pt = String(cString: sqlite3_column_text(stmt, 3))
-            let pk = String(cString: sqlite3_column_text(stmt, 4))
-            let tools = pt.isEmpty ? [] : pt.components(separatedBy: ",")
-            let keywords = pk.isEmpty ? [] : pk.components(separatedBy: ",")
-            let toolOverlap = !tools.isEmpty && tools.contains(where: { recentTools.contains($0) })
-            // Use token similarity for keyword matching (P2: better than pure substring)
+        syncOnQueue {
+            guard let db else { return [] }
+            let maxAgeDays: Double = 30
+            let cutoff = Date().addingTimeInterval(-maxAgeDays * 86400).timeIntervalSince1970
+            // Prefer model-specific patterns; also include model-agnostic ones
+            let sql = """
+            SELECT id, pattern_hash, intent, trigger_tools, trigger_keywords,
+                   root_cause, preemptive_instruction, frequency, success_after_fix, last_seen, model_name
+            FROM failure_patterns
+            WHERE intent = ? AND frequency >= 2 AND last_seen > ? AND (model_name = '' OR model_name = ?)
+            ORDER BY CASE WHEN model_name = ? THEN 0 ELSE 1 END, frequency DESC, last_seen DESC
+            LIMIT 10;
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text_safe(stmt, 1, intent)
+            sqlite3_bind_double(stmt, 2, cutoff)
+            sqlite3_bind_text_safe(stmt, 3, modelName)
+            sqlite3_bind_text_safe(stmt, 4, modelName)
+            let now = Date()
+            let decayThreshold: TimeInterval = 14 * 86400
+            var results: [FailurePattern] = []
             let messageTokens = Self.tokenize(message)
-            let keywordTokens = keywords.reduce(into: Set<String>()) { $0.formUnion(Self.tokenize($1)) }
-            let sim = Self.similarity(messageTokens, keywordTokens)
-            let keywordMatch = sim > 0.15 || (!keywords.isEmpty && keywords.contains(where: { message.localizedCaseInsensitiveContains($0) }))
-            if toolOverlap || keywordMatch {
-                let lastSeen = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 9))
-                let age = now.timeIntervalSince(lastSeen)
-                // Deprioritize stale patterns (>14 days) — only include if frequency is high
-                if age > decayThreshold && freq < 4 { continue }
-                results.append(FailurePattern(
-                    id: Int(sqlite3_column_int(stmt, 0)),
-                    patternHash: String(cString: sqlite3_column_text(stmt, 1)),
-                    intent: String(cString: sqlite3_column_text(stmt, 2)),
-                    triggerTools: tools,
-                    triggerKeywords: keywords,
-                    rootCause: String(cString: sqlite3_column_text(stmt, 5)),
-                    preemptiveInstruction: String(cString: sqlite3_column_text(stmt, 6)),
-                    frequency: freq,
-                    successAfterFix: successCount > 0,
-                    lastSeen: lastSeen
-                ))
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let successCount = Int(sqlite3_column_int(stmt, 8))
+                let freq = Int(sqlite3_column_int(stmt, 7))
+                // Skip patterns already confirmed as fixed (success rate > 60%)
+                if successCount > 0 && freq > 0 && Double(successCount) / Double(freq) > 0.6 {
+                    continue
+                }
+                let pt = Self.columnText(stmt, 3)
+                let pk = Self.columnText(stmt, 4)
+                let tools = pt.isEmpty ? [] : pt.components(separatedBy: ",")
+                let keywords = pk.isEmpty ? [] : pk.components(separatedBy: ",")
+                let toolOverlap = !tools.isEmpty && tools.contains(where: { recentTools.contains($0) })
+                // Use token similarity for keyword matching (P2: better than pure substring)
+                let keywordTokens = keywords.reduce(into: Set<String>()) { $0.formUnion(Self.tokenize($1)) }
+                let sim = Self.similarity(messageTokens, keywordTokens)
+                let keywordMatch = sim > 0.15 || (!keywords.isEmpty && keywords.contains(where: { message.localizedCaseInsensitiveContains($0) }))
+                if toolOverlap || keywordMatch {
+                    let lastSeen = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 9))
+                    let age = now.timeIntervalSince(lastSeen)
+                    // Deprioritize stale patterns (>14 days) — only include if frequency is high
+                    if age > decayThreshold && freq < 4 { continue }
+                    results.append(FailurePattern(
+                        id: Int(sqlite3_column_int(stmt, 0)),
+                        patternHash: Self.columnText(stmt, 1),
+                        intent: Self.columnText(stmt, 2),
+                        triggerTools: tools,
+                        triggerKeywords: keywords,
+                        rootCause: Self.columnText(stmt, 5),
+                        preemptiveInstruction: Self.columnText(stmt, 6),
+                        frequency: freq,
+                        successAfterFix: successCount > 0,
+                        lastSeen: lastSeen
+                    ))
+                }
             }
+            return results
         }
-        sqlite3_finalize(stmt)
-        return results
     }
 
     /// Mark a pattern as having led to success after its preemptive instruction was applied.
     public func markSuccess(patternHash: String) {
         queue.async { [weak self] in
-            guard let self, let db else { return }
+            guard let self, let db = self.db else { return }
             let sql = "UPDATE failure_patterns SET success_after_fix = success_after_fix + 1 WHERE pattern_hash = ?;"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text_safe(stmt, 1, patternHash)
             sqlite3_step(stmt)
-            sqlite3_finalize(stmt)
         }
     }
 
@@ -232,26 +256,48 @@ public final class FailurePatternDB {
         return Double(intersection) / Double(union)
     }
 
+    /// Prune patterns that are outdated (>60 days), low-frequency and fixed.
+    /// Call periodically (e.g. on app launch) to keep the DB lean.
+    public func pruneStalePatterns() {
+        queue.async { [weak self] in
+            guard let self, let db = self.db else { return }
+            let cutoff60 = Date().addingTimeInterval(-60 * 86400).timeIntervalSince1970
+            // Delete: >60 days old AND (low frequency OR confirmed fixed)
+            let sql = """
+            DELETE FROM failure_patterns
+            WHERE last_seen < ?
+              AND (frequency < 3 OR (success_after_fix > 0 AND success_after_fix * 2 > frequency));
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, cutoff60)
+            sqlite3_step(stmt)
+        }
+    }
+
     /// Return top failure patterns by frequency for self-improvement analysis.
     public func topPatterns(limit: Int = 5) -> [PatternSummary] {
-        guard let db else { return [] }
-        let sql = "SELECT intent, trigger_tools, root_cause, preemptive_instruction, frequency, success_after_fix FROM failure_patterns ORDER BY frequency DESC LIMIT ?;"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_int(stmt, 1, Int32(limit))
-        var results: [PatternSummary] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            results.append(PatternSummary(
-                intent: String(cString: sqlite3_column_text(stmt, 0)),
-                triggerTools: String(cString: sqlite3_column_text(stmt, 1)),
-                rootCause: String(cString: sqlite3_column_text(stmt, 2)),
-                preemptiveInstruction: String(cString: sqlite3_column_text(stmt, 3)),
-                frequency: Int(sqlite3_column_int(stmt, 4)),
-                successAfterFix: Int(sqlite3_column_int(stmt, 5))
-            ))
+        syncOnQueue {
+            guard let db else { return [] }
+            let sql = "SELECT intent, trigger_tools, root_cause, preemptive_instruction, frequency, success_after_fix FROM failure_patterns ORDER BY frequency DESC LIMIT ?;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int(stmt, 1, Int32(limit))
+            var results: [PatternSummary] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                results.append(PatternSummary(
+                    intent: Self.columnText(stmt, 0),
+                    triggerTools: Self.columnText(stmt, 1),
+                    rootCause: Self.columnText(stmt, 2),
+                    preemptiveInstruction: Self.columnText(stmt, 3),
+                    frequency: Int(sqlite3_column_int(stmt, 4)),
+                    successAfterFix: Int(sqlite3_column_int(stmt, 5))
+                ))
+            }
+            return results
         }
-        sqlite3_finalize(stmt)
-        return results
     }
 }
 
@@ -270,7 +316,7 @@ public struct BehaviorSignalTracker {
     /// Record a behavior signal from a thread.
     /// Extracts tools, keywords, and generates a preemptive instruction automatically.
     public static func record(signal: Signal, thread: Thread) {
-        let intentString = thread.source == .session ? "chat" : inferIntent(from: thread)
+        let intentString = inferIntent(from: thread)
         let recentTools = thread.steps
             .filter { $0.kind == .toolCall }
             .compactMap { $0.toolName }
@@ -297,7 +343,7 @@ public struct BehaviorSignalTracker {
     private static func extractKeywords(from thread: Thread) -> [String] {
         // Use first user input and title as keywords for pattern matching
         var keywords: [String] = []
-        if !thread.title.isEmpty && thread.title != "新会话" {
+        if !Thread.isPlaceholderTitle(thread.title) {
             keywords.append(thread.title)
         }
         if let firstInput = thread.steps.first(where: { $0.kind == .userInput })?.text {

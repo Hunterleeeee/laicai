@@ -28,7 +28,7 @@ final class TaskOutcomeRecorderTests: LaicaiNativeFoundationTestCase {
                     recorder.record(
                         taskID: id,
                         intent: "task",
-                        routeLabel: "任务",
+                        routeLabel: "会话 执行",
                         executionMode: "auto",
                         iterations: index % 5 + 1,
                         status: index.isMultiple(of: 7) ? .failed : .completed,
@@ -59,7 +59,7 @@ final class TaskOutcomeRecorderTests: LaicaiNativeFoundationTestCase {
 
         try await Task.sleep(nanoseconds: 1_000_000_000)
         let stats = recorder.stats(days: 1)
-        let row = try XCTUnwrap(stats.first { $0.intent == "task" && $0.routeLabel == "任务" })
+        let row = try XCTUnwrap(stats.first { $0.intent == "task" && $0.routeLabel == "会话 执行" })
         XCTAssertEqual(row.total, 80)
         XCTAssertGreaterThan(row.completed, 0)
         XCTAssertNotNil(recorder.avgIterations(intent: "task", days: 1))

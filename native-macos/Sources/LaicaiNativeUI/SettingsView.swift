@@ -241,7 +241,7 @@ private struct GeneralSettingsTab: View {
         return settingsCard(title: "数据概览") {
             HStack(spacing: AppSpace.xl) {
                 statPill(value: "\(projectCount)", label: "项目")
-                statPill(value: "\(threadCount)", label: "会话")
+                statPill(value: "\(threadCount)", label: "对话")
                 statPill(value: "\(totals.requestCount)", label: "请求")
                 statPill(value: formatCostBrief(totals.estimatedCost), label: "费用")
             }
@@ -473,10 +473,13 @@ private struct ConnectorSettingsRow: View {
 private struct ToolsSettingsTab: View {
     @EnvironmentObject private var store: AppStore
     @State private var serverStatus: String = ""
+    @State private var bridgeStatus: GeminiOAuthBridgeStatus = .empty
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppSpace.lg) {
+                geminiBridgeCard
+
                 settingsCard(title: "ComfyUI 图片生成") {
                     settingsRow(label: "服务地址") {
                         TextField("http://127.0.0.1:8188", text: Binding(
@@ -531,6 +534,119 @@ private struct ToolsSettingsTab: View {
             .padding(AppSpace.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .onAppear { refreshBridgeStatus() }
+    }
+
+    private var geminiBridgeCard: some View {
+        settingsCard(title: "Gemini / Antigravity 桥") {
+            VStack(alignment: .leading, spacing: AppSpace.md) {
+                HStack(alignment: .center, spacing: AppSpace.md) {
+                    ZStack {
+                        Circle()
+                            .fill(bridgeTone.opacity(0.14))
+                            .frame(width: 26, height: 26)
+                        Image(systemName: bridgeIcon)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(bridgeTone)
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(bridgeStatus.title)
+                            .font(AppFont.bodyMedium)
+                            .foregroundStyle(TextGrade.primary)
+                        Text(bridgeStatus.detail)
+                            .font(AppFont.caption)
+                            .foregroundStyle(TextGrade.muted)
+                            .lineLimit(2)
+                    }
+
+                    Spacer()
+
+                    Button("刷新") {
+                        refreshBridgeStatus()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button(bridgePrimaryActionTitle) {
+                        store.startGeminiOAuthBridge()
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(2))
+                            refreshBridgeStatus()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(bridgeStatus.socksAvailable ? Brand.primary : Semantic.warning)
+
+                    if bridgeStatus.hasPartialState {
+                        Button("清理") {
+                            store.stopGeminiOAuthBridge()
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .seconds(2))
+                                refreshBridgeStatus()
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Semantic.error)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                    Text("用于 Gemini 与 Antigravity 不吃系统代理时，临时把 \(GeminiOAuthBridgeManager.domains.joined(separator: "、")) 转发到 Veee SOCKS \(GeminiOAuthBridgeManager.socksHost):\(GeminiOAuthBridgeManager.socksPort)。")
+                        .font(AppFont.caption)
+                        .foregroundStyle(TextGrade.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("启动会弹出 macOS 管理员授权，授权后桥在后台运行；失败会自动回滚 hosts。来财不会读取、保存或代理你的 Mac 密码。")
+                        .font(AppFont.caption)
+                        .foregroundStyle(TextGrade.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(spacing: AppSpace.sm) {
+                    Button("打开脚本位置") {
+                        GeminiOAuthBridgeManager.shared.revealHelperInFinder()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Text(bridgeStatus.scriptPath.isEmpty ? GeminiOAuthBridgeManager.shared.scriptURL.path : bridgeStatus.scriptPath)
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(TextGrade.ghost)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                if let processLine = bridgeStatus.processLine {
+                    Text(processLine)
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(TextGrade.ghost)
+                        .lineLimit(2)
+                }
+            }
+        }
+    }
+
+    private var bridgeTone: Color {
+        if bridgeStatus.isRunning { return Semantic.success }
+        if bridgeStatus.hasPartialState || !bridgeStatus.socksAvailable { return Semantic.warning }
+        return TextGrade.ghost
+    }
+
+    private var bridgeIcon: String {
+        if bridgeStatus.isRunning { return "checkmark.shield" }
+        if bridgeStatus.hasPartialState { return "wrench.and.screwdriver" }
+        return "link.badge.plus"
+    }
+
+    private var bridgePrimaryActionTitle: String {
+        if bridgeStatus.isRunning { return "重启修复" }
+        if bridgeStatus.hasPartialState { return "修复启动" }
+        return "启动"
+    }
+
+    private func refreshBridgeStatus() {
+        bridgeStatus = GeminiOAuthBridgeManager.shared.status()
     }
 }
 
@@ -610,6 +726,21 @@ private struct InputSettingsTab: View {
                         ))
                         .font(.system(size: 12))
                         .toggleStyle(.switch)
+                    }
+
+                    settingsRow(label: "精简模式") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Codex 风格内核（实验）", isOn: Binding(
+                                get: { store.state.settings.leanMode },
+                                set: { store.toggleLeanMode($0) }
+                            ))
+                            .font(.system(size: 12))
+                            .toggleStyle(.switch)
+                            Text("跳过编排层（阶段切换、模式匹配、自动恢复等），直接由模型驱动工具调用。更快、更省 token，但容错性较低。")
+                                .font(.system(size: 11))
+                                .foregroundStyle(TextGrade.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
             }
@@ -864,7 +995,7 @@ private struct ChannelEditSheet: View {
                     case .wecom:
                         configField("Corp ID", text: $corpID, placeholder: "企业微信企业 ID")
                         configField("Corp Secret", text: $corpSecret, placeholder: "应用的 Secret", isSecure: true)
-                        configField("Agent ID", text: $agentID, placeholder: "应用 AgentId")
+                        configField("应用 ID", text: $agentID, placeholder: "企业微信 AgentId")
 
                     case .slack:
                         configField("Bot Token", text: $botToken, placeholder: "xoxb-xxxxx", isSecure: true)

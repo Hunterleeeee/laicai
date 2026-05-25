@@ -104,12 +104,42 @@ struct ResponseHandler {
             state.messages.append(ChatMessage(role: "system", content: nudgeMsg))
             let planStep = TaskStep(
                 kind: .aiThinking,
-                text: "编排层拦截：模型只输出计划未行动，强制要求继续执行。",
+                text: "检测到还没真正执行，继续推进。",
                 isCollapsible: true,
                 isCollapsed: true
             )
-            state.task.steps.append(planStep)
-            onStep(planStep)
+            if config.emitDebugSteps {
+                state.task.steps.append(planStep)
+                onStep(planStep)
+            }
+            return .continueLoop
+        }
+        let requiresToolEvidence = AgentLoop.shouldRequireToolEvidenceBeforeFinalText(
+            message: state.message,
+            intent: state.intent,
+            isReadOnlyRun: state.isReadOnlyRun,
+            toolCallCount: toolCallCount,
+            toolDefs: state.toolDefs,
+            usedToolCompatibilityFallback: state.usedToolCompatibilityFallback
+        )
+            && state.iteration < state.effectiveMaxIterations - 1
+            && !hasFakeToolCalls
+            && !AgentLoop.looksLikeProviderError(text)
+            && state.nudgeCount < state.maxNudges
+        if requiresToolEvidence {
+            state.nudgeCount += 1
+            state.messages.append(ChatMessage(role: "assistant", content: text))
+            state.messages.append(ChatMessage(role: "system", content: "当前是会话执行任务，但你没有调用任何工具就给出了结论。不要裸答。请先调用 workspace_index、code_search、file_read、web_search 或更合适的工具取得真实证据；如果任务需要修改或验证，继续执行对应工具。"))
+            let evidenceStep = TaskStep(
+                kind: .aiThinking,
+                text: "执行质量门：尚未调用工具取证，继续执行。",
+                isCollapsible: true,
+                isCollapsed: true
+            )
+            if config.emitDebugSteps {
+                state.task.steps.append(evidenceStep)
+                onStep(evidenceStep)
+            }
             return .continueLoop
         }
 
@@ -117,9 +147,11 @@ struct ResponseHandler {
         let isActMode = !state.isReadOnlyRun
             && isToolAllowed("shell.exec", config: config)
             && isToolAllowed("file.write", config: config)
-        let allReadNoWrite = isActMode && toolCallCount >= 5 && !hasWritten
-        let pastHalfBudget = state.iteration > state.effectiveMaxIterations / 2
+        let allReadNoWrite = isActMode && toolCallCount >= 3 && !hasWritten
+        let pastHalfBudget = state.iteration >= max(2, state.effectiveMaxIterations / 3)
+        let expectsFurtherExecution = AgentLoop.expectsWriteOutput(state.message) || AgentLoop.expectsWikiOutput(state.message)
         let shouldNudge = allReadNoWrite && pastHalfBudget
+            && expectsFurtherExecution
             && state.intent != .chat && state.intent != .research
             && state.nudgeCount < 1
             && !AgentLoop.looksLikeProviderError(text)
@@ -135,7 +167,7 @@ struct ResponseHandler {
         if hasFakeToolCalls && !state.usedToolCompatibilityFallback {
             let warningStep = TaskStep(
                 kind: .aiThinking,
-                text: "检测到模型将工具调用写成了文本，说明该模型不兼容函数调用。建议切换到支持 function calling 的云端模型（如 GPT-4o/5.5、Claude）来执行复杂任务。",
+                text: "检测到模型将工具调用写成了文本，说明该模型不兼容函数调用。建议切换到支持 function calling 的云端模型（如 GPT-4o/5.5、Claude）来执行复杂会话。",
                 isCollapsible: false,
                 isCollapsed: false
             )
@@ -153,9 +185,21 @@ struct ResponseHandler {
             }
         }
         // Completion-claim guard
-        if AgentLoop.expectsWriteOutput(state.message) && !hasWritten && !AgentLoop.hasSavedWiki(in: state.task)
+        let missingDeliverables = AgentLoop.expectedDeliverablePaths(
+            from: state.message,
+            workspaceRoot: state.taskContext.workspaceRoot
+        ).filter { path in
+            var isDirectory: ObjCBool = false
+            return !FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) || isDirectory.boolValue
+        }
+        if AgentLoop.expectsWriteOutput(state.message)
+            && (!hasWritten || !missingDeliverables.isEmpty)
+            && !AgentLoop.hasSavedWiki(in: state.task)
             && AgentLoop.containsFalseCompletionClaim(visibleText) {
-            visibleText += "\n\n---\n⚠️ **来财提醒**：本轮未实际执行成功的写入/保存操作（`file.write` / `file.edit` / `wiki.build` 全部未成功）。上面的「已修改 / 已保存」等说法是模型自述，不代表磁盘上文件已变更。请检查上方工具结果，或要求重试。"
+            let targetText = missingDeliverables.isEmpty
+                ? ""
+                : "目标文件尚未生成：\(missingDeliverables.prefix(3).map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "、"))。"
+            visibleText += "\n\n---\n⚠️ **来财提醒**：\(targetText)本轮没有足够的真实交付证据。上面的「已修改 / 已保存 / 已创建」等说法是模型自述，请以上方工具结果和磁盘文件为准。"
         }
 
         // ── Provider error ──
@@ -191,7 +235,7 @@ struct ResponseHandler {
             state.nudgeCount += 1
             let gateStep = TaskStep(
                 kind: .aiThinking,
-                text: "完成质量门：Wiki 任务尚未保存任何笔记，继续执行 wiki_build。",
+                text: "完成质量门：Wiki会话尚未保存任何笔记，继续执行 wiki_build。",
                 isCollapsible: true,
                 isCollapsed: true
             )
@@ -231,7 +275,7 @@ struct ResponseHandler {
                 if continuationStep.text.contains("回复仍被截断") {
                     let stillTruncatedStep = TaskStep(
                         kind: .error,
-                        text: "第二段回复仍被截断。请继续在这条任务里发送\u{201C}接着说\u{201D}，我会继续沿用当前上下文。",
+                        text: "第二段回复仍被截断。请继续在这个会话里发送\u{201C}接着说\u{201D}，我会继续沿用当前上下文。",
                         isFailure: false,
                         recoverable: true,
                         retryAction: "接着说"
@@ -260,7 +304,7 @@ struct ResponseHandler {
                 state.didComplete = false
                 state.messages.append(ChatMessage(role: "assistant", content: text))
                 let wikiInstruction = expectsWiki
-                    ? "\n\nWiki 任务必须调用 wiki_build(mode=\"atomic\", save=true) 保存原子笔记，并在需要时调用 wiki_build(mode=\"moc\", save=true) 保存索引页。"
+                    ? "\n\nWiki会话必须调用 wiki_build(mode=\"atomic\", save=true) 保存原子笔记，并在需要时调用 wiki_build(mode=\"moc\", save=true) 保存索引页。"
                     : ""
                 state.messages.append(ChatMessage(role: "system", content: "⚠️ 完成质量检查未通过：\n" + qualityIssues.map { "- \($0)" }.joined(separator: "\n") + "\(wikiInstruction)\n\n请立即修复以上问题后再输出最终总结。"))
                 let gateStep = TaskStep(
@@ -329,11 +373,11 @@ struct ResponseHandler {
         }
 
         // On 2nd empty response, strip tools
-        if state.consecutiveEmptyResponses == 2 && !state.toolDefs.isEmpty {
+        if state.consecutiveEmptyResponses == 2 {
             state.toolDefs = []
             let stripStep = TaskStep(
                 kind: .aiThinking,
-                text: "编排层：连续空响应，临时移除工具定义重试（部分模型对工具 schema 敏感）。",
+                text: "模型连续空响应，临时移除工具定义，换一种方式继续。",
                 isCollapsible: true,
                 isCollapsed: true
             )

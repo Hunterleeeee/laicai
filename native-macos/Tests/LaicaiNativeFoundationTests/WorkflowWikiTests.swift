@@ -25,11 +25,11 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertEqual(store.state.workflowRuns.first?.name, "code-review")
         XCTAssertEqual(store.state.workflowRuns.first?.statusLine, "执行中")
-        XCTAssertEqual(store.state.tasks.first?.workflowName, "code-review")
-        XCTAssertEqual(store.state.selectedTaskID, store.state.tasks.first?.id)
-        XCTAssertGreaterThanOrEqual(store.state.tasks.first?.steps.count ?? 0, 2)
-        XCTAssertEqual(store.state.tasks.first?.steps[1].kind, .aiThinking)
-        XCTAssertTrue(store.state.tasks.first?.steps[1].text.contains("规划：工作流") == true)
+        XCTAssertEqual(store.state.threads.first?.workflowName, "code-review")
+        XCTAssertEqual(store.state.selectedThreadID, store.state.threads.first?.id)
+        XCTAssertGreaterThanOrEqual(store.state.threads.first?.steps.count ?? 0, 2)
+        XCTAssertEqual(store.state.threads.first?.steps[1].kind, .aiThinking)
+        XCTAssertTrue(store.state.threads.first?.steps[1].text.contains("规划：工作流") == true)
     }
     func testWorkflowParserSupportsFailureStrategyConditionsAndPromptBlocks() {
         let source = """
@@ -96,6 +96,54 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(registry.skills.contains { $0.name == "整理日报" })
         XCTAssertTrue(SkillRegistry.loadLocalSkills(workspaceRoot: workspace.path).contains { $0.name == "整理日报" })
     }
+    func testSkillRegistryLoadsMarkdownSkillsWithCategory() throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let dir = workspace.appendingPathComponent(".laicai/skills", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try """
+        ---
+        name: 易学术数权威资料整理
+        description: 整理易学术数资料并回答分类问题
+        category: 通用
+        tools: [web.search, web.fetch]
+        ---
+
+        # 易学术数权威资料整理
+
+        整理易学术数资料并回答分类问题。
+        """.write(to: dir.appendingPathComponent("易学术数权威资料整理.md"), atomically: true, encoding: .utf8)
+
+        let skills = SkillRegistry.loadLocalSkills(workspaceRoot: workspace.path)
+        let skill = try XCTUnwrap(skills.first { $0.name == "易学术数权威资料整理" })
+
+        XCTAssertFalse(skill.isBuiltin)
+        XCTAssertTrue(skill.isPublished)
+        XCTAssertEqual(skill.category, "general")
+        XCTAssertEqual(skill.tools, ["web.fetch", "web.search"])
+    }
+    func testSkillManageCreateAndListShowsCustomCategory() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let tool = SkillManageTool()
+
+        let created = try await tool.execute(
+            argumentsJSON: #"{"action":"create","name":"通用测试技能","description":"测试本地技能分类","tools":"web.search,file.read","instructions":"按步骤执行。","category":"通用"}"#,
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+        let listed = try await tool.execute(
+            argumentsJSON: #"{"action":"list"}"#,
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+
+        XCTAssertTrue(created.success)
+        XCTAssertEqual(created.data?["category"], "general")
+        XCTAssertTrue(listed.output.contains("自定义"))
+        XCTAssertTrue(listed.output.contains("通用测试技能"))
+        XCTAssertTrue(SkillRegistry.loadLocalSkills(workspaceRoot: workspace.path).contains {
+            $0.name == "通用测试技能" && $0.category == "general"
+        })
+    }
     func testBootstrapSelectsLatestThreadAcrossSessionsAndTasks() {
         let olderSession = ChatSession(
             title: "旧线程",
@@ -119,10 +167,8 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
 
         let state = AppState.bootstrap(environment: environment)
 
-        XCTAssertEqual(state.selectedTaskID, newerTask.id)
-        XCTAssertNil(state.selectedSessionID)
         XCTAssertEqual(state.selectedThreadID, newerTask.id)
-        XCTAssertEqual(state.selectedThreadSource, .task)
+        XCTAssertEqual(state.selectedThreadID, newerTask.id)
     }
     func testBootstrapRestoresPersistedThreadSnapshotAsAuthoritativeSource() {
         let staleSession = ChatSession(
@@ -153,11 +199,10 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
 
         let state = AppState.bootstrap(environment: environment)
 
-        XCTAssertTrue(state.sessions.isEmpty)
-        XCTAssertEqual(state.tasks.first?.id, restoredTask.id)
-        XCTAssertEqual(state.tasks.first?.title, "已升级任务")
+        XCTAssertEqual(state.threads.count, 1)
+        XCTAssertEqual(state.threads.first?.id, restoredTask.id)
+        XCTAssertEqual(state.threads.first?.title, "已升级任务")
         XCTAssertEqual(state.selectedThreadID, restoredTask.id)
-        XCTAssertEqual(state.selectedThreadSource, .task)
     }
     func testBootstrapCancelsStaleRunningTasks() {
         let staleTask = AgentTask(
@@ -166,7 +211,7 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
             updatedAt: Date(timeIntervalSinceNow: -3600)
         )
         let store = AppStore(
-            state: testState(tasks: [staleTask], selectedTaskID: staleTask.id),
+            state: testState(tasks: [staleTask], selectedThreadID: staleTask.id),
             environment: AppEnvironment(
                 runtimeClient: PreviewChatRuntime(),
                 sessionRepository: NoopSessionRepository(),
@@ -176,10 +221,10 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
             )
         )
 
-        XCTAssertEqual(store.state.tasks.first?.status, .cancelled)
-        XCTAssertTrue(store.state.tasks.first?.steps.contains { $0.text.contains("上次运行被中断") } == true)
-        XCTAssertTrue(store.state.tasks.first?.steps.contains { $0.text.hasPrefix("任务检查点") } == true)
-        XCTAssertEqual(store.state.selectedTaskID, staleTask.id)
+        XCTAssertEqual(store.state.threads.first?.status, .cancelled)
+        XCTAssertTrue(store.state.threads.first?.steps.contains { $0.text.contains("上次运行被中断") } == true)
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(store.state.selectedThreadID, staleTask.id)
     }
     func testWikiPreviewDoesNotWriteUntilSaved() async throws {
         let vault = try makeTemporaryWorkspace()

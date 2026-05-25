@@ -3,6 +3,18 @@ import Foundation
 /// 中文友好相对时间格式化器
 /// 输出：刚刚 / 5分钟前 / 2小时前 / 昨天 / 3天前 / 05-12
 enum RelativeTimeFormatter {
+    private static let fullDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd"
+        return f
+    }()
+
     static func string(for date: Date) -> String {
         let now = Date()
         let diff = now.timeIntervalSince(date)
@@ -47,14 +59,10 @@ enum RelativeTimeFormatter {
     }
 
     private static func formatDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: date)
+        fullDateFormatter.string(from: date)
     }
 
     private static func formatShortDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "MM-dd"
-        return f.string(from: date)
+        shortDateFormatter.string(from: date)
     }
 }

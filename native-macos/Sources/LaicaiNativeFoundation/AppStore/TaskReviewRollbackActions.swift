@@ -15,6 +15,7 @@ extension AppStore {
                 isFailure: false,
                 recoverable: false
             ))
+            syncAgentSnapshot(at: threadIndex)
             state.threads[threadIndex].updatedAt = .now
             persistThreads()
             return
@@ -28,7 +29,7 @@ extension AppStore {
             step.kind == .reviewRequest && step.approved == true && step.diffFilePath != nil && step.diffOldContent != nil ? (index, step) : nil
         }
         guard !approvedSteps.isEmpty else {
-            ToastCenter.shared.show("没有可回滚的已批准变更")
+            notify("没有可回滚的已批准变更")
             return
         }
         var rolledBack = 0
@@ -50,6 +51,7 @@ extension AppStore {
         appendReviewResult(to: threadIndex, approved: false, text: "批量回滚完成：\(rolledBack)/\(approvedSteps.count) 个文件已恢复")
         AuditLog.shared.record(tool: "batch.rollback", input: "\(approvedSteps.count) files", output: "回滚 \(rolledBack) 个文件", success: true)
         recordToolActivity(name: "batch.rollback", summary: "批量回滚 \(rolledBack) 个文件", statusLine: "", isFailure: false)
+        syncAgentSnapshot(at: threadIndex)
         state.threads[threadIndex].updatedAt = .now
         persistThreads()
     }
@@ -59,7 +61,7 @@ extension AppStore {
         guard let step = state.threads[threadIndex].steps.first(where: {
             $0.id == stepID && $0.kind == .reviewRequest && $0.approved == true && $0.diffFilePath != nil && $0.diffOldContent != nil
         }) else {
-            ToastCenter.shared.warn("该步骤不可回滚")
+            notify("该步骤不可回滚", style: .warning)
             return
         }
         performRollback(threadIndex: threadIndex, step: step)
@@ -72,6 +74,7 @@ extension AppStore {
         if let securityError = SecurityManager.shared.checkWrite(path: fullPath) {
             appendReviewResult(to: threadIndex, approved: false, text: "回滚被安全策略拦截：\(securityError)")
             recordToolActivity(name: "file.rollback", summary: "回滚被拦截", statusLine: filePath, isFailure: true)
+            syncAgentSnapshot(at: threadIndex)
             state.threads[threadIndex].updatedAt = .now
             persistThreads()
             return
@@ -87,6 +90,7 @@ extension AppStore {
             AuditLog.shared.record(tool: "file.rollback", input: filePath, output: error.localizedDescription, success: false)
             recordToolActivity(name: "file.rollback", summary: "回滚失败", statusLine: error.localizedDescription, isFailure: true)
         }
+        syncAgentSnapshot(at: threadIndex)
         state.threads[threadIndex].updatedAt = .now
         persistThreads()
     }

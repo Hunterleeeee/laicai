@@ -25,8 +25,8 @@ public final class MenuBarAgent: NSObject, ObservableObject {
         let menu = NSMenu()
         menu.addItem(makeItem("打开来财", action: #selector(activateApp)))
         menu.addItem(.separator())
-        menu.addItem(makeItem("新建 Agent", action: #selector(newThread), key: "n"))
-        menu.addItem(makeItem("继续最近 Agent", action: #selector(continueLastTask), key: "r"))
+        menu.addItem(makeItem("新建对话", action: #selector(newThread), key: "n"))
+        menu.addItem(makeItem("继续最近会话", action: #selector(continueLastTask), key: "r"))
         menu.addItem(.separator())
         let toggleItem = makeItem(isActive ? "暂停后台智能" : "恢复后台智能", action: #selector(toggleActive))
         toggleItem.tag = 100
@@ -104,7 +104,6 @@ extension MenuBarAgent: NSMenuDelegate {
 
 extension Notification.Name {
     public static let laicaiNewThread = Notification.Name("laicai.newThread")
-    public static let laicaiNewSession = Notification.Name("laicai.newSession")
     public static let laicaiContinueLastTask = Notification.Name("laicai.continueLastTask")
     public static let laicaiBackgroundTaskCompleted = Notification.Name("laicai.backgroundTaskCompleted")
     public static let laicaiProactiveSuggestion = Notification.Name("laicai.proactiveSuggestion")
@@ -201,7 +200,7 @@ public final class NotificationManager {
     }
     
     public func notifyBackgroundTaskCompleted(taskTitle: String, threadID: String) {
-        post(title: "后台 Agent 完成", body: taskTitle, threadID: threadID)
+        post(title: "后台会话完成", body: taskTitle, threadID: threadID)
         NotificationCenter.default.post(name: .laicaiBackgroundTaskCompleted, object: nil, userInfo: ["threadID": threadID])
     }
 }
@@ -284,8 +283,8 @@ public struct ReportGenerator {
             "",
             "| 指标 | 数量 |",
             "|------|------|",
-            "| 活跃 Agent | \(todayThreads.count) |",
-            "| Agent 状态 | ✅ \(completedAgents.count)　❌ \(failedAgents.count)　🔄 \(runningAgents.count) |",
+            "| 活跃会话| \(todayThreads.count) |",
+            "| 会话状态 | ✅ \(completedAgents.count)　❌ \(failedAgents.count)　🔄 \(runningAgents.count) |",
             "| 工具调用 | \(countToolCalls(todayThreads)) 次 |",
             "| 文件变更 | \(countFileChanges(todayThreads)) 个文件 |",
         ]
@@ -362,7 +361,7 @@ public struct ReportGenerator {
         let wikiSuggestions = extractWikiSuggestions(todayThreads)
         if !wikiSuggestions.isEmpty {
             lines += ["## 📝 建议存入 Wiki", ""]
-            lines.append("以下内容来自今天的 Agent，可能值得沉淀为知识库条目：")
+            lines.append("以下内容来自今天的会话，可能值得沉淀为知识库条目：")
             lines.append("")
             for suggestion in wikiSuggestions {
                 lines.append("### \(suggestion.topic)")
@@ -403,9 +402,9 @@ public struct ReportGenerator {
             "",
             "| 指标 | 数量 |",
             "|------|------|",
-            "| 总 Agent | \(weekThreads.count) |",
-            "| 完成 Agent | \(completedAgents.count) |",
-            "| 失败 Agent | \(failedAgents.count) |",
+            "| 总会话| \(weekThreads.count) |",
+            "| 完成会话 | \(completedAgents.count) |",
+            "| 失败会话 | \(failedAgents.count) |",
             "| 工具调用 | \(countToolCalls(weekThreads)) 次 |",
             "| 文件变更 | \(countFileChanges(weekThreads)) 个文件 |",
         ]
@@ -422,7 +421,7 @@ public struct ReportGenerator {
             dayFmt.dateFormat = "MM/dd (E)"
             dayFmt.locale = Locale(identifier: "zh_CN")
             let dayCompleted = dayThreads.filter { $0.agentState == .completed }
-            lines.append("**\(dayFmt.string(from: day))**：\(dayThreads.count) 个 Agent，\(dayCompleted.count) 个完成")
+            lines.append("**\(dayFmt.string(from: day))**：\(dayThreads.count) 个会话，\(dayCompleted.count) 个完成")
             for t in dayThreads.prefix(5) {
                 let icon = agentStatusIcon(t.agentState)
                 lines.append("  - \(icon) \(t.title)")
@@ -435,7 +434,7 @@ public struct ReportGenerator {
 
         // Completed tasks detail
         if !completedAgents.isEmpty {
-            lines += ["## 完成的 Agent", ""]
+            lines += ["## 完成的会话", ""]
             for task in completedAgents.prefix(20) {
                 let files = extractChangedFiles(task)
                 let fileSuffix = files.isEmpty ? "" : "（涉及 \(files.count) 个文件）"
@@ -586,19 +585,17 @@ public struct ReportGenerator {
             }
 
             // New knowledge from long-running Agents
-            if thread.source == .session {
-                let userSteps = thread.steps.filter { $0.kind == .userInput }
-                let aiSteps = thread.steps.filter { $0.kind == .textOutput }
-                if userSteps.count >= 3 && aiSteps.count >= 3 {
-                    let topics = extractTopicsFromText(userSteps.map(\.text).joined(separator: " "))
-                    if !topics.isEmpty {
-                        suggestions.append(WikiSuggestion(
-                            topic: topics.first ?? "Agent 知识点",
-                            reason: "这个 Agent 多轮讨论了 \(topics.joined(separator: "、")) 等话题",
-                            keyContent: String((aiSteps.last?.text ?? "").prefix(200)),
-                            sourceThread: thread.title
-                        ))
-                    }
+            let userSteps = thread.steps.filter { $0.kind == .userInput }
+            let aiSteps = thread.steps.filter { $0.kind == .textOutput }
+            if userSteps.count >= 3 && aiSteps.count >= 3 {
+                let topics = extractTopicsFromText(userSteps.map(\.text).joined(separator: " "))
+                if !topics.isEmpty {
+                    suggestions.append(WikiSuggestion(
+                        topic: topics.first ?? "会话 知识点",
+                        reason: "这个会话多轮讨论了 \(topics.joined(separator: "、")) 等话题",
+                        keyContent: String((aiSteps.last?.text ?? "").prefix(200)),
+                        sourceThread: thread.title
+                    ))
                 }
             }
         }

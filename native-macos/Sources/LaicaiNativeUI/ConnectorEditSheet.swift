@@ -125,7 +125,7 @@ struct ConnectorEditSheet: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .help("自动：沿用默认判断；开启：总是发送 tools；关闭：任务模式不再发送 tools。")
+                    .help("自动：沿用默认判断；开启：总是发送 tools；关闭：执行姿态不再发送 tools。")
 
                     Text(toolCallingStatusText)
                         .font(AppFont.caption)
@@ -266,8 +266,8 @@ struct ConnectorEditSheet: View {
         var lines = ["当前生效：\(tools) · \(capability.toolCallingSourceDetail)"]
         if let conflict = capability.toolCallingConflict {
             let followup = conflict == .unsupported
-                ? "如果切回自动，后续任务会默认不再发送 tools。"
-                : "如果切回自动，后续任务会恢复发送 tools。"
+                ? "如果切回自动，后续会话会默认不再发送 tools。"
+                : "如果切回自动，后续会话会恢复发送 tools。"
             lines.append("系统记录：\(conflict.title)。\(followup)")
         } else if toolCallingPolicy == .automatic,
                   let learned = capability.learnedToolCallingDetail {

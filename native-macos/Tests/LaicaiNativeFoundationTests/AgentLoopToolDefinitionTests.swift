@@ -9,6 +9,7 @@ final class AgentLoopToolDefinitionTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertTrue(names.contains("file_read"))
         XCTAssertTrue(names.contains("file_extract"))
+        XCTAssertTrue(names.contains("document_transform"))
         XCTAssertTrue(names.contains("code_search"))
         XCTAssertTrue(names.contains("workspace_index"))
         XCTAssertTrue(names.contains("web_search"))
@@ -16,6 +17,7 @@ final class AgentLoopToolDefinitionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(names.contains("wiki_build"))
         XCTAssertFalse(names.contains("file.read"))
         XCTAssertFalse(names.contains("file.extract"))
+        XCTAssertFalse(names.contains("document.transform"))
         XCTAssertFalse(names.contains("code.search"))
     }
     func testAgentLoopPrioritizesEvidenceToolsInExplorePhase() {
@@ -64,7 +66,7 @@ final class AgentLoopToolDefinitionTests: LaicaiNativeFoundationTestCase {
                 && step.text.contains("approval_required")
         })
         XCTAssertTrue(runtime.requests.contains { request in
-            request.messages.contains { $0.role == "tool" && ($0.content ?? "").contains("approval_required") }
+            (request.messages ?? []).contains { $0.role == "tool" && ($0.content ?? "").contains("approval_required") }
         })
     }
     func testDiffApplyUsesFileChangeToolSemantics() {
@@ -96,14 +98,47 @@ final class AgentLoopToolDefinitionTests: LaicaiNativeFoundationTestCase {
     }
     func testToolRegistryAcceptsAPICompatibleAliases() {
         XCTAssertEqual(ToolNameCodec.canonicalName("file_read"), "file.read")
+        XCTAssertEqual(ToolNameCodec.canonicalName("document_transform"), "document.transform")
         XCTAssertEqual(ToolNameCodec.canonicalName("code_search"), "code.search")
         XCTAssertEqual(ToolNameCodec.canonicalName("web_search"), "web.search")
         XCTAssertEqual(ToolNameCodec.canonicalName("web_fetch"), "web.fetch")
         XCTAssertEqual(ToolNameCodec.canonicalName("wiki_build"), "wiki.build")
         XCTAssertNotNil(ToolRegistry.shared.tool(named: "file_read"))
+        XCTAssertNotNil(ToolRegistry.shared.tool(named: "document_transform"))
         XCTAssertNotNil(ToolRegistry.shared.tool(named: "code_search"))
         XCTAssertNotNil(ToolRegistry.shared.tool(named: "web_search"))
         XCTAssertNotNil(ToolRegistry.shared.tool(named: "web_fetch"))
         XCTAssertNotNil(ToolRegistry.shared.tool(named: "wiki_build"))
+    }
+
+    func testOfficeDocumentDeliveryRequiresVerifyWhenTranslating() throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("pptx")
+        FileManager.default.createFile(atPath: outputURL.path, contents: Data("placeholder".utf8))
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let applyStep = TaskStep(
+            kind: .toolResult,
+            text: "写回完成",
+            toolName: "document.transform",
+            toolParams: ["action": "apply", "outputPath": outputURL.path]
+        )
+        var task = AgentTask(
+            title: "翻译文档",
+            steps: [TaskStep(kind: .userInput, text: "把 /tmp/demo.pptx 翻译成英文"), applyStep]
+        )
+
+        XCTAssertTrue(AgentLoop.hasSuccessfulDocumentWrite(in: task))
+        XCTAssertFalse(AgentLoop.hasSatisfiedDocumentDelivery(in: task, originalMessage: "把 /tmp/demo.pptx 翻译成英文"))
+
+        task.steps.append(TaskStep(
+            kind: .toolResult,
+            text: "remainingCJK: 0",
+            toolName: "document.transform",
+            toolParams: ["action": "verify", "outputPath": outputURL.path, "remainingCJK": "0"]
+        ))
+
+        XCTAssertTrue(AgentLoop.hasSatisfiedDocumentDelivery(in: task, originalMessage: "把 /tmp/demo.pptx 翻译成英文"))
     }
 }

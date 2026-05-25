@@ -16,8 +16,8 @@ struct ReportPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            header
+        VStack(alignment: .leading, spacing: AppSpace.lg) {
+            reportOverview
             typePicker
             if isGenerated {
                 reportView
@@ -26,23 +26,34 @@ struct ReportPanel: View {
                 emptyState
             }
 
-            Divider().padding(.vertical, AppSpace.sm)
+            Rectangle()
+                .fill(SurfaceGrade.divider.opacity(0.6))
+                .frame(height: 0.7)
             OutcomeStatsPanel()
         }
-        .padding(AppSpace.lg)
     }
 
     // MARK: - Header
 
-    private var header: some View {
-        HStack {
-            Image(systemName: "chart.bar.doc.horizontal")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Brand.primary)
-            Text("报告")
-                .font(AppFont.subheadline)
-                .foregroundStyle(TextGrade.primary)
-            Spacer()
+    private var reportOverview: some View {
+        workbenchHeroCard(
+            icon: "chart.bar.doc.horizontal",
+            title: "报告",
+            subtitle: reportType == .daily ? "汇总今天的进展与沉淀。" : "把本周工作整理成可复盘的摘要。",
+            tint: Brand.primary
+        ) {
+            Button {
+                generateReport()
+            } label: {
+                Label(isGenerated ? "重新生成" : "生成报告", systemImage: "sparkles")
+                    .font(AppFont.captionMedium)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Brand.primary)
+            .padding(.vertical, AppSpace.sm)
+            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Brand.primary.opacity(0.10)))
+            .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(Brand.primary.opacity(0.18), lineWidth: 0.6))
         }
     }
 
@@ -58,15 +69,15 @@ struct ReportPanel: View {
                 } label: {
                     Text(type.rawValue)
                         .font(AppFont.captionMedium)
-                        .foregroundStyle(reportType == type ? .white : TextGrade.secondary)
+                        .foregroundStyle(reportType == type ? Brand.primaryDark : TextGrade.secondary)
                         .padding(.horizontal, AppSpace.lg)
                         .padding(.vertical, AppSpace.sm)
                         .background(
-                            Capsule().fill(reportType == type ? Brand.primary : SurfaceGrade.elevated.opacity(0.72))
+                            Capsule().fill(reportType == type ? Brand.primary.opacity(0.12) : SurfaceGrade.elevated.opacity(0.72))
                         )
                         .overlay(
                             Capsule().strokeBorder(
-                                reportType == type ? Color.clear : SurfaceGrade.hairline,
+                                reportType == type ? Brand.primary.opacity(0.18) : SurfaceGrade.hairline,
                                 lineWidth: 0.6
                             )
                         )
@@ -75,18 +86,6 @@ struct ReportPanel: View {
             }
 
             Spacer()
-
-            Button {
-                generateReport()
-            } label: {
-                Label("生成", systemImage: "sparkles")
-                    .font(AppFont.captionMedium)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, AppSpace.lg)
-                    .padding(.vertical, AppSpace.sm)
-                    .background(Capsule().fill(Brand.primary))
-            }
-            .buttonStyle(.plain)
         }
     }
 
@@ -97,20 +96,22 @@ struct ReportPanel: View {
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 28, weight: .ultraLight))
                 .foregroundStyle(TextGrade.ghost)
-            Text("点击「生成」查看\(reportType.rawValue)")
+            Text("还没有生成\(reportType.rawValue)")
                 .font(AppFont.caption)
                 .foregroundStyle(TextGrade.muted)
             VStack(spacing: AppSpace.xs) {
-                Text("包含：活动日志、文件变更汇总、Wiki 建议")
+                Text("会整理活动、变更和知识沉淀建议")
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.ghost)
-                Text(reportType == .daily ? "汇总今日的任务、会话、工具调用和文件变更" : "汇总本周活动 + 每日分解 + 知识沉淀建议")
+                Text(reportType == .daily ? "汇总今日的会话、工具调用和文件变更" : "汇总本周活动 + 每日分解 + 知识沉淀建议")
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.ghost)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, AppSpace.xxl)
+        .background(RoundedRectangle(cornerRadius: AppRadius.lg).fill(SurfaceGrade.card.opacity(0.62)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.lg).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
     }
 
     // MARK: - Report View

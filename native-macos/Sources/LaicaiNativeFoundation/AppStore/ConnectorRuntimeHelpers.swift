@@ -54,12 +54,16 @@ extension AppStore {
     }
 
     func recordConnectorOutcome(_ task: AgentTask, connectorID: UUID, attemptedToolCalling: Bool) {
-        rememberToolCallingCapabilityIfNeeded(from: task, connectorID: connectorID, attemptedToolCalling: attemptedToolCalling)
+        let finalConnectorID = task.connectorID ?? connectorID
+        if task.steps.contains(where: { $0.retryAction == AgentLoop.connectorFailoverAction }) {
+            updateConnectorHealth(connectorID, to: .offline)
+        }
+        rememberToolCallingCapabilityIfNeeded(from: task, connectorID: finalConnectorID, attemptedToolCalling: attemptedToolCalling)
         if let health = Self.connectorFailureHealth(from: task) {
-            updateConnectorHealth(connectorID, to: health)
+            updateConnectorHealth(finalConnectorID, to: health)
             return
         }
-        markConnectorReady(connectorID)
+        markConnectorReady(finalConnectorID)
     }
 
     static func connectorConfigurationChanged(from previous: ConnectorProfile, to next: ConnectorProfile) -> Bool {

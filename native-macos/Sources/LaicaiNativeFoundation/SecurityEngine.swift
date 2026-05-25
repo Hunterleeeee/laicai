@@ -612,7 +612,7 @@ public enum DangerousOperationGuard {
             #">\s*(/etc/|/usr/|/bin/|/sbin/|/var/|/private/|~/.ssh|.*\.env)"#
         ]
         if exactOrPrefixPatterns.contains(where: { normalized.range(of: $0, options: .regularExpression) != nil }) {
-            return "危险操作已拦截：删除、重置、系统安装、强制发布、密钥/系统路径写入等操作需要用户明确审查，不能由 Agent 自动执行。"
+            return "危险操作已拦截：删除、重置、系统安装、强制发布、密钥/系统路径写入等操作需要用户明确审查，不能由会话自动执行。"
         }
         return nil
     }
@@ -622,7 +622,7 @@ public enum DangerousOperationGuard {
         let lower = standardized.lowercased()
         let sensitiveMarkers = ["/.ssh/", "/.gnupg/", "/keychain", ".env", "secret", "token", "credential", "id_rsa", "id_ed25519", ".pem", ".key"]
         if sensitiveMarkers.contains(where: { lower.contains($0) }) {
-            return "危险写入已拦截：目标看起来包含密钥、凭据或敏感配置，默认不允许 Agent 自动准备覆盖。"
+            return "危险写入已拦截：目标看起来包含密钥、凭据或敏感配置，默认不允许会话自动准备覆盖。"
         }
         let systemPrefixes = ["/etc/", "/usr/", "/bin/", "/sbin/", "/var/", "/private/etc/"]
         if systemPrefixes.contains(where: { standardized.hasPrefix($0) }),

@@ -149,7 +149,7 @@ public struct ReadFileTool: LaicaiTool {
 
 public struct ExtractFileTool: LaicaiTool {
     public var name: String { "file.extract" }
-    public var description: String { "从表格/文档中提取可供模型阅读的文本。支持 xlsx/xlsm/csv/tsv；普通文本也可读取。" }
+    public var description: String { "从表格/文档中提取可供模型阅读的文本。支持 xlsx/xlsm/pptx/csv/tsv；普通文本也可读取。" }
 
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(
@@ -205,6 +205,8 @@ public struct ExtractFileTool: LaicaiTool {
             switch ext {
             case "xlsx", "xlsm":
                 extracted = try Self.extractXLSX(path: fullPath, limit: limit)
+            case "pptx":
+                extracted = try Self.extractPPTX(path: fullPath, limit: limit)
             case "csv", "tsv":
                 extracted = try Self.extractDelimited(path: fullPath, separator: ext == "tsv" ? "\t" : ",", limit: limit)
             case "txt", "md", "json", "yaml", "yml", "xml", "html", "htm", "log":
@@ -279,6 +281,65 @@ public struct ExtractFileTool: LaicaiTool {
             print('\\n'.join(out))
         """
         return try runPython(script: script, arguments: [path]).prefixString(limit)
+    }
+
+    private static func extractPPTX(path: String, limit: Int) throws -> String {
+        let script = """
+        import sys, zipfile, re, html, xml.etree.ElementTree as ET
+        path = sys.argv[1]
+        limit = int(sys.argv[2])
+
+        def index_for(name):
+            m = re.search(r'(?:slide|notesSlide)(\\d+)\\.xml$', name)
+            return int(m.group(1)) if m else 0
+
+        def text_runs(data):
+            try:
+                root = ET.fromstring(data)
+            except Exception:
+                return []
+            runs = []
+            for node in root.iter():
+                if node.tag.endswith('}t') or node.tag == 't':
+                    text = (node.text or '').strip()
+                    if text:
+                        runs.append(html.unescape(text))
+            return runs
+
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+            slides = sorted(
+                [n for n in names if re.match(r'ppt/slides/slide\\d+\\.xml$', n)],
+                key=index_for
+            )
+            notes = sorted(
+                [n for n in names if re.match(r'ppt/notesSlides/notesSlide\\d+\\.xml$', n)],
+                key=index_for
+            )
+            media = [n for n in names if n.startswith('ppt/media/')]
+            out = [
+                f'PPTX 可编辑文本提取：{len(slides)} 页，{len(media)} 个媒体文件',
+                '注意：本工具提取可编辑文本和备注，不包含图片中文字 OCR。若用户要求处理图片中文字，必须另行使用 OCR/视觉识别，不能声称已完成图片文字处理。',
+                ''
+            ]
+            for name in slides:
+                runs = text_runs(z.read(name))
+                if not runs:
+                    continue
+                out.append(f'## Slide {index_for(name)}')
+                out.extend(runs)
+                out.append('')
+            for name in notes:
+                runs = text_runs(z.read(name))
+                if not runs:
+                    continue
+                out.append(f'## Notes {index_for(name)}')
+                out.extend(runs)
+                out.append('')
+            result = '\\n'.join(out)
+            sys.stdout.write(result[:limit])
+        """
+        return try runPython(script: script, arguments: [path, "\(limit)"]).prefixString(limit)
     }
 
     private static func runPython(script: String, arguments: [String]) throws -> String {
@@ -425,6 +486,9 @@ public struct FileEditTool: LaicaiTool {
             content = first.newText
         } else {
             return ToolResult(output: "文件不存在：\(path)。设置 createIfMissing=true 可以创建新文件。", success: false, error: "file_not_found")
+        }
+        if let dangerousError = DangerousOperationGuard.writeViolation(path: fullPath, oldContent: content, context: context) {
+            return ToolResult(output: dangerousError, success: false, error: "dangerous_operation")
         }
 
         // File change detection: warn if file was modified externally since last read

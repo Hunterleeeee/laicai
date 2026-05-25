@@ -57,7 +57,7 @@ final class ContextConnectorCapabilityTests: LaicaiNativeFoundationTestCase {
                 checkpoints: ["下一步继续验证"],
                 verificationStatus: "typecheck passed",
                 pendingFiles: ["/tmp/attachment.md"],
-                userDecisions: ["用户要求继续同一任务"]
+                userDecisions: ["用户要求继续同一 Agent"]
             )
         )
 
@@ -188,17 +188,24 @@ final class ContextConnectorCapabilityTests: LaicaiNativeFoundationTestCase {
     func testThreadRecordAdaptsSessionsAndTasks() {
         let turn = ChatTurn(role: .user, text: "hello")
         let session = ChatSession(title: "Chat", preview: "hello", modelName: "m", turns: [turn])
-        let sessionThread = ThreadRecord(session: session)
+        let sessionThread = ThreadRecord(thread: Thread(
+            title: "Chat",
+            preview: "hello",
+            steps: [TaskStep(kind: .userInput, text: "hello")],
+            modelName: "m"
+        ))
 
-        XCTAssertEqual(sessionThread.source, .session)
         XCTAssertEqual(sessionThread.events.first?.kind, .user)
         XCTAssertEqual(sessionThread.events.first?.text, "hello")
 
         let step = TaskStep(kind: .toolCall, text: "search", toolName: "web.search")
         let task = AgentTask(title: "Task", status: .running, steps: [step])
-        let taskThread = ThreadRecord(task: task)
+        let taskThread = ThreadRecord(thread: Thread(
+            title: "Task",
+            status: .running,
+            steps: [TaskStep(kind: .toolCall, text: "search", toolName: "web.search")]
+        ))
 
-        XCTAssertEqual(taskThread.source, .task)
         XCTAssertEqual(taskThread.status, .running)
         XCTAssertEqual(taskThread.events.first?.kind, .toolCall)
     }

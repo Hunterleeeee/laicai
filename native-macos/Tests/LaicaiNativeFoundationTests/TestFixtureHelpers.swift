@@ -2,6 +2,8 @@ import XCTest
 @testable import LaicaiNativeFoundation
 @testable import LaicaiNativeDomain
 
+typealias Thread = LaicaiThread
+
 @MainActor
 extension LaicaiNativeFoundationTestCase {
     func makeTemporaryWorkspace() throws -> URL {
@@ -67,7 +69,7 @@ extension LaicaiNativeFoundationTestCase {
         selectedSessionID: UUID? = nil,
         modeLabel: String = "Build",
         tasks: [AgentTask] = [],
-        selectedTaskID: UUID? = nil,
+        selectedThreadID: UUID? = nil,
         workspacePath: String = "/tmp",
         defaultConnectorName: String = "None",
         contextMode: ContextMode = .balanced,
@@ -79,7 +81,7 @@ extension LaicaiNativeFoundationTestCase {
                 workspaceName: "Test",
                 modeLabel: modeLabel,
                 threads: threads,
-                selectedThreadID: selectedTaskID ?? selectedSessionID,
+                selectedThreadID: selectedThreadID ?? selectedSessionID,
                 workbenchTab: .tools,
                 connectors: connectors,
                 activeConnectorID: activeConnectorID,
@@ -96,7 +98,7 @@ extension LaicaiNativeFoundationTestCase {
                 )
             )
         }
-        AppState(
+        return AppState(
             workspaceName: "Test",
             modeLabel: modeLabel,
             sessions: sessions,
@@ -116,19 +118,19 @@ extension LaicaiNativeFoundationTestCase {
                 contextMode: contextMode
             ),
             tasks: tasks,
-            selectedTaskID: selectedTaskID
+            selectedThreadID: selectedThreadID
         )
     }
 
     func makeTestEnvironment(
-        runtime: any ChatRuntimeClient = CapturingToolsRuntime(),
+        runtime: (any ChatRuntimeClient)? = nil,
         sessionRepository: any SessionRepository = NoopSessionRepository(),
         connectorRepository: any ConnectorRepository = NoopConnectorRepository(),
         taskRepository: any TaskRepository = NoopTaskRepository(),
         threadRepository: any ThreadRepository = NoopThreadRepository()
     ) -> AppEnvironment {
         AppEnvironment(
-            runtimeClient: runtime,
+            runtimeClient: runtime ?? CapturingToolsRuntime(),
             sessionRepository: sessionRepository,
             connectorRepository: connectorRepository,
             taskRepository: taskRepository,
@@ -141,13 +143,13 @@ extension LaicaiNativeFoundationTestCase {
         selectedSessionID: UUID? = nil,
         modeLabel: String = "Build",
         tasks: [AgentTask] = [],
-        selectedTaskID: UUID? = nil,
+        selectedThreadID: UUID? = nil,
         workspacePath: String = "/tmp",
         defaultConnectorName: String = "None",
         contextMode: ContextMode = .balanced,
         connectors: [ConnectorProfile] = [],
         activeConnectorID: UUID? = nil,
-        runtime: any ChatRuntimeClient = CapturingToolsRuntime()
+        runtime: (any ChatRuntimeClient)? = nil
     ) -> AppStore {
         AppStore(
             state: testState(
@@ -155,7 +157,7 @@ extension LaicaiNativeFoundationTestCase {
                 selectedSessionID: selectedSessionID,
                 modeLabel: modeLabel,
                 tasks: tasks,
-                selectedTaskID: selectedTaskID,
+                selectedThreadID: selectedThreadID,
                 workspacePath: workspacePath,
                 defaultConnectorName: defaultConnectorName,
                 contextMode: contextMode,

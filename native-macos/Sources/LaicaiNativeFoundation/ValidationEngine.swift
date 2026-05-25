@@ -81,7 +81,7 @@ public struct ValidationEngine {
     private static let deterministicErrors: Set<String> = [
         "invalid_params", "invalid_edits", "invalid_batch_edits", "empty_edits", "empty_batch_edits",
         "patch_not_found", "patch_ambiguous", "all_edits_failed",
-        "file_not_found", "unsupported_binary_file", "security_denied", "unknown_tool"
+        "file_not_found", "unsupported_binary_file", "unsupported_file_type", "security_denied", "unknown_tool"
     ]
 
     /// Execute tool with JSON arguments (function calling style)
@@ -140,10 +140,27 @@ public struct ValidationEngine {
         try? await Task.sleep(for: .milliseconds(totalDelayMs))
     }
 
+    public static func timeoutSeconds(for toolName: String) -> TimeInterval {
+        switch ToolNameCodec.canonicalName(toolName) {
+        case "image.generate":
+            return NetworkDefaults.imageRequest + 20
+        case "shell.exec":
+            return 300
+        case "verify.build":
+            return 150
+        case "browser", "browser.real", "computer":
+            return 60
+        case "code.search", "workspace.index", "web.search":
+            return 30
+        case "web.fetch":
+            return NetworkDefaults.webFetch + 5
+        default:
+            return 120
+        }
+    }
+
     private static func timeoutSeconds(for tool: any LaicaiTool) -> TimeInterval {
-        if tool.name == "image.generate" { return NetworkDefaults.imageRequest + 20 }
-        if tool.name.contains("shell") { return 60 }
-        return 30
+        timeoutSeconds(for: tool.name)
     }
 }
 
@@ -304,11 +321,34 @@ public struct ErrorRecoveryEngine {
         if toolName == "file.read", error.contains("unsupported_binary_file") || error.contains("file_extract") {
             let path = params["path"] ?? ""
             let payload: [String: Any] = ["path": path, "limit": 60_000]
-            let json = (try? JSONSerialization.data(withJSONObject: payload)).flatMap { String(data: $0, encoding: .utf8) } ?? "{\"path\":\"\(path)\"}"
+            let json = (try? JSONSerialization.data(withJSONObject: payload, options: [.withoutEscapingSlashes])).flatMap { String(data: $0, encoding: .utf8) } ?? "{\"path\":\"\(path)\"}"
             return RecoveryPlan(
                 action: .fallbackTool("file.extract", json),
                 description: "file.read 检测到表格/文档，改用 file.extract 提取文本",
                 suppressOriginalFailure: true
+            )
+        }
+
+        if toolName == "file.extract", error.contains("unsupported_file_type") || error.contains("暂不支持提取") {
+            let path = params["path"] ?? ""
+            let ext = (path as NSString).pathExtension.lowercased()
+            if ["pptx", "docx", "xlsx", "xlsm"].contains(ext) {
+                let payload: [String: Any] = [
+                    "action": "prepare",
+                    "sourcePath": path,
+                    "chunkSize": 80,
+                    "onlyChinese": true
+                ]
+                let json = (try? JSONSerialization.data(withJSONObject: payload)).flatMap { String(data: $0, encoding: .utf8) } ?? "{\"sourcePath\":\"\(path)\"}"
+                return RecoveryPlan(
+                    action: .fallbackTool("document.transform", json),
+                    description: "file.extract 不足以完成 Office 文档交付，改用 document.transform",
+                    suppressOriginalFailure: true
+                )
+            }
+            return RecoveryPlan(
+                action: .askUser("当前内置提取器不支持此文件类型：\(path)。请改用 shell_exec/系统工具转换，或说明缺少转换/OCR组件，不能重复调用 file.extract。"),
+                description: "file.extract 不支持该类型，停止同参数重试"
             )
         }
 

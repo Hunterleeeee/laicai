@@ -31,11 +31,10 @@ struct WikiPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: AppSpace.md) {
             wikiHeader
-            Divider().opacity(0.3)
-            wikiSearchBar.padding(.horizontal, AppSpace.md).padding(.top, AppSpace.sm)
-            wikiOptionBar.padding(.horizontal, AppSpace.md).padding(.top, AppSpace.xs)
+            wikiSearchBar
+            wikiOptionBar
 
             switch mode {
             case .browse:
@@ -52,34 +51,78 @@ struct WikiPanel: View {
     // MARK: - Header
 
     private var wikiHeader: some View {
-        HStack(spacing: AppSpace.sm) {
-            Image(systemName: "book.closed.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Brand.primary)
-            Text("知识库")
-                .font(AppFont.subheadline)
-                .foregroundStyle(TextGrade.primary)
+        VStack(alignment: .leading, spacing: AppSpace.md) {
+            HStack(alignment: .top, spacing: AppSpace.sm) {
+                Image(systemName: "book.closed.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Brand.primary)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Brand.primary.opacity(0.10)))
 
-            Spacer()
-
-            Text("\(vaultNotes.count) 篇")
-                .font(AppFont.tiny)
-                .foregroundStyle(TextGrade.ghost)
-
-            if case .viewing = mode {
-                Button {
-                    mode = .browse
-                    selectedNote = nil
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
+                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                    Text("Wiki")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(TextGrade.primary)
+                    Text(vaultNotes.isEmpty ? "搜索、生成、沉淀本地知识。" : "\(vaultNotes.count) 篇 · \(vaultLabel)")
+                        .font(AppFont.caption)
                         .foregroundStyle(TextGrade.muted)
+                        .lineLimit(2)
                 }
-                .buttonStyle(.plain)
+
+                Spacer()
+
+                if case .viewing = mode {
+                    Button {
+                        mode = .browse
+                        selectedNote = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(TextGrade.muted)
+                            .frame(width: 24, height: 24)
+                            .background(Circle().fill(SurfaceGrade.card.opacity(0.72)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: AppSpace.xs) {
+                wikiStat(icon: "doc.text", value: "\(vaultNotes.count)", label: "文档", tint: Brand.primary)
+                wikiStat(icon: useWeb ? "globe" : "network.slash", value: useWeb ? "开" : "关", label: "联网", tint: useWeb ? Brand.teal : TextGrade.ghost)
+                wikiStat(icon: "folder", value: vaultLabel, label: "位置", tint: Brand.purple)
             }
         }
-        .padding(.horizontal, AppSpace.md)
-        .padding(.vertical, AppSpace.sm)
+        .padding(AppSpace.lg)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                .fill(LinearGradient(colors: [SurfaceGrade.card, SurfaceGrade.elevated.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                .strokeBorder(SurfaceGrade.hairline.opacity(0.9), lineWidth: 0.7)
+        )
+        .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.y)
+    }
+
+    private func wikiStat(icon: String, value: String, label: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: AppSpace.xs) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                Text(label)
+                    .font(AppFont.micro)
+            }
+            .foregroundStyle(tint.opacity(0.82))
+            Text(value)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(TextGrade.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(AppSpace.sm)
+        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.66)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
     }
 
     // MARK: - Search bar (doubles as generator input)
@@ -111,11 +154,11 @@ struct WikiPanel: View {
         .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .fill(SurfaceGrade.card)
+                .fill(SurfaceGrade.card.opacity(0.78))
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .strokeBorder(SurfaceGrade.hairline, lineWidth: 0.75)
+                .strokeBorder(SurfaceGrade.hairline.opacity(0.88), lineWidth: 0.75)
         )
     }
 
@@ -150,6 +193,9 @@ struct WikiPanel: View {
             .buttonStyle(.plain)
             .help("刷新")
         }
+        .padding(AppSpace.sm)
+        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.elevated.opacity(0.58)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
     }
 
     // MARK: - File list (browse mode)
@@ -212,7 +258,11 @@ struct WikiPanel: View {
             .padding(.horizontal, AppSpace.sm)
             .background(
                 RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                    .fill(selectedNote == note ? Brand.primary.opacity(0.08) : Color.clear)
+                    .fill(selectedNote == note ? Brand.primary.opacity(0.10) : SurfaceGrade.card.opacity(0.46))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    .strokeBorder(selectedNote == note ? Brand.primary.opacity(0.18) : SurfaceGrade.hairline.opacity(0.55), lineWidth: 0.5)
             )
             .contentShape(Rectangle())
         }
@@ -369,6 +419,8 @@ struct WikiPanel: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, AppSpace.xl)
+        .background(RoundedRectangle(cornerRadius: AppRadius.lg).fill(SurfaceGrade.card.opacity(0.62)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.lg).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
     }
 
     // MARK: - Pill toggle

@@ -49,12 +49,16 @@ struct IterationEngine {
                 }
 
                 // Phase-based model routing
-                if !allConnectors.isEmpty {
-                    if let routed = ModelRouter.selectModel(forPhase: state.currentPhase, connectors: allConnectors, activeConnectorID: state.connector.id),
-                       routed.id != state.connector.id {
+                if !allConnectors.isEmpty,
+                   let routed = ModelRouter.selectModel(forPhase: state.currentPhase, connectors: allConnectors, activeConnectorID: state.connector.id),
+                   routed.id != state.connector.id {
+                    state.connector = routed
+                    state.task.connectorID = routed.id
+                    state.usesOllamaChat = AgentLoop.usesOllamaChat(routed)
+                    if config.emitDebugSteps {
                         let routingStep = TaskStep(
                             kind: .aiThinking,
-                            text: "切换到\(routed.modelName.isEmpty ? routed.name : routed.modelName)处理\(state.currentPhase.title)阶段",
+                            text: "已调整处理策略，继续执行。",
                             isCollapsible: true,
                             isCollapsed: true
                         )
@@ -139,7 +143,7 @@ struct IterationEngine {
             !stripPrefixes.contains(where: { section.hasPrefix($0) })
         }
         var result = sections.joined(separator: "\n## ")
-        result += "\n\n[第\(iteration)轮] 直接行动，不要计划或解释。用最少步骤完成任务。"
+        result += "\n\n[第\(iteration)轮] 直接行动，不要计划或解释。用最少步骤推进当前会话目标。"
         return result
     }
 
@@ -175,6 +179,12 @@ struct IterationEngine {
                 if let path = step.toolParams?["path"] {
                     orchestrationNotes.append("\(path) 是目录不是文件。用 shell_exec ls 或 workspace_index 查看目录内容。")
                 }
+            }
+            if ["file.read", "file.extract"].contains(tn),
+               !toolResult.success,
+               ["unsupported_binary_file", "unsupported_file_type"].contains(toolResult.error ?? "") {
+                let target = step.toolParams?["path"] ?? "目标文件"
+                orchestrationNotes.append("`\(tn)` 对 `\(target)` 是确定性失败，不要重复同参数调用。请换成受支持的提取方式或 shell_exec/系统工具；如果用户要求生成交付文件，必须真实创建目标文件后再总结。")
             }
         }
 
@@ -265,17 +275,23 @@ struct IterationEngine {
             callSteps[entry.0].1.toolName == "verify.build" && entry.1.success
         }
         let batchHadWrite = toolCallResults.contains { entry in
-            AgentLoop.isFileChangeTool(callSteps[entry.0].1.toolName ?? "") && entry.1.success
+            let step = callSteps[entry.0].1
+            if AgentLoop.isFileChangeTool(step.toolName ?? "") && entry.1.success { return true }
+            return entry.1.success && step.toolName == "document.transform" && ["apply", "copy", "render"].contains(entry.1.data?["action"] ?? "")
         }
         let batchHadNonCodeWrite = toolCallResults.contains { entry in
             let step = callSteps[entry.0].1
-            guard entry.1.success, AgentLoop.isFileChangeTool(step.toolName ?? "") else { return false }
+            guard entry.1.success else { return false }
+            if step.toolName == "document.transform" {
+                return ["apply", "copy", "render"].contains(entry.1.data?["action"] ?? "")
+            }
+            guard AgentLoop.isFileChangeTool(step.toolName ?? "") else { return false }
             let path = AgentLoop.pathForFileChange(callStep: step, toolResult: entry.1)
             let ext = (path as NSString).pathExtension.lowercased()
             return !codeExtensions.contains(ext) && !ext.isEmpty
         }
         if (batchHadWrite && batchVerifyPassed) || (batchHadNonCodeWrite && !hasBuildSystem) {
-            state.messages.append(ChatMessage(role: "system", content: "任务已完成：文件已成功写入\(batchVerifyPassed ? "且编译验证通过" : "")。请输出简短的完成总结，不要调用更多工具。"))
+            state.messages.append(ChatMessage(role: "system", content: "会话目标已完成：文件已成功写入\(batchVerifyPassed ? "且编译验证通过" : "")。请输出简短的完成总结，不要调用更多工具。"))
         }
     }
 
@@ -318,7 +334,7 @@ struct IterationEngine {
         stateLines.append("⏱ 迭代预算：已用 \(state.iteration)/\(state.effectiveMaxIterations)，剩余 \(remaining)")
 
         if !stateLines.isEmpty {
-            state.messages.append(ChatMessage(role: "system", content: "## 任务状态（第 \(state.iteration) 轮）\n" + stateLines.joined(separator: "\n")))
+            state.messages.append(ChatMessage(role: "system", content: "##会话状态（第 \(state.iteration) 轮）\n" + stateLines.joined(separator: "\n")))
         }
     }
 

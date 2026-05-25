@@ -4,12 +4,11 @@ import LaicaiNativeDomain
 extension AppStore {
     public func autoResumeInterruptedTask() {
         let interrupted = state.threads
-            .filter { $0.source == .task && $0.status == .cancelled }
+            .filter { $0.isExecutionAgent && $0.status == .cancelled }
             .filter { $0.steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) }
             .sorted { $0.updatedAt > $1.updatedAt }
 
         guard let latest = interrupted.first else { return }
-        state.selectedThreadID = latest.id
 
         let timeSinceInterruption = Date.now.timeIntervalSince(latest.updatedAt)
         if timeSinceInterruption < 30 * 60 {
@@ -17,16 +16,17 @@ extension AppStore {
                 let hasResumeHint = state.threads[idx].steps.contains(where: {
                     $0.kind == .error && $0.text.contains("自动恢复")
                 })
+                state.selectThread(id: latest.id)
                 if !hasResumeHint {
                     state.threads[idx].steps.append(TaskStep(
                         kind: .error,
-                        text: "检测到上次任务被中断（\(Self.relativeTimeString(latest.updatedAt))）。点击「继续任务」自动恢复，或发送新消息开始新的对话。",
+                        text: "检测到上次会话被中断（\(Self.relativeTimeString(latest.updatedAt))）。点击「继续 会话」自动恢复，或发送新目标启动新的会话。",
                         isFailure: false,
                         recoverable: true,
                         retryAction: "继续执行"
                     ))
-                    persistThreads()
                 }
+                persistThreads()
             }
         }
     }

@@ -1,10 +1,291 @@
 # 来财 (Laicai) 开发路线图
 
-> 最后更新：2026-05-01
+> 最后更新：2026-05-19
 > 核心定位：本地 AI 编排中枢，不是聊天应用
 > 竞争策略：模型弱 → 工具/编排必须强
 
 ---
+
+## Agent Runtime 可信执行路线图（2026-05-19）
+
+本阶段路线图正式把来财从“聊天 + 工具调用”升级为“本地可信执行 Agent”。目标不是让模型多回答几句，而是让每个任务都具备明确目标、上下文归属、证据采集、真实执行、验证闭环、失败恢复和可追溯交付。
+
+一句话标准：每个任务都要像 Codex 处理长任务一样，先理解目标，读取真实上下文，制定计划，分步执行，保护用户工作区，验证结果，失败后恢复或明确阻塞，最后只汇报真实完成的内容。
+
+### 总目标
+
+- [x] 长任务不能丢上下文：同一任务内的“继续、还有什么、为什么、还是不对、又出现 bug”等追问必须回到原执行上下文。
+- [x] 任务不能只回答不执行：凡是涉及项目、文件、UI、性能、文档、业务系统的请求，必须先拿到证据，再决定执行路径。
+- [x] 不能假完成：没有真实文件、命令、页面、截图、来源或验证记录时，不允许进入完成态。
+- [x] 用户工作区必须被保护：不覆盖无关改动，不执行破坏性命令，不把模型猜测当成事实。
+- [x] UI 必须让用户看懂 Agent 在做什么：当前目标、阶段、证据、改动、验证、失败和下一步要清楚可见。
+
+### P0：可信执行骨架
+
+#### P0-1 Agent Task Protocol
+
+- [x] 每个 Agent 任务创建时必须生成结构化协议：`taskGoal`、`workspaceRoot`、`threadID`、`expectedOutcome`、`completionCriteria`、`riskPolicy`、`continuationPolicy`。
+- [x] 没有协议不得进入执行；协议缺字段时必须回到规划或等待用户确认。
+- [x] 最终完成时必须逐条对照 `completionCriteria`，未满足项进入未完成清单。
+
+验收要求：
+
+- 创建代码修改、文档生成、UI 检查、性能优化任务时，都能看到协议字段。
+- 缺少 `workspaceRoot` 或 `completionCriteria` 的任务不会直接执行。
+- 最终总结能说明哪些标准已满足，哪些没有满足以及原因。
+
+#### P0-2 Agent State Machine
+
+- [x] 引入强状态机：`created`、`planning`、`gatheringEvidence`、`executing`、`verifying`、`waitingUser`、`paused`、`completed`、`failed`、`cancelled`。
+- [x] 没有工具证据的项目任务不能进入 `completed`。
+- [x] 涉及写入、安装、运行、生成文件的任务必须经过 `executing`。
+- [x] 涉及代码改动的任务必须进入 `verifying`，除非明确记录验证阻塞原因。
+- [x] 工具失败必须进入恢复、等待用户或失败态，不能被包装成完成。
+
+验收要求：
+
+- 任务详情能显示当前状态、上一个状态和状态切换原因。
+- 人为制造工具失败时，任务不会直接显示“完成”。
+- 代码类任务没有 diff 或验证记录时无法完成。
+
+#### P0-3 Execution Ledger
+
+- [x] 建立独立于聊天流的执行账本，作为 Agent 事实来源。
+- [x] 账本记录：原始请求、目标、状态、计划、已读文件、搜索、页面、修改文件、产物、命令、验证、失败工具、错误原因、替代路径、下一步、未完成工作。
+- [x] 工具结果、文件系统、命令输出、截图和来源是事实；模型文本只能是解释，不能单独作为事实。
+- [x] 续跑、继续按钮、追问和重启恢复必须先读取账本，再拼接模型上下文。
+
+验收要求：
+
+- 重启 App 后能恢复任务目标、阶段、已读文件、已改文件和下一步。
+- 用户问“刚才做到哪了”时，答案来自账本，不依赖模型记忆。
+- 长任务被暂停后点击继续，会从账本里的 `nextAction` 恢复。
+
+#### P0-4 Follow-up Ownership Protection
+
+- [x] 当前执行 Agent 默认拥有短追问，避免“一个会话里追问却自动新建会话”的问题。
+- [x] 识别追问标记：`继续`、`接着`、`还有什么`、`为什么`、`没反应`、`又出现`、`还是不对`、`卡顿`、`bug`。
+- [x] 运行中收到追问时进入 `pendingFollowUp`，不打断当前写入或验证。
+- [x] 暂停、失败、等待用户状态下收到追问时优先恢复当前任务。
+- [x] 只有用户明确说“新建任务、换话题、另开一个、新会话”时才创建新线程。
+
+验收要求：
+
+- 连续 20 次同任务追问不误建新会话。
+- 失败任务里问“为什么”只解释当前任务失败原因。
+- 当前线程里问“继续”会恢复原 Agent，而不是创建空白 Agent。
+
+#### P0-5 Evidence-First Quality Gate
+
+- [x] 项目任务必须调用 `workspace.index`、`code.search` 或 `file.read` 等证据工具。
+- [x] 文件任务必须先确认文件存在并读取相关内容。
+- [x] UI 任务必须有页面检查、截图或可访问性树证据。
+- [x] 调研任务必须有搜索和来源读取。
+- [x] 性能任务必须先定位瓶颈，不能只做样式或经验性改动。
+- [x] 没有证据时，任务只能处于规划、采证、等待或失败状态。
+
+验收要求：
+
+- 用户要求“优化性能”时，必须能看到被定位的卡顿区域和原因。
+- 用户要求“看这个项目”时，必须能看到实际读取过的目录、文件或索引。
+- UI 类结果必须附带页面/截图检查记录。
+
+#### P0-6 Permission Layers
+
+- [x] 权限分层：`ask`、`inspect`、`act`、`review`、`dangerous`。
+- [x] “只分析、先别改、给我清单”进入 `inspect`，禁止写文件和执行危险命令。
+- [x] “做、改、一次性全做了”进入 `act`，但仍需记录改动和验证。
+- [x] 涉及删除、重置、覆盖、系统安装、密钥、网络发布的操作进入 `dangerous`，默认不自动执行。
+- [x] 写入前后必须能追踪文件变更。
+
+验收要求：
+
+- 只分析任务不会产生 diff。
+- act 任务会记录改动文件和验证方式。
+- 破坏性命令默认被拦截，并提示风险和替代方案。
+
+#### P0-7 Tool Failure Recovery
+
+- [x] 建立工具失败恢复表：`file.edit` 失败转 `file.read + file.write`；`code.search` 失败转 `shell.exec rg`；Office 读取转 `file.extract/document.transform`；`web.fetch` 失败转搜索替代来源。
+- [x] `verify.build` 失败时必须读取失败文件和错误上下文，再决定修复或阻塞。
+- [x] 同一工具对同一目标连续失败两次后触发 circuit break，避免无限重试。
+- [x] 恢复路径必须写入执行账本。
+
+验收要求：
+
+- 模拟工具失败后，Agent 会尝试替代路径。
+- 替代路径成功时，最终报告只突出有效路径，同时保留失败记录。
+- 替代路径失败时，给出明确阻塞原因和下一步。
+
+#### P0-8 Completion Gates
+
+- [x] 代码任务：必须有真实 diff，并有测试、构建、lint 或无法验证原因。
+- [x] 文档任务：必须有真实输出文件路径。
+- [x] 调研任务：必须有来源和读取内容。
+- [x] UI 任务：必须有页面、截图或交互验证。
+- [x] 性能任务：必须有瓶颈诊断和修复记录，或明确的测量阻塞。
+- [x] 会话归属修复：必须有复现路径、修复点和回归验证。
+
+验收要求：
+
+- “完成”按钮或完成态之前自动跑 completion gate。
+- 没通过 gate 的任务显示为未完成/需验证，而不是完成。
+- 最终回答只报告已通过 gate 的成果。
+
+### P1：编排、工作台和体验升级
+
+#### P1-1 Multi-Agent Orchestration
+
+- [x] 固定角色：Planner、Researcher、Coder、Tester、Reviewer。
+- [x] Planner 只产出任务拆解和验收标准。
+- [x] Researcher 只产出证据和来源。
+- [x] Coder 是唯一写入角色，避免多角色同时改文件。
+- [x] Tester 必须输出命令、结果和失败上下文。
+- [x] Reviewer 必须基于 diff、文件内容和验收标准审查，不能凭空评论。
+- [x] 每个角色都必须有输入 artifact 和输出 artifact。
+
+验收要求：
+
+- 代码任务能看到角色链路和依赖关系。
+- Tester 失败会回到 Coder 修复，再重新验证。
+- Reviewer 不拿到 diff 时不能给通过结论。
+
+#### P1-2 Agent Workbench UI
+
+- [x] 工作台展示：Agent 状态、当前阶段、任务目标、计划、已读文件、已改文件、运行命令、验证结果、失败原因、下一步、继续按钮、产物。
+- [x] 用户不需要翻完整聊天流，也能判断任务是否真的在做事。
+- [x] 继续按钮必须绑定执行账本里的 `nextAction` 或 `pendingFollowUp`。
+- [x] 失败态展示恢复建议和可执行动作。
+
+验收要求：
+
+- 点击继续能看到状态变化和新步骤追加。
+- 失败任务能一眼看到失败工具、失败原因和下一步。
+- 产物文件能直接在工作台定位。
+
+#### P1-3 Performance
+
+- [x] 侧栏历史任务使用虚拟列表，只渲染可视区域。
+- [x] Markdown 分块解析和缓存，流式输出不重复全量排版。
+- [x] 工具步骤增量更新，避免整个 timeline 重绘。
+- [x] 侧栏搜索 debounce，并优先查轻量索引。
+- [x] 长工具输出默认折叠，按需展开。
+- [x] 摘要生成和历史压缩异步执行，避免阻塞主线程。
+- [x] 大任务切换时避免全页面同步重算。
+
+验收要求：
+
+- 历史任务快速滚动不明显掉帧。
+- 长 Markdown 回复滚动时不反复卡住。
+- 流式输出期间侧栏不会持续重排。
+
+#### P1-4 Regression Task Set
+
+- [x] 20 次连续追问不误建新会话。
+- [x] 失败后点击继续能恢复原任务。
+- [x] 代码改动任务必须能生成 diff 并跑验证。
+- [x] 文档生成任务必须能产出真实文件。
+- [x] 工具失败后会走替代路径。
+- [x] UI 任务必须产生截图或页面检查记录。
+- [x] 调研任务必须读取来源。
+- [x] 只读任务不能写文件。
+- [x] 运行中追问进入 pending follow-up。
+- [x] 重启 App 后长任务能从账本恢复。
+
+验收要求：
+
+- 回归任务集可一键运行或半自动运行。
+- 每个用例都有输入、期望状态、期望证据和通过/失败结果。
+- 发布前至少跑 P0 相关回归。
+
+### 执行顺序
+
+1. Agent Task Protocol
+2. Agent State Machine
+3. Execution Ledger
+4. Follow-up Ownership Protection
+5. Evidence-First Quality Gate
+6. Permission Layers
+7. Tool Failure Recovery
+8. Completion Gates
+9. Multi-Agent Orchestration
+10. Agent Workbench UI
+11. Performance
+12. Regression Task Set
+
+### 来自 Codex 工作方式的具体要求
+
+- [x] 先读项目再判断：不能在没有文件、索引、页面或命令证据时直接下结论。
+- [x] 先列计划再执行：复杂任务必须有可更新计划，计划项要能变成执行步骤。
+- [x] 小步修改：每轮改动应有清晰边界，避免把无关重构混进用户需求。
+- [x] 保护脏工作区：识别用户已有改动，不回滚、不覆盖、不把无关 diff 算作自己的成果。
+- [x] 执行后验证：构建、测试、截图、打开文件、读取产物，至少选择与任务匹配的一种验证。
+- [x] 失败要继续推进：工具失败时尝试替代路径；替代路径也失败才明确阻塞。
+- [x] 汇报要诚实：只说真实做过的事，没验证就明确写“未验证”和原因。
+
+### 本轮推进记录（2026-05-19）
+
+- [x] 新增 `AgentTaskProtocol`、`AgentRuntimeState`、`AgentRiskPolicy`、`AgentContinuationPolicy`、`AgentExecutionLedger`，并持久化到 `Thread` / `AgentTask` / `ThreadRecord` / `AgentRecord`。
+- [x] 新建和续跑 Agent 时生成结构化任务协议和执行账本；AgentLoop 启动时从 metadata 恢复协议/账本，并注入 prompt。
+- [x] `TaskFinalizer.meetsCompletionCriteria` 接入协议和账本：执行类任务没有工具证据不能完成；inspect 任务有写入则不能完成。
+- [x] 运行中追问从静默丢弃改为写入 `pendingFollowUp` 和账本；继续按钮优先使用账本的 `nextAction` / `pendingFollowUp`。
+- [x] 工作台新增“执行账本”卡片，展示 runtime state、证据数、改动数、验证数、失败数、下一步和排队补充。
+- [x] 多 Agent 角色契约强化：Coder 是唯一写入角色；Planner/Researcher/Tester/Reviewer 移除写入工具并明确输出 artifact。
+- [x] 新增回归测试覆盖协议/账本持久化、继续按钮账本恢复、运行中追问排队、inspect 权限、Multi-Agent 写入角色约束。
+- [x] 补齐危险操作拦截、脏工作区保护、UI/调研证据门禁、恢复路径入账本、20 次追问归属回归。
+- [x] 侧栏历史改为 Lazy + 分页可见渲染，搜索使用 debounce + 最近一步轻量索引，compact rail 限制首屏数量。
+- [x] 大任务 timeline 切换时优先基于可见步骤统计，避免正在运行任务切换时同步扫完整历史。
+- [x] `LAICAI_ARCHS=arm64 bash native-macos/build.sh` 通过，产出 build `2026.5.19 (build 1206)`。
+- [x] CLI `native-macos/dist/laicai --help` 正常输出。
+- [x] App `native-macos/dist/Laicai.app` 启动 3 秒未立即崩溃。
+- [x] 修复运行中追问白屏路径：输入框打字只更新轻量草稿，点击发送后才写入 pending follow-up / 执行账本，避免每个字符触发线程重排和 Agent 误消费半截输入。
+- [x] `LAICAI_ARCHS=arm64 bash native-macos/build.sh` 再次通过，产出 build `2026.5.19 (build 1215)`；CLI help 与 App 3 秒启动 smoke 均通过。
+- [x] `git diff --check -- native-macos` 通过。
+- [x] 修复最近来财会话暴露的路由漂移：不确定输入默认回到轻量问答，不再把“你了解易经吗 / 大小六壬 梅花易数呢 / 数据不对”这类普通追问自动开成执行 Agent。
+- [x] 收紧选中任务追问归属：只有明确继续、截断续写、当前任务引用、状态/失败问题或语义重叠时才续跑；普通概念/技能/领域问题不会因为当前选中任务有工具历史就被硬拉进 Agent。
+- [x] 收紧 `code.search` 自动启动门禁：只有项目、代码、文件、路径、符号等工作区语义才自动搜本地；股票、易经、skill 能力询问和“数据不对”这类反馈不再误搜工作区。
+- [x] 修复 `skill.manage` 本地技能可见性：创建/更新支持结构化 `category`，Registry 可加载 `.md` frontmatter，本地 markdown skill 会显示到 Skill Hub 和 `skill.manage list` 的对应分类。
+- [x] 补充回归覆盖最近坏样本：普通领域追问不续跑任务、通用反馈不触发工作区搜索、markdown skill 分类可加载、`skill.manage list` 能看到自定义技能。
+- [x] `LAICAI_ARCHS=arm64 bash native-macos/build.sh` 通过，产出 build `2026.5.19 (build 1234)`；CLI help/version 与 App 3 秒启动 smoke 均通过。
+- [x] CLI 路由接入 `IntentRouter.plan`：轻量问答不再被强制按任务跑，真实模型 smoke “请只回复 OK，不要使用工具。” 返回 OK 且完成态。
+- [x] 修复本地路径 / Office 文档翻译路由：`/tmp/demo.pptx -> /tmp/demo-en.pptx` 这类请求进入翻译工作流，不再误判为纯问答。
+- [x] 真实 Agent 项目读取 smoke 通过：CLI 读取 `Package.swift`，实际调用 `code.search` + `file.read Package.swift`，正确列出 6 个 target，完成态。
+- [x] 真实 PPTX 交付 smoke 通过：生成最小中文 PPTX，Agent 经 `file.read` 失败后恢复到 `document.transform`，输出 `/tmp/laicai-pptx-smoke/demo-en.pptx`，验证 `remainingCJK=0`，完成态。
+- [x] 安装版 UI smoke 通过：`/Applications/Laicai.app` 已更新到 build `1507`，重启后只有一个 `main` 窗口；Dock/Finder 图标资源存在；Skill 面板可打开，显示 84 个技能和“知识/通用”分类；输入框存在，未出现白屏。
+- [x] 旧 `src/harness/*` 迁移参照复核：当前工作区已不存在 `src/harness` 目录，迁移待办改为以现有 `docs/`、`skills/` 与 `native-macos` 实现为参照。
+- [x] 大改动拆批次方案已形成：当前 diff 约 130 文件、+10,775/-3,727 行，后续按“路由与会话归属、Agent 执行账本、工具与 Office、UI 工作台与性能、测试与文档”五批审查。
+- [x] 最终收口构建安装：`LAICAI_ARCHS=arm64 bash native-macos/build.sh` 通过，产出 `2026.5.19 (build 1507)`；`native-macos/dist/install_laicai.command` 已安装到 `/Applications/Laicai.app`；CLI help 正常；Info.plist 显示 `CFBundleDisplayName=来财`、`CFBundleIconFile=laicai`、`CFBundleVersion=1507`。
+- [x] 滚动卡死止血：启动不再自动加载历史 timeline，而是进入轻量工作台；超大任务默认只渲染最近 4 步；移除 timeline 滚动监听回写、侧栏滚动行 hover 状态动画和长 Markdown SwiftUI 分块渲染；build `1507` 重启 smoke 显示单窗口、轻量工作台、可手动点开 170k token 历史任务且只展开最近步骤。
+- [x] 修复真实会话暴露的追问误建新会话：复盘 `2026-05-19 16:50` “出一个水生万物，财自流转的icon图” 与 `16:51` “在哪了？我要预览啊” 被拆成两个线程的样本；现在追问归属会先看当前线程，失败时回找最近可归属执行线程；有工具调用、审查、任务协议或执行账本的历史 session 会被视为执行 Agent；新增回归覆盖“空白新 Agent 中询问预览仍回到原产物线程”；build `1750` 通过并已安装。
+- [ ] `swift test --package-path native-macos --filter 'AppStoreTaskLifecycleTests|AppStorePersistenceAndRuntimeTests|AppStoreTaskFollowUpRoutingTests'` 仍被本机 CommandLineTools `xcrun --show-sdk-platform-path` / `PlatformPath` 问题阻塞，未进入测试编译阶段。
+
+---
+
+## 最新推进快照（2026-05-18）
+
+当前本地改动已从“聊天/任务”继续收敛到“Agent 工作台”形态：`Thread` 增加 Agent 模式、运行状态、目标、计划和产物快照；右侧工作台面板开始围绕当前 Agent、模型能力、最近活动和交付产物组织信息；普通用户界面进一步隐藏内部调试步骤，`showDebugPanels` 打开时才展示更多编排细节。
+
+Agent 执行层新增并接入 `document.transform` 工具，支持 Office 文档 `workspace / inspect / prepare / apply / copy / verify / render` 闭环；工具权限、恢复路径、完成判定、证据摘要和产物提取都已纳入 Agent Loop。已完成最小 DOCX smoke：生成含中文的 `.docx`，经 `inspect -> prepare -> apply -> verify` 后写回英文文本，`remainingCJK=0`，输出文件内容确认已替换。
+
+多 Agent 编排继续增强：代码类请求按 `planner/researcher -> coder -> tester -> reviewer` 组织依赖；测试员或审查员失败时会自动交回编码员修复，并重新验证/审查；各角色提示词更强调真实读写文件、运行验证和按证据汇报。
+
+本轮收口修复了两个直接影响日常使用的问题：新建空 Agent 现在会作为当前选中的草稿 Agent 出现在侧栏和检查器里，同时清空搜索、草稿、附件和 pending follow-up，避免用户误以为没有切换；`⌘N` 与界面提示统一为新建 Agent。重复窗口根因也已修掉：启动入口改为单例 `Window("来财", id: "main")`，替换系统默认新建窗口菜单，AppDelegate 不再额外创建备用 `NSWindow`，菜单栏/重新激活只负责拉起已有窗口。
+
+验证状态：
+
+- [x] `LAICAI_ARCHS=arm64 bash native-macos/build.sh` 通过，产出 `native-macos/dist/Laicai.app` 和 `native-macos/dist/laicai`。
+- [x] CLI `native-macos/dist/laicai --help` 可正常输出。
+- [x] App 二进制启动 3 秒未立即崩溃。
+- [x] 当前 dist App 已由 `2026.5.18 (build 1117)` 升级到 `2026.5.19 (build 1406)`；启动后 Computer Use 只枚举到一个 `standard window 来财`，窗口 ID 为 `main`。
+- [x] UI smoke：点击“新 Agent”和连续按 `⌘N` 后都只在同一窗口切到空白 Agent，不再创建第二个主窗口；侧栏“最近”显示当前草稿，右侧检查器显示空闲状态。
+- [x] 真实模型 smoke：使用当前 `gpt-5.5` 发送“请只回复 OK，不要使用工具。”，返回 `OK`，未触发工具活动。
+- [x] 重启持久化 smoke：退出并重新启动 dist App 后，真实模型 smoke 记录仍出现在“最近”列表；启动仍只有一个 `main` 窗口。当前会自动选回最近的可继续暂停 Agent，这是既有 auto-resume 行为。
+- [x] 安装版 smoke：`native-macos/dist/install_laicai.command` 已更新 `/Applications/Laicai.app` 到 `2026.5.19 (build 1406)`，安装版与 dist 二进制一致；从 `/Applications/Laicai.app` 启动后只有一个进程和一个 `main` 窗口。
+- [x] `document.transform` 最小 DOCX smoke 通过。
+- [x] `git diff --check` 通过。
+- [ ] `swift test --package-path native-macos` 仍被本机 CommandLineTools `xcrun --show-sdk-platform-path` / `PlatformPath` 问题阻塞，尚未进入代码编译阶段。
+
+下一步优先：修复或替换本机 SwiftPM 工具链后跑完整单测；补齐多供应商真实模型回归矩阵；把当前 100+ 文件本地改动拆成可审查提交批次。
 
 ## 剩余功能包快照（2026-04-30）
 
@@ -34,9 +315,9 @@
 
 卡顿优化追加：直连聊天流式输出增加缓冲刷新，避免每个 chunk 都更新侧栏摘要并写入 SQLite；最终回复完成后再落盘。Markdown 渲染结果改为状态缓存，只在文本或展开状态变化时重新解析，减少长回复滚动和输入框聚焦时的重复排版成本。
 
-侧栏性能追加：侧栏线程列表改用轻量 `ThreadRecord` 摘要，不再在每次流式刷新时为所有线程重建完整 events；只有主 timeline、搜索命中内容和持久化快照需要完整事件流。
+侧栏性能追加：侧栏线程列表改用轻量 `ThreadRecord` 摘要，不再在每次流式刷新时为所有线程重建完整 events；只有主 timeline、搜索命中内容和持久化快照需要完整事件流。本轮进一步把 summary 里的执行账本/协议大对象移除，减少历史列表滚动时的复制和比较成本。
 
-任务体验追加：长任务 timeline 默认只渲染最近 72 条步骤，早期历史折叠为摘要但不删除；软中断状态从“已取消/红色错误”调整为“已暂停/可继续”，减少误导用户以为上下文或任务丢失。
+任务体验追加：长任务 timeline 默认只渲染最近 72 条步骤，早期历史折叠为摘要但不删除；软中断状态从“已取消/红色错误”调整为“已暂停/可继续”，减少误导用户以为上下文或任务丢失。本轮针对 170k token / 180+ 步历史任务追加重任务保护：超过 80 步只渲染最近 4 步，启动页不自动打开历史 timeline，用户点开后再按需展开。
 
 模型菜单追加：聊天框模型切换菜单开始展示本地/API、上下文窗口、工具能力和健康状态，并提供“测试当前模型”入口。
 
@@ -127,12 +408,12 @@ Patch Workflow 追加：审查卡片增加“复制 diff”动作，可在批准
 - [x] `src/harness/desktop/`：Native UI + runtime 对齐旧桌面能力后删除。
 - [x] `tests/test_desktop_app.py`：Native UI/runtime 测试覆盖同等行为后删除。
 
-**暂时保留**
+**已关闭 / 不再适用**
 
-- [ ] `src/harness/wiki.py`、`src/harness/rag/`、`src/harness/retrieval/`：V0.4 Vault + LLM Wiki 的迁移参照。
-- [ ] `src/harness/agent/`、`src/harness/tools/`、`src/harness/workflow/`、`src/harness/skills/`：V0.2/V0.6 的迁移参照。
-- [ ] `src/harness/adapters/llm/`、`src/harness/config/`、`src/harness/storage/`：模型配置、OpenAI-compatible API、会话存储的行为参照。
-- [ ] Python tests：在对应 Native 单测/集成测试补齐前继续作为回归资产。
+- [x] `src/harness/wiki.py`、`src/harness/rag/`、`src/harness/retrieval/`：当前工作区已不存在 `src/harness`，Vault + LLM Wiki 以后以现有 `native-macos`、`docs/`、`skills/` 为准。
+- [x] `src/harness/agent/`、`src/harness/tools/`、`src/harness/workflow/`、`src/harness/skills/`：当前工作区已不存在 `src/harness`，Agent / Tool / Workflow / Skill 迁移参照关闭。
+- [x] `src/harness/adapters/llm/`、`src/harness/config/`、`src/harness/storage/`：当前工作区已不存在 `src/harness`，模型配置和会话存储以 Native SQLite + connector 实现为准。
+- [x] Python tests：当前工作区无旧 Python harness 测试资产；Native 回归以 Swift 测试、CLI smoke、安装版 UI smoke 和真实 Agent smoke 为准。
 
 ### V0.1 — 可安装、可用、像产品
 
@@ -144,7 +425,7 @@ Patch Workflow 追加：审查卡片增加“复制 diff”动作，可在批准
 - [x] 数据目录固定在 `~/Library/Application Support/Laicai`。
 - [x] 设置页可配置 connector：endpoint、model、api key。
 - [x] connector health check 可用。
-- [ ] 能完成一次真实模型对话。
+- [x] 能完成一次真实模型对话：安装版使用当前 `gpt-5.5` connector 发送“请只回复 OK，不要使用工具。”，返回 `OK`，完成态正常。
 - [x] 首次启动不加载英文 sample 会话，不出现 demo/mock/preview response 文案。
 
 **UI**
@@ -164,15 +445,15 @@ Patch Workflow 追加：审查卡片增加“复制 diff”动作，可在批准
 
 - [x] `native-macos/typecheck.sh`
 - [x] `venv3/bin/python -m pytest -q`
-- [ ] 手动 smoke：安装 → 启动 → 配置模型 → 发消息 → 重启 → 会话保留。
-- [ ] UI smoke：Dock/Finder icon 正常，消息不重叠，输入框可聚焦。
+- [x] 手动 smoke：安装 → 启动 → 配置模型 → 发消息 → 重启 → 会话保留，安装版 build `1406` 已通过。
+- [x] UI smoke：Dock/Finder icon 正常，Skill 面板可打开，输入框可聚焦，重启后只有一个 `main` 窗口，未出现白屏。
 - [x] 源码扫描：普通界面无 demo/mock/诊断类产品文案。
 
 **验收**
 
-- [ ] 可以作为日常 App 打开使用。
-- [ ] 配置真实模型后能稳定问答。
-- [ ] 重启后设置和会话保留。
+- [x] 可以作为日常 App 打开使用：安装版 `/Applications/Laicai.app` 已通过启动、单窗口、输入框、Skill 面板和真实模型 smoke。
+- [x] 配置真实模型后能稳定问答：当前 active connector 真实模型 smoke 通过，轻量问答路由不会误进任务完成门禁。
+- [x] 重启后设置和会话保留：重启 smoke 后最近记录仍在“最近”列表，设置和会话 SQLite 持久化正常。
 - [x] 普通界面不出现开发术语。
 
 ### V0.2 — 本地 Agent 最小闭环

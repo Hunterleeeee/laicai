@@ -609,6 +609,15 @@ public struct StepExecutor {
                 isFailure: !result.success
             )
             taskSteps.append(resultStep)
+            onStepProgress(StepProgress(stepIndex: index, totalSteps: workflow.steps.count, stepName: step.name, taskStep: resultStep))
+            if result.success, step.tool == "llm" {
+                let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !output.isEmpty {
+                    let outputStep = TaskStep(kind: .textOutput, text: output, isCollapsible: false)
+                    taskSteps.append(outputStep)
+                    onStepProgress(StepProgress(stepIndex: index, totalSteps: workflow.steps.count, stepName: step.name, taskStep: outputStep))
+                }
+            }
 
             if !result.success && step.onFailure == "abort" {
                 hadFailure = true

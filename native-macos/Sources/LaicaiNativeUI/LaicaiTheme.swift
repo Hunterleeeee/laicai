@@ -1,40 +1,102 @@
 import SwiftUI
+import AppKit
 
 // ═══════════════════════════════════════════════════════════════
-//  来财 Design System v5 — MISSION CONTROL
-//  Deep-space dark theme with ambient intelligence,
-//  glass morphism, living status colors, and spatial depth.
-//  Designed for an AI orchestration command center.
+//  来财 Design System v14 — QUIET DESKTOP
+//  ‧ Real light/dark adaptive colors via NSColor dynamic providers
+//  ‧ Light gray navigation, white canvas, graphite text, restrained accents
+//  ‧ Layout tokens prioritize a readable center canvas over decorative chrome
 // ═══════════════════════════════════════════════════════════════
 
-// MARK: - Brand Colors
+// MARK: - Adaptive Color Helpers
+
+extension Color {
+    /// Adaptive color that resolves per appearance. Both inputs are sRGB.
+    init(light: Color, dark: Color) {
+        self.init(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [
+                .darkAqua,
+                .vibrantDark,
+                .accessibilityHighContrastDarkAqua,
+                .accessibilityHighContrastVibrantDark
+            ]) != nil
+            return NSColor(isDark ? dark : light)
+        })
+    }
+}
+
+private func hex(_ value: String) -> Color { Color(hex: value) }
+
+// MARK: - Brand
+// Neutral desktop colors with one clear action accent.
+// Color is used as hierarchy, not wallpaper.
 
 struct Brand {
-    static let primary = Color(hex: "3B82F6")
-    static let primaryDark = Color(hex: "2563EB")
-    static let primaryMuted = Color(hex: "172554")
-    static let primaryHover = Color(hex: "60A5FA")
-    static let primaryLight = Color(hex: "93C5FD")
+    static let primary = Color(
+        light: hex("2563EB"),
+        dark:  hex("8FB4FF")
+    )
+    static let primaryDark = Color(
+        light: hex("1747B8"),
+        dark:  hex("B7CCFF")
+    )
+    static let primaryMuted = Color(
+        light: hex("EAF1FF"),
+        dark:  hex("1B2742")
+    )
+    static let primaryHover = Color(
+        light: hex("1D4ED8"),
+        dark:  hex("A8C3FF")
+    )
+    static let primaryLight = Color(
+        light: hex("7AA2FF"),
+        dark:  hex("D4E1FF")
+    )
 
-    static let purple = Color(hex: "8B5CF6")
-    static let purpleMuted = Color(hex: "1E1338")
+    static let purple = Color(
+        light: hex("7C3AED"),
+        dark:  hex("C4B5FD")
+    )
+    static let purpleMuted = Color(
+        light: hex("F2EEFF"),
+        dark:  hex("2B2244")
+    )
 
-    static let teal = Color(hex: "06B6D4")
-    static let tealMuted = Color(hex: "0C2D3F")
+    static let teal = Color(
+        light: hex("0F766E"),
+        dark:  hex("7DD3C7")
+    )
+    static let tealMuted = Color(
+        light: hex("E7F7F4"),
+        dark:  hex("173B38")
+    )
 
-    static let gradientStart = Color(hex: "3B82F6")
-    static let gradientEnd = Color(hex: "8B5CF6")
+    static let jade = Color(
+        light: hex("10B981"),
+        dark:  hex("86EFAC")
+    )
+    static let jadeMuted = Color(
+        light: hex("E9FBF3"),
+        dark:  hex("173729")
+    )
+
+    static let gradientStart = primary
+    static let gradientEnd = jade
 
     static let premiumGradient = LinearGradient(
-        colors: [Color(hex: "3B82F6"), Color(hex: "6366F1"), Color(hex: "8B5CF6")],
+        colors: [primary, primaryLight],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
 
+    /// Very gentle wash used behind the welcome hero only.
     static let subtleGradient = LinearGradient(
-        colors: [Color(hex: "3B82F6").opacity(0.15), Color(hex: "8B5CF6").opacity(0.15)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        colors: [
+            Color(light: hex("FFFFFF"), dark: hex("15171C")).opacity(0.0),
+            Color(light: hex("F3F6FC"), dark: hex("1E2430")).opacity(0.42)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
     )
 
     static var accent: Color { Color.accentColor }
@@ -43,63 +105,129 @@ struct Brand {
 // MARK: - Semantic Colors
 
 struct Semantic {
-    static let success = Color(hex: "10B981")
-    static let successMuted = Color(hex: "052E1C")
-    static let warning = Color(hex: "F59E0B")
-    static let warningMuted = Color(hex: "2D1F04")
-    static let error = Color(hex: "EF4444")
-    static let errorMuted = Color(hex: "2D0A0A")
+    static let success = Color(
+        light: hex("059669"),
+        dark:  hex("34D399")
+    )
+    static let successMuted = Color(
+        light: hex("D1FAE5"),
+        dark:  hex("0F3D2C")
+    )
+    static let warning = Color(
+        light: hex("C2670A"),
+        dark:  hex("F0AB4C")
+    )
+    static let warningMuted = Color(
+        light: hex("FCEFD7"),
+        dark:  hex("3A2A12")
+    )
+    static let error = Color(
+        light: hex("DC2626"),
+        dark:  hex("F87171")
+    )
+    static let errorMuted = Color(
+        light: hex("FDE3E3"),
+        dark:  hex("3F1818")
+    )
+
     static let purpleMuted = Brand.purpleMuted
     static let info = Brand.primary
     static let infoMuted = Brand.primaryMuted
 
-    static var userBubble: Color { Color(hex: "1E293B") }
+    static var userBubble: Color {
+        Color(light: hex("F3F6FB"), dark: hex("202735"))
+    }
     static var assistantBubble: Color { Color.clear }
     static var thinkingBubble: Color { Brand.purpleMuted }
 
-    static let toolCall = Color(hex: "F59E0B")
-    static let toolResult = Color(hex: "64748B")
-    static let toolRunning = Brand.teal
+    static let toolCall = Color(
+        light: hex("64748B"),
+        dark:  hex("CBD5E1")
+    )
+    static let toolResult = Color(
+        light: hex("475569"),
+        dark:  hex("AAB6C7")
+    )
+    static let toolRunning = Brand.jade
 }
 
-// MARK: - Text Colors
+// MARK: - Text — four steps, no more
 
 struct TextGrade {
-    static var primary: Color { Color(hex: "F1F5F9") }
-    static var secondary: Color { Color(hex: "A8C0DA") }
-    static var muted: Color { Color(hex: "7B96B5") }
-    static var ghost: Color { Color(hex: "506880") }
-    static var inverted: Color { Color(hex: "0B1120") }
+    static var primary: Color {
+        Color(light: hex("111827"), dark: hex("F8FAFC"))
+    }
+    static var secondary: Color {
+        Color(light: hex("374151"), dark: hex("D1D5DB"))
+    }
+    static var muted: Color {
+        Color(light: hex("6B7280"), dark: hex("9CA3AF"))
+    }
+    static var ghost: Color {
+        Color(light: hex("9CA3AF"), dark: hex("6B7280"))
+    }
+    static var inverted: Color { Color.white }
 }
 
-// MARK: - Surface System — Elevated Dark
+// MARK: - Surface — white canvas, light gray chrome, low-contrast separators.
 
 struct SurfaceGrade {
-    static var base: Color { Color(hex: "0B1120") }      // Rich navy
-    static var panel: Color { Color(hex: "111B2E") }     // Sidebar
-    static var card: Color { Color(hex: "1A2744") }      // Cards — lifted
-    static var elevated: Color { Color(hex: "243352") }   // Elevated — brighter
-    static var sunken: Color { Color(hex: "080E1A") }     // Sunken
-    static var glass: Color { Color(hex: "1A2744").opacity(0.85) }
+    static var base: Color {
+        Color(light: hex("FFFFFF"), dark: hex("111318"))
+    }
+    static var panel: Color {
+        Color(light: hex("F4F6FA"), dark: hex("181C23"))
+    }
+    static var card: Color {
+        Color(light: hex("FFFFFF"), dark: hex("20242D"))
+    }
+    static var elevated: Color {
+        Color(light: hex("F8FAFC"), dark: hex("252A34"))
+    }
+    static var sunken: Color {
+        Color(light: hex("ECEFF5"), dark: hex("0D1016"))
+    }
+    /// Translucent overlay — used for popovers and command palette.
+    static var glass: Color {
+        Color(light: hex("FFFFFF").opacity(0.78),
+              dark:  hex("222733").opacity(0.92))
+    }
 
-    static var hover: Color { Color.white.opacity(0.07) }
-    static var selected: Color { Brand.primary.opacity(0.15) }
-    static var pressed: Color { Color.white.opacity(0.04) }
+    static var hover: Color {
+        Color(light: Color.black.opacity(0.04),
+              dark:  Color.white.opacity(0.06))
+    }
+    static var selected: Color {
+        Color(light: hex("E9EDF6"), dark: hex("253149"))
+    }
+    static var pressed: Color {
+        Color(light: Color.black.opacity(0.07),
+              dark:  Color.white.opacity(0.10))
+    }
     static var active: Color { Brand.primary.opacity(0.10) }
 
-    static var divider: Color { Color(hex: "2A3F5F").opacity(0.7) }
-    static var hairline: Color { Color.white.opacity(0.08) }
-    static var ring: Color { Color(hex: "3D5A80") }
-    static var focusRing: Color { Brand.primary.opacity(0.55) }
-    static var border: Color { Color(hex: "2A3F5F") }
+    static var divider: Color {
+        Color(light: hex("E3E7EF"), dark: hex("000000").opacity(0.46))
+    }
+    static var hairline: Color {
+        Color(light: hex("EAEDF3"), dark: hex("FFFFFF").opacity(0.08))
+    }
+    static var ring: Color {
+        Color(light: hex("C6CEDA"), dark: hex("4B5563"))
+    }
+    static var focusRing: Color { Brand.primary.opacity(0.42) }
+    static var border: Color {
+        Color(light: hex("D8DEE8"), dark: hex("FFFFFF").opacity(0.11))
+    }
 }
 
-// MARK: - Typography — Clean & Functional
+// MARK: - Typography
+// Tight ladder using system defaults. Sizes follow macOS HIG.
 
 struct AppFont {
-    static let largeTitle = Font.system(size: 26, weight: .bold, design: .rounded)
-    static let title = Font.system(size: 18, weight: .semibold)
-    static let headline = Font.system(size: 14, weight: .semibold)
+    static let largeTitle = Font.system(size: 26, weight: .bold)
+    static let title = Font.system(size: 17, weight: .semibold)
+    static let headline = Font.system(size: 13, weight: .semibold)
     static let subheadline = Font.system(size: 12, weight: .semibold)
 
     static let body = Font.system(size: 13, weight: .regular)
@@ -111,16 +239,16 @@ struct AppFont {
     static let micro = Font.system(size: 9, weight: .medium)
 
     static let bubbleBody = Font.system(size: 13.5, weight: .regular)
-    static let bubbleCaption = Font.system(size: 9, weight: .regular)
+    static let bubbleCaption = Font.system(size: 10, weight: .regular)
 
     static let code = Font.system(size: 12, weight: .regular, design: .monospaced)
     static let codeSmall = Font.system(size: 10.5, weight: .regular, design: .monospaced)
 
-    static let statusBar = Font.system(size: 11, weight: .medium, design: .monospaced)
-    static let threadRail = Font.system(size: 10, weight: .bold, design: .rounded)
+    static let statusBar = Font.system(size: 11, weight: .regular)
+    static let threadRail = Font.system(size: 11, weight: .semibold, design: .rounded)
 }
 
-// MARK: - Spacing
+// MARK: - Spacing — 4pt grid, capped at 8 steps
 
 struct AppSpace {
     static let xxs: CGFloat = 2
@@ -133,28 +261,28 @@ struct AppSpace {
     static let xxxl: CGFloat = 48
 }
 
-// MARK: - Corner Radius — Refined
+// MARK: - Radius — three real choices
 
 struct AppRadius {
     static let xs: CGFloat = 4
     static let sm: CGFloat = 6
     static let md: CGFloat = 8
-    static let lg: CGFloat = 12
-    static let xl: CGFloat = 16
-    static let xxl: CGFloat = 20
+    static let lg: CGFloat = 10
+    static let xl: CGFloat = 12
+    static let xxl: CGFloat = 14
     static let pill: CGFloat = 999
 }
 
-// MARK: - Shadows — Subtle Depth
+// MARK: - Shadow — calmer values; dark mode keeps them barely-there
 
 struct AppShadow {
-    static let sm = Shadow(color: .black.opacity(0.25), radius: 4, y: 2)
-    static let card = Shadow(color: .black.opacity(0.40), radius: 16, y: 8)
-    static let toast = Shadow(color: .black.opacity(0.50), radius: 24, y: 12)
-    static let bubble = Shadow(color: .black.opacity(0.20), radius: 6, y: 3)
-    static let glow = Shadow(color: Brand.primary.opacity(0.25), radius: 20, y: 0)
-    static let deep = Shadow(color: .black.opacity(0.60), radius: 40, y: 20)
-    static let ambient = Shadow(color: Brand.primary.opacity(0.10), radius: 40, y: 0)
+    static let sm = Shadow(color: Color.black.opacity(0.045), radius: 4, y: 2)
+    static let card = Shadow(color: Color.black.opacity(0.065), radius: 14, y: 6)
+    static let toast = Shadow(color: Color.black.opacity(0.18), radius: 18, y: 10)
+    static let bubble = Shadow(color: Color.black.opacity(0.045), radius: 6, y: 2)
+    static let glow = Shadow(color: Brand.primary.opacity(0.12), radius: 12, y: 0)
+    static let deep = Shadow(color: Color.black.opacity(0.16), radius: 30, y: 16)
+    static let ambient = Shadow(color: Color.black.opacity(0.055), radius: 36, y: 0)
 }
 
 struct Shadow {
@@ -168,9 +296,9 @@ struct Shadow {
 struct AppAnimation {
     static let quick = SwiftUI.Animation.easeOut(duration: 0.12)
     static let standard = SwiftUI.Animation.easeInOut(duration: 0.2)
-    static let spring = SwiftUI.Animation.spring(response: 0.35, dampingFraction: 0.8)
-    static let gentle = SwiftUI.Animation.easeInOut(duration: 0.35)
-    static let smooth = SwiftUI.Animation.spring(response: 0.5, dampingFraction: 0.85)
+    static let spring = SwiftUI.Animation.spring(response: 0.32, dampingFraction: 0.85)
+    static let gentle = SwiftUI.Animation.easeInOut(duration: 0.3)
+    static let smooth = SwiftUI.Animation.spring(response: 0.5, dampingFraction: 0.88)
     static let bounce = SwiftUI.Animation.spring(response: 0.4, dampingFraction: 0.65)
     static let micro = SwiftUI.Animation.easeOut(duration: 0.08)
 }
@@ -178,59 +306,70 @@ struct AppAnimation {
 // MARK: - Layout Constants
 
 struct LayoutConst {
-    static let threadRailWidth: CGFloat = 60
-    static let threadRailExpandedWidth: CGFloat = 280
-    static let statusBarHeight: CGFloat = 28
-    static let commandBarHeight: CGFloat = 40
+    static let threadRailWidth: CGFloat = 64
+    static let threadRailExpandedWidth: CGFloat = 230
+    static let statusBarHeight: CGFloat = 22
+    static let commandBarHeight: CGFloat = 38
+    static let conversationMaxWidth: CGFloat = 760
     static let composerMaxWidth: CGFloat = 720
-    static let composerCornerRadius: CGFloat = 16
+    static let composerCornerRadius: CGFloat = 12
     static let toolbarHeight: CGFloat = 44
+
+    /// Hidden title bar + fullSizeContentView: keep toolbar clear of traffic lights.
+    static let windowChromeLeadingInset: CGFloat = 76
+
+    static let workbenchPanelMinWidth: CGFloat = 300
+    static let workbenchPanelIdealWidth: CGFloat = 316
+    static let workbenchPanelMaxWidth: CGFloat = 368
 }
 
 // MARK: - View Extensions
 
 extension View {
-    func cardStyle() -> some View {
+    /// Standard surface card: 1 hairline border, very faint shadow.
+    func cardStyle(cornerRadius: CGFloat = AppRadius.xl) -> some View {
         self
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(SurfaceGrade.card)
             )
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
-                    .strokeBorder(SurfaceGrade.border.opacity(0.5), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(SurfaceGrade.hairline, lineWidth: 0.7)
             )
     }
 
-    func glassCard(cornerRadius: CGFloat = AppRadius.lg) -> some View {
+    /// Floating popover-style surface with a touch more elevation.
+    func glassCard(cornerRadius: CGFloat = AppRadius.xl) -> some View {
         self
-            .background(.ultraThinMaterial)
+            .background(SurfaceGrade.glass)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+                    .strokeBorder(SurfaceGrade.border.opacity(0.5), lineWidth: 0.5)
             )
-            .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+            .shadow(color: AppShadow.card.color, radius: AppShadow.card.radius, y: AppShadow.card.y)
     }
 
+    /// Chat bubble — neutral surface, user variant gets the brand tint.
     func bubbleStyle(isUser: Bool = false) -> some View {
         self
             .background(
                 isUser
                     ? AnyShapeStyle(Semantic.userBubble)
-                    : AnyShapeStyle(.ultraThinMaterial)
+                    : AnyShapeStyle(SurfaceGrade.card)
             )
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
                     .strokeBorder(
-                        isUser ? Brand.primary.opacity(0.20) : Color.white.opacity(0.06),
-                        lineWidth: 0.5
+                        isUser ? Brand.primary.opacity(0.22) : SurfaceGrade.hairline,
+                        lineWidth: 0.6
                     )
             )
     }
 
+    /// Pill — small tagged label.
     func pillStyle(color: Color = Brand.primary) -> some View {
         self
             .font(AppFont.captionMedium)
@@ -263,26 +402,28 @@ extension View {
         )
     }
 
+    /// Command palette / popover surface.
     func commandSurface() -> some View {
         self
-            .background(.ultraThickMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
+            .background(SurfaceGrade.glass)
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.xxl, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: AppRadius.xxl, style: .continuous)
+                    .strokeBorder(SurfaceGrade.border.opacity(0.55), lineWidth: 0.5)
             )
-            .shadow(color: .black.opacity(0.4), radius: 30, y: 15)
+            .shadow(color: AppShadow.deep.color, radius: AppShadow.deep.radius, y: AppShadow.deep.y)
     }
 
+    /// Sidebar list row treatment.
     func threadRailItem(isSelected: Bool = false, isHovering: Bool = false) -> some View {
         self
             .background(
                 RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                    .fill(isSelected ? Brand.primary.opacity(0.15) : (isHovering ? SurfaceGrade.hover : Color.clear))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                    .strokeBorder(isSelected ? Brand.primary.opacity(0.3) : Color.clear, lineWidth: 0.5)
+                    .fill(
+                        isSelected
+                            ? SurfaceGrade.selected
+                            : (isHovering ? SurfaceGrade.hover : Color.clear)
+                    )
             )
     }
 
@@ -304,7 +445,7 @@ enum TextHelper {
     }
 }
 
-// MARK: - Color Extension
+// MARK: - Color Hex Init
 
 extension Color {
     init(hex: String) {
@@ -334,81 +475,49 @@ extension Color {
 
 // MARK: - Brand Logo
 
-/// Custom 4-pointed spark shape — elongated vertically with smooth curves.
-struct SparkMark: Shape {
-    func path(in rect: CGRect) -> Path {
-        let cx = rect.midX
-        let cy = rect.midY
-        let rx = rect.width / 2
-        let ry = rect.height / 2
-        let pinch: CGFloat = 0.18
-
-        var p = Path()
-        // Top
-        p.move(to: CGPoint(x: cx, y: cy - ry))
-        // To right
-        p.addQuadCurve(
-            to: CGPoint(x: cx + rx, y: cy),
-            control: CGPoint(x: cx + rx * pinch, y: cy - ry * pinch)
-        )
-        // To bottom
-        p.addQuadCurve(
-            to: CGPoint(x: cx, y: cy + ry),
-            control: CGPoint(x: cx + rx * pinch, y: cy + ry * pinch)
-        )
-        // To left
-        p.addQuadCurve(
-            to: CGPoint(x: cx - rx, y: cy),
-            control: CGPoint(x: cx - rx * pinch, y: cy + ry * pinch)
-        )
-        // Back to top
-        p.addQuadCurve(
-            to: CGPoint(x: cx, y: cy - ry),
-            control: CGPoint(x: cx - rx * pinch, y: cy - ry * pinch)
-        )
-        return p
-    }
-}
-
 /// Reusable brand logo at any size.
 struct BrandLogo: View {
     let size: CGFloat
 
     var body: some View {
-        let corner = size * 0.24
-        let sparkH = size * 0.58
-        let sparkW = sparkH * 0.72
-        let dotR = max(2, size * 0.05)
-
         ZStack {
-            // Squircle base
-            RoundedRectangle(cornerRadius: corner, style: .continuous)
-                .fill(Brand.premiumGradient)
-                .frame(width: size, height: size)
+            if let image = NSImage(named: "laicai-logo") ?? Bundle.main.image(forResource: "laicai-logo") {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: size, height: size)
+            } else {
+                fallbackLogo
+            }
+        }
+        .frame(width: size, height: size)
+    }
 
-            // Subtle inner glow
-            RoundedRectangle(cornerRadius: corner * 0.8, style: .continuous)
+    private var fallbackLogo: some View {
+        let corner = size * 0.23
+        let stroke = max(3, size * 0.12)
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
                 .fill(
-                    RadialGradient(
-                        colors: [.white.opacity(0.12), .clear],
-                        center: .topLeading,
-                        startRadius: 0,
-                        endRadius: size * 0.7
+                    LinearGradient(
+                        colors: [hex("2E6E91"), hex("0F334E"), hex("071D31")],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: size * 0.92, height: size * 0.92)
 
-            // Main spark mark
-            SparkMark()
-                .fill(.white.opacity(0.92))
-                .frame(width: sparkW, height: sparkH)
-
-            // Small accent dot — top-right of spark
-            Circle()
-                .fill(.white)
-                .frame(width: dotR * 2, height: dotR * 2)
-                .offset(x: sparkW * 0.42, y: -sparkH * 0.28)
-                .opacity(size >= 40 ? 0.7 : 0)
+            Image(systemName: "infinity")
+                .font(.system(size: size * 0.64, weight: .heavy))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [hex("F7FEFF"), hex("A8C0C9"), hex("EAF7FA")],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: .black.opacity(0.45), radius: stroke * 0.18, y: stroke * 0.12)
         }
     }
 }

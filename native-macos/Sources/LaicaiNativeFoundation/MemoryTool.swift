@@ -3,7 +3,7 @@ import LaicaiNativeDomain
 
 // MARK: - Memory Tool (agent-callable)
 
-/// Allows the agent to store and recall cross-session memories.
+/// Allows the agent to store and recall cross-Agent memories.
 public struct MemoryTool: LaicaiTool {
     public var name: String { "memory" }
     public var description: String { "跨会话持久记忆：存储知识、召回相关记忆、搜索历史" }

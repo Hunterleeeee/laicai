@@ -53,6 +53,14 @@ extension AppStore {
         summary += checkpointText
 
         thread.context.memory.appendDecision("[continuation] \(summary)")
+        if !checkpointText.isEmpty {
+            thread.steps.append(TaskStep(
+                kind: .aiThinking,
+                text: "恢复现场：最近检查点已写入本轮上下文。\(checkpointText)",
+                isCollapsible: true,
+                isCollapsed: true
+            ))
+        }
     }
 
     static func ensureCheckpointIfNeeded(_ thread: inout Thread) {
@@ -93,7 +101,7 @@ extension AppStore {
         if let lastOutput, !lastOutput.isEmpty {
             lines.append("阶段输出：\(String(lastOutput.prefix(260)))")
         }
-        lines.append("建议下一步：基于已读结果继续，优先补齐未读关键文件；如果是整项目任务，先使用 workspace.index 或已有索引，不要重复低效 shell 遍历。")
+        lines.append("建议下一步：基于已读结果继续，优先补齐未读关键文件；如果是整项目会话，先使用 workspace.index 或已有索引，不要重复低效 shell 遍历。")
         return TaskStep(
             kind: .aiThinking,
             text: lines.joined(separator: "\n"),
@@ -105,7 +113,7 @@ extension AppStore {
 
     static func latestCheckpoint(in thread: Thread) -> String? {
         thread.steps.reversed().first {
-            $0.kind == .aiThinking && $0.text.hasPrefix("任务检查点")
+            $0.kind == .aiThinking && ($0.text.hasPrefix("会话 检查点") || $0.text.hasPrefix("任务检查点"))
         }?.text
     }
 
@@ -127,24 +135,26 @@ extension AppStore {
     static func markStaleRunningTasks(in state: inout AppState, now: Date = .now) {
         let timeout: TimeInterval = 20 * 60
         for index in state.threads.indices {
-            let shouldCancelRunning = state.threads[index].status == .running
-            let shouldCancelStaleReview = state.threads[index].source == .task
+            let isStale = now.timeIntervalSince(state.threads[index].updatedAt) > timeout
+            let shouldCancelRunning = state.threads[index].status == .running && isStale
+            let shouldCancelStaleReview = state.threads[index].isExecutionAgent
                 && state.threads[index].status == .waitingReview
-                && now.timeIntervalSince(state.threads[index].updatedAt) > timeout
+                && isStale
             guard shouldCancelRunning || shouldCancelStaleReview else { continue }
             state.threads[index].status = .cancelled
+            state.threads[index].agentState = .paused
             state.threads[index].updatedAt = now
             if state.threads[index].steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) {
                 continue
             }
             state.threads[index].steps.append(TaskStep(
                 kind: .error,
-                text: "上次运行被中断，已自动标记为已暂停。可以从这条任务继续或重新发送。",
+                text: "上次运行被中断，已自动标记为已暂停。可以从这个会话继续或重新发送。",
                 isFailure: false,
                 recoverable: true,
                 retryAction: "继续"
             ))
-            if state.threads[index].source == .task {
+            if state.threads[index].isExecutionAgent {
                 ensureCheckpointIfNeeded(&state.threads[index])
             }
         }

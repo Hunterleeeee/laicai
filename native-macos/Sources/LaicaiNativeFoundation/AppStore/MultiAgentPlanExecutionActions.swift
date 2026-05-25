@@ -11,7 +11,11 @@ extension AppStore {
         plan.isEditable = false
         plan.status = .running
         state.threads[idx].multiAgentPlan = plan
-        state.threads[idx].status = .running
+        Self.markAgentRunning(
+            &state.threads[idx],
+            goal: state.threads[idx].agentGoal ?? state.threads[idx].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[idx].title,
+            plan: Self.agentPlanLines(for: plan, message: state.threads[idx].agentGoal ?? state.threads[idx].title)
+        )
         state.threads[idx].updatedAt = .now
 
         let thread = state.threads[idx]
@@ -59,9 +63,10 @@ extension AppStore {
                 self.flushStreamBuffer(for: epThreadID)
                 if let idx = self.state.threads.firstIndex(where: { $0.id == epThreadID }) {
                     self.state.threads[idx].steps.append(
-                        TaskStep(kind: .error, text: "多Agent执行失败：\(error.localizedDescription)", isFailure: true, recoverable: true)
+                        TaskStep(kind: .error, text: "多会话执行失败：\(error.localizedDescription)", isFailure: true, recoverable: true)
                     )
                     self.state.threads[idx].status = .failed
+                    self.syncAgentSnapshot(at: idx)
                     self.state.threads[idx].updatedAt = .now
                     self.persistThreadsNow()
                 }
@@ -85,7 +90,11 @@ extension AppStore {
         plan.status = .running
         plan.isEditable = false
         state.threads[idx].multiAgentPlan = plan
-        state.threads[idx].status = .running
+        Self.markAgentRunning(
+            &state.threads[idx],
+            goal: state.threads[idx].agentGoal ?? state.threads[idx].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[idx].title,
+            plan: Self.agentPlanLines(for: plan, message: state.threads[idx].agentGoal ?? state.threads[idx].title)
+        )
         state.threads[idx].updatedAt = .now
 
         let thread = state.threads[idx]
@@ -133,9 +142,10 @@ extension AppStore {
                 self.flushStreamBuffer(for: rpThreadID)
                 if let idx = self.state.threads.firstIndex(where: { $0.id == rpThreadID }) {
                     self.state.threads[idx].steps.append(
-                        TaskStep(kind: .error, text: "多Agent恢复执行失败：\(error.localizedDescription)", isFailure: true, recoverable: true)
+                        TaskStep(kind: .error, text: "多会话恢复执行失败：\(error.localizedDescription)", isFailure: true, recoverable: true)
                     )
                     self.state.threads[idx].status = .failed
+                    self.syncAgentSnapshot(at: idx)
                     self.state.threads[idx].updatedAt = .now
                     self.persistThreadsNow()
                 }

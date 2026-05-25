@@ -306,7 +306,7 @@ public final class ProjectManager: ObservableObject {
 
         let pending = project.activeTasks.filter { $0.status != .completed }
         if !pending.isEmpty {
-            lines.append("## 当前任务")
+            lines.append("## 当前项目事项")
             for task in pending {
                 let icon = task.status == .inProgress ? "🔄" : "⬜"
                 lines.append("- \(icon) \(task.title)")
@@ -314,9 +314,9 @@ public final class ProjectManager: ObservableObject {
             lines.append("")
         }
 
-        // Rolling memory: recent task summaries
+        // Rolling memory: recent Agent summaries
         if !project.recentTaskSummaries.isEmpty {
-            lines.append("## 最近任务记忆")
+            lines.append("## 最近会话记忆")
             for entry in project.recentTaskSummaries.suffix(5) {
                 let f = DateFormatter()
                 f.dateFormat = "yyyy-MM-dd HH:mm"
@@ -451,10 +451,10 @@ public final class ProjectManager: ObservableObject {
         if !pending.isEmpty {
             parts.append("待办（\(pending.count)项）：\(pending.prefix(3).map(\.title).joined(separator: "、"))")
         }
-        // Rolling task memory: inject recent task summaries for cross-session continuity
+        // Rolling Agent memory: inject recent Agent summaries for continuity
         if !project.recentTaskSummaries.isEmpty {
             let recent = project.recentTaskSummaries.suffix(3)
-            var historyLines: [String] = ["最近任务记忆："]
+            var historyLines: [String] = ["最近会话记忆："]
             for entry in recent {
                 let dateStr = Self.shortDateString(entry.date)
                 historyLines.append("  - [\(dateStr)] \(entry.summary)")

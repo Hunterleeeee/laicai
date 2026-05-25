@@ -19,63 +19,42 @@ struct WorkflowsPanel: View {
         }
         let loadErrors = WorkflowLibrary.shared.lastLoadErrors
 
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            // Header
-            HStack(spacing: AppSpace.sm) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Brand.primary)
-                Text("工作流")
-                    .font(AppFont.subheadline)
-                    .foregroundStyle(TextGrade.primary)
-                Spacer()
-                Button { showEditor = true } label: {
-                    Image(systemName: "plus.circle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Brand.primary)
-                }
-                .buttonStyle(.plain)
-                .help("创建自定义工作流")
-            }
+        VStack(alignment: .leading, spacing: AppSpace.lg) {
+            workflowOverview(total: allWorkflows.count, visible: workflows.count, loadErrorCount: loadErrors.count)
 
             // Search
             if allWorkflows.count > 3 {
-                HStack(spacing: AppSpace.sm) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 10))
-                        .foregroundStyle(TextGrade.ghost)
-                    TextField("搜索工作流…", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(AppFont.caption)
-                }
-                .padding(AppSpace.sm)
-                .background(RoundedRectangle(cornerRadius: AppRadius.sm).fill(SurfaceGrade.card))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.sm).strokeBorder(SurfaceGrade.hairline, lineWidth: 0.5))
+                workbenchSearchField(text: $searchText, placeholder: "搜索流程…")
             }
 
             // Workflows list
             if workflows.isEmpty {
                 VStack(spacing: AppSpace.md) {
                     Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 24, weight: .light))
-                        .foregroundStyle(Brand.primary.opacity(0.4))
-                        .frame(width: 40, height: 40)
-                        .background(Circle().fill(Brand.primary.opacity(0.06)))
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Brand.primary)
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(Brand.primary.opacity(0.10)))
                     VStack(spacing: AppSpace.xs) {
-                        Text(searchText.isEmpty ? "暂无工作流" : "无匹配结果")
+                        Text(searchText.isEmpty ? "暂无流程" : "无匹配结果")
                             .font(AppFont.captionMedium)
                             .foregroundStyle(TextGrade.secondary)
-                        Text(searchText.isEmpty ? "创建 YAML 工作流或点击 + 新建" : "尝试其他关键词")
+                        Text(searchText.isEmpty ? "把常做的事保存成流程，下次直接运行" : "换个关键词试试")
                             .font(AppFont.tiny)
                             .foregroundStyle(TextGrade.muted)
                     }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, AppSpace.lg)
+                .background(RoundedRectangle(cornerRadius: AppRadius.lg).fill(SurfaceGrade.card.opacity(0.62)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.lg).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
             } else {
-                ForEach(workflows) { wf in
-                    WorkflowRow(workflow: wf) {
-                        selectedWorkflow = wf
+                VStack(alignment: .leading, spacing: AppSpace.sm) {
+                    workbenchSectionHeader(title: searchText.isEmpty ? "可用流程" : "匹配结果", count: workflows.count)
+                    ForEach(workflows) { wf in
+                        WorkflowRow(workflow: wf) {
+                            selectedWorkflow = wf
+                        }
                     }
                 }
             }
@@ -99,65 +78,61 @@ struct WorkflowsPanel: View {
                     }
                 }
                 .padding(AppSpace.sm)
-                .background(RoundedRectangle(cornerRadius: AppRadius.sm).fill(Semantic.warningMuted.opacity(0.5)))
+                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Semantic.warningMuted.opacity(0.55)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(Semantic.warning.opacity(0.16), lineWidth: 0.6))
             }
 
             // Workflow chains
             if !chainRegistry.chains.isEmpty {
-                HStack {
-                    Text("工作流链")
-                        .font(AppFont.captionMedium)
-                        .foregroundStyle(TextGrade.secondary)
-                    Spacer()
-                    Text("\(chainRegistry.chains.count) 条")
-                        .font(AppFont.tiny)
-                        .foregroundStyle(TextGrade.ghost)
-                }
-                ForEach(chainRegistry.chains) { chain in
-                    HStack(spacing: AppSpace.sm) {
-                        Image(systemName: "link")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Brand.purple)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(chain.name)
-                                .font(AppFont.captionMedium)
-                                .foregroundStyle(TextGrade.primary)
-                                .lineLimit(1)
-                            Text(chain.workflowNames.joined(separator: " → "))
-                                .font(AppFont.tiny)
-                                .foregroundStyle(TextGrade.muted)
-                                .lineLimit(1)
+                VStack(alignment: .leading, spacing: AppSpace.sm) {
+                    workbenchSectionHeader(title: "流程链", count: chainRegistry.chains.count)
+                    ForEach(chainRegistry.chains) { chain in
+                        HStack(spacing: AppSpace.sm) {
+                            Image(systemName: "link")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Brand.purple)
+                                .frame(width: 24, height: 24)
+                                .background(Circle().fill(Brand.purple.opacity(0.10)))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(chain.name)
+                                    .font(AppFont.captionMedium)
+                                    .foregroundStyle(TextGrade.primary)
+                                    .lineLimit(1)
+                                Text(chain.workflowNames.joined(separator: " → "))
+                                    .font(AppFont.tiny)
+                                    .foregroundStyle(TextGrade.muted)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Button {
+                                chainRegistry.removeChain(id: chain.id)
+                                chainRegistry.save(workspaceRoot: store.state.settings.workspacePath)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(TextGrade.ghost)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        Spacer()
-                        Button {
-                            chainRegistry.removeChain(id: chain.id)
-                            chainRegistry.save(workspaceRoot: store.state.settings.workspacePath)
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundStyle(TextGrade.ghost)
-                        }
-                        .buttonStyle(.plain)
+                        .padding(AppSpace.sm)
+                        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.66)))
+                        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
                     }
-                    .padding(AppSpace.sm)
-                    .background(RoundedRectangle(cornerRadius: AppRadius.sm).fill(SurfaceGrade.card.opacity(0.5)))
                 }
             }
 
             // Run history
             if !store.state.workflowRuns.isEmpty {
-                HStack {
-                    Text("运行记录")
-                        .font(AppFont.captionMedium)
-                        .foregroundStyle(TextGrade.secondary)
-                    Spacer()
-                    Text("\(store.state.workflowRuns.count) 次")
-                        .font(AppFont.tiny)
-                        .foregroundStyle(TextGrade.ghost)
-                }
-
-                ForEach(store.state.workflowRuns) { run in
-                    WorkflowRunRow(run: run)
+                VStack(alignment: .leading, spacing: AppSpace.sm) {
+                    workbenchSectionHeader(title: "最近运行", count: store.state.workflowRuns.count)
+                    VStack(spacing: AppSpace.xs) {
+                        ForEach(store.state.workflowRuns.prefix(6)) { run in
+                            WorkflowRunRow(run: run)
+                        }
+                    }
+                    .padding(AppSpace.md)
+                    .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.66)))
+                    .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
                 }
             }
         }
@@ -171,6 +146,74 @@ struct WorkflowsPanel: View {
             WorkflowEditorView(isPresented: $showEditor)
                 .environmentObject(store)
         }
+    }
+
+    private func workflowOverview(total: Int, visible: Int, loadErrorCount: Int) -> some View {
+        VStack(alignment: .leading, spacing: AppSpace.md) {
+            HStack(alignment: .top, spacing: AppSpace.sm) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Brand.teal)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Brand.teal.opacity(0.10)))
+                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                    Text("流程")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(TextGrade.primary)
+                    Text(total == 0 ? "把重复目标沉成可复用流程。" : "\(visible)/\(total) 个可用 · 点击即可配置并启动")
+                        .font(AppFont.caption)
+                        .foregroundStyle(TextGrade.muted)
+                        .lineLimit(2)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: AppSpace.xs) {
+                workflowMetric(icon: "rectangle.stack", value: "\(total)", label: "流程", tint: Brand.primary)
+                workflowMetric(icon: "link", value: "\(chainRegistry.chains.count)", label: "流程链", tint: Brand.purple)
+                workflowMetric(icon: loadErrorCount > 0 ? "exclamationmark.triangle" : "checkmark.seal", value: loadErrorCount > 0 ? "\(loadErrorCount)" : "OK", label: "状态", tint: loadErrorCount > 0 ? Semantic.warning : Semantic.success)
+            }
+
+            Button { showEditor = true } label: {
+                Label("新建流程", systemImage: "plus")
+                    .font(AppFont.captionMedium)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, AppSpace.sm)
+                    .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Brand.teal.opacity(0.10)))
+                    .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(Brand.teal.opacity(0.18), lineWidth: 0.6))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Brand.teal)
+        }
+        .padding(AppSpace.lg)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                .fill(LinearGradient(colors: [SurfaceGrade.card, SurfaceGrade.elevated.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                .strokeBorder(SurfaceGrade.hairline.opacity(0.9), lineWidth: 0.7)
+        )
+        .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.y)
+    }
+
+    private func workflowMetric(icon: String, value: String, label: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: AppSpace.xs) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                Text(label)
+                    .font(AppFont.micro)
+            }
+            .foregroundStyle(tint.opacity(0.82))
+            Text(value)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(TextGrade.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(AppSpace.sm)
+        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.66)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
     }
 
 }
@@ -229,15 +272,16 @@ private struct WorkflowRow: View {
             }
         }
         .buttonStyle(.plain)
-        .padding(AppSpace.sm)
+        .padding(AppSpace.md)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md)
-                .fill(isHovered ? SurfaceGrade.hover : SurfaceGrade.card)
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .fill(isHovered ? SurfaceGrade.hover.opacity(0.92) : SurfaceGrade.card.opacity(0.72))
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .strokeBorder(isHovered ? categoryColor.opacity(0.2) : Color.clear, lineWidth: 0.6)
+                .strokeBorder(isHovered ? categoryColor.opacity(0.24) : SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.7)
         )
+        .shadow(color: isHovered ? AppShadow.sm.color : .clear, radius: AppShadow.sm.radius, y: AppShadow.sm.y)
         .onHover { isHovered = $0 }
     }
 }
@@ -276,54 +320,12 @@ struct SkillsPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack {
-                Text("技能")
-                    .font(AppFont.subheadline)
-                    .foregroundStyle(TextGrade.primary)
-                Spacer()
-                Button {
-                    registry.refresh(workspaceRoot: store.state.settings.workspacePath)
-                    ToastCenter.shared.success("已刷新技能")
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("刷新本地技能（读取 .laicai/skills 和 skills/*/skill.json）")
-
-                Button {
-                    createDraftSkill()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("从当前输入创建技能草稿")
-
-                Text("\(registry.skills.count) 个")
-                    .font(AppFont.tiny)
-                    .foregroundStyle(TextGrade.ghost)
-            }
+            skillsOverview
 
             if registry.skills.isEmpty {
-                VStack(spacing: AppSpace.sm) {
-                    Image(systemName: "star")
-                        .font(.system(size: 24, weight: .ultraLight))
-                        .foregroundStyle(TextGrade.ghost)
-                    Text("暂无技能")
-                        .font(AppFont.caption)
-                        .foregroundStyle(TextGrade.muted)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, AppSpace.xl)
+                workbenchEmptyState(icon: "sparkles", title: "暂无技能", hint: "把常用能力保存下来，之后一键调用")
             } else {
-                Text("来源：内置技能、.laicai/skills/*.json、skills/*/skill.json")
-                    .font(AppFont.tiny)
-                    .foregroundStyle(TextGrade.ghost)
+                workbenchSectionHeader(title: "可用技能", count: registry.skills.count)
                 ForEach(registry.skills) { skill in
                     SkillRow(skill: skill) {
                         store.useSkill(skill)
@@ -339,10 +341,50 @@ struct SkillsPanel: View {
         }
     }
 
+    private var skillsOverview: some View {
+        workbenchHeroCard(
+            icon: "sparkles",
+            title: "技能",
+            subtitle: registry.skills.isEmpty ? "沉淀常用能力，之后直接调用。" : "\(registry.skills.count) 个可用 · 选择一个技能带入当前会话",
+            tint: Brand.purple
+        ) {
+            HStack(spacing: AppSpace.xs) {
+                Button {
+                    registry.refresh(workspaceRoot: store.state.settings.workspacePath)
+                    ToastCenter.shared.success("已刷新技能")
+                } label: {
+                    Label("刷新", systemImage: "arrow.clockwise")
+                        .font(AppFont.captionMedium)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Brand.purple)
+                .padding(.vertical, AppSpace.sm)
+                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.62)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.8), lineWidth: 0.6))
+                .help("刷新技能")
+
+                Button {
+                    createDraftSkill()
+                } label: {
+                    Label("新建", systemImage: "plus")
+                        .font(AppFont.captionMedium)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Brand.purple)
+                .padding(.vertical, AppSpace.sm)
+                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Brand.purple.opacity(0.10)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(Brand.purple.opacity(0.18), lineWidth: 0.6))
+                .help("从当前输入创建技能草稿")
+            }
+        }
+    }
+
     private func createDraftSkill() {
         let draft = store.state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = draft.isEmpty ? "新技能 \(shortTimestamp())" : String(draft.prefix(18))
-        let description = draft.isEmpty ? "本地技能草稿，可在 .laicai/skills 中继续编辑。" : draft
+        let description = draft.isEmpty ? "本地技能草稿，可继续补充说明和可用动作。" : draft
 
         do {
             _ = try registry.createDraft(

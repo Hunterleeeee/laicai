@@ -15,6 +15,25 @@ enum AppSettingsStorage {
     }
 }
 
+private func normalizedPersistedSettings(_ settings: AppSettings) -> AppSettings {
+    var normalized = settings
+    if WorkspaceSandbox.isOverlyBroadWorkspace(normalized.workspacePath)
+        || WorkspaceSandbox.isDisposableSmokeWorkspace(normalized.workspacePath) {
+        let fallback = normalized.recentWorkspaces.first { path in
+            !WorkspaceSandbox.isOverlyBroadWorkspace(path)
+                && !WorkspaceSandbox.isDisposableSmokeWorkspace(path)
+                && FileManager.default.fileExists(atPath: path)
+        }
+        normalized.workspacePath = fallback ?? ""
+    }
+    normalized.recentWorkspaces = normalized.recentWorkspaces.filter { path in
+        !WorkspaceSandbox.isOverlyBroadWorkspace(path)
+            && !WorkspaceSandbox.isDisposableSmokeWorkspace(path)
+            && FileManager.default.fileExists(atPath: path)
+    }
+    return normalized
+}
+
 func migrateFromPythonConnectorCatalog(workspacePath: String) -> ConnectorCatalog? {
     let path = (workspacePath as NSString).appendingPathComponent("desktop-connectors.json")
     guard FileManager.default.fileExists(atPath: path),
@@ -47,16 +66,23 @@ public extension AppState {
     static func bootstrap(environment: AppEnvironment) -> AppState {
         var state = SampleData.appState
         if let settings = AppSettingsStorage.load() {
-            state.settings = settings
-            if WorkspaceSandbox.isOverlyBroadWorkspace(state.settings.workspacePath) {
-                state.settings.workspacePath = ""
-            }
-            let last = URL(fileURLWithPath: settings.workspacePath).lastPathComponent
+            state.settings = normalizedPersistedSettings(settings)
+            let last = URL(fileURLWithPath: state.settings.workspacePath).lastPathComponent
             if !last.isEmpty { state.workspaceName = last }
         }
 
-        if let savedThreads = try? environment.threadRepository.loadThreads(), !savedThreads.isEmpty {
+        if let savedThreads = try? environment.agentRepository.loadAgents(), !savedThreads.isEmpty {
             state.threads = savedThreads.filter { !$0.isEmptyPlaceholder }
+        } else if let savedThreads = try? environment.threadRepository.loadThreads(), !savedThreads.isEmpty {
+            state.threads = savedThreads.filter { !$0.isEmptyPlaceholder }
+        } else {
+            let legacySessions = (try? environment.sessionRepository.loadSessions()) ?? []
+            let legacyTasks = (try? environment.taskRepository.loadTasks()) ?? []
+            let legacyThreads = (legacySessions.map(Thread.init(session:)) + legacyTasks.map(Thread.init(task:)))
+                .filter { !$0.isEmptyPlaceholder }
+            if !legacyThreads.isEmpty {
+                state.threads = legacyThreads
+            }
         }
 
         if let catalog = try? environment.connectorRepository.loadConnectorCatalog(), !catalog.connectors.isEmpty {
@@ -83,15 +109,8 @@ public extension AppState {
 
         var normalizedThreads = false
         for index in state.threads.indices {
-            if state.threads[index].source == .session,
-               isTaskLikeHistoricalSession(state.threads[index]) {
-                state.threads[index].source = .task
-                state.threads[index].preview = normalizedSessionPreview(state.threads[index].preview)
-                normalizedThreads = true
-            }
-
-            if state.threads[index].source == .session {
-                if state.threads[index].title.isEmpty || state.threads[index].title == "新对话" || state.threads[index].title == "新会话" {
+            if state.threads[index].isAskAgent {
+                if Thread.isPlaceholderTitle(state.threads[index].title) {
                     let firstMsg = state.threads[index].steps.first(where: { $0.kind == .userInput })?.text ?? ""
                     let title = String(firstMsg.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
                     if !title.isEmpty { state.threads[index].title = title }
@@ -99,6 +118,7 @@ public extension AppState {
                 state.threads[index].preview = normalizedSessionPreview(state.threads[index].preview)
             } else if state.threads[index].status == .running {
                 state.threads[index].status = .cancelled
+                state.threads[index].agentState = .paused
                 if !state.threads[index].steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) {
                     state.threads[index].steps.append(TaskStep(
                         kind: .error,
@@ -111,7 +131,19 @@ public extension AppState {
                 normalizedThreads = true
             }
 
-            if state.threads[index].source == .session,
+            let beforeAgentState = state.threads[index].agentState
+            let beforeAgentGoal = state.threads[index].agentGoal
+            let beforePlan = state.threads[index].currentPlan
+            let beforeArtifacts = state.threads[index].artifacts
+            AppStore.syncAgentSnapshot(&state.threads[index])
+            if state.threads[index].agentState != beforeAgentState
+                || state.threads[index].agentGoal != beforeAgentGoal
+                || state.threads[index].currentPlan != beforePlan
+                || state.threads[index].artifacts != beforeArtifacts {
+                normalizedThreads = true
+            }
+
+            if state.threads[index].isAskAgent,
                state.threads[index].projectID != nil,
                !threadNeedsProjectScope(state.threads[index]) {
                 state.threads[index].projectID = nil
@@ -120,12 +152,10 @@ public extension AppState {
         }
 
         if normalizedThreads {
-            try? environment.threadRepository.saveThreads(state.threads)
+            try? environment.agentRepository.saveAgents(state.threads)
         }
 
-        if let latest = state.threads.first {
-            state.selectThread(id: latest.id)
-        }
+        state.selectThread(id: state.threads.sorted { $0.updatedAt > $1.updatedAt }.first?.id)
 
         // Start MCP servers and register their tools
         Task { @MainActor in
@@ -157,24 +187,8 @@ private func normalizedBootstrapConnector(_ connector: ConnectorProfile) -> Conn
     return normalized
 }
 
-func isTaskLikeHistoricalSession(_ thread: Thread) -> Bool {
-    guard thread.source == .session else { return false }
-    if thread.workflowName != nil { return true }
-    return thread.steps.contains { step in
-        if let toolName = step.toolName?.trimmingCharacters(in: .whitespacesAndNewlines), !toolName.isEmpty {
-            return true
-        }
-        switch step.kind {
-        case .toolCall, .toolResult, .reviewRequest, .reviewResult:
-            return true
-        case .userInput, .aiThinking, .textOutput, .error:
-            return false
-        }
-    }
-}
-
 private func threadNeedsProjectScope(_ thread: Thread) -> Bool {
-    if thread.source == .task { return true }
+    if thread.isExecutionAgent { return true }
     return thread.workflowName != nil
         || thread.steps.contains { step in
             step.kind == .toolCall || step.kind == .toolResult || step.kind == .reviewRequest || step.kind == .reviewResult

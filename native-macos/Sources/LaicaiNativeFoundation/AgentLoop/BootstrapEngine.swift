@@ -91,7 +91,7 @@ struct BootstrapEngine {
         if wasTruncated {
             let stillTruncatedStep = TaskStep(
                 kind: .error,
-                text: "续写仍被截断。请继续在这条任务里发送\u{201C}接着说\u{201D}，我会继续沿用当前上下文。",
+                text: "续写仍被截断。请继续在这个会话里发送\u{201C}接着说\u{201D}，我会继续沿用当前上下文。",
                 isFailure: false,
                 recoverable: true,
                 retryAction: "接着说"
@@ -128,7 +128,7 @@ struct BootstrapEngine {
         let toolParams = AgentLoop.displayParamsFromJSON(argumentsJSON)
         let callId = "call_bootstrap_web_fetch"
 
-        let (callStep, resultStep, toolResult) = await executeBootstrapTool(
+        let (_, _, toolResult) = await executeBootstrapTool(
             toolName: "web.fetch",
             tool: fetchTool,
             argumentsJSON: argumentsJSON,
@@ -145,7 +145,7 @@ struct BootstrapEngine {
             limit: config.maxTokensPerTurn
         )
         let instruction = toolResult.success
-            ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWebFetch, baseline: "我已读取用户提供的网页。请基于网页正文和当前任务继续工作，必要时再搜索或读取项目文件；不要声称无法访问该链接。")
+            ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWebFetch, baseline: "我已读取用户提供的网页。请基于网页正文和当前会话目标继续工作，必要时再搜索或读取项目文件；不要声称无法访问该链接。")
             : PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWebFetch + "_fail", baseline: "我尝试读取用户提供的网页但失败。请明确说明失败原因，不能编造网页内容。")
         state.messages.append(ChatMessage(
             role: "user",
@@ -212,7 +212,7 @@ struct BootstrapEngine {
             limit: config.maxTokensPerTurn
         )
         let instruction = toolResult.success
-            ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapFileRead, baseline: "我已直接读取用户提供的本地路径。请基于真实读取结果继续完成任务；如果这是目录，先根据目录清单判断下一步该读哪些文件。")
+            ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapFileRead, baseline: "我已直接读取用户提供的本地路径。请基于真实读取结果继续推进当前会话目标；如果这是目录，先根据目录清单判断下一步该读哪些文件。")
             : PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapFileRead + "_fail", baseline: "我尝试读取用户提供的本地路径但失败。请明确说明失败原因，不能编造文件内容。")
         state.messages.append(ChatMessage(
             role: "user",
@@ -328,7 +328,7 @@ struct BootstrapEngine {
         let fileHints = state.taskContext.relevantFiles.prefix(12).map { "- \($0.path) (\($0.language))" }.joined(separator: "\n")
         let hintBlock = fileHints.isEmpty ? "" : "\n\n自动相关文件线索：\n\(fileHints)"
         let instruction = toolResult.success
-            ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWorkspaceSearch, baseline: "我已先搜索工作区，并尽量自动读取首个高相关文件片段。请基于这些真实线索继续完成任务；如果线索不足，再调用 file_read/code_search 等工具，不要凭空猜文件内容。")
+            ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWorkspaceSearch, baseline: "我已先搜索工作区，并尽量自动读取首个高相关文件片段。请基于这些真实线索继续推进当前会话目标；如果线索不足，再调用 file_read/code_search 等工具，不要凭空猜文件内容。")
             : PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWorkspaceSearch + "_fail", baseline: "我尝试先搜索工作区但失败。请明确说明失败原因，必要时让用户检查工作区路径。")
         state.messages.append(ChatMessage(
             role: "user",
@@ -390,7 +390,7 @@ struct BootstrapEngine {
         let patterns = repo.loadMemories(workspace: state.taskContext.workspaceRoot, limit: 50)
             .filter { $0.category == "tool_pattern" && $0.key.hasPrefix("success_\(taskType)") }
         if let bestPattern = patterns.first {
-            state.systemPrompt += "\n\n## 历史成功路径\n此类任务（\(taskType)）曾用以下工具序列成功完成：\(bestPattern.value)\n请优先按此路径执行。"
+            state.systemPrompt += "\n\n## 历史成功路径\n此类会话目标（\(taskType)）曾用以下工具序列成功完成：\(bestPattern.value)\n请优先按此路径执行。"
         }
     }
 
@@ -408,18 +408,21 @@ struct BootstrapEngine {
             task: &state.task,
             messages: &state.messages,
             toolRegistry: toolRegistry,
+            emitDebugSteps: config.emitDebugSteps,
             onStep: onStep
         )
         guard templateResult.executedSteps > 0 else { return }
 
-        let templateStep = TaskStep(
-            kind: .aiThinking,
-            text: "编排层模板引擎：预执行 \(templateResult.executedSteps) 步（\(templateResult.templateName)）",
-            isCollapsible: true,
-            isCollapsed: true
-        )
-        state.task.steps.append(templateStep)
-        onStep(templateStep)
+        if config.emitDebugSteps {
+            let templateStep = TaskStep(
+                kind: .aiThinking,
+                text: "会话 预处理完成：\(templateResult.executedSteps) 步（\(templateResult.templateName)）",
+                isCollapsible: true,
+                isCollapsed: true
+            )
+            state.task.steps.append(templateStep)
+            onStep(templateStep)
+        }
 
         state.messages.append(ChatMessage(role: "system", content: templateResult.directive))
     }

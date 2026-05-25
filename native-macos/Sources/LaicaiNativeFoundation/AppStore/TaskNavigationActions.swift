@@ -2,47 +2,57 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
-    public func deleteTask(id: UUID) {
+    public func deleteExecutingAgent(id: UUID) {
         state.threads.removeAll(where: { $0.id == id })
-        if state.selectedTaskID == id {
+        if state.selectedThreadID == id {
             state.selectThread(id: nil)
             selectThread(state.threads.first.map { ThreadRecord(thread: $0, includeEvents: false) })
         }
-        do { try environment.taskRepository.deleteTask(id: id) }
-        catch { recordToolActivity(name: "tasks.delete", summary: "任务删除失败", statusLine: error.localizedDescription, isFailure: true) }
+        persistThreads()
     }
 
-    public func selectTask(id: UUID?) {
+    public func selectExecutingAgent(id: UUID?) {
         state.selectThread(id: id)
+        syncActiveProjectForSelectedThread(id: id)
         if let id, let thread = state.threads.first(where: { $0.id == id }) {
-            state.modeLabel = thread.workflowName == nil ? "任务" : "工作流"
+            state.modeLabel = thread.workflowName == nil ? "会话" : "工作流"
         }
         syncGeneratingStateForSelectedThread()
     }
 
-    public func prepareTaskContinuation(id: UUID) {
-        guard state.threads.contains(where: { $0.id == id }) else { return }
+    public func prepareAgentContinuation(id: UUID) {
+        guard let threadIndex = state.threads.firstIndex(where: { $0.id == id }) else { return }
         state.selectThread(id: id)
-        state.modeLabel = "任务"
-        if state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            state.draftMessage = "继续这个任务"
-        }
+        syncActiveProjectForSelectedThread(id: id)
+        state.modeLabel = state.threads[threadIndex].workflowName == nil ? "会话" : "工作流"
+        state.draftMessage = "继续这个会话"
+        syncGeneratingStateForSelectedThread()
     }
+
+    public func deleteTask(id: UUID) { deleteExecutingAgent(id: id) }
+
+    public func selectTask(id: UUID?) { selectThread(id: id) }
+
+    public func prepareTaskContinuation(id: UUID) { prepareAgentContinuation(id: id) }
 
     public func selectThread(_ record: ThreadRecord?) {
         state.selectThread(id: record?.id)
+        syncActiveProjectForSelectedThread(id: record?.id)
         if let record {
-            switch record.source {
-            case .session:
-                state.modeLabel = "聊天"
-            case .task:
-                let workflowName = state.threads.first { $0.id == record.id }?.workflowName ?? record.task?.workflowName
-                state.modeLabel = workflowName == nil ? "任务" : "工作流"
-            }
+            let workflowName = state.threads.first { $0.id == record.id }?.workflowName
+            state.modeLabel = workflowName == nil ? "会话" : "工作流"
         } else {
-            state.modeLabel = "聊天"
+            state.modeLabel = "会话"
         }
         syncGeneratingStateForSelectedThread()
+    }
+
+    private func syncActiveProjectForSelectedThread(id: UUID?) {
+        guard let id, let thread = state.threads.first(where: { $0.id == id }) else {
+            ProjectManager.shared.activeProjectID = nil
+            return
+        }
+        ProjectManager.shared.activeProjectID = thread.projectID
     }
 
     public func toggleStepCollapsed(taskID: UUID, stepID: UUID) {

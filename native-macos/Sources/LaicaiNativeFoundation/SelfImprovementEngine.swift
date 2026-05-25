@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import LaicaiNativeDomain
 
 // MARK: - Self-Improvement Engine
 // Allows 来财 to detect its own weaknesses, modify its own source code,
@@ -123,7 +124,7 @@ public final class SelfImprovementEngine: Sendable {
             return Diagnosis(
                 category: .lowCompletionRate,
                 severity: .critical,
-                description: "最近3天任务完成率仅 \(Int(completionRate * 100))%（\(totalCompleted)/\(totalTasks)）",
+                description: "最近3天会话完成率仅 \(Int(completionRate * 100))%（\(totalCompleted)/\(totalTasks)）",
                 evidence: formatStats(stats),
                 suggestedFiles: ["AgentLoop.swift", "Orchestrator.swift", "PromptComposer.swift"],
                 improvementPrompt: buildImprovementPrompt(for: .lowCompletionRate, evidence: formatStats(stats))
@@ -178,7 +179,7 @@ public final class SelfImprovementEngine: Sendable {
             return Diagnosis(
                 category: .lowCompletionRate,
                 severity: .warning,
-                description: "最近3天任务完成率 \(Int(completionRate * 100))%（\(totalCompleted)/\(totalTasks)），低于目标50%",
+                description: "最近3天会话完成率 \(Int(completionRate * 100))%（\(totalCompleted)/\(totalTasks)），低于目标50%",
                 evidence: formatStats(stats),
                 suggestedFiles: ["AgentLoop.swift", "Orchestrator.swift", "PromptComposer.swift"],
                 improvementPrompt: buildImprovementPrompt(for: .lowCompletionRate, evidence: formatStats(stats))
@@ -337,7 +338,7 @@ public final class SelfImprovementEngine: Sendable {
         ## 证据
         \(diagnosis.evidence)
 
-        ## 任务要求
+        ##会话要求
 
         你是来财AI系统，现在需要修改自己的源代码来修复上述问题。
 

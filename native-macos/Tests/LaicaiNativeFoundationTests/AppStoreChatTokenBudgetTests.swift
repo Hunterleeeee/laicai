@@ -19,7 +19,7 @@ final class AppStoreChatTokenBudgetTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertEqual(runtime.requests.last?.maxOutputTokens, 512)
+        XCTAssertEqual(runtime.requests.last?.maxOutputTokens, 1400)
     }
     func testLocalAgentRequestsUseConservativeBudget() async throws {
         let connector = makeConnector(name: "Local Ollama", kind: "ollama", endpoint: "http://127.0.0.1:11434/v1", modelName: "qwen3.5:9b-q4_K_M")

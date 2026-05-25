@@ -15,12 +15,17 @@ public struct SkillHubView: View {
     public init() {}
 
     public var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
+        VStack(alignment: .leading, spacing: AppSpace.md) {
+            headerCard
+            workbenchSearchField(text: $searchText, placeholder: "搜索技能…")
             categoryBar
-            Divider()
             skillList
+        }
+        .onAppear {
+            registry.refresh(workspaceRoot: store.state.settings.workspacePath)
+        }
+        .onChange(of: store.state.settings.workspacePath) { root in
+            registry.refresh(workspaceRoot: root)
         }
         .sheet(isPresented: $showingCreateSheet) {
             SkillCreateSheet()
@@ -32,42 +37,40 @@ public struct SkillHubView: View {
 
     // MARK: - Header
 
-    private var header: some View {
-        HStack(spacing: AppSpace.md) {
-            Spacer()
+    private var headerCard: some View {
+        workbenchHeroCard(
+            icon: "sparkles",
+            title: "技能",
+            subtitle: registry.skills.isEmpty ? "沉淀常用能力，之后直接调用。" : "\(registry.skills.count) 个可用 · 找到技能后点一下带入当前会话",
+            tint: Brand.purple
+        ) {
+            HStack(spacing: AppSpace.xs) {
+                Button {
+                    registry.refresh(workspaceRoot: store.state.settings.workspacePath)
+                    ToastCenter.shared.success("已刷新技能")
+                } label: {
+                    Label("刷新", systemImage: "arrow.clockwise")
+                        .font(AppFont.captionMedium)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Brand.purple)
+                .padding(.vertical, AppSpace.sm)
+                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.62)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.8), lineWidth: 0.6))
 
-            HStack(spacing: 5) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(TextGrade.ghost)
-                TextField("搜索技能…", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .frame(maxWidth: 180)
+                Button { showingCreateSheet = true } label: {
+                    Label("新建", systemImage: "plus")
+                        .font(AppFont.captionMedium)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Brand.purple)
+                .padding(.vertical, AppSpace.sm)
+                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Brand.purple.opacity(0.10)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(Brand.purple.opacity(0.18), lineWidth: 0.6))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(SurfaceGrade.elevated.opacity(0.5))
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(SurfaceGrade.border.opacity(0.1), lineWidth: 0.5)
-            )
-
-            Button { showingCreateSheet = true } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Brand.primary)
-                    .frame(width: 28, height: 28)
-                    .background(Circle().fill(Brand.primary.opacity(0.1)))
-            }
-            .buttonStyle(.plain)
-            .help("创建新技能")
         }
-        .padding(.horizontal, AppSpace.lg)
-        .padding(.vertical, 8)
     }
 
     // MARK: - Category Bar
@@ -87,16 +90,18 @@ public struct SkillHubView: View {
                             .padding(.vertical, 5)
                             .background(
                                 isActive
-                                ? AnyShapeStyle(SurfaceGrade.hover)
+                                ? AnyShapeStyle(Brand.purple.opacity(0.10))
                                 : AnyShapeStyle(Color.clear)
+                            )
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(isActive ? Brand.purple.opacity(0.16) : Color.clear, lineWidth: 0.6)
                             )
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, AppSpace.lg)
-            .padding(.vertical, 4)
         }
     }
 
@@ -117,35 +122,23 @@ public struct SkillHubView: View {
     }
 
     private var skillList: some View {
-        ScrollView {
-            LazyVStack(spacing: 2) {
-                if filteredSkills.isEmpty {
-                    VStack(spacing: AppSpace.md) {
-                        Image(systemName: "sparkle")
-                            .font(.system(size: 28, weight: .thin))
-                            .foregroundStyle(TextGrade.ghost)
-                        Text("暂无匹配的技能")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(TextGrade.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 60)
-                } else {
-                    ForEach(filteredSkills) { skill in
-                        SkillCard(skill: skill, category: categorize(skill))
-                            .onTapGesture { selectedSkill = skill }
-                    }
+        LazyVStack(alignment: .leading, spacing: AppSpace.sm) {
+            if filteredSkills.isEmpty {
+                workbenchEmptyState(icon: "sparkle.magnifyingglass", title: "暂无匹配技能", hint: "换个关键词或新建一个自己的技能")
+            } else {
+                workbenchSectionHeader(title: selectedCategory == .all ? "可用技能" : selectedCategory.title, count: filteredSkills.count)
+                ForEach(filteredSkills) { skill in
+                    SkillCard(skill: skill, category: categorize(skill))
+                        .onTapGesture { selectedSkill = skill }
                 }
             }
-            .padding(.horizontal, AppSpace.md)
-            .padding(.vertical, AppSpace.sm)
         }
     }
 
     // MARK: - Categorization
 
     private func categorize(_ skill: SkillDefinition) -> SkillCategory {
-        if let cat = skill.category, let matched = SkillCategory(rawValue: cat) {
+        if let cat = SkillRegistry.normalizeSkillCategory(skill.category), let matched = SkillCategory(rawValue: cat) {
             return matched
         }
         if skill.workflowName != nil { return .workflow }
@@ -170,7 +163,7 @@ public struct SkillHubView: View {
 enum SkillCategory: String, CaseIterable {
     case all, analysis, editing, execution, research, workflow
     case marketing, product, content, data, business, design
-    case general
+    case knowledge, general
 
     var title: String {
         switch self {
@@ -179,13 +172,14 @@ enum SkillCategory: String, CaseIterable {
         case .editing: return "编辑"
         case .execution: return "执行"
         case .research: return "研究"
-        case .workflow: return "工作流"
+        case .workflow: return "流程"
         case .marketing: return "营销"
         case .product: return "产品"
         case .content: return "内容"
         case .data: return "数据"
         case .business: return "商业"
         case .design: return "设计"
+        case .knowledge: return "知识"
         case .general: return "通用"
         }
     }
@@ -204,6 +198,7 @@ enum SkillCategory: String, CaseIterable {
         case .data: return "chart.bar"
         case .business: return "briefcase"
         case .design: return "paintpalette"
+        case .knowledge: return "book.closed"
         case .general: return "star"
         }
     }
@@ -230,6 +225,7 @@ struct SkillCard: View {
         case .data: return Color(hex: "6366F1")
         case .business: return Color(hex: "84CC16")
         case .design: return Color(hex: "D946EF")
+        case .knowledge: return Color(hex: "0F766E")
         default: return Brand.primary
         }
     }
@@ -380,7 +376,11 @@ struct SkillCard: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(hovered ? SurfaceGrade.hover.opacity(0.5) : Color.clear)
+                .fill(hovered ? SurfaceGrade.hover.opacity(0.72) : SurfaceGrade.card.opacity(0.54))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(hovered ? accentColor.opacity(0.22) : SurfaceGrade.hairline.opacity(0.58), lineWidth: 0.6)
         )
         .contentShape(Rectangle())
         .onHover { h in withAnimation(AppAnimation.quick) { hovered = h } }
@@ -430,7 +430,7 @@ struct SkillDetailSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 detailRow("模型偏好", value: skill.modelPreference.title)
                 if let wf = skill.workflowName {
-                    detailRow("工作流", value: wf)
+                    detailRow("流程", value: wf)
                 }
                 if !skill.tools.isEmpty {
                     detailRow("工具", value: skill.tools.joined(separator: ", "))
@@ -547,8 +547,8 @@ struct SkillCreateSheet: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 12, design: .monospaced))
                 }
-                createField("工作流") {
-                    TextField("关联工作流名（可选）", text: $workflowName)
+                createField("流程") {
+                    TextField("关联流程名（可选）", text: $workflowName)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
                 }
@@ -867,7 +867,7 @@ public struct TeleportPanel: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Brand.primary)
                 }
-                Text("会话接力")
+                Text("会话 接力")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(TextGrade.primary)
             }

@@ -82,6 +82,66 @@ final class CapturingToolsRuntime: ChatRuntimeClient {
 }
 
 @MainActor
+final class InlineCommandJSONRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        return SendMessageResponse(
+            assistantText: #"我先查看一下当前工作区，了解需要修改/生成什么文件。{"cmd":"ls -la /tmp/laicai-pptx-smoke && find . -maxdepth 2 -type f","cwd":"/tmp/laicai-pptx-smoke","max_output_tokens":12000}可以整理成一段给 Gemini 的完整提示词。"#
+        )
+    }
+}
+
+@MainActor
+final class UIInspectThenFinalRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        if requests.count == 1 {
+            return SendMessageResponse(
+                assistantText: "我先检查页面并截图。",
+                toolCalls: [
+                    FunctionCallResponse(
+                        id: "call_browser_screenshot",
+                        function: FunctionCallDetail(
+                            name: "browser",
+                            arguments: #"{"action":"screenshot"}"#
+                        )
+                    )
+                ]
+            )
+        }
+        return SendMessageResponse(assistantText: "已根据页面截图完成 UI 检查。")
+    }
+}
+
+@MainActor
+final class PlainThenToolRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        if requests.count == 1 {
+            return SendMessageResponse(assistantText: "这个项目主要问题可能是渲染和状态更新导致卡顿。")
+        }
+        if requests.count == 2 {
+            return SendMessageResponse(
+                assistantText: "我先读取项目索引。",
+                toolCalls: [
+                    FunctionCallResponse(
+                        id: "call_index",
+                        function: FunctionCallDetail(name: "workspace_index", arguments: #"{}"#)
+                    )
+                ]
+            )
+        }
+        return SendMessageResponse(assistantText: "已基于项目索引给出下一步。")
+    }
+}
+
+@MainActor
 final class CapturingContinuationRuntime: ChatRuntimeClient {
     var requests: [SendMessageRequest] = []
 
@@ -154,11 +214,15 @@ final class EmptyThenFinalRuntime: ChatRuntimeClient {
 
 @MainActor
 final class StreamingRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
     func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
-        SendMessageResponse(assistantText: "你好，世界")
+        requests.append(request)
+        return SendMessageResponse(assistantText: "你好，世界")
     }
 
     func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
+        requests.append(request)
         await onChunk("你好，")
         await onChunk("世界")
         return SendMessageResponse(

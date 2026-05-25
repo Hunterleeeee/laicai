@@ -43,7 +43,7 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "workspace.index" && $0.text.contains("自动恢复") })
         XCTAssertTrue(task.steps.contains { $0.kind == .toolResult && $0.toolName == "workspace.index" && !$0.isFailure && $0.text.contains("自动恢复成功") })
         XCTAssertTrue(runtime.requests.contains { request in
-            request.messages.contains { $0.role == "user" && ($0.content ?? "").contains("自动恢复工具 workspace.index") }
+            (request.messages ?? []).contains { $0.role == "user" && ($0.content ?? "").contains("自动恢复工具 workspace.index") }
         })
     }
     func testAgentLoopRetriesEmptyResponsesWithoutSurfacingRuntimeFallbackText() async throws {
@@ -67,6 +67,86 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.contains("临时移除工具定义") })
         XCTAssertFalse(task.steps.contains { $0.kind == .textOutput && $0.text.contains("模型没有返回可显示内容") })
     }
+    func testUITaskRequiresScreenshotOrPageEvidence() {
+        let noEvidence = AgentTask(
+            title: "检查 UI 页面",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "检查 UI 页面按钮是否正常"),
+                TaskStep(kind: .toolResult, text: "读取文件", toolName: "file.read", toolParams: ["path": "SidebarView.swift"]),
+                TaskStep(kind: .textOutput, text: "完成")
+            ],
+            context: TaskContext(workspaceRoot: "/tmp")
+        )
+
+        XCTAssertFalse(AgentLoop.meetsCompletionCriteria(
+            task: noEvidence,
+            intent: .task,
+            didComplete: true,
+            hadFailure: false,
+            wasTruncated: false
+        ))
+
+        let withScreenshot = AgentTask(
+            title: "检查 UI 页面",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "检查 UI 页面按钮是否正常"),
+                TaskStep(kind: .toolResult, text: "截图已保存：/tmp/page.png", toolName: "browser", toolParams: ["action": "screenshot"]),
+                TaskStep(kind: .textOutput, text: "完成")
+            ],
+            context: TaskContext(workspaceRoot: "/tmp")
+        )
+
+        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(
+            task: withScreenshot,
+            intent: .task,
+            didComplete: true,
+            hadFailure: false,
+            wasTruncated: false
+        ))
+    }
+    func testResearchTaskRequiresFetchedSource() {
+        let searchOnly = AgentTask(
+            title: "研究模型新闻",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "研究今天 AI 新闻"),
+                TaskStep(kind: .toolCall, text: "搜索", toolName: "web.search"),
+                TaskStep(kind: .toolResult, text: "搜索结果", toolName: "web.search"),
+                TaskStep(kind: .textOutput, text: "完成")
+            ]
+        )
+
+        XCTAssertFalse(AgentLoop.meetsCompletionCriteria(
+            task: searchOnly,
+            intent: .research,
+            didComplete: true,
+            hadFailure: false,
+            wasTruncated: false
+        ))
+
+        let fetched = AgentTask(
+            title: "研究模型新闻",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "研究今天 AI 新闻"),
+                TaskStep(kind: .toolCall, text: "搜索", toolName: "web.search"),
+                TaskStep(kind: .toolResult, text: "搜索结果", toolName: "web.search"),
+                TaskStep(kind: .toolCall, text: "读取来源", toolName: "web.fetch"),
+                TaskStep(kind: .toolResult, text: "来源正文", toolName: "web.fetch"),
+                TaskStep(kind: .textOutput, text: "完成")
+            ]
+        )
+
+        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(
+            task: fetched,
+            intent: .research,
+            didComplete: true,
+            hadFailure: false,
+            wasTruncated: false
+        ))
+    }
     func testAgentLoopIncludesToolsForTasks() async throws {
         let runtime = CapturingToolsRuntime()
         let loop = AgentLoop(
@@ -83,6 +163,50 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertTrue(runtime.requests.first?.tools?.contains { $0.function.name == "code_search" } == true)
         XCTAssertEqual(runtime.requests.first?.maxOutputTokens, 1024)
+    }
+    func testExecutionTaskRequiresToolEvidenceBeforeFinalText() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        try "hello".write(to: workspace.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+        let runtime = PlainThenToolRuntime()
+        let loop = AgentLoop(
+            config: .init(maxIterations: 4, maxTokensPerTurn: 1024, workspaceRoot: workspace.path),
+            runtime: runtime
+        )
+
+        let task = try await loop.run(
+            message: "优化下性能，觉得各种卡",
+            intent: .task,
+            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+
+        XCTAssertGreaterThanOrEqual(runtime.requests.count, 3)
+        XCTAssertTrue((runtime.requests[1].messages ?? []).contains { ($0.content ?? "").contains("没有调用任何工具就给出了结论") })
+        XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "workspace.index" })
+    }
+    func testInlineCommandJSONIsHiddenFromVisibleOutput() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let runtime = InlineCommandJSONRuntime()
+        let loop = AgentLoop(
+            config: .init(maxIterations: 2, maxTokensPerTurn: 1024, workspaceRoot: workspace.path),
+            runtime: runtime
+        )
+
+        let task = try await loop.run(
+            message: "帮我梳理 Gemini 作歌 prompt",
+            intent: .chat,
+            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+
+        let output = task.steps.compactMap { $0.kind == .textOutput ? $0.text : nil }.joined(separator: "\n")
+        XCTAssertTrue(output.contains("我先查看一下当前工作区"))
+        XCTAssertTrue(output.contains("可以整理成"))
+        XCTAssertFalse(output.contains(#""cmd""#))
+        XCTAssertFalse(output.contains("laicai-pptx-smoke"))
     }
     func testAgentLoopOmitsToolsWhenConfigDisablesToolCalling() async throws {
         let runtime = CapturingToolsRuntime()
@@ -201,7 +325,7 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         )
 
         XCTAssertEqual(runtime.requests.count, 2)
-        XCTAssertTrue(runtime.requests[1].messages.contains {
+        XCTAssertTrue((runtime.requests[1].messages ?? []).contains {
             $0.role == "assistant" && $0.reasoningContent == "先读取文件。"
         })
     }
@@ -223,7 +347,7 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         )
 
         XCTAssertEqual(runtime.requests.count, 2)
-        XCTAssertTrue(runtime.requests[1].messages.contains { $0.role == "user" && ($0.content ?? "").contains("工具 file.read 执行结果") })
-        XCTAssertFalse(runtime.requests[1].messages.contains { $0.role == "tool" })
+        XCTAssertTrue((runtime.requests[1].messages ?? []).contains { $0.role == "user" && ($0.content ?? "").contains("工具 file.read 执行结果") })
+        XCTAssertFalse((runtime.requests[1].messages ?? []).contains { $0.role == "tool" })
     }
 }

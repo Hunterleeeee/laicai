@@ -78,16 +78,20 @@ extension AppStore {
         return text.isEmpty ? attachmentText : "\(text)\n\(attachmentText)"
     }
 
-    func promoteSelectedSessionToTaskIfNeeded() {
-        guard let sessionID = state.selectedSessionID,
-              let threadIndex = state.threads.firstIndex(where: { $0.id == sessionID }) else { return }
+    func promoteSelectedAgentToExecutionIfNeeded() {
+        guard let agentID = state.selectedAgentID,
+              let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }) else { return }
         let thread = state.threads[threadIndex]
-        guard thread.source == .session && !thread.steps.isEmpty else { return }
-        // Session already has steps as TaskStep; just add context to promote to task
+        guard thread.isAskAgent && !thread.steps.isEmpty else { return }
+        // The Agent already has a unified event stream; add workspace context to enable tools.
         state.threads[threadIndex].context = TaskContext(workspaceRoot: state.settings.workspacePath, vaultRoot: cleanVaultPath())
         state.threads[threadIndex].connectorID = state.activeConnectorID
-        // Source will automatically become .task now that context is non-empty
+        syncAgentSnapshot(at: threadIndex)
         persistThreads()
+    }
+
+    func promoteSelectedSessionToTaskIfNeeded() {
+        promoteSelectedAgentToExecutionIfNeeded()
     }
 
     func taskStepKind(for role: ChatRole) -> TaskStepKind {
@@ -144,10 +148,11 @@ extension AppStore {
               state.threads[threadIndex].status == .running else { return }
 
         state.threads[threadIndex].status = .cancelled
+        syncAgentSnapshot(at: threadIndex)
         state.threads[threadIndex].updatedAt = .now
         state.threads[threadIndex].steps.append(TaskStep(
             kind: .error,
-            text: "上次执行没有正常结束，已转为可继续状态。本轮会沿着这条任务继续。",
+            text: "上次执行没有正常结束，已转为可继续状态。本轮会沿着这个会话继续。",
             isCollapsible: true,
             isCollapsed: true,
             isFailure: false,
@@ -158,8 +163,9 @@ extension AppStore {
     }
 
     func answerSelectedTaskStatusQuestion(_ message: String) -> Bool {
-        guard let taskID = state.selectedTaskID,
-              let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }),
+        guard let agentID = state.selectedAgentID,
+              let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }),
+              state.threads[threadIndex].isExecutionAgent,
               state.threads[threadIndex].status != .running,
               Self.isTaskStatusQuestion(message) else { return false }
 
@@ -167,8 +173,8 @@ extension AppStore {
         state.threads[threadIndex].steps.append(TaskStep(kind: .userInput, text: message, isCollapsible: false, isCollapsed: false))
         state.threads[threadIndex].steps.append(TaskStep(kind: .textOutput, text: answer, isCollapsible: false, isCollapsed: false))
         state.threads[threadIndex].updatedAt = .now
-        state.selectThread(id: taskID)
-        state.modeLabel = state.threads[threadIndex].workflowName == nil ? "任务" : "工作流"
+        state.selectThread(id: agentID)
+        state.modeLabel = state.threads[threadIndex].workflowName == nil ? "会话" : "工作流"
         state.draftMessage = ""
         persistThreads()
         return true

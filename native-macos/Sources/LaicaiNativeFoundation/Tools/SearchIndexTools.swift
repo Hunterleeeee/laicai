@@ -301,10 +301,10 @@ public struct WorkspaceIndexTool: LaicaiTool {
             if importantNames.contains(name) || ["package.json", "pyproject.toml", "Package.swift", "Cargo.toml", "go.mod", "requirements.txt", "tsconfig.json"].contains(name) {
                 configCandidates.append(item)
             }
-            if lowerName == "main.swift" || lowerName == "main.py" || lowerName == "app.py" || lowerName == "index.ts" || lowerName == "index.js" || lowerName == "main.ts" || lowerName == "main.js" || lowerItem.contains("/sources/") || lowerItem.contains("/src/") {
+            if lowerName == "main.swift" || lowerName == "main.py" || lowerName == "app.py" || lowerName == "index.ts" || lowerName == "index.js" || lowerName == "main.ts" || lowerName == "main.js" || lowerItem.hasPrefix("sources/") || lowerItem.contains("/sources/") || lowerItem.hasPrefix("src/") || lowerItem.contains("/src/") {
                 entryCandidates.append(item)
             }
-            if lowerItem.contains("/test") || lowerItem.contains("/tests/") || lowerName.hasPrefix("test_") || lowerName.hasSuffix("test.swift") || lowerName.hasSuffix(".test.ts") || lowerName.hasSuffix(".spec.ts") {
+            if lowerItem.hasPrefix("test") || lowerItem.contains("/test") || lowerItem.contains("/tests/") || lowerName.hasPrefix("test_") || lowerName.hasSuffix("test.swift") || lowerName.hasSuffix("tests.swift") || lowerName.hasSuffix(".test.ts") || lowerName.hasSuffix(".spec.ts") {
                 testCandidates.append(item)
             }
             if lowerItem.contains("todo") || lowerItem.contains("fixme") || lowerItem.contains("security") || lowerItem.contains("secret") || lowerItem.contains("auth") || lowerItem.contains("token") || lowerItem.contains("credential") {

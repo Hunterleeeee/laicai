@@ -24,16 +24,12 @@ struct ChatDetailView: View {
         .background(SurfaceGrade.base)
         .onAppear { PasteImageMonitor.install(store: store) }
         .onReceive(NotificationCenter.default.publisher(for: .laicaiNewThread)) { _ in
-            store.newTask()
-            composerFocused = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .laicaiNewSession)) { _ in
-            store.newSession()
+            store.newThread()
             composerFocused = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .laicaiContinueLastTask)) { _ in
             if let agent = store.state.continuableAgents.first {
-                store.selectAgent(id: agent.id)
+                store.selectThread(id: agent.id)
             }
         }
     }
@@ -44,7 +40,7 @@ struct ChatDetailView: View {
     private var content: some View {
         if let thread = store.state.selectedThread, shouldShowTimeline(for: thread) {
             ThreadTimelineView(thread: thread)
-                .id("\(thread.source.rawValue)-\(thread.id)")
+                .id("\(thread.id)")
         } else {
             WelcomeView(showingSettings: $showingSettings)
         }
@@ -255,7 +251,7 @@ struct ChatDetailView: View {
             .frame(height: 24)
             .background(Capsule().fill(color.opacity(0.10)))
             .overlay(Capsule().strokeBorder(color.opacity(0.22), lineWidth: 0.6))
-            .help("当前 Agent 已用 \(gaugeTokens.formatted()) token · 约占模型窗口 \(Int(gaugePct * 100))%")
+            .help("当前会话 已用 \(gaugeTokens.formatted()) token · 约占模型窗口 \(Int(gaugePct * 100))%")
             .onAppear { refreshGauge() }
             .onChange(of: store.state.selectedThread?.id) { _ in refreshGauge() }
             .onChange(of: store.state.isGenerating) { gen in if !gen { refreshGauge() } }
@@ -452,7 +448,7 @@ struct ChatDetailView: View {
         switch label {
         case "当前输入": return "text.cursor"
         case "项目资料", "项目上下文": return "folder"
-        case "任务记忆", "Agent 记忆": return "brain"
+        case "任务记忆", "会话记忆": return "brain"
         case "工具结果": return "wrench.and.screwdriver"
         case "附件线索": return "paperclip"
         default: return "slider.horizontal.3"
@@ -478,7 +474,7 @@ struct ChatDetailView: View {
                             .font(AppFont.tiny)
                     }
                     .foregroundStyle(TextGrade.secondary)
-                    .help("Agent 已读取 \(readFiles) 个文件")
+                    .help("会话 已读取 \(readFiles) 个文件")
                 }
 
                 let hasMemory = agent.steps.contains { $0.kind == .toolResult && $0.toolName == "workspace.index" && !$0.isFailure }

@@ -1,5 +1,29 @@
 import SwiftUI
 
+struct AdaptiveMarkdownText: View {
+    let markdown: String
+    var fontSize: CGFloat = 14
+    var enablesTextSelection: Bool = true
+    var forceFast: Bool = false
+
+    private var shouldUseFastRenderer: Bool {
+        forceFast || markdown.count > 9_000 || markdown.components(separatedBy: "\n").count > 220
+    }
+
+    var body: some View {
+        if shouldUseFastRenderer {
+            FastMarkdownText(markdown: markdown, fontSize: fontSize)
+        } else {
+            MarkdownText(
+                markdown,
+                fontSize: fontSize,
+                enablesTextSelection: enablesTextSelection,
+                previewLimit: 18_000
+            )
+        }
+    }
+}
+
 // MARK: - Markdown Text
 
 struct MarkdownText: View {
@@ -63,9 +87,9 @@ struct MarkdownText: View {
         case .heading(let level, let text):
             let size: CGFloat = {
                 switch level {
-                case 1: return fontSize + 8
-                case 2: return fontSize + 5
-                case 3: return fontSize + 2.5
+                case 1: return fontSize + 5
+                case 2: return fontSize + 3
+                case 3: return fontSize + 1.5
                 default: return fontSize + 1
                 }
             }()
@@ -77,30 +101,25 @@ struct MarkdownText: View {
                     .selectableText(enablesTextSelection)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
-                if level <= 2 {
+                if level == 1 {
                     Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.1), Color.white.opacity(0.02)],
-                                startPoint: .leading, endPoint: .trailing
-                            )
-                        )
-                        .frame(height: level == 1 ? 1.5 : 1)
+                        .fill(SurfaceGrade.divider.opacity(0.72))
+                        .frame(height: 1)
                         .padding(.top, 6)
                 }
             }
-            .padding(.top, level == 1 ? 20 : (level == 2 ? 16 : 10))
-            .padding(.bottom, 6)
+            .padding(.top, level == 1 ? 14 : (level == 2 ? 12 : 8))
+            .padding(.bottom, level == 1 ? 6 : 4)
 
         case .paragraph(let text):
             Text(Self.inlineAttributed(text))
                 .font(.system(size: fontSize, weight: .regular))
                 .foregroundStyle(TextGrade.primary)
-                .lineSpacing(6)
+                .lineSpacing(5)
                 .selectableText(enablesTextSelection)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.vertical, 4)
+                .padding(.vertical, 3)
 
         case .listItem(let indent, let ordered, let index, let text):
             let bullets = ["•", "◦", "▪"]
@@ -120,7 +139,7 @@ struct MarkdownText: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, CGFloat(indent) * 16)
-            .padding(.vertical, 1.5)
+            .padding(.vertical, 2)
 
         case .blockquote(let text):
             HStack(alignment: .top, spacing: 0) {
@@ -141,7 +160,7 @@ struct MarkdownText: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, 12)
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
             .padding(.horizontal, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
@@ -159,19 +178,19 @@ struct MarkdownText: View {
 
         case .divider:
             Rectangle()
-                .fill(Color.white.opacity(0.08))
+                .fill(SurfaceGrade.divider)
                 .frame(height: 1)
                 .padding(.vertical, 8)
 
         case .blank:
-            Spacer().frame(height: 8)
+            Spacer().frame(height: 6)
         }
     }
 
     // MARK: - Inline formatting (bold, code, links)
 
     private static func inlineAttributed(_ text: String) -> AttributedString {
-        let key = NSString(string: String(text.prefix(64)) + "_\(text.count)_\(text.suffix(32).hashValue)")
+        let key = NSString(string: cacheKey(for: text))
         if let cached = inlineCache.object(forKey: key) {
             return cached.value
         }
@@ -188,13 +207,13 @@ struct MarkdownText: View {
             let range = run.range
             // Inline code: monospace + tinted background
             if run.inlinePresentationIntent?.contains(.code) == true {
-                result[range].font = .system(size: 13, weight: .medium, design: .monospaced)
-                result[range].foregroundColor = Color(hex: "C8D0FF")
-                result[range].backgroundColor = Color.white.opacity(0.07)
+                result[range].font = .system(size: 13, weight: .regular, design: .monospaced)
+                result[range].foregroundColor = Brand.primaryDark
+                result[range].backgroundColor = SurfaceGrade.elevated
             }
             // Bold: ensure it's visually prominent
             if run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true {
-                result[range].foregroundColor = Color.white
+                result[range].foregroundColor = TextGrade.primary
             }
             // Links: brand color
             if run.link != nil {
@@ -235,45 +254,22 @@ struct MarkdownText: View {
     private static let inlineCache = NSCache<NSString, InlineCacheEntry>()
 
     private static func cachedParse(_ text: String) -> [Block] {
-        let key = NSString(string: String(text.prefix(64)) + "_\(text.count)_\(text.suffix(32).hashValue)")
+        let key = NSString(string: cacheKey(for: text))
         if let cached = blockCache.object(forKey: key) {
             return cached.blocks
         }
 
-        // Incremental: try to reuse a prefix cache from a shorter version of this text.
-        // During streaming, text grows by appending — the earlier blocks are stable.
         let preprocessed = preprocess(text)
-        let parsed: [Block]
-
-        let prefixKey = NSString(string: String(text.prefix(64)) + "_prefix")
-        if let prefixEntry = blockCache.object(forKey: prefixKey),
-           prefixEntry.blocks.count > 2 {
-            // Reuse all but the last 2 blocks (last block may be incomplete during streaming)
-            let stableCount = prefixEntry.blocks.count - 2
-            let stableBlocks = Array(prefixEntry.blocks.prefix(stableCount))
-
-            // Find where the stable blocks end in the source
-            let lines = preprocessed.components(separatedBy: "\n")
-            let tailLineIndex = estimateTailStart(stableBlockCount: stableCount, totalLines: lines.count)
-            let tailText = lines[tailLineIndex...].joined(separator: "\n")
-            let tailBlocks = parseBlocks(from: tailText)
-            parsed = stableBlocks + tailBlocks
-        } else {
-            parsed = parseBlocks(from: preprocessed)
-        }
+        let parsed = parseBlocks(from: preprocessed)
 
         let entry = BlockCacheEntry(blocks: parsed)
         blockCache.setObject(entry, forKey: key)
-        // Store as prefix cache for next incremental parse
-        blockCache.setObject(entry, forKey: prefixKey)
         blockCache.countLimit = 60
         return parsed
     }
 
-    private static func estimateTailStart(stableBlockCount: Int, totalLines: Int) -> Int {
-        // Rough heuristic: each block ≈ 3 lines on average
-        let estimatedStableLines = stableBlockCount * 3
-        return max(0, min(estimatedStableLines, totalLines - 10))
+    private static func cacheKey(for text: String) -> String {
+        "\(text.count)_\(text.hashValue)"
     }
 
     /// Normalize LLM output: ensure headings/lists start on their own line.
@@ -531,7 +527,7 @@ private struct CodeBlockView: View {
                     .padding(.vertical, 4)
                     .background(
                         Capsule()
-                            .fill(copied ? Semantic.success.opacity(0.12) : Color.white.opacity(0.06))
+                            .fill(copied ? Semantic.success.opacity(0.12) : SurfaceGrade.elevated)
                     )
                 }
                 .buttonStyle(.plain)
@@ -539,29 +535,30 @@ private struct CodeBlockView: View {
             }
             .padding(.horizontal, AppSpace.md)
             .padding(.vertical, AppSpace.sm)
-            .background(Color.white.opacity(0.03))
+            .background(SurfaceGrade.elevated)
 
-            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+            Rectangle().fill(SurfaceGrade.divider).frame(height: 1)
 
             // Code content
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
                     .font(.system(size: fontSize, weight: .regular, design: .monospaced))
-                    .foregroundStyle(Color(hex: "E0E0F0"))
+                    .foregroundStyle(TextGrade.secondary)
                     .lineSpacing(4)
                     .selectableText(enablesTextSelection)
-                    .padding(AppSpace.md)
+                    .padding(.horizontal, AppSpace.md)
+                    .padding(.vertical, AppSpace.sm)
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                 .fill(SurfaceGrade.sunken)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .strokeBorder(SurfaceGrade.border.opacity(0.55), lineWidth: 0.8)
         )
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
         .onHover { h in withAnimation(.easeOut(duration: 0.15)) { isHovered = h } }
     }
 }
@@ -589,9 +586,9 @@ private struct TableBlockView: View {
                             .frame(minWidth: columnWidth(idx), alignment: .leading)
                     }
                 }
-                .background(Color.white.opacity(0.05))
+                .background(SurfaceGrade.elevated)
 
-                Rectangle().fill(Color.white.opacity(0.1)).frame(height: 1)
+                Rectangle().fill(SurfaceGrade.divider).frame(height: 1)
 
                 // Data rows
                 ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
@@ -606,10 +603,10 @@ private struct TableBlockView: View {
                                 .frame(minWidth: columnWidth(colIdx), alignment: .leading)
                         }
                     }
-                    .background(rowIdx % 2 == 1 ? Color.white.opacity(0.02) : Color.clear)
+                    .background(rowIdx % 2 == 1 ? SurfaceGrade.elevated.opacity(0.55) : Color.clear)
 
                     if rowIdx < rows.count - 1 {
-                        Rectangle().fill(Color.white.opacity(0.04)).frame(height: 0.5)
+                        Rectangle().fill(SurfaceGrade.hairline).frame(height: 0.5)
                     }
                 }
             }
@@ -620,7 +617,7 @@ private struct TableBlockView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                .strokeBorder(SurfaceGrade.border.opacity(0.55), lineWidth: 0.8)
         )
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
     }

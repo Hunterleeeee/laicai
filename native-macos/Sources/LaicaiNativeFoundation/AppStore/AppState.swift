@@ -6,6 +6,7 @@ public struct AppState: Equatable {
     public var modeLabel: String
     public var executionMode: ExecutionMode
     public var searchText: String
+    public var debouncedSearchText: String
     public var threads: [Thread]
     public var selectedThreadID: UUID?
     public var workbenchTab: WorkbenchTab
@@ -31,6 +32,7 @@ public struct AppState: Equatable {
         modeLabel: String,
         executionMode: ExecutionMode = .auto,
         searchText: String = "",
+        debouncedSearchText: String = "",
         threads: [Thread] = [],
         selectedThreadID: UUID? = nil,
         workbenchTab: WorkbenchTab,
@@ -50,6 +52,7 @@ public struct AppState: Equatable {
         self.modeLabel = modeLabel
         self.executionMode = executionMode
         self.searchText = searchText
+        self.debouncedSearchText = debouncedSearchText
         self.threads = threads
         self.selectedThreadID = selectedThreadID
         self.workbenchTab = workbenchTab
@@ -73,6 +76,7 @@ public struct AppState: Equatable {
         modeLabel: String,
         executionMode: ExecutionMode = .auto,
         searchText: String = "",
+        debouncedSearchText: String = "",
         sessions: [ChatSession],
         selectedSessionID: UUID?,
         workbenchTab: WorkbenchTab,
@@ -87,15 +91,15 @@ public struct AppState: Equatable {
         tasks: [AgentTask] = [],
         selectedTaskID: UUID? = nil,
         selectedThreadID: UUID? = nil,
-        selectedThreadSource: ThreadSource? = nil,
         notice: AppNotice? = nil
     ) {
         self.workspaceName = workspaceName
         self.modeLabel = modeLabel
         self.executionMode = executionMode
         self.searchText = searchText
+        self.debouncedSearchText = debouncedSearchText
         self.threads = sessions.map(Thread.init(session:)) + tasks.map(Thread.init(task:))
-        if let selectedThreadID, selectedThreadSource != nil {
+        if let selectedThreadID {
             self.selectedThreadID = selectedThreadID
         } else if let selectedTaskID {
             self.selectedThreadID = selectedTaskID

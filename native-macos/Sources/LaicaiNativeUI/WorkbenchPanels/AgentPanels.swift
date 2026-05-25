@@ -15,13 +15,11 @@ struct AgentsPanel: View {
     @State private var expandedRole: AgentRole?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.xl) {
+        VStack(alignment: .leading, spacing: AppSpace.lg) {
+            agentsOverview
             builtinRolesSection
-            dividerLine
             collaborationSection
-            dividerLine
             customAgentSection
-            dividerLine
             customToolSection
         }
         .onAppear {
@@ -50,7 +48,7 @@ struct AgentsPanel: View {
                                 workspaceRoot: store.state.settings.workspacePath
                             )
                         }
-                        ToastCenter.shared.success("已保存 Agent「\(saved.name)」")
+                        ToastCenter.shared.success("已保存会话「\(saved.name)」")
                     } catch { ToastCenter.shared.error(error.localizedDescription) }
                     showAgentSheet = false
                 }
@@ -77,15 +75,45 @@ struct AgentsPanel: View {
         }
     }
 
-    private var dividerLine: some View {
-        Rectangle().fill(SurfaceGrade.divider).frame(height: 1).padding(.horizontal, -AppSpace.md)
+    private var agentsOverview: some View {
+        workbenchHeroCard(
+            icon: "person.3.fill",
+            title: "会话",
+            subtitle: "\(AgentRole.allCases.count) 个内置角色 · \(agentReg.agents.count) 个自定义助手 · \(toolReg.tools.count) 个工具",
+            tint: Brand.primary
+        ) {
+            HStack(spacing: AppSpace.xs) {
+                agentMetric(icon: "bolt.circle", value: "\(store.state.activeAgents.count)", label: "运行", tint: Brand.primary)
+                agentMetric(icon: "arrow.triangle.branch", value: "\(PlanTemplate.templates.count)", label: "协作", tint: Brand.purple)
+                agentMetric(icon: "tray.full", value: "\(store.state.completedAgents.count)", label: "完成", tint: Brand.teal)
+            }
+        }
+    }
+
+    private func agentMetric(icon: String, value: String, label: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: AppSpace.xs) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                Text(label)
+                    .font(AppFont.micro)
+            }
+            .foregroundStyle(tint.opacity(0.82))
+            Text(value)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(TextGrade.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(AppSpace.sm)
+        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.66)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
     }
 
     // MARK: - 1. Built-in Roles Catalog
 
     private var builtinRolesSection: some View {
         VStack(alignment: .leading, spacing: AppSpace.md) {
-            sectionHeader(icon: "person.3.fill", color: Brand.primary, title: "内置角色", subtitle: "5 种专业角色，自动按任务分配")
+            sectionHeader(icon: "person.3.fill", color: Brand.primary, title: "内置角色", subtitle: "按会话目标自动分工，也可以手动展开查看能力")
 
             VStack(spacing: AppSpace.xs) {
                 ForEach(AgentRole.allCases) { role in
@@ -166,7 +194,7 @@ struct AgentsPanel: View {
                     }
 
                     // Capabilities
-                    Text("典型任务")
+                    Text("典型目标")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(TextGrade.ghost)
                         .textCase(.uppercase)
@@ -191,11 +219,11 @@ struct AgentsPanel: View {
         }
         .background(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .fill(isExpanded ? color.opacity(0.03) : SurfaceGrade.card)
+                .fill(isExpanded ? color.opacity(0.06) : SurfaceGrade.card.opacity(0.72))
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .strokeBorder(isExpanded ? color.opacity(0.15) : SurfaceGrade.border.opacity(0.08), lineWidth: 0.5)
+                .strokeBorder(isExpanded ? color.opacity(0.18) : SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6)
         )
     }
 
@@ -203,7 +231,7 @@ struct AgentsPanel: View {
 
     private var collaborationSection: some View {
         VStack(alignment: .leading, spacing: AppSpace.md) {
-            sectionHeader(icon: "arrow.triangle.branch", color: Color(hex: "8B5CF6"), title: "协作模板", subtitle: "预设的多 Agent 协作流水线")
+            sectionHeader(icon: "arrow.triangle.branch", color: Brand.purple, title: "协作方案", subtitle: "复杂会话会自动组合多个角色")
 
             VStack(spacing: AppSpace.sm) {
                 ForEach(PlanTemplate.templates) { tpl in
@@ -217,7 +245,7 @@ struct AgentsPanel: View {
                     Image(systemName: "text.bubble")
                         .font(.system(size: 9))
                         .foregroundStyle(TextGrade.ghost)
-                    Text("触发多 Agent 协作的关键词")
+                    Text("更容易触发协作的表达")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(TextGrade.muted)
                 }
@@ -240,14 +268,18 @@ struct AgentsPanel: View {
                     }
                 }
 
-                Text("在输入中包含这些关键词，系统自动激活多 Agent 协作")
+                Text("描述越完整，分工越准确。")
                     .font(.system(size: 9))
                     .foregroundStyle(TextGrade.ghost)
             }
             .padding(AppSpace.md)
             .background(
                 RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                    .fill(SurfaceGrade.panel.opacity(0.4))
+                    .fill(SurfaceGrade.card.opacity(0.58))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    .strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6)
             )
         }
     }
@@ -301,11 +333,11 @@ struct AgentsPanel: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .fill(SurfaceGrade.card)
+                .fill(SurfaceGrade.card.opacity(0.72))
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .strokeBorder(SurfaceGrade.border.opacity(0.08), lineWidth: 0.5)
+                .strokeBorder(SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6)
         )
     }
 
@@ -314,7 +346,7 @@ struct AgentsPanel: View {
     private var customAgentSection: some View {
         VStack(alignment: .leading, spacing: AppSpace.md) {
             HStack(spacing: AppSpace.sm) {
-                sectionHeader(icon: "person.crop.circle.badge.plus", color: Semantic.success, title: "自定义 Agent", subtitle: agentReg.agents.isEmpty ? "基于内置角色创建专属 Agent" : "\(agentReg.agents.count) 个")
+                sectionHeader(icon: "person.crop.circle.badge.plus", color: Brand.teal, title: "自定义助手", subtitle: agentReg.agents.isEmpty ? "为常用目标配置专属助手" : "\(agentReg.agents.count) 个")
                 Spacer()
                 Button { editingAgent = nil; showAgentSheet = true } label: {
                     HStack(spacing: 3) {
@@ -330,11 +362,7 @@ struct AgentsPanel: View {
             }
 
             if agentReg.agents.isEmpty {
-                Text("点击「新建」创建自定义 Agent，设定角色、提示词和工具集")
-                    .font(.system(size: 10))
-                    .foregroundStyle(TextGrade.ghost)
-                    .padding(.vertical, AppSpace.md)
-                    .frame(maxWidth: .infinity)
+                workbenchEmptyState(icon: "person.crop.circle.badge.plus", title: "暂无自定义助手", hint: "创建后可以直接带入当前会话")
             } else {
                 VStack(spacing: AppSpace.sm) {
                     ForEach(agentReg.agents) { agent in
@@ -356,7 +384,7 @@ struct AgentsPanel: View {
     private var customToolSection: some View {
         VStack(alignment: .leading, spacing: AppSpace.md) {
             HStack(spacing: AppSpace.sm) {
-                sectionHeader(icon: "wrench.and.screwdriver", color: Semantic.warning, title: "自定义工具", subtitle: toolReg.tools.isEmpty ? "Shell · HTTP · 脚本" : "\(toolReg.tools.count) 个")
+                sectionHeader(icon: "wrench.and.screwdriver", color: Semantic.warning, title: "自定义工具", subtitle: toolReg.tools.isEmpty ? "连接外部动作与脚本" : "\(toolReg.tools.count) 个")
                 Spacer()
                 Button { editingTool = nil; showToolSheet = true } label: {
                     HStack(spacing: 3) {
@@ -372,11 +400,7 @@ struct AgentsPanel: View {
             }
 
             if toolReg.tools.isEmpty {
-                Text("创建工具后，Agent 可在任务中自动调用")
-                    .font(.system(size: 10))
-                    .foregroundStyle(TextGrade.ghost)
-                    .padding(.vertical, AppSpace.sm)
-                    .frame(maxWidth: .infinity)
+                workbenchEmptyState(icon: "wrench.and.screwdriver", title: "暂无自定义工具", hint: "给助手接入你常用的动作")
             } else {
                 VStack(spacing: AppSpace.xs) {
                     ForEach(toolReg.tools) { tool in
@@ -388,12 +412,6 @@ struct AgentsPanel: View {
                     }
                 }
             }
-
-            HStack(spacing: 4) {
-                Image(systemName: "folder").font(.system(size: 8))
-                Text(".laicai/tools/*.json").font(.system(size: 9, design: .monospaced))
-            }
-            .foregroundStyle(TextGrade.ghost)
         }
     }
 
@@ -432,7 +450,7 @@ struct AgentsPanel: View {
 
     private static func roleDescription(for role: AgentRole) -> String {
         switch role {
-        case .planner: return "分析复杂任务并拆解为可执行步骤，制定实施计划"
+        case .planner: return "分析复杂目标并拆解为可执行步骤，制定实施计划"
         case .coder: return "读写代码、执行命令、使用 Git，完成具体的编码实现"
         case .reviewer: return "审查代码质量、逻辑正确性和潜在风险"
         case .researcher: return "搜索代码库和网络，收集信息并整理调研结果"
@@ -442,7 +460,7 @@ struct AgentsPanel: View {
 
     private static func roleCapabilities(for role: AgentRole) -> [String] {
         switch role {
-        case .planner: return ["拆解复杂任务为子步骤", "分析项目结构和依赖", "制定实施计划和优先级", "评估风险和可行性"]
+        case .planner: return ["拆解复杂目标为子步骤", "分析项目结构和依赖", "制定实施计划和优先级", "评估风险和可行性"]
         case .coder: return ["读写和修改源代码", "执行 Shell 命令和脚本", "Git 提交和分支操作", "构建验证和错误修复"]
         case .reviewer: return ["检查代码逻辑和风格", "发现潜在 bug 和安全隐患", "对比 Git 变更和差异", "提出改进建议"]
         case .researcher: return ["搜索代码库中的函数和类", "联网查找技术方案", "整理 API 文档和用例", "对比不同实现方案"]
@@ -504,7 +522,7 @@ private struct AgentCard: View {
                 }
                 Spacer()
                 HStack(spacing: 4) {
-                    MiniBtn(icon: "bubble.left.fill", color: Brand.primary, tip: "会话") { onChat() }
+                    MiniBtn(icon: "bubble.left.fill", color: Brand.primary, tip: "带入会话") { onChat() }
                     MiniBtn(icon: "pencil", color: TextGrade.secondary, tip: "编辑") { onEdit() }
                     MiniBtn(icon: "trash", color: Semantic.error.opacity(0.7), tip: "删除") { onDelete() }
                 }
@@ -636,7 +654,7 @@ private struct AgentEditorSheet: View {
     @State private var selectedTools: Set<String> = []
 
     private static let promptTemplates: [(String, String)] = [
-        ("通用助手", "你是{{name}}，一个专业的{{role}}。请根据用户需求完成任务，注重质量和效率。"),
+        ("通用助手", "你是{{name}}，一个专业的{{role}}。请根据当前会话目标推进，注重质量和效率。"),
         ("代码专家", "你是{{name}}，精通多种编程语言。分析代码时关注：架构设计、性能、安全性、可维护性。输出简洁、可执行的方案。"),
         ("研究分析", "你是{{name}}，负责深度研究和信息整合。先搜索、再验证、最后归纳。确保结论有数据支撑，标注来源。"),
         ("严格审查", "你是{{name}}，负责代码审查。逐行检查变更，关注：逻辑错误、边界情况、风格一致性、安全漏洞。给出具体修改建议。"),
@@ -654,7 +672,7 @@ private struct AgentEditorSheet: View {
 
     private var header: some View {
         HStack {
-            Text(agent == nil ? "新建 Agent" : "编辑 Agent")
+            Text(agent == nil ? "新建会话" : "编辑会话")
                 .font(AppFont.headline).foregroundStyle(TextGrade.primary)
             Spacer()
             Button { dismiss() } label: {
@@ -669,7 +687,7 @@ private struct AgentEditorSheet: View {
     private var form: some View {
         VStack(alignment: .leading, spacing: 16) {
             fieldSection("基本信息") {
-                TextField("Agent 名称", text: $name)
+                TextField("会话 名称", text: $name)
                     .textFieldStyle(.roundedBorder)
                     .font(AppFont.body)
 
@@ -698,7 +716,7 @@ private struct AgentEditorSheet: View {
                     ForEach(Self.promptTemplates, id: \.0) { tpl in
                         Button(tpl.0) {
                             prompt = tpl.1
-                                .replacingOccurrences(of: "{{name}}", with: name.isEmpty ? "Agent" : name)
+                                .replacingOccurrences(of: "{{name}}", with: name.isEmpty ? "会话" : name)
                                 .replacingOccurrences(of: "{{role}}", with: role.title)
                         }
                         .font(AppFont.tiny)

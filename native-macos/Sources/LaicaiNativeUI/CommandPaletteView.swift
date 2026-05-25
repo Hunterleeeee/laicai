@@ -24,7 +24,7 @@ struct CommandPaletteView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(TextGrade.muted)
-                    TextField("输入命令或搜索 Agent...", text: $query)
+                    TextField("输入命令或搜索会话...", text: $query)
                         .textFieldStyle(.plain)
                         .font(.system(size: 15))
                         .foregroundStyle(TextGrade.primary)
@@ -51,7 +51,7 @@ struct CommandPaletteView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if !matchingThreads.isEmpty {
-                            CommandPaletteSectionTitle("Agent")
+                            CommandPaletteSectionTitle("对话和任务")
                             ForEach(matchingThreads) { thread in
                                 Button {
                                     open(thread)
@@ -79,7 +79,7 @@ struct CommandPaletteView: View {
                         }
 
                         if filteredActions.isEmpty && matchingThreads.isEmpty {
-                            Text("没有匹配的命令或 Agent")
+                            Text("没有匹配的命令或会话")
                                 .font(AppFont.caption)
                                 .foregroundStyle(TextGrade.muted)
                                 .frame(maxWidth: .infinity, alignment: .center)
@@ -158,30 +158,34 @@ struct CommandPaletteView: View {
             .filter { thread in
                 thread.title.localizedCaseInsensitiveContains(needle)
                     || thread.preview.localizedCaseInsensitiveContains(needle)
-                    || thread.source.rawValue.localizedCaseInsensitiveContains(needle)
                     || thread.status?.title.localizedCaseInsensitiveContains(needle) == true
             }
             .prefix(8)
             .map { $0 }
     }
 
+    private var threadTypeLabel: String {
+        "线程"
+    }
+
     private var actions: [CommandPaletteAction] {
+        let typeLabel = threadTypeLabel
         var result: [CommandPaletteAction] = [
-            .init(kind: .newThread, icon: "square.and.pencil", title: "新 Agent", subtitle: "开始一个干净的 Agent", keywords: ["new", "thread", "agent"]),
-            .init(kind: .search, icon: "magnifyingglass", title: "搜索 Agent", subtitle: "打开侧栏搜索", keywords: ["find", "search", "agent"]),
-            .init(kind: .toggleWorkbench, icon: "sidebar.right", title: "打开 Agent 检查器", subtitle: "查看右侧 Agent 状态、计划和模型连接", keywords: ["workbench", "panel", "agent"]),
+            .init(kind: .newThread, icon: "plus.square", title: "新对话", subtitle: "开始一个新对话", keywords: ["new", "thread"]),
+            .init(kind: .search, icon: "magnifyingglass", title: "搜索", subtitle: "打开侧栏搜索", keywords: ["find", "search"]),
+            .init(kind: .toggleWorkbench, icon: "sidebar.right", title: "打开检查器", subtitle: "查看状态、计划和模型连接", keywords: ["workbench", "panel"]),
             .init(kind: .settings, icon: "gearshape", title: "设置", subtitle: "模型、工作区与运行配置", keywords: ["settings", "model"])
         ]
 
         if store.state.selectedThread?.canContinueAgent == true {
-            result.insert(.init(kind: .continueTask, icon: "arrow.turn.down.right", title: "继续当前 Agent", subtitle: "沿用这个 Agent 的已读信息", keywords: ["continue", "resume", "agent"]), at: 1)
+            result.insert(.init(kind: .continueThread, icon: "arrow.turn.down.right", title: "继续当前 \(typeLabel)", subtitle: "沿用当前 \(typeLabel) 的上下文", keywords: ["continue", "resume"]), at: 2)
         }
         if store.state.selectedThread != nil {
-            result.append(.init(kind: .copyMarkdown, icon: "doc.on.doc", title: "复制当前 Agent Markdown", subtitle: "导出可读记录", keywords: ["copy", "export", "markdown"]))
-            result.append(.init(kind: .exportJSON, icon: "square.and.arrow.up", title: "导出当前 Agent JSON", subtitle: "导出完整结构化记录", keywords: ["export", "json"]))
+            result.append(.init(kind: .copyMarkdown, icon: "doc.on.doc", title: "复制当前 \(typeLabel) Markdown", subtitle: "导出可读记录", keywords: ["copy", "export", "markdown"]))
+            result.append(.init(kind: .exportJSON, icon: "square.and.arrow.up", title: "导出当前 \(typeLabel) JSON", subtitle: "导出完整结构化记录", keywords: ["export", "json"]))
             result.append(.init(kind: .exportShellScript, icon: "terminal", title: "导出为 Shell 脚本", subtitle: "提取所有 shell 命令为可运行脚本", keywords: ["export", "shell", "bash", "script"]))
-            result.append(.init(kind: .exportWorkflowYAML, icon: "arrow.triangle.branch", title: "导出为工作流 YAML", subtitle: "将 Agent 步骤转为可重放工作流", keywords: ["export", "workflow", "yaml"]))
-            result.append(.init(kind: .archiveThread, icon: "archivebox", title: "归档当前 Agent", subtitle: "从侧栏隐藏", keywords: ["archive", "hide"]))
+            result.append(.init(kind: .exportWorkflowYAML, icon: "arrow.triangle.branch", title: "导出为工作流 YAML", subtitle: "将步骤转为可重放工作流", keywords: ["export", "workflow", "yaml"]))
+            result.append(.init(kind: .archiveThread, icon: "archivebox", title: "归档当前 \(typeLabel)", subtitle: "从侧栏隐藏", keywords: ["archive", "hide"]))
         }
         if store.state.selectedThread?.canContinueAgent == true {
             result.append(.init(kind: .copyEvidence, icon: "checklist", title: "复制证据清单", subtitle: "导出已读文件、工具和验证状态", keywords: ["evidence", "verify", "proof"]))
@@ -258,10 +262,10 @@ struct CommandPaletteView: View {
     private func run(_ action: CommandPaletteAction) {
         switch action.kind {
         case .newThread:
-            store.newTask()
-        case .continueTask:
+            store.newThread()
+        case .continueThread:
             if let agent = store.state.selectedThread {
-                store.continueAgent(id: agent.id)
+                store.continueThread(id: agent.id)
             }
         case .search:
             NotificationCenter.default.post(name: .laicaiToggleSearch, object: nil)
@@ -273,7 +277,7 @@ struct CommandPaletteView: View {
             if let markdown = store.exportSelectedThreadMarkdown() {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(markdown, forType: .string)
-                ToastCenter.shared.success("已复制当前 Agent")
+                ToastCenter.shared.success("已复制当前会话")
             }
         case .copyEvidence:
             if let markdown = store.exportSelectedTaskEvidenceMarkdown() {
@@ -320,7 +324,7 @@ struct CommandPaletteView: View {
                 NSPasteboard.general.setString(script, forType: .string)
                 ToastCenter.shared.success("已复制 Shell 脚本")
             } else {
-                ToastCenter.shared.error("当前 Agent 无 shell 命令")
+                ToastCenter.shared.error("当前会话无 shell 命令")
             }
         case .exportWorkflowYAML:
             if let yaml = store.exportSelectedThreadWorkflowYAML() {
@@ -328,12 +332,12 @@ struct CommandPaletteView: View {
                 NSPasteboard.general.setString(yaml, forType: .string)
                 ToastCenter.shared.success("已复制工作流 YAML")
             } else {
-                ToastCenter.shared.error("当前 Agent 无工具调用")
+                ToastCenter.shared.error("当前会话无工具调用")
             }
         case .pmAgent(let skillName):
             let skill = PMSkillType(rawValue: skillName) ?? .prd
             store.updateDraft("帮我写一份\(skill.displayName)，主题：")
-            ToastCenter.shared.success("PM Agent：\(skill.displayName)")
+            ToastCenter.shared.success("PM会话：\(skill.displayName)")
         case .switchProject(let path):
             store.switchWorkspace(to: path)
             let name = URL(fileURLWithPath: path).lastPathComponent
@@ -343,7 +347,7 @@ struct CommandPaletteView: View {
     }
 
     private func open(_ thread: ThreadRecord) {
-        store.selectAgent(id: thread.id)
+        store.selectThread(id: thread.id)
         isPresented = false
     }
 }
@@ -436,7 +440,7 @@ private struct CommandPaletteThreadRow: View {
     }
 
     private var subtitle: String {
-        let type = "Agent"
+        let type = "线程"
         let status = thread.status.map { " · \($0.title)" } ?? ""
         let preview = thread.preview.trimmingCharacters(in: .whitespacesAndNewlines)
         return preview.isEmpty ? "\(type)\(status)" : "\(type)\(status) · \(preview)"
@@ -464,7 +468,7 @@ private struct CommandPaletteAction: Identifiable {
 
 private enum CommandPaletteActionKind {
     case newThread
-    case continueTask
+    case continueThread
     case search
     case toggleWorkbench
     case settings

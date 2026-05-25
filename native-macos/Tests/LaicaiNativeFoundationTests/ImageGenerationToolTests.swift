@@ -20,10 +20,29 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
 
         XCTAssertTrue(store.state.isGenerating)
-        XCTAssertEqual(store.state.selectedTask?.connectorID, imageConnector.id)
-        XCTAssertEqual(store.state.modeLabel, "图片生成")
-        XCTAssertTrue(store.state.selectedTask?.steps.contains { $0.text.contains("正在调用 gpt-image-2 生成图片") } == true)
+        XCTAssertEqual(store.state.selectedThread?.connectorID, imageConnector.id)
+        XCTAssertEqual(store.state.modeLabel, "会话 图片")
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.text.contains("正在调用 gpt-image-2 生成图片") } == true)
         store.stopGenerating()
+    }
+
+    func testImageRequestRejectsDisposableSmokeWorkspace() {
+        let chatConnector = makeConnector(name: "GPT", endpoint: "https://duckcu.tech/v1", modelName: "gpt-5.5")
+        let imageConnector = makeConnector(name: "图片", endpoint: "https://duckcu.tech", modelName: "gpt-image-2")
+        let store = makeTestStore(
+            workspacePath: "/tmp/laicai-pptx-smoke",
+            defaultConnectorName: "GPT",
+            connectors: [chatConnector, imageConnector],
+            activeConnectorID: chatConnector.id
+        )
+
+        store.updateDraft("生成一张雪碧介绍图")
+        store.sendDraft()
+
+        XCTAssertFalse(store.state.isGenerating)
+        XCTAssertNil(store.state.selectedThreadID)
+        XCTAssertEqual(store.state.notice?.style, .error)
+        XCTAssertTrue(store.state.notice?.message.contains("来财测试目录") == true)
     }
 
     func testImageRequestReusesSelectedPlainSessionAndDoesNotUseActiveProject() async throws {
@@ -40,13 +59,13 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
             activeConnectorID: chatConnector.id
         )
 
-        store.newSession()
+        store.newThread()
         let threadID = try XCTUnwrap(store.state.selectedThreadID)
         store.updateDraft("生成一张雪碧介绍图")
         store.sendDraft()
 
         XCTAssertEqual(store.state.selectedThreadID, threadID)
-        XCTAssertEqual(store.state.selectedThread?.source, .task)
+        XCTAssertNotNil(store.state.selectedThread)
         XCTAssertEqual(store.state.selectedThread?.connectorID, imageConnector.id)
         XCTAssertNil(store.state.selectedThread?.projectID)
         store.stopGenerating()
@@ -60,7 +79,6 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
             title: "项目里正在执行",
             status: .running,
             steps: [TaskStep(kind: .userInput, text: "继续优化项目")],
-            source: .task,
             projectID: projectID
         )
         let chatConnector = makeConnector(name: "GPT", endpoint: "https://duckcu.tech/v1", modelName: "gpt-5.5")
@@ -68,26 +86,24 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         let store = AppStore(
             state: testState(
                 threads: [runningProjectThread],
-                selectedTaskID: runningProjectThread.id,
+                selectedThreadID: runningProjectThread.id,
                 workspacePath: workspace.path,
                 connectors: [chatConnector, imageConnector],
                 activeConnectorID: chatConnector.id
             ),
             environment: makeTestEnvironment()
         )
-        store.state.threads[0].status = .running
-
         let decision = PlannerDecision(
             intent: .task,
             confidence: 0.9,
             reason: "测试图片生成路由",
-            routeLabel: "图片生成",
+            routeLabel: "会话 图片",
             expectedCapabilities: []
         )
         store.sendImageGenerationDraft(message: "生成一张项目封面图", decision: decision, connector: imageConnector)
 
         XCTAssertNotEqual(store.state.selectedThreadID, runningProjectThread.id)
-        XCTAssertEqual(store.state.selectedThread?.source, .task)
+        XCTAssertNotNil(store.state.selectedThread)
         XCTAssertEqual(store.state.selectedThread?.connectorID, imageConnector.id)
         XCTAssertEqual(store.state.selectedThread?.projectID, projectID)
         store.stopGenerating()

@@ -37,33 +37,43 @@ public struct IntentRouter {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let signals = IntentSignals(input: trimmed)
 
+        if signals.isCreativePromptChat {
+            return PlannerDecision(
+                intent: .chat,
+                confidence: 0.90,
+                reason: "这是创作提示词、歌曲/MV 描述或风格补充，不需要读取工作区或调用本地工具。",
+                routeLabel: "会话 问答",
+                expectedCapabilities: ["创作", "润色", "规划"]
+            )
+        }
+
+        if signals.capabilityOnly {
+            return PlannerDecision(
+                intent: .chat,
+                confidence: 0.86,
+                reason: "这是能力确认问题，不应触发工具或工作流。",
+                routeLabel: "会话 问答",
+                expectedCapabilities: ["解释", "分析", "规划"]
+            )
+        }
+
         if let workflow = signals.workflow {
             return applyRoutingDrift(PlannerDecision(
                 intent: .workflow(workflow),
                 confidence: 0.86,
                 reason: signals.workflowReason(for: workflow),
-                routeLabel: "工作流",
+                routeLabel: "会话 工作流",
                 expectedCapabilities: signals.workflowCapabilities(for: workflow)
             ))
         }
 
         if signals.isResearch {
             return applyRoutingDrift(PlannerDecision(
-                intent: .research,
+                intent: .task,
                 confidence: 0.85,
                 reason: signals.researchReason,
-                routeLabel: "研究",
+                routeLabel: "会话 研究",
                 expectedCapabilities: ["联网检索", "整理交付"]
-            ))
-        }
-
-        if signals.shouldInspectBeforeActing {
-            return applyRoutingDrift(PlannerDecision(
-                intent: .task,
-                confidence: 0.82,
-                reason: "用户主要是在要求理解、读取、分析、诊断、评估或给建议；应先建立意图和证据，只做只读分析，不能自动执行命令或修改文件。",
-                routeLabel: "看项目",
-                expectedCapabilities: ["理解意图", "读取工作区", "搜索代码", "输出建议"]
             ))
         }
 
@@ -72,7 +82,7 @@ public struct IntentRouter {
                 intent: .task,
                 confidence: 0.84,
                 reason: "用户在要求生成视觉素材，应调用图片生成能力。",
-                routeLabel: "图片生成",
+                routeLabel: "会话 图片",
                 expectedCapabilities: ["生成图片", "整理交付"]
             ))
         }
@@ -82,7 +92,17 @@ public struct IntentRouter {
                 intent: .task,
                 confidence: signals.executionConfidence,
                 reason: signals.executionReason,
-                routeLabel: "任务",
+                routeLabel: "会话 执行",
+                expectedCapabilities: signals.expectedCapabilities
+            ))
+        }
+
+        if signals.shouldInspectBeforeActing {
+            return applyRoutingDrift(PlannerDecision(
+                intent: .task,
+                confidence: 0.80,
+                reason: "用户要求理解/诊断/评估实际对象。先读证据，再继续形成可执行结论或落地修改；只有用户明确说只分析/先别改时才停止在建议层。",
+                routeLabel: signals.isExplicitPlanOnly ? "会话 分析" : "会话 执行",
                 expectedCapabilities: signals.expectedCapabilities
             ))
         }
@@ -92,7 +112,7 @@ public struct IntentRouter {
                 intent: .chat,
                 confidence: 0.82,
                 reason: "这是能力、概念或判断类问题，不需要立即调用工具。",
-                routeLabel: "聊天",
+                routeLabel: "会话 问答",
                 expectedCapabilities: ["解释", "分析", "规划"]
             ))
         }
@@ -102,20 +122,19 @@ public struct IntentRouter {
                 intent: .task,
                 confidence: 0.68,
                 reason: "用户希望产出具体结果，但没有匹配到专门工作流。",
-                routeLabel: "任务",
+                routeLabel: "会话 执行",
                 expectedCapabilities: signals.expectedCapabilities
             ))
         }
 
-        // Default to task mode — better to have tools available and not need them
-        // than to be stuck in chat mode unable to act.
-        // Pure questions are already caught by isQuestion above.
+        // Ambiguous input should stay lightweight. Tool execution is opt-in through
+        // concrete action, project/file, web, generation, or workflow signals.
         return PlannerDecision(
             intent: .chat,
-            confidence: 0.55,
-            reason: "无法确定是否需要工具，先按问答理解用户意图，不主动执行工具。",
-            routeLabel: "聊天",
-            expectedCapabilities: ["理解意图", "解释", "规划"]
+            confidence: 0.64,
+            reason: "没有检测到明确的执行、文件、项目、联网或生成信号，先作为轻量问答处理，避免误开任务和误用工具。",
+            routeLabel: "会话 问答",
+            expectedCapabilities: ["解释", "澄清", "规划"]
         )
     }
 
@@ -162,7 +181,8 @@ public struct UserFrustrationDetector {
             "没读", "没看", "没理解", "没上下文", "上下文没了", "新建会话",
             "自动创建新", "说一半", "被截断", "没发完", "别重复", "不要重复",
             "费token", "费 token", "省点token", "省点 token", "认真", "一次性",
-            "卡的", "难受", "差距", "你看了吗", "你看看"
+            "卡的", "难受", "差距", "你看了吗", "你看看",
+            "干活干不明白", "干不明白", "没干活", "只回答", "不干活"
         ]
         return markers.contains { text.localizedCaseInsensitiveContains($0) }
     }
@@ -172,7 +192,8 @@ public struct UserFrustrationDetector {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let taskMarkers = [
             "刚才", "最近", "上个", "上一轮", "这个会话", "那个会话", "这个任务", "那个任务",
-            "上下文", "新会话", "本地项目", "读取项目", "输出", "截断", "没发完", "没说完"
+            "上下文", "新会话", "本地项目", "读取项目", "输出", "截断", "没发完", "没说完",
+            "干活", "只回答"
         ]
         return taskMarkers.contains { text.localizedCaseInsensitiveContains($0) }
     }
@@ -383,6 +404,29 @@ private struct IntentSignals {
             || requestsPMDocument
     }
 
+    var isCreativePromptChat: Bool {
+        guard !containsLocalPath,
+              !referencesOfficeDocument,
+              !containsExplicitURLAction,
+              !requestsShellExecution,
+              !requestsLocalIO,
+              !requestsMutation else { return false }
+
+        let promptMarkers = ["prompt", "提示词", "描述词", "描述prompt", "怎么描述", "描述一下", "梳理一下", "帮我梳理", "润色"]
+        let creativeTargets = ["gemini", "歌曲", "写歌", "作一首歌", "作歌", "音乐", "歌词", "mv", "视频", "短片", "画面", "风格", "电影感", "古风", "电子"]
+        if promptMarkers.contains(where: { input.localizedCaseInsensitiveContains($0) })
+            && creativeTargets.contains(where: { input.localizedCaseInsensitiveContains($0) }) {
+            return true
+        }
+
+        let styleWords = ["古风", "电子", "电影感", "男生", "女生", "故事", "伤感", "治愈", "热血", "赛博", "国风", "摇滚", "民谣"]
+        let separators = [",", "，", "、", " "]
+        let looksLikeStyleList = separators.contains(where: { input.contains($0) })
+            && styleWords.filter { input.contains($0) }.count >= 2
+            && input.count <= 80
+        return looksLikeStyleList
+    }
+
     var workflow: String? {
         if wantsCodeReview { return "code-review" }
         if wantsTestGeneration { return "test-gen" }
@@ -396,7 +440,7 @@ private struct IntentSignals {
     /// Information retrieval that needs web search but NOT file writes or shell commands
     var isResearch: Bool {
         guard !requestsShellExecution, !requestsMutation else { return false }
-        return requestsExternalInfo || requestsMarketSurvey || requestsRecommendation || requestsFreshInfoOnly
+        return requestsExternalInfo || requestsMarketSurvey || requestsRecommendation || requestsFreshInfoOnly || rawRequestsWebResearch
     }
 
     var researchReason: String {
@@ -436,6 +480,8 @@ private struct IntentSignals {
 
     var requiresExecution: Bool {
         input.hasPrefix("/")
+            || containsLocalPath
+            || referencesOfficeDocument
             || containsExplicitURLAction
             || requestsImageGeneration
             || requestsFreshInformation
@@ -455,11 +501,11 @@ private struct IntentSignals {
             || requestsWebResearch
             || requestsModelCurrentInfo
             || requestedDeliverable
+            || referencesOfficeDocument
             || requestsPMDocument
     }
 
     var shouldInspectBeforeActing: Bool {
-        guard !requestsShellExecution, !requestsMutation else { return false }
         return requestsLocalIO
             || requestsDiagnosis
             || requestsAdvice
@@ -468,8 +514,20 @@ private struct IntentSignals {
             || requestsPlanOnly
     }
 
+    var isExplicitPlanOnly: Bool {
+        explicitPlanOnly
+    }
+
     private var containsURL: Bool {
         input.contains("http://") || input.contains("https://")
+    }
+
+    private var containsLocalPath: Bool {
+        input.range(of: #"/[^\s，。；;）)\]}>\"']+"#, options: .regularExpression) != nil
+    }
+
+    private var referencesOfficeDocument: Bool {
+        input.range(of: #"[A-Za-z0-9_./\-\u{4e00}-\u{9fff}]+\.(pptx|docx|xlsx|xlsm|ppt|doc|xls)"#, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     /// URL presence alone should not trigger execution. Only trigger if user explicitly
@@ -512,7 +570,8 @@ private struct IntentSignals {
     }
 
     private var requestsLocalIO: Bool {
-        ["读取", "读一下", "打开文件", "看这个文件", "这个路径", "这些路径", "搜索项目", "搜索代码", "查找文件", "当前项目", "工作区",
+        if containsLocalPath || referencesOfficeDocument { return true }
+        return ["读取", "读一下", "打开文件", "看这个文件", "这个路径", "这些路径", "搜索", "搜索项目", "搜索代码", "查找文件", "当前项目", "工作区",
          "看看项目", "看下项目", "看一下项目", "看看代码", "看下代码", "查看项目", "查看代码",
          "检查项目", "检查代码", "分析项目", "分析代码", "找到", "找一下", "定位"].contains {
             input.contains($0)
@@ -520,7 +579,8 @@ private struct IntentSignals {
     }
 
     private var requestsDiagnosis: Bool {
-        ["诊断", "排查", "分析一下", "看下原因", "为什么", "哪里出问题", "问题在哪", "哪里不好", "不对劲", "不好用", "难用", "卡住"].contains {
+        ["诊断", "排查", "分析一下", "看下原因", "为什么", "哪里出问题", "问题在哪", "哪里不好", "不对劲", "不好用", "难用", "卡住",
+         "卡顿", "卡死", "很卡", "各种卡", "慢", "很慢", "延迟", "掉帧", "性能"].contains {
             input.contains($0)
         }
     }
@@ -549,6 +609,12 @@ private struct IntentSignals {
         }
     }
 
+    private var explicitPlanOnly: Bool {
+        ["先别改", "不要改", "别改", "不用改", "只给建议", "只分析", "先只分析", "不要执行", "先不执行", "只要方案"].contains {
+            input.contains($0)
+        }
+    }
+
     private var requestsShellExecution: Bool {
         ["运行", "执行命令", "跑测试", "构建", "部署", "启动服务",
          "安装", "卸载", "升级", "更新", "下载", "编译", "打包", "发布",
@@ -557,12 +623,12 @@ private struct IntentSignals {
     }
 
     private var requestsMutation: Bool {
-        ["直接改", "帮我改", "修改", "写入", "创建文件", "删除文件", "添加", "实现", "修复", "改一下", "改写",
+        ["直接改", "帮我改", "修改", "写入", "创建文件", "删除文件", "添加", "增加", "实现", "修复", "改一下", "改写",
          "配置", "设置", "接入", "集成", "迁移", "替换", "重命名", "移动", "复制",
-         "加入", "注册", "导入", "导出", "初始化",
-         "改成", "换成", "改为", "调整", "改进", "重写", "拆分", "合并",
+         "加入", "注册", "导入", "导出", "初始化", "保存", "另存", "翻译成", "转成",
+         "改成", "换成", "改为", "调整", "改进", "优化", "优化下", "优化一下", "性能优化", "提升性能", "提速", "加速", "重写", "拆分", "合并",
          "记住", "记下", "长期记忆", "写进记忆", "保存偏好", "保存到记忆", "remember",
-         "fix", "implement", "create", "add", "remove", "update", "refactor"].contains { input.contains($0) }
+         "fix", "implement", "create", "add", "remove", "update", "refactor", "rewrite"].contains { input.contains($0) }
     }
 
     private var requestedDeliverable: Bool {
@@ -570,7 +636,7 @@ private struct IntentSignals {
     }
 
     private var rawRequestedDeliverable: Bool {
-        ["生成", "创建", "整理", "汇总", "给我一份", "写一个", "写一份", "做一个"].contains { input.contains($0) }
+        ["生成", "创建", "整理", "汇总", "给我一份", "写一个", "写一份", "写一段", "做一个"].contains { input.contains($0) }
     }
 
     var requestsImageGeneration: Bool {
@@ -605,7 +671,7 @@ private struct IntentSignals {
     }
 
     private var wantsCodeReview: Bool {
-        let reviewMarkers = ["代码审查", "审查代码", "review", "看下改动", "看一下改动", "检查改动"]
+        let reviewMarkers = ["代码审查", "审查代码", "review", "审查", "看下改动", "看一下改动", "检查改动"]
         guard reviewMarkers.contains(where: { input.contains($0) }) else { return false }
         return codeOrProjectContext
     }
@@ -617,9 +683,9 @@ private struct IntentSignals {
     }
 
     private var wantsDebugWorkflow: Bool {
-        let debugMarkers = ["调试", "诊断", "排查报错", "分析报错", "定位报错", "这个报错"]
+        let debugMarkers = ["调试", "诊断", "排查", "排查报错", "分析报错", "定位报错", "这个报错"]
         guard debugMarkers.contains(where: { input.contains($0) }) else { return false }
-        return codeOrProjectContext || input.contains("日志") || input.contains("堆栈") || input.contains("异常") || input.contains("crash")
+        return codeOrProjectContext || input.contains("日志") || input.contains("堆栈") || input.contains("异常") || input.contains("报错") || input.contains("crash")
     }
 
     private var wantsRefactorWorkflow: Bool {
@@ -629,21 +695,21 @@ private struct IntentSignals {
     }
 
     private var wantsDocumentationWorkflow: Bool {
-        let docMarkers = ["生成文档", "写文档", "补文档", "readme", "接口文档"]
+        let docMarkers = ["生成文档", "写文档", "补文档", "接口文档"]
         guard docMarkers.contains(where: { input.contains($0) }) else { return false }
         return codeOrProjectContext || input.contains("readme")
     }
 
     private var wantsTranslationWorkflow: Bool {
-        let translateMarkers = ["翻译文件", "翻译这个文件", "国际化", "i18n", "本地化"]
-        return translateMarkers.contains { input.contains($0) }
+        let translateMarkers = ["翻译文件", "翻译这个文件", "翻译成", "转成英文", "英文版", "国际化", "i18n", "本地化"]
+        return translateMarkers.contains { input.contains($0) } && (codeOrProjectContext || containsLocalPath || referencesOfficeDocument)
     }
 
     private var codeOrProjectContext: Bool {
         let markers = [
             "代码", "项目", "文件", "模块", "函数", "类", "组件", "接口", "仓库",
             "diff", "commit", "pr", "分支", "变更", "改动", ".swift", ".ts", ".tsx",
-            ".js", ".py", ".md", "package.json", "readme"
+            ".js", ".py", ".md", ".pptx", ".docx", ".xlsx", ".xlsm", "package.json", "readme"
         ]
         return markers.contains { input.contains($0) }
     }
@@ -686,9 +752,10 @@ private struct IntentSignals {
         }
     }
 
-    private var capabilityOnly: Bool {
+    fileprivate var capabilityOnly: Bool {
         let capabilityPatterns = ["你能", "能不能", "可以", "会不会", "是否支持", "支持", "能否", "可不可以"]
         guard isDirectQuestion, capabilityPatterns.contains(where: { input.contains($0) }) else { return false }
+        guard !requestsMutation else { return false }
         return !input.contains("帮我") && !input.contains("给我") && !input.contains("现在") && !input.contains("一下")
     }
 
@@ -714,10 +781,11 @@ private struct IntentSignals {
         var capabilities: [String] = []
         if requestsImageGeneration { capabilities.append("生成图片") }
         if requestsFreshInformation || requestsWebResearch || requestsModelCurrentInfo || containsURL { capabilities.append("联网检索") }
-        if requestsLocalIO { capabilities.append("读取工作区") }
+        if requestsLocalIO || requestsDiagnosis || requestsAdvice || requestsEvaluation || requestsSummary { capabilities.append("读取工作区") }
         if requestsShellExecution { capabilities.append("运行命令") }
-        if requestsMutation { capabilities.append("提出文件修改") }
+        if requestsMutation || (!explicitPlanOnly && (requestsDiagnosis || requestsAdvice)) { capabilities.append("提出文件修改") }
         if requestedDeliverable { capabilities.append("整理交付") }
+        if !explicitPlanOnly, !capabilities.contains("形成可验证结果") { capabilities.append("形成可验证结果") }
         return capabilities.isEmpty ? ["规划", "执行", "总结"] : capabilities
     }
 }
@@ -1124,17 +1192,48 @@ public struct PromptComposer {
         parts.append("你是来财（Laicai），macOS 本机 AI 编排助手。\(currentDateString())。")
         if intent != .chat {
             parts.append("""
-            ## 准则
-            每轮必须调用工具行动。禁止只说不做。
-            - 第一轮：探索→1句话计划→立即执行首步。
+            ##会话操作协议
+            目标只有一个：完成用户交给当前会话 的目标。不要无脑调用工具，也不要套固定工作流。
+
+            ### Harness 与模型的分工
+            - Harness 层负责：暴露真实工具、执行文件/命令、维护工作区边界、记录证据、失败恢复提示、跨轮记忆和可用工具列表。
+            - 模型层负责：理解目标、拆解任务、设计临时工作流、选择工具/skill、根据结果修改工作流、判断何时收口。
+            - 你不能否认可用工具，也不能假装工具结果；以 Harness 返回的证据为准。
+
+            ### 动态工作流
+            1. 先判断交付物和完成标准：要改什么、生成什么、验证什么。
+            2. 把目标拆成 3-7 个可执行步骤，形成当前会话 的临时工作流。
+            3. 立即执行最小必要的第一步；已有证据足够时直接动手，不重复探索。
+            4. 每次工具返回后重新评估：继续、改步骤、换工具、扩大/缩小范围，或收口。
+            5. 失败不是结束：同参数不重试，换工具/参数/路径；连续失败才向用户说明阻塞。
+            6. 只有交付物真实存在、修改已落盘、验证符合完成标准，才能说完成。
+
+            ### Skill 与沉淀
+            - Skill 是可复用经验，不是当前目标的借口。先完成当前会话 的目标。
+            - 当你发现非平凡流程未来会复用，或用户要求“以后都这样做”，可用 skill.manage 创建/更新 skill。
+            - 创建 skill 只在当前目标已完成或不会打断当前会话 时进行；skill 内容要写清触发条件、步骤、工具、验证标准和失败换路。
+
+            ### 执行纪律
             - 证据优先：没读过的文件不判断内容。只读工具可并行。
-            - 失败换路：同参数不重试，换工具或参数。失败2次报告用户。
-            - 编辑：已有文件用 file_edit；失败则 file_read→file_write 全量。新文件 file_write。代码改后 verify_build。
-            - 不认识的概念/版本/新闻→web_search。有URL→web_fetch。
-            - 收口只说：改了什么、验证了什么、剩余风险。不输出内部流程。
+            - 编辑：已有文件优先 file_edit；匹配失败再 file_read→file_write 全量。新文件 file_write。代码改后 verify_build。
+            - 不认识的概念/版本/新闻→web_search。有 URL→web_fetch。
+            - UI/页面/按钮/窗口任务必须留下页面检查证据：优先 browser/browser.real 的 extract/screenshot，必要时 computer 的 windows/screenshot。没有截图、页面内容或窗口证据不能收口。
+            - 危险操作（删除、重置、覆盖用户改动、sudo/系统安装、密钥、发布/强推）默认停止并说明风险，除非用户明确授权且 Harness 放行。
+            - 收口只说：做了什么、验证了什么、剩余风险。不输出内部工作流标签。
             - 禁止声称完成未做操作。禁止编造文件内容。禁止输出 Plan/Execute/Verify 等框架。
             - 记忆持久化用 memory(action="store")。整理知识库用 wiki_build。
             """)
+            if let protocolGoal = context.metadata["taskProtocolGoal"] {
+                let risk = context.metadata["taskProtocolRisk"] ?? "act"
+                parts.append("""
+
+            ## 当前任务协议（Harness 已建立）
+            - taskGoal: \(protocolGoal)
+            - workspaceRoot: \(context.workspaceRoot.isEmpty ? "未指定" : context.workspaceRoot)
+            - riskPolicy: \(risk)
+            - completion: 必须满足真实证据、执行记录、验证或明确阻塞后才能收口。
+            """)
+            }
         } else {
             parts.append("直接回答问题。简洁、准确、不啰嗦。")
         }
@@ -1144,7 +1243,7 @@ public struct PromptComposer {
             if let claudeMD = context.claudeMD {
                 parts.append("\n## 项目记忆\n\(claudeMD)")
             }
-            parts.append("\n## 模式\n聊天模式。直接回答。如需读取文件或操作项目可使用工具，但不要主动发起复杂操作。")
+            parts.append("\n##会话姿态\n当前为问答姿态。优先直接回答用户问题；如需读取文件或操作项目，可以使用工具，但不要主动发起复杂操作。")
             return parts.joined(separator: "\n")
         }
 
@@ -1200,15 +1299,15 @@ public struct PromptComposer {
             """)
         case .task:
             parts.append("""
-            ## 任务模式
-            流程：搜索→读→执行→验证→总结。file_edit 改已有文件，file_write 新建文件。不自行 git commit。
+            ##会话执行姿态
+            根据用户目标生成当前会话 的临时工作流，边执行边调整。file_edit 改已有文件，file_write 新建文件。不自行 git commit。
             PM 文档类需求用 pm_agent(skill=xxx, topic=xxx) 工具。
             """)
             if let verifyCmd = ValidationEngine.suggestVerificationCommand(workspaceRoot: context.workspaceRoot) {
                 parts.append("验证命令：`\(verifyCmd)`")
             }
         case .workflow(let name):
-            parts.append("\n## 模式\n工作流模式：\(name)。按步骤执行。")
+            parts.append("\n## 模式\n工作流模式：\(name)。这是初始流程，不是死流程；如果工具结果证明需要调整，先调整再继续，最终仍以完成用户目标为准。")
         }
 
         return parts.joined(separator: "\n")
@@ -1228,11 +1327,11 @@ public struct PromptComposer {
         parts.append("""
         你是来财（Laicai），运行在用户 macOS 上的本地助手。当前日期：\(currentDateString())。
         
-        聊天规则：
+        会话问答规则：
         - 直接回答问题，保持简洁有深度
         - 认真阅读会话历史，保持上下文连贯
         - 用户追问时，基于之前的会话内容回答，不要要求重复
-        - 你是运行在本机的 Agent，拥有文件读写、代码搜索、命令执行、联网搜索等工具能力
+        - 你是运行在本机的会话，拥有文件读写、代码搜索、命令执行、联网搜索等工具能力
         - 你是来财，不是 ChatGPT/Qwen/DeepSeek
         - **输出禁令**：禁止输出「阶段总结」「Plan/Execute/Verify/Summarize」「证据清单」「完成检查」等内部推理格式。只用自然语言回答。
         """)

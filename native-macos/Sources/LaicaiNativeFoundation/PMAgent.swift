@@ -111,7 +111,7 @@ public enum PMAgentPrompts {
         switch skill {
         case .prd:
             return """
-            ## 当前任务：撰写 PRD（产品需求文档）
+            ## 当前会话目标：撰写 PRD（产品需求文档）
 
             按以下结构输出完整 PRD：
 
@@ -169,7 +169,7 @@ public enum PMAgentPrompts {
 
         case .userStories:
             return """
-            ## 当前任务：撰写用户故事
+            ## 当前会话目标：撰写用户故事
 
             按以下格式为每个功能点生成用户故事：
 
@@ -198,7 +198,7 @@ public enum PMAgentPrompts {
 
         case .competitiveAnalysis:
             return """
-            ## 当前任务：竞品分析
+            ## 当前会话目标：竞品分析
 
             按以下结构输出竞品分析报告：
 
@@ -240,7 +240,7 @@ public enum PMAgentPrompts {
 
         case .experimentDesign:
             return """
-            ## 当前任务：实验设计（A/B Test）
+            ## 当前会话目标：实验设计（A/B Test）
 
             按以下结构输出实验方案：
 
@@ -285,7 +285,7 @@ public enum PMAgentPrompts {
 
         case .retrospective:
             return """
-            ## 当前任务：项目复盘
+            ## 当前会话目标：项目复盘
 
             按以下结构输出复盘报告：
 
@@ -325,7 +325,7 @@ public enum PMAgentPrompts {
 
         case .problemStatement:
             return """
-            ## 当前任务：问题定义
+            ## 当前会话目标：问题定义
 
             输出结构：
             ### 问题陈述
@@ -353,7 +353,7 @@ public enum PMAgentPrompts {
 
         case .hypothesis:
             return """
-            ## 当前任务：假设验证
+            ## 当前会话目标：假设验证
 
             输出格式：
             ### 假设 [编号]
@@ -370,7 +370,7 @@ public enum PMAgentPrompts {
 
         case .persona:
             return """
-            ## 当前任务：用户画像
+            ## 当前会话目标：用户画像
 
             为每个画像输出：
             ### 画像：[姓名]（[角色标签]）
@@ -398,7 +398,7 @@ public enum PMAgentPrompts {
 
         case .jtbdCanvas:
             return """
-            ## 当前任务：Jobs to Be Done 画布
+            ## 当前会话目标：Jobs to Be Done 画布
 
             ### Core Job
             [用户的核心任务是什么？]
@@ -425,7 +425,7 @@ public enum PMAgentPrompts {
 
         case .solutionBrief:
             return """
-            ## 当前任务：方案简述
+            ## 当前会话目标：方案简述
 
             ### 方案概述
             一段话描述方案核心思路
@@ -450,7 +450,7 @@ public enum PMAgentPrompts {
 
         case .adr:
             return """
-            ## 当前任务：Architecture Decision Record
+            ## 当前会话目标：Architecture Decision Record
 
             ### ADR-[编号]: [决策标题]
 
@@ -481,7 +481,7 @@ public enum PMAgentPrompts {
 
         case .acceptanceCriteria:
             return """
-            ## 当前任务：验收标准
+            ## 当前会话目标：验收标准
 
             对每个功能点输出：
             ### AC-[编号]: [功能点名称]
@@ -506,7 +506,7 @@ public enum PMAgentPrompts {
 
         case .edgeCases:
             return """
-            ## 当前任务：边界用例分析
+            ## 当前会话目标：边界用例分析
 
             按类别列出所有边界用例：
             ### 输入边界
@@ -529,7 +529,7 @@ public enum PMAgentPrompts {
 
         case .launchChecklist:
             return """
-            ## 当前任务：上线清单
+            ## 当前会话目标：上线清单
 
             ### 上线前
             - [ ] PRD 评审通过
@@ -559,7 +559,7 @@ public enum PMAgentPrompts {
 
         case .releaseNotes:
             return """
-            ## 当前任务：发版说明
+            ## 当前会话目标：发版说明
 
             ### [产品名] v[版本号] 发版说明
             **发布日期**：[日期]
@@ -581,7 +581,7 @@ public enum PMAgentPrompts {
 
         case .okrWriter:
             return """
-            ## 当前任务：OKR 撰写
+            ## 当前会话目标：OKR 撰写
 
             ### Objective: [目标]
             明确、鼓舞人心、有挑战性
@@ -606,7 +606,7 @@ public enum PMAgentPrompts {
 
         case .interviewSynthesis:
             return """
-            ## 当前任务：用户访谈综述
+            ## 当前会话目标：用户访谈综述
 
             ### 访谈概况
             - 访谈人数、时间、方式
@@ -633,7 +633,7 @@ public enum PMAgentPrompts {
 
         case .stakeholderSummary:
             return """
-            ## 当前任务：干系人汇报
+            ## 当前会话目标：干系人汇报
 
             ### 项目状态概览
             🟢 On Track / 🟡 At Risk / 🔴 Blocked
@@ -660,7 +660,7 @@ public enum PMAgentPrompts {
 
         case .pivotDecision:
             return """
-            ## 当前任务：转型/策略调整决策
+            ## 当前会话目标：转型/策略调整决策
 
             ### 当前状态
             - 现有方向的数据表现
@@ -691,7 +691,7 @@ public enum PMAgentPrompts {
 
 public struct PMAgentTool: LaicaiTool {
     public var name: String { "pm.agent" }
-    public var description: String { "产品经理 Agent：生成 PRD、用户故事、竞品分析、实验设计、OKR、复盘等专业产品文档。基于 Triple Diamond 框架。" }
+    public var description: String { "产品经理会话：生成 PRD、用户故事、竞品分析、实验设计、OKR、复盘等专业产品文档。基于 Triple Diamond 框架。" }
     public var requiresReview: Bool { false }
 
     public var functionDefinition: FunctionDefinition {
@@ -786,7 +786,7 @@ public struct PMAgentTool: LaicaiTool {
         }
 
         let output = """
-        PM Agent 已激活 [\(skill.phase)] \(skill.displayName) 模式。
+        PM会话已激活 [\(skill.phase)] \(skill.displayName) 模式。
 
         现在请严格按照以下框架，直接输出关于「\(params.topic)」的完整 \(skill.displayName) 文档。
         不要输出任何多余解释或确认，直接输出文档正文。\(saveInstruction)

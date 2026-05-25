@@ -47,12 +47,11 @@ public final class MultiAgentOrchestrator: ObservableObject {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !text.isEmpty else { return nil }
 
+        let needsCodeMutation = needsCodeMutation(text)
         let roles = inferRoles(for: text, intent: intent)
         guard roles.count >= 2 else { return nil }
 
         var agents: [AgentNode] = []
-        var handoffs: [AgentHandoff] = []
-        var previousNode: AgentNode?
 
         for role in roles {
             let connector = ModelRouter.selectModel(forRole: role, connectors: connectors, activeConnectorID: activeConnectorID)
@@ -61,20 +60,19 @@ public final class MultiAgentOrchestrator: ObservableObject {
                 connectorID: connector?.id
             )
             agents.append(node)
-
-            if let prev = previousNode {
-                handoffs.append(AgentHandoff(
-                    fromAgentID: prev.id,
-                    toAgentID: node.id,
-                    artifact: ""
-                ))
-            }
-            previousNode = node
         }
+        var handoffs: [AgentHandoff] = []
 
-        // Set dependencies: each agent depends on the previous one
-        for i in 1..<agents.count {
-            agents[i].dependsOn = [agents[i - 1].id]
+        // Coding plans are staged as a real engineering loop:
+        // planner/research → coder → tester → reviewer.
+        if needsCodeMutation {
+            applyCodingDependencies(to: &agents)
+            handoffs = handoffsForDependencies(agents)
+        } else {
+            for i in 1..<agents.count {
+                agents[i].dependsOn = [agents[i - 1].id]
+            }
+            handoffs = handoffsForDependencies(agents)
         }
 
         let planTitle = roles.map { $0.title }.joined(separator: " → ")
@@ -86,11 +84,45 @@ public final class MultiAgentOrchestrator: ObservableObject {
         )
     }
 
+    private static func applyCodingDependencies(to agents: inout [AgentNode]) {
+        let plannerID = agents.first(where: { $0.role == .planner })?.id
+        let researcherID = agents.first(where: { $0.role == .researcher })?.id
+        let coderID = agents.first(where: { $0.role == .coder })?.id
+        let testerID = agents.first(where: { $0.role == .tester })?.id
+
+        for i in agents.indices {
+            switch agents[i].role {
+            case .planner:
+                agents[i].dependsOn = []
+            case .researcher:
+                agents[i].dependsOn = plannerID.map { [$0] } ?? []
+            case .coder:
+                agents[i].dependsOn = [plannerID, researcherID].compactMap { $0 }
+            case .tester:
+                agents[i].dependsOn = coderID.map { [$0] } ?? []
+            case .reviewer:
+                agents[i].dependsOn = testerID.map { [$0] } ?? (coderID.map { [$0] } ?? [])
+            }
+        }
+    }
+
+    private static func handoffsForDependencies(_ agents: [AgentNode]) -> [AgentHandoff] {
+        var handoffs: [AgentHandoff] = []
+        for agent in agents {
+            for depID in agent.dependsOn {
+                handoffs.append(AgentHandoff(fromAgentID: depID, toAgentID: agent.id, artifact: ""))
+            }
+        }
+        return handoffs
+    }
+
     /// Infer which agent roles are needed for the given message.
     static func inferRoles(for message: String, intent: UserIntent) -> [AgentRole] {
+        let needsCodeMutation = needsCodeMutation(message)
+
         // Explicit multi-agent patterns
         if message.contains("协同") || message.contains("多agent") || message.contains("multi-agent") {
-            return [.planner, .coder, .reviewer]
+            return needsCodeMutation ? [.planner, .coder, .tester, .reviewer] : [.planner, .coder, .reviewer]
         }
 
         // Sequential patterns: "先...然后...再..."
@@ -107,10 +139,13 @@ public final class MultiAgentOrchestrator: ObservableObject {
         }
 
         // Task-specific patterns
+        if needsCodeMutation, (message.contains("测试") || message.contains("验证")) && (message.contains("审查") || message.contains("review")) {
+            return [.planner, .coder, .tester, .reviewer]
+        }
         if (message.contains("审查") || message.contains("review")) && (message.contains("修复") || message.contains("fix") || message.contains("改")) {
             return [.researcher, .coder, .reviewer]
         }
-        if (message.contains("实现") || message.contains("写") || message.contains("开发")) && (message.contains("测试") || message.contains("test")) {
+        if (message.contains("实现") || message.contains("写") || message.contains("开发") || message.contains("创建") || message.contains("编辑") || message.contains("维护")) && (message.contains("测试") || message.contains("test")) {
             return [.coder, .tester]
         }
         if (message.contains("搜索") || message.contains("调研") || message.contains("research")) && (message.contains("实现") || message.contains("写") || message.contains("改")) {
@@ -120,32 +155,40 @@ public final class MultiAgentOrchestrator: ObservableObject {
             return [.coder, .tester, .reviewer]
         }
         let broadMarkers = message.contains("全面") || message.contains("完整") || message.contains("端到端")
-        let hasExplicitMutation = message.contains("修改")
-            || message.contains("写入")
-            || message.contains("实现")
-            || message.contains("修复")
-            || message.contains("重构")
-            || message.contains("部署")
-            || message.contains("改")
+        let hasExplicitMutation = needsCodeMutation
         if broadMarkers && hasExplicitMutation && (message.contains("测试") || message.contains("验证") || message.contains("审查") || message.contains("review")) {
             return [.planner, .coder, .tester, .reviewer]
         }
 
         // Complex tasks with multiple action verbs benefit from multi-agent
-        let actionVerbs = ["读取", "搜索", "修改", "写入", "运行", "测试", "审查", "重构", "优化", "实现", "部署"]
+        let actionVerbs = ["读取", "搜索", "修改", "写入", "运行", "测试", "审查", "重构", "优化", "实现", "部署", "创建", "编辑", "维护", "开发"]
         let actionCount = actionVerbs.filter { message.contains($0) }.count
         if hasExplicitMutation && actionCount >= 3 {
             return [.planner, .coder, .reviewer]
         }
+        if hasExplicitMutation && (message.contains("编排") || message.contains("项目") || message.contains("文件") || message.contains("代码") || message.contains("ui") || message.contains("布局") || message.contains("界面")) {
+            return [.planner, .coder, .tester, .reviewer]
+        }
 
         return []
+    }
+
+    private static func needsCodeMutation(_ message: String) -> Bool {
+        let mutationMarkers = [
+            "修改", "更改", "改掉", "改一下", "编辑", "维护", "创建", "新建", "生成",
+            "写入", "实现", "修复", "重构", "部署", "搭建", "开发", "落盘", "保存",
+            "优化", "改进", "增强", "完善", "调整", "重做", "重写", "重新设计", "美化",
+            "create", "write", "edit", "modify", "fix", "refactor", "implement", "build",
+            "optimize", "improve", "redesign", "revamp"
+        ]
+        return mutationMarkers.contains { message.contains($0) }
     }
 
     private static func dominantRole(for text: String) -> AgentRole? {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if t.contains("规划") || t.contains("分析") || t.contains("拆解") { return .planner }
         if t.contains("搜索") || t.contains("调研") || t.contains("查找") || t.contains("了解") { return .researcher }
-        if t.contains("写") || t.contains("实现") || t.contains("修改") || t.contains("修复") || t.contains("开发") || t.contains("重构") { return .coder }
+        if t.contains("写") || t.contains("实现") || t.contains("修改") || t.contains("编辑") || t.contains("创建") || t.contains("新建") || t.contains("维护") || t.contains("修复") || t.contains("开发") || t.contains("重构") { return .coder }
         if t.contains("测试") || t.contains("验证") || t.contains("运行") { return .tester }
         if t.contains("审查") || t.contains("检查") || t.contains("review") { return .reviewer }
         return nil
@@ -197,7 +240,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
         // Emit plan overview step
         let parallelCount = currentPlan.readyAgents().count
         let modeLabel = parallelCount > 1 ? "并行" : "顺序"
-        let planText = "多Agent协同任务：\(currentPlan.title)\n共 \(currentPlan.agents.count) 个Agent（\(modeLabel)执行）"
+        let planText = "多会话协同：\(currentPlan.title)\n共 \(currentPlan.agents.count) 个 会话（\(modeLabel)执行）"
         let planStep = TaskStep(kind: .aiThinking, text: planText, isCollapsible: true, isCollapsed: false, agentRole: .planner)
         task.steps.append(planStep)
         onStep(planStep)
@@ -237,7 +280,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
                 // Parallel: run multiple agents concurrently
                 let batchStep = TaskStep(
                     kind: .aiThinking,
-                    text: "并行启动 \(ready.count) 个Agent：\(ready.map { $0.role.title }.joined(separator: "、"))",
+                    text: "并行启动 \(ready.count) 个会话：\(ready.map { $0.role.title }.joined(separator: "、"))",
                     isCollapsible: true,
                     isCollapsed: true,
                     agentRole: .planner
@@ -302,37 +345,31 @@ public final class MultiAgentOrchestrator: ObservableObject {
             }
         }
 
-        // Re-plan: if some agents failed but others succeeded, retry failed ones with a different connector
-        let failedAgents = currentPlan.agents.filter { $0.status == .failed }
-        let hasSuccesses = currentPlan.agents.contains { $0.status == .completed }
-        if !failedAgents.isEmpty && hasSuccesses && failedAgents.count <= 2 {
-            let replanStep = TaskStep(
-                kind: .aiThinking,
-                text: "部分子任务失败（\(failedAgents.map { $0.role.title }.joined(separator: "、"))），尝试重新分配并重试…",
-                isCollapsible: true, isCollapsed: true, agentRole: .planner
-            )
-            task.steps.append(replanStep)
-            onStep(replanStep)
+        await repairCodingPlanIfNeeded(
+            message: message,
+            intent: intent,
+            connector: connector,
+            allConnectors: allConnectors,
+            plan: &currentPlan,
+            task: &task,
+            artifacts: &agentArtifacts,
+            onStep: onStep,
+            onStreamDelta: onStreamDelta,
+            onPlanUpdate: onPlanUpdate
+        )
 
-            for failedNode in failedAgents {
-                guard let idx = currentPlan.agents.firstIndex(where: { $0.id == failedNode.id }) else { continue }
-                // Reset status for retry
-                currentPlan.agents[idx].status = .queued
-                currentPlan.agents[idx].retryCount = 0
-                currentPlan.agents[idx].errorMessage = nil
-                // Switch to a different connector
-                let altConnector = selectFailoverConnector(excluding: failedNode.connectorID, allConnectors: allConnectors, fallback: connector)
-                currentPlan.agents[idx].connectorID = altConnector.id
-                currentPlan.agents[idx].updatedAt = .now
-
-                await runSingleAgent(
-                    node: currentPlan.agents[idx], message: message, intent: intent,
-                    connector: altConnector, allConnectors: allConnectors,
-                    plan: &currentPlan, task: &task, artifacts: &agentArtifacts,
-                    onStep: onStep, onStreamDelta: onStreamDelta, onPlanUpdate: onPlanUpdate
-                )
-            }
-        }
+        await retryFailedAgentsIfUseful(
+            message: message,
+            intent: intent,
+            connector: connector,
+            allConnectors: allConnectors,
+            plan: &currentPlan,
+            task: &task,
+            artifacts: &agentArtifacts,
+            onStep: onStep,
+            onStreamDelta: onStreamDelta,
+            onPlanUpdate: onPlanUpdate
+        )
 
         // Finalize
         let allCompleted = currentPlan.agents.allSatisfy { $0.status == .completed }
@@ -350,6 +387,142 @@ public final class MultiAgentOrchestrator: ObservableObject {
         onStep(summaryStep)
 
         return task
+    }
+
+    private func repairCodingPlanIfNeeded(
+        message: String,
+        intent: UserIntent,
+        connector: ConnectorProfile,
+        allConnectors: [ConnectorProfile],
+        plan: inout MultiAgentPlan,
+        task: inout AgentTask,
+        artifacts: inout [UUID: String],
+        onStep: @MainActor (TaskStep) -> Void,
+        onStreamDelta: @Sendable @MainActor (String) -> Void,
+        onPlanUpdate: @MainActor (MultiAgentPlan) -> Void
+    ) async {
+        guard Self.needsCodeMutation(message.lowercased()) else { return }
+        guard plan.agents.contains(where: { $0.role == .coder && $0.status == .completed }) else { return }
+
+        let failedQualityAgents = plan.agents.filter {
+            ($0.role == .tester || $0.role == .reviewer) && $0.status == .failed
+        }
+        guard !failedQualityAgents.isEmpty else { return }
+
+        let repairStep = TaskStep(
+            kind: .aiThinking,
+            text: "验证/审查发现问题，自动交回编码员修复后再验证。",
+            isCollapsible: true,
+            isCollapsed: true,
+            agentRole: .planner
+        )
+        task.steps.append(repairStep)
+        onStep(repairStep)
+
+        let blockerArtifacts = failedQualityAgents
+            .map { node -> String in
+                let output = artifacts[node.id] ?? node.output
+                return "\(node.role.title)：\(output.isEmpty ? node.errorMessage ?? "失败但无输出" : output)"
+            }
+            .joined(separator: "\n")
+
+        let coderConnector = ModelRouter.selectModel(forRole: .coder, connectors: allConnectors, activeConnectorID: connector.id) ?? connector
+        var repairNode = AgentNode(role: .coder, connectorID: coderConnector.id)
+        repairNode.input = """
+        修复上一轮测试/审查发现的问题。必须直接读写项目文件，修复后运行 verify_build 或最接近的 shell_exec 验证。
+
+        失败反馈：
+        \(blockerArtifacts)
+        """
+        plan.agents.append(repairNode)
+        plan.handoffs.append(contentsOf: failedQualityAgents.map {
+            AgentHandoff(fromAgentID: $0.id, toAgentID: repairNode.id, artifact: String((artifacts[$0.id] ?? $0.output).prefix(500)))
+        })
+        task.multiAgentPlan = plan
+        onPlanUpdate(plan)
+
+        await runSingleAgent(
+            node: repairNode,
+            message: "\(message)\n\n上一轮验证/审查反馈：\n\(blockerArtifacts)",
+            intent: intent,
+            connector: coderConnector,
+            allConnectors: allConnectors,
+            plan: &plan,
+            task: &task,
+            artifacts: &artifacts,
+            onStep: onStep,
+            onStreamDelta: onStreamDelta,
+            onPlanUpdate: onPlanUpdate
+        )
+
+        guard let repairIndex = plan.agents.firstIndex(where: { $0.id == repairNode.id }),
+              plan.agents[repairIndex].status == .completed else { return }
+
+        for failedNode in failedQualityAgents {
+            guard let idx = plan.agents.firstIndex(where: { $0.id == failedNode.id }) else { continue }
+            plan.agents[idx].status = .queued
+            plan.agents[idx].errorMessage = nil
+            plan.agents[idx].retryCount = 0
+            plan.agents[idx].dependsOn = [repairNode.id]
+            plan.agents[idx].updatedAt = .now
+            plan.handoffs.append(AgentHandoff(fromAgentID: repairNode.id, toAgentID: failedNode.id, artifact: String((artifacts[repairNode.id] ?? "").prefix(500))))
+
+            await runSingleAgent(
+                node: plan.agents[idx],
+                message: message,
+                intent: intent,
+                connector: connector,
+                allConnectors: allConnectors,
+                plan: &plan,
+                task: &task,
+                artifacts: &artifacts,
+                onStep: onStep,
+                onStreamDelta: onStreamDelta,
+                onPlanUpdate: onPlanUpdate
+            )
+        }
+    }
+
+    private func retryFailedAgentsIfUseful(
+        message: String,
+        intent: UserIntent,
+        connector: ConnectorProfile,
+        allConnectors: [ConnectorProfile],
+        plan: inout MultiAgentPlan,
+        task: inout AgentTask,
+        artifacts: inout [UUID: String],
+        onStep: @MainActor (TaskStep) -> Void,
+        onStreamDelta: @Sendable @MainActor (String) -> Void,
+        onPlanUpdate: @MainActor (MultiAgentPlan) -> Void
+    ) async {
+        let failedAgents = plan.agents.filter { $0.status == .failed }
+        let hasSuccesses = plan.agents.contains { $0.status == .completed }
+        guard !failedAgents.isEmpty, hasSuccesses, failedAgents.count <= 2 else { return }
+
+        let replanStep = TaskStep(
+            kind: .aiThinking,
+            text: "部分子任务失败（\(failedAgents.map { $0.role.title }.joined(separator: "、"))），尝试重新分配并重试…",
+            isCollapsible: true, isCollapsed: true, agentRole: .planner
+        )
+        task.steps.append(replanStep)
+        onStep(replanStep)
+
+        for failedNode in failedAgents {
+            guard let idx = plan.agents.firstIndex(where: { $0.id == failedNode.id }) else { continue }
+            plan.agents[idx].status = .queued
+            plan.agents[idx].retryCount = 0
+            plan.agents[idx].errorMessage = nil
+            let altConnector = selectFailoverConnector(excluding: failedNode.connectorID, allConnectors: allConnectors, fallback: connector)
+            plan.agents[idx].connectorID = altConnector.id
+            plan.agents[idx].updatedAt = .now
+
+            await runSingleAgent(
+                node: plan.agents[idx], message: message, intent: intent,
+                connector: altConnector, allConnectors: allConnectors,
+                plan: &plan, task: &task, artifacts: &artifacts,
+                onStep: onStep, onStreamDelta: onStreamDelta, onPlanUpdate: onPlanUpdate
+            )
+        }
     }
 
     // MARK: - Single Agent Runner (sequential path)
@@ -578,13 +751,25 @@ public final class MultiAgentOrchestrator: ObservableObject {
         onStep: @MainActor (TaskStep) -> Void,
         onStreamDelta: @Sendable @MainActor (String) -> Void
     ) async -> AgentResult {
-        let agentConfig = AgentLoop.Config(
+        let profile = ConnectorCapabilityProfile.infer(for: connector, mode: config.contextMode)
+        var agentConfig = AgentLoop.Config(
             maxIterations: maxIterations(for: node.role),
-            maxTokensPerTurn: config.contextMode.maxTokensPerTurn,
+            maxTokensPerTurn: profile.maxTokensPerTurn,
             workspaceRoot: config.workspaceRoot,
-            supportsToolCalling: true,
-            contextMode: config.contextMode
+            supportsToolCalling: profile.supportsToolCalling,
+            contextMode: config.contextMode,
+            contextWindow: profile.contextWindow,
+            customSystemPrompt: roleSystemPrompt(for: node.role),
+            allowedTools: node.role.allowedTools,
+            modelName: connector.modelName,
+            connectorEndpoint: connector.endpoint,
+            apiKey: connector.note
         )
+        if node.role == .coder {
+            agentConfig.maxIterations = max(agentConfig.maxIterations, 24)
+        } else if node.role == .tester {
+            agentConfig.maxIterations = max(agentConfig.maxIterations, 14)
+        }
 
         let loop = AgentLoop(config: agentConfig, runtime: runtime, toolRegistry: toolRegistry)
 
@@ -607,7 +792,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
                 .joined(separator: "\n")
 
             if agentTask.status == .failed {
-                return .failure(output.isEmpty ? "Agent执行失败" : String(output.prefix(500)))
+                return .failure(output.isEmpty ? "会话执行失败" : String(output.prefix(500)))
             }
             return .success(output)
         } catch {
@@ -640,13 +825,14 @@ public final class MultiAgentOrchestrator: ObservableObject {
     ) -> String {
         var parts: [String] = []
 
-        // Custom agent systemPrompt takes priority over default role instruction
         let node = plan.agents[agentIndex]
         let customPrompt = node.input.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Custom prompt extends the role instruction; edited plans and repair agents
+        // still keep the discipline for their role.
+        parts.append(roleInstruction(for: role))
+        parts.append(role.outputContract)
         if !customPrompt.isEmpty {
-            parts.append(customPrompt)
-        } else {
-            parts.append(roleInstruction(for: role))
+            parts.append("本轮具体指令：\n\(customPrompt)")
         }
         parts.append("用户原始请求：\(message)")
 
@@ -665,7 +851,18 @@ public final class MultiAgentOrchestrator: ObservableObject {
             .map { "\($0.role.title)（\($0.status.title)）" }
             .joined(separator: "、")
         if !otherAgents.isEmpty {
-            parts.append("\n协同Agent：\(otherAgents)")
+            parts.append("\n协同会话：\(otherAgents)")
+        }
+        if [.coder, .tester, .reviewer].contains(role) {
+            parts.append("""
+
+            项目维护要求：
+            - 你运行在真实工作区 `\(config.workspaceRoot)`，需要像 coding agent 一样直接读写、验证项目。
+            - 优先用 workspace_index / code_search 找上下文，再 file_read 关键文件。
+            - 只有编码员可以写入项目文件；测试员和审查员只能运行验证、读取证据并输出问题。
+            - 编码员的代码任务必须落到文件变更；不能只输出方案或伪代码。
+            - 输出必须列出实际修改/检查过的文件和验证结果。
+            """)
         }
 
         return parts.joined(separator: "\n\n")
@@ -676,34 +873,71 @@ public final class MultiAgentOrchestrator: ObservableObject {
         case .planner:
             return """
             你是规划员。你的任务是分析用户需求，理解项目结构，制定执行计划。
-            重点：读取关键文件、建立项目索引、梳理依赖关系。
-            输出：清晰的任务分解和执行建议，供后续Agent参考。
+            重点：读取关键文件、建立项目索引、梳理依赖关系，并明确哪些文件需要创建/编辑。
+            输出：清晰的任务分解、待修改文件、验证命令和风险点，供后续会话参考。不要停在泛泛建议，不要让编码员猜路径。不得写入项目文件。
             """
         case .coder:
             return """
             你是编码员。你的任务是根据计划实现代码修改。
-            重点：精确的文件读写、遵循项目风格、最小化变更范围。
-            输出：完成的代码修改和变更说明。
+            重点：必须使用 file_read / file_edit / file_write / diff_apply 真实创建、编辑、维护项目文件；必要时用 shell_exec / verify_build 验证。
+            流程：先确认路径与现状，再写入变更；已有文件优先 file_edit，失败后 file_read → file_write 完整写回；新文件用 file_write。
+            输出：已修改的文件、验证结果和变更说明。没有工具成功写入时，不准声称已完成。
             """
         case .reviewer:
             return """
-            你是审查员。你的任务是审查其他Agent的工作成果。
-            重点：检查代码质量、发现潜在问题、验证逻辑正确性。
-            输出：审查意见和改进建议。不要重复执行已完成的操作。
+            你是审查员。你的任务是审查其他会话的工作成果。
+            重点：读取 diff/关键文件，检查代码质量、潜在回归、测试缺口；必要时运行 verify_build 或 shell_exec。
+            输出：按严重程度列出问题；没有发现问题要明确说明剩余风险。不得写入项目文件。
             """
         case .researcher:
             return """
             你是研究员。你的任务是收集和整理相关信息。
             重点：搜索代码库、查阅文档、联网获取最新资料。
-            输出：整理好的参考资料和分析结论，供其他Agent使用。
+            输出：整理好的参考资料和分析结论，供其他会话使用。不得写入项目文件。
             """
         case .tester:
             return """
             你是测试员。你的任务是验证变更的正确性。
-            重点：运行测试、检查构建、验证功能是否正常。
-            输出：测试结果和发现的问题。
+            重点：使用 verify_build 或 shell_exec 运行项目构建/测试/静态检查，必要时读取失败文件定位原因。
+            输出：测试结果和发现的问题；失败时必须给编码员可执行的修复线索（文件/命令/关键错误）。不得写入项目文件。
             """
         }
+    }
+
+    private func roleSystemPrompt(for role: AgentRole) -> String {
+        var prompt = roleInstruction(for: role)
+        switch role {
+        case .coder:
+            prompt += """
+
+            ## 编码员执行纪律
+            - 你有真实项目文件读写能力。创建文件用 file_write，修改已有文件优先 file_edit，复杂补丁可用 diff_apply。
+            - 不要只给代码片段或建议；除非用户只问方案，否则必须把变更写入工作区。
+            - 如果要维护项目结构，允许创建目录/文件、更新配置、调整测试或文档，但必须保持改动范围清晰。
+            - 修改后读取关键文件或运行 verify_build / shell_exec 验证。
+            - 如果 file_edit 匹配失败，先 file_read 最新内容，再用 file_write 写回完整正确内容。
+            - 最终只总结真实成功的工具结果。
+            """
+        case .tester:
+            prompt += """
+
+            ## 测试员执行纪律
+            - 优先调用 verify_build；没有构建系统时再用项目脚本或 shell_exec 做最接近的验证。
+            - 验证失败时，读取相关文件定位原因，并输出“失败命令 / 关键错误 / 建议修改文件”。
+            - 不要因为环境命令缺失而宣布代码失败；要区分环境问题和代码问题。
+            """
+        case .reviewer:
+            prompt += """
+
+            ## 审查员执行纪律
+            - 以代码审查口吻输出问题，优先具体文件和行为风险。
+            - 可以运行 verify_build 辅助确认，但不要把“没有运行测试”说成“已通过”。
+            - 不直接写入文件；如果发现问题，明确交回编码员处理。
+            """
+        default:
+            break
+        }
+        return prompt
     }
 
     private func maxIterations(for role: AgentRole) -> Int {
@@ -725,8 +959,13 @@ public final class MultiAgentOrchestrator: ObservableObject {
 
     private func buildSummary(plan: MultiAgentPlan, artifacts: [UUID: String]) -> String {
         var parts: [String] = []
-        parts.append("## 多Agent协同完成报告\n")
+        let completed = plan.agents.filter { $0.status == .completed }.count
+        let allCompleted = completed == plan.agents.count
+        parts.append(allCompleted ? "## 多会话协同完成报告\n" : "## 多会话协同执行报告\n")
         parts.append("**流程：**\(plan.title)\n")
+        if !allCompleted {
+            parts.append("**状态：**任务未完成，\(plan.agents.count - completed) 个会话失败。请以上方失败工具和错误步骤为准，不要把部分输出当成交付结果。\n")
+        }
 
         for agent in plan.agents {
             let status = agent.status == .completed ? "✅" : "❌"
@@ -734,8 +973,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
             parts.append("**\(status) \(agent.role.title)：**\(output)\n")
         }
 
-        let completed = plan.agents.filter { $0.status == .completed }.count
-        parts.append("\n完成 \(completed)/\(plan.agents.count) 个Agent")
+        parts.append("\n完成 \(completed)/\(plan.agents.count) 个会话")
 
         return parts.joined(separator: "\n")
     }

@@ -1,6 +1,8 @@
 import Foundation
 import LaicaiNativeDomain
 
+public typealias Thread = LaicaiThread
+
 // MARK: - Request / Response
 
 public struct SendMessageRequest: Sendable, Equatable {
@@ -149,8 +151,13 @@ public protocol TaskRepository {
 }
 
 public protocol ThreadRepository {
-    func loadThreads() throws -> [Thread]?
-    func saveThreads(_ threads: [Thread]) throws
+    func loadThreads() throws -> [LaicaiThread]?
+    func saveThreads(_ threads: [LaicaiThread]) throws
+}
+
+public protocol AgentRepository {
+    func loadAgents() throws -> [LaicaiThread]?
+    func saveAgents(_ agents: [LaicaiThread]) throws
 }
 
 // MARK: - App Environment
@@ -161,19 +168,22 @@ public struct AppEnvironment {
     public var connectorRepository: any ConnectorRepository
     public var taskRepository: any TaskRepository
     public var threadRepository: any ThreadRepository
+    public var agentRepository: any AgentRepository
 
     public init(
         runtimeClient: any ChatRuntimeClient,
         sessionRepository: any SessionRepository,
         connectorRepository: any ConnectorRepository,
         taskRepository: any TaskRepository,
-        threadRepository: any ThreadRepository
+        threadRepository: any ThreadRepository,
+        agentRepository: (any AgentRepository)? = nil
     ) {
         self.runtimeClient = runtimeClient
         self.sessionRepository = sessionRepository
         self.connectorRepository = connectorRepository
         self.taskRepository = taskRepository
         self.threadRepository = threadRepository
+        self.agentRepository = agentRepository ?? ThreadRepositoryAgentAdapter(threadRepository)
     }
 
     public static var preview: AppEnvironment {
@@ -182,7 +192,8 @@ public struct AppEnvironment {
             sessionRepository: NoopSessionRepository(),
             connectorRepository: NoopConnectorRepository(),
             taskRepository: NoopTaskRepository(),
-            threadRepository: NoopThreadRepository()
+            threadRepository: NoopThreadRepository(),
+            agentRepository: NoopAgentRepository()
         )
     }
 
@@ -193,7 +204,8 @@ public struct AppEnvironment {
             sessionRepository: sqlite,
             connectorRepository: sqlite,
             taskRepository: sqlite,
-            threadRepository: sqlite
+            threadRepository: sqlite,
+            agentRepository: sqlite
         )
     }
 }
@@ -267,6 +279,32 @@ public struct NoopThreadRepository: ThreadRepository {
     }
 
     public func saveThreads(_ threads: [Thread]) throws {}
+}
+
+public struct NoopAgentRepository: AgentRepository {
+    public init() {}
+
+    public func loadAgents() throws -> [Thread]? {
+        nil
+    }
+
+    public func saveAgents(_ agents: [Thread]) throws {}
+}
+
+public struct ThreadRepositoryAgentAdapter: AgentRepository {
+    private let repository: any ThreadRepository
+
+    public init(_ repository: any ThreadRepository) {
+        self.repository = repository
+    }
+
+    public func loadAgents() throws -> [Thread]? {
+        try repository.loadThreads()
+    }
+
+    public func saveAgents(_ agents: [Thread]) throws {
+        try repository.saveThreads(agents)
+    }
 }
 
 // MARK: - ConnectorCatalog (legacy)

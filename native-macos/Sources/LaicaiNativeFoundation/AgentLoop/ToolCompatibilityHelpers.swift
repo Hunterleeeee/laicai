@@ -83,7 +83,7 @@ extension AgentLoop {
     }
 
     static func applyToolCompatibilityFallbackInstruction(to messages: inout [ChatMessage]) {
-        let instruction = "\n\n## 工具兼容限制\n当前连接器不兼容工具调用。后续禁止再调用任何工具，也不要声称已经读取文件、搜索项目、联网、运行命令或写入文件。只能基于当前已知上下文直接回答；如果完成任务必须依赖工具，请明确说明当前连接器暂不兼容工具调用，并建议用户切换支持工具的连接器后重试。"
+        let instruction = "\n\n## 工具兼容限制\n当前连接器不兼容工具调用。后续禁止再调用任何工具，也不要声称已经读取文件、搜索项目、联网、运行命令或写入文件。只能基于当前已知上下文直接回答；如果完成当前会话目标必须依赖工具，请明确说明当前连接器暂不兼容工具调用，并建议用户切换支持工具的连接器后重试。"
         if !messages.isEmpty, messages[0].role == "system" {
             messages[0].content = (messages[0].content ?? "") + instruction
             return
@@ -100,10 +100,57 @@ extension AgentLoop {
         let writeMarkers = [
             "写入", "写到", "保存", "存到", "落地", "记录到", "追加到",
             "修改", "改一下", "改成", "更新", "替换", "重写", "插入",
-            "新建", "创建文件", "生成文件", "添加到",
-            "整理到", "归档到", "导出到"
+            "新建", "创建", "创建文件", "生成", "生成文件", "输出", "输出到", "放到", "添加到",
+            "整理到", "归档到", "导出", "导出到"
         ]
         return writeMarkers.contains { message.contains($0) }
+    }
+
+    static func expectsWriteAction(_ message: String) -> Bool {
+        let markers = [
+            "写入", "写到", "保存", "存到", "落地", "记录到", "追加到",
+            "修改", "改一下", "改成", "更新", "替换", "重写", "插入",
+            "新建", "创建", "创建文件", "生成文件", "输出到", "放到", "添加到",
+            "整理到", "归档到", "导出", "导出到"
+        ]
+        return markers.contains { message.contains($0) }
+    }
+
+    static func shouldRequireToolEvidenceBeforeFinalText(
+        message: String,
+        intent: UserIntent,
+        isReadOnlyRun: Bool,
+        toolCallCount: Int,
+        toolDefs: [ToolDefinition],
+        usedToolCompatibilityFallback: Bool
+    ) -> Bool {
+        guard intent != .chat,
+              !isReadOnlyRun,
+              toolCallCount == 0,
+              !toolDefs.isEmpty,
+              !usedToolCompatibilityFallback else {
+            return false
+        }
+        if Self.isPureContinuationCommand(message) {
+            return false
+        }
+
+        let lower = message.lowercased()
+        let explicitReadOnlyMarkers = [
+            "只分析", "先别改", "不要改", "别改", "不用改", "只给建议", "不要执行", "先不执行", "只要方案"
+        ]
+        guard !explicitReadOnlyMarkers.contains(where: { lower.contains($0) }) else {
+            return false
+        }
+
+        let actionMarkers = [
+            "项目", "代码", "文件", "工作区", "页面", "按钮", "bug", "报错", "异常",
+            "卡顿", "卡死", "很卡", "各种卡", "性能", "优化", "修复", "调整", "改进",
+            "实现", "创建", "生成", "修改", "读取", "查看", "检查", "排查", "诊断",
+            "最新进展", "进展", "继续", "接着", "没反应", "不生效",
+            "workspace", "code", "file", "bug", "error", "fix", "implement", "optimize", "performance"
+        ]
+        return actionMarkers.contains { lower.contains($0) } || expectsWriteOutput(message)
     }
 
     /// Detect if model output claims completion of a write/save action.
@@ -140,11 +187,50 @@ extension AgentLoop {
         }
         var changed = false
 
+        if toolName == "document.transform" || toolName == "document_transform" {
+            if dict["sourcePath"] == nil, let path = dict["path"] {
+                dict["sourcePath"] = path
+                changed = true
+            }
+            if dict["action"] == nil, let mode = dict["mode"] as? String {
+                dict["action"] = mode
+                changed = true
+            }
+            if dict["action"] == nil, dict["workspace"] != nil || dict["workflowPath"] != nil {
+                dict["action"] = "workspace"
+                changed = true
+            }
+        }
+
         // Fix 1: Relative paths → absolute paths for file tools
-        if ["file.read", "file.write", "file.edit", "diff.apply"].contains(toolName),
+        if ["file.read", "file.write", "file.edit", "diff.apply", "document.transform", "document_transform"].contains(toolName),
            let path = dict["path"] as? String,
            !path.hasPrefix("/") && !workspaceRoot.isEmpty {
             dict["path"] = (workspaceRoot as NSString).appendingPathComponent(path)
+            changed = true
+        }
+        if toolName == "document.transform" || toolName == "document_transform",
+           let sourcePath = dict["sourcePath"] as? String,
+           !sourcePath.hasPrefix("/") && !workspaceRoot.isEmpty {
+            dict["sourcePath"] = (workspaceRoot as NSString).appendingPathComponent(sourcePath)
+            changed = true
+        }
+        if toolName == "document.transform" || toolName == "document_transform",
+           let outputPath = dict["outputPath"] as? String,
+           !outputPath.hasPrefix("/") && !workspaceRoot.isEmpty {
+            dict["outputPath"] = (workspaceRoot as NSString).appendingPathComponent(outputPath)
+            changed = true
+        }
+        if toolName == "document.transform" || toolName == "document_transform",
+           let workflowPath = dict["workflowPath"] as? String,
+           !workflowPath.hasPrefix("/") && !workspaceRoot.isEmpty {
+            dict["workflowPath"] = (workspaceRoot as NSString).appendingPathComponent(workflowPath)
+            changed = true
+        }
+        if toolName == "document.transform" || toolName == "document_transform",
+           let renderDir = dict["renderDir"] as? String,
+           !renderDir.hasPrefix("/") && !workspaceRoot.isEmpty {
+            dict["renderDir"] = (workspaceRoot as NSString).appendingPathComponent(renderDir)
             changed = true
         }
 

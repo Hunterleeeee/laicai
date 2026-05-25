@@ -84,7 +84,21 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
             ],
             context: TaskContext(workspaceRoot: "/tmp/workspace")
         )
-        let thread = ThreadRecord(task: task)
+        let thread = Thread(
+            id: task.id,
+            title: task.title,
+            preview: task.preview,
+            status: task.status,
+            steps: task.steps,
+            connectorID: task.connectorID,
+            workflowName: task.workflowName,
+            context: task.context,
+            updatedAt: task.updatedAt,
+            agentState: Thread.inferAgentState(status: task.status),
+            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            taskProtocol: task.taskProtocol,
+            executionLedger: task.executionLedger
+        )
 
         try repository.saveThreads([thread])
         let loaded = try XCTUnwrap(repository.loadThreads())
@@ -92,8 +106,8 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertEqual(restored.id, thread.id)
         XCTAssertEqual(restored.title, "统一线程")
-        XCTAssertEqual(restored.events.map(\.kind), [.user, .assistant])
-        XCTAssertEqual(restored.task?.steps.map(\.text), ["生成 README", "已生成"])
+        XCTAssertEqual(restored.steps.map(\.kind), [.userInput, .textOutput])
+        XCTAssertEqual(restored.steps.map(\.text), ["生成 README", "已生成"])
     }
     func testSQLiteRepositoryDeletesThreadsAfterReload() throws {
         let base = FileManager.default.temporaryDirectory
@@ -101,8 +115,8 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: base) }
 
-        let first = Thread(title: "保留", preview: "keep", updatedAt: Date(timeIntervalSince1970: 10), source: .session)
-        let second = Thread(title: "删除", preview: "delete", updatedAt: Date(timeIntervalSince1970: 20), source: .session)
+        let first = Thread(title: "保留", preview: "keep", updatedAt: Date(timeIntervalSince1970: 10))
+        let second = Thread(title: "删除", preview: "delete", updatedAt: Date(timeIntervalSince1970: 20))
         try SQLiteRepository(path: base.path).saveThreads([first, second])
 
         let reloaded = SQLiteRepository(path: base.path)
@@ -121,17 +135,14 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         var thread = Thread(
             title: "历史会话",
             preview: "hello",
-            updatedAt: Date(timeIntervalSince1970: 10),
-            source: .session
+            updatedAt: Date(timeIntervalSince1970: 10)
         )
         let repository = SQLiteRepository(path: base.path)
         try repository.saveThreads([thread])
 
-        thread.source = .task
         try repository.saveThreads([thread])
 
         let loaded = try XCTUnwrap(SQLiteRepository(path: base.path).loadThreads())
-        XCTAssertEqual(loaded.first?.source, .task)
         XCTAssertEqual(loaded.first?.updatedAt, Date(timeIntervalSince1970: 10))
     }
 
@@ -155,11 +166,132 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         let thread = try decoder.decode(Thread.self, from: Data(json.utf8))
 
         XCTAssertEqual(thread.id, id)
-        XCTAssertEqual(thread.source, .session)
         XCTAssertEqual(thread.modelName, "")
         XCTAssertEqual(thread.category, .engineering)
         XCTAssertFalse(thread.isPinned)
     }
+
+    func testThreadDecodingWithoutTitleDefaultsToNewSession() throws {
+        let id = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "preview": "旧预览",
+          "status": "completed",
+          "steps": [],
+          "context": {},
+          "createdAt": "2026-01-01T00:00:00Z",
+          "updatedAt": "2026-01-02T00:00:00Z"
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let thread = try decoder.decode(Thread.self, from: Data(json.utf8))
+
+        XCTAssertEqual(thread.id, id)
+        XCTAssertEqual(thread.title, "新会话")
+    }
+
+    func testExportSelectedThreadMarkdownUsesNewSessionFallbackTitle() throws {
+        let thread = Thread(title: "", preview: "", status: .completed)
+        let store = AppStore(state: testState(threads: [thread], selectedThreadID: thread.id))
+
+        let markdown = try XCTUnwrap(store.exportSelectedThreadMarkdown())
+
+        XCTAssertTrue(markdown.hasPrefix("# 新会话\n"))
+    }
+
+    func testExportSelectedTaskEvidenceMarkdownUsesSessionWording() throws {
+        let thread = Thread(
+            title: "",
+            status: .completed,
+            steps: [TaskStep(kind: .toolCall, text: "读取文件", toolName: "file.read")],
+            agentState: .completed
+        )
+        let store = AppStore(state: testState(threads: [thread], selectedThreadID: thread.id))
+
+        let markdown = try XCTUnwrap(store.exportSelectedTaskEvidenceMarkdown())
+
+        XCTAssertTrue(markdown.hasPrefix("# 会话证据清单：新会话\n"))
+    }
+
+    func testThreadPersistsAgentSnapshotFields() throws {
+        let artifact = AgentArtifact(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000222")!,
+            title: "result.pdf",
+            path: "/tmp/result.pdf",
+            kind: "document",
+            createdAt: Date(timeIntervalSince1970: 20)
+        )
+        let thread = Thread(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000111")!,
+            title: "翻译文档",
+            status: .running,
+            agentState: .running,
+            agentGoal: "把文档翻译成英文",
+            currentPlan: ["读取源文档", "生成译文", "导出 PDF"],
+            artifacts: [artifact]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(thread)
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(json.contains("agentState"))
+        XCTAssertTrue(json.contains("currentPlan"))
+        XCTAssertTrue(json.contains("artifacts"))
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(Thread.self, from: data)
+
+        XCTAssertEqual(decoded.agentState, .running)
+        XCTAssertEqual(decoded.agentGoal, "把文档翻译成英文")
+        XCTAssertEqual(decoded.currentPlan, ["读取源文档", "生成译文", "导出 PDF"])
+        XCTAssertEqual(decoded.artifacts, [artifact])
+    }
+
+    func testThreadPersistsTaskProtocolAndExecutionLedger() throws {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-000000000333")!
+        let taskProtocol = AgentTaskProtocol(
+            taskGoal: "修复继续按钮",
+            workspaceRoot: "/tmp/workspace",
+            threadID: id,
+            expectedOutcome: "按钮可继续原 Agent",
+            completionCriteria: ["不新建会话", "读取执行账本"],
+            riskPolicy: .act,
+            continuationPolicy: .ownFollowUps,
+            createdAt: Date(timeIntervalSince1970: 10)
+        )
+        var ledger = AgentExecutionLedger(
+            originalRequest: "修复继续按钮",
+            goal: "修复继续按钮",
+            state: .executing,
+            plan: ["复现", "修复", "验证"],
+            nextAction: "点击继续后从账本恢复",
+            updatedAt: Date(timeIntervalSince1970: 20)
+        )
+        ledger.appendUnique("Sources/AppStore.swift", to: \.readFiles)
+        ledger.appendUnique("Tests/AppStoreTests.swift", to: \.modifiedFiles)
+        let thread = Thread(
+            id: id,
+            title: "修复继续按钮",
+            status: .running,
+            taskProtocol: taskProtocol,
+            executionLedger: ledger
+        )
+
+        let data = try JSONEncoder().encode(thread)
+        let decoded = try JSONDecoder().decode(Thread.self, from: data)
+
+        XCTAssertEqual(decoded.taskProtocol?.taskGoal, "修复继续按钮")
+        XCTAssertEqual(decoded.taskProtocol?.completionCriteria, ["不新建会话", "读取执行账本"])
+        XCTAssertEqual(decoded.executionLedger?.state, .executing)
+        XCTAssertEqual(decoded.executionLedger?.readFiles, ["Sources/AppStore.swift"])
+        XCTAssertEqual(decoded.executionLedger?.modifiedFiles, ["Tests/AppStoreTests.swift"])
+        XCTAssertEqual(AgentTask(thread: decoded).executionLedger?.nextAction, "点击继续后从账本恢复")
+    }
+
     func testPersistentMemoryUsesBoundParameters() throws {
         let base = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

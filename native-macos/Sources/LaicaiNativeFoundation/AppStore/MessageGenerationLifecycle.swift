@@ -7,6 +7,9 @@ extension AppStore {
         if let threadIndex = state.threads.firstIndex(where: { $0.id == targetTaskID }) {
             let step = TaskStep(kind: .userInput, text: followUp, isCollapsible: false, isCollapsed: false)
             state.threads[threadIndex].steps.append(step)
+            state.threads[threadIndex].executionLedger?.pendingFollowUp = nil
+            state.threads[threadIndex].executionLedger?.nextAction = "处理用户补充：\(followUp)"
+            state.threads[threadIndex].executionLedger?.transition(to: .executing, reason: "运行结束后接续 pending follow-up")
             state.threads[threadIndex].updatedAt = .now
             persistThreadsNow()
         }

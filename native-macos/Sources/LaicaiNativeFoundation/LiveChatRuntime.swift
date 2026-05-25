@@ -233,6 +233,15 @@ private struct OpenAIModelsResponse: Codable {
 // MARK: - Live Chat Runtime
 
 public struct LiveChatRuntime: ChatRuntimeClient {
+    public struct ConnectorRequestError: LocalizedError, Sendable {
+        public let connectorName: String
+        public let message: String
+
+        public var errorDescription: String? {
+            "无法连接 \(connectorName)：\(message)"
+        }
+    }
+
     private static let historyTurnLimit = 40
     private static let historyCharacterBudget = 60_000
     private static let probeMessages = [
@@ -378,10 +387,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 metrics: metrics
             )
         } catch {
-            return SendMessageResponse(
-                assistantText: "无法连接 \(connector.name)：\(error.localizedDescription)",
-                toolActivities: [ToolActivity(name: "chat.error", summary: "连接 \(connector.name) 网络错误", statusLine: error.localizedDescription, isFailure: true)]
-            )
+            throw Self.connectorRequestError(connector: connector, error: error)
         }
     }
 
@@ -426,7 +432,13 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             isLocal: isOllamaNative
         )
 
-        let (bytes, response) = try await session.bytes(for: urlRequest)
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (bytes, response) = try await session.bytes(for: urlRequest)
+        } catch {
+            throw Self.connectorRequestError(connector: connector, error: error)
+        }
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
         guard (200...299).contains(statusCode) else {
@@ -457,97 +469,99 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         let chunkFlushThreshold = 240  // chars
         let chunkFlushInterval = 0.35 // seconds
 
-        for try await line in bytes.lines {
-            if isOllamaNative {
+        do {
+            for try await line in bytes.lines {
+                if isOllamaNative {
                 // Ollama native NDJSON (no tool calling support in native format)
-                guard let data = line.data(using: .utf8) else { continue }
-                if let ollamaChunk = try? decoder.decode(OllamaChatChunk.self, from: data) {
-                    if ollamaChunk.done == true {
-                        finalOllamaChunk = ollamaChunk
-                    }
-                    if let thinking = ollamaChunk.message?.thinking {
-                        reasoningText += thinking
-                        reasoningCount += thinking.count
-                        if let onReasoningChunk { await onReasoningChunk(thinking) }
-                    }
-                    if let chunkToolCalls = ollamaChunk.message?.toolCalls {
-                        for (offset, tc) in chunkToolCalls.enumerated() {
-                            let idx = accumulatedToolCalls.count + offset
-                            accumulatedToolCalls[idx] = AccumulatedToolCall(
-                                id: tc.id ?? "call_ollama_\(idx)",
-                                name: tc.function.name,
-                                arguments: tc.function.arguments
-                            )
+                    guard let data = line.data(using: .utf8) else { continue }
+                    if let ollamaChunk = try? decoder.decode(OllamaChatChunk.self, from: data) {
+                        if ollamaChunk.done == true {
+                            finalOllamaChunk = ollamaChunk
                         }
-                    }
-                    if let content = ollamaChunk.message?.content {
-                        rawText += content
-                        let nextVisible = Self.visibleAnswer(from: rawText)
-                        if nextVisible.count > visibleText.count {
-                            let delta = String(nextVisible.dropFirst(visibleText.count))
-                            visibleText = nextVisible
-                            if firstVisibleAt == nil { firstVisibleAt = Date() }
-                            // H6: batch deltas
-                            pendingDelta += delta
-                            let now = CFAbsoluteTimeGetCurrent()
-                            if pendingDelta.count >= chunkFlushThreshold || (now - lastChunkAt) >= chunkFlushInterval {
-                                let batch = pendingDelta
-                                pendingDelta = ""
-                                lastChunkAt = now
-                                await onChunk(batch)
+                        if let thinking = ollamaChunk.message?.thinking {
+                            reasoningText += thinking
+                            reasoningCount += thinking.count
+                            if let onReasoningChunk { await onReasoningChunk(thinking) }
+                        }
+                        if let chunkToolCalls = ollamaChunk.message?.toolCalls {
+                            for (offset, tc) in chunkToolCalls.enumerated() {
+                                let idx = accumulatedToolCalls.count + offset
+                                accumulatedToolCalls[idx] = AccumulatedToolCall(
+                                    id: tc.id ?? "call_ollama_\(idx)",
+                                    name: tc.function.name,
+                                    arguments: tc.function.arguments
+                                )
+                            }
+                        }
+                        if let content = ollamaChunk.message?.content {
+                            rawText += content
+                            let nextVisible = Self.visibleAnswer(from: rawText)
+                            if nextVisible.count > visibleText.count {
+                                let delta = String(nextVisible.dropFirst(visibleText.count))
+                                visibleText = nextVisible
+                                if firstVisibleAt == nil { firstVisibleAt = Date() }
+                                pendingDelta += delta
+                                let now = CFAbsoluteTimeGetCurrent()
+                                if pendingDelta.count >= chunkFlushThreshold || (now - lastChunkAt) >= chunkFlushInterval {
+                                    let batch = pendingDelta
+                                    pendingDelta = ""
+                                    lastChunkAt = now
+                                    await onChunk(batch)
+                                }
                             }
                         }
                     }
-                }
-            } else {
+                } else {
                 // OpenAI compatible SSE: data: {...}
-                guard line.hasPrefix("data: ") else { continue }
-                let jsonStr = String(line.dropFirst(6))
-                if jsonStr.trimmingCharacters(in: .whitespaces) == "[DONE]" { break }
-                guard let data = jsonStr.data(using: .utf8) else { continue }
+                    guard line.hasPrefix("data: ") else { continue }
+                    let jsonStr = String(line.dropFirst(6))
+                    if jsonStr.trimmingCharacters(in: .whitespaces) == "[DONE]" { break }
+                    guard let data = jsonStr.data(using: .utf8) else { continue }
 
-                if let chunk = try? decoder.decode(StreamChunk.self, from: data) {
-                    if let chunkUsage = chunk.usage {
-                        usage = chunkUsage
-                    }
-                    if let reasoning = chunk.choices.first?.delta.reasoningContent ?? chunk.choices.first?.delta.reasoning {
-                        reasoningText += reasoning
-                        reasoningCount += reasoning.count
-                        if let onReasoningChunk { await onReasoningChunk(reasoning) }
-                    }
-                    if let delta = chunk.choices.first?.delta.content {
-                        rawText += delta
-                        let nextVisible = Self.visibleAnswer(from: rawText)
-                        if nextVisible.count > visibleText.count {
-                            let visibleDelta = String(nextVisible.dropFirst(visibleText.count))
-                            visibleText = nextVisible
-                            if firstVisibleAt == nil { firstVisibleAt = Date() }
-                            // H6: batch deltas
-                            pendingDelta += visibleDelta
-                            let now = CFAbsoluteTimeGetCurrent()
-                            if pendingDelta.count >= chunkFlushThreshold || (now - lastChunkAt) >= chunkFlushInterval {
-                                let batch = pendingDelta
-                                pendingDelta = ""
-                                lastChunkAt = now
-                                await onChunk(batch)
+                    if let chunk = try? decoder.decode(StreamChunk.self, from: data) {
+                        if let chunkUsage = chunk.usage {
+                            usage = chunkUsage
+                        }
+                        if let reasoning = chunk.choices.first?.delta.reasoningContent ?? chunk.choices.first?.delta.reasoning {
+                            reasoningText += reasoning
+                            reasoningCount += reasoning.count
+                            if let onReasoningChunk { await onReasoningChunk(reasoning) }
+                        }
+                        if let delta = chunk.choices.first?.delta.content {
+                            rawText += delta
+                            let nextVisible = Self.visibleAnswer(from: rawText)
+                            if nextVisible.count > visibleText.count {
+                                let visibleDelta = String(nextVisible.dropFirst(visibleText.count))
+                                visibleText = nextVisible
+                                if firstVisibleAt == nil { firstVisibleAt = Date() }
+                                pendingDelta += visibleDelta
+                                let now = CFAbsoluteTimeGetCurrent()
+                                if pendingDelta.count >= chunkFlushThreshold || (now - lastChunkAt) >= chunkFlushInterval {
+                                    let batch = pendingDelta
+                                    pendingDelta = ""
+                                    lastChunkAt = now
+                                    await onChunk(batch)
+                                }
                             }
                         }
-                    }
-                    if let toolCallDeltas = chunk.choices.first?.delta.toolCalls {
-                        for tc in toolCallDeltas {
-                            let idx = tc.index ?? 0
-                            var acc = accumulatedToolCalls[idx] ?? AccumulatedToolCall()
-                            if let id = tc.id { acc.id = id }
-                            if let name = tc.function?.name { acc.name = name }
-                            if let args = tc.function?.arguments { acc.arguments += args }
-                            accumulatedToolCalls[idx] = acc
+                        if let toolCallDeltas = chunk.choices.first?.delta.toolCalls {
+                            for tc in toolCallDeltas {
+                                let idx = tc.index ?? 0
+                                var acc = accumulatedToolCalls[idx] ?? AccumulatedToolCall()
+                                if let id = tc.id { acc.id = id }
+                                if let name = tc.function?.name { acc.name = name }
+                                if let args = tc.function?.arguments { acc.arguments += args }
+                                accumulatedToolCalls[idx] = acc
+                            }
                         }
-                    }
-                    if let fr = chunk.choices.first?.finish_reason {
-                        finishReason = fr
+                        if let fr = chunk.choices.first?.finish_reason {
+                            finishReason = fr
+                        }
                     }
                 }
             }
+        } catch {
+            throw Self.connectorRequestError(connector: connector, error: error)
         }
 
         // H6: Flush remaining batched delta
@@ -589,6 +603,13 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             toolActivities: [ToolActivity(name: "chat.complete", summary: "流式收到 \(connector.name) 的响应", statusLine: toolCalls.isEmpty ? Self.responseStatusLine(finalText: finalText, reasoningCount: reasoningCount) : "\(toolCalls.count) 个工具调用", isFailure: false)],
             metrics: metrics
         )
+    }
+
+    private static func connectorRequestError(connector: ConnectorProfile, error: Error) -> ConnectorRequestError {
+        if let connectorError = error as? ConnectorRequestError {
+            return connectorError
+        }
+        return ConnectorRequestError(connectorName: connector.name, message: error.localizedDescription)
     }
 
     public func healthCheck(endpoint: String, model: String, apiKey: String, kind: String = "openai-compatible") async throws -> ConnectorHealth {
@@ -754,7 +775,10 @@ public struct LiveChatRuntime: ChatRuntimeClient {
 
     static func buildURL(from endpoint: String, kind: String = "openai-compatible") -> URL {
         let cleaned = normalizedEndpoint(endpoint, kind: kind)
-        return URL(string: cleaned) ?? URL(string: "http://127.0.0.1/invalid-endpoint")!
+        guard let url = URL(string: cleaned), url.host != nil else {
+            return URL(string: "http://127.0.0.1/invalid-endpoint")!
+        }
+        return url
     }
 
     static func baseEndpoint(from endpoint: String) -> String {
@@ -794,13 +818,35 @@ public struct LiveChatRuntime: ChatRuntimeClient {
 
     static func serviceBaseEndpoint(from endpoint: String) -> String {
         let cleaned = baseEndpoint(from: endpoint)
-        if cleaned.hasSuffix("/chat/completions") {
-            return String(cleaned.dropLast(17))
+        guard let url = URL(string: cleaned), url.host != nil else {
+            return cleaned
         }
-        if cleaned.hasSuffix("/api/chat") {
-            return String(cleaned.dropLast(9))
+        let path = normalizedPath(for: url)
+        if path.hasSuffix("chat/completions") {
+            let components = path.split(separator: "/").map(String.init)
+            let basePath: String
+            if components.count >= 3, components.suffix(2) == ["chat", "completions"], components[components.count - 3] == "v1" {
+                basePath = url.host?.localizedCaseInsensitiveContains("deepseek") == true ? "/v1" : ""
+            } else {
+                basePath = "/" + components.dropLast(2).joined(separator: "/")
+            }
+            return rootEndpoint(from: url, path: basePath)
+        }
+        if path.hasSuffix("api/chat") {
+            let components = path.split(separator: "/").map(String.init)
+            let basePath = components.count > 2 ? "/" + components.dropLast(2).joined(separator: "/") : ""
+            return rootEndpoint(from: url, path: basePath)
         }
         return cleaned
+    }
+
+    private static func rootEndpoint(from url: URL, path: String = "") -> String {
+        var components = URLComponents()
+        components.scheme = url.scheme
+        components.host = url.host
+        components.port = url.port
+        components.path = path == "/" ? "" : path
+        return components.string ?? "\(url.scheme ?? "http")://\(url.host ?? "127.0.0.1")\(path)"
     }
 
     private static func openAICompatibleBase(from endpoint: String) -> String {
@@ -860,8 +906,16 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             || path.hasSuffix("/chat/completions")
     }
 
+    private static let useEnglishErrors: Bool = {
+        let lang = Locale.preferredLanguages.first ?? ""
+        return !lang.hasPrefix("zh")
+    }()
+
     private static func userFacingErrorMessage(statusCode: Int, bodyText: String, connectorName: String) -> String {
         let extracted = extractServerMessage(from: bodyText)
+        if useEnglishErrors {
+            return userFacingErrorMessageEN(statusCode: statusCode, extracted: extracted, connectorName: connectorName)
+        }
         switch statusCode {
         case 400:
             return extracted.isEmpty
@@ -883,6 +937,31 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             return extracted.isEmpty
                 ? "请求失败（HTTP \(statusCode)）。"
                 : "请求失败（HTTP \(statusCode)）：\(extracted)"
+        }
+    }
+
+    private static func userFacingErrorMessageEN(statusCode: Int, extracted: String, connectorName: String) -> String {
+        switch statusCode {
+        case 400:
+            return extracted.isEmpty
+                ? "Request format not accepted by \(connectorName). Check endpoint, model name and compatibility."
+                : "Request not accepted by \(connectorName): \(extracted)"
+        case 401:
+            return "Authentication failed. Please check your API key."
+        case 403:
+            return extracted.isEmpty
+                ? "Request denied. Check your API key or service permissions."
+                : "Request denied: \(extracted)"
+        case 404:
+            return "Endpoint not found. Check the URL.\nHint: OpenAI-compatible endpoints end with /v1/chat/completions, Ollama with /api/chat."
+        case 429:
+            return "Too many requests. Please wait and try again."
+        case 500...599:
+            return "Service temporarily unavailable (HTTP \(statusCode)). Please retry later."
+        default:
+            return extracted.isEmpty
+                ? "Request failed (HTTP \(statusCode))."
+                : "Request failed (HTTP \(statusCode)): \(extracted)"
         }
     }
 
@@ -1201,7 +1280,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             toolActivities: [
                 ToolActivity(
                     name: "chat.model_unsupported",
-                    summary: "图片生成模型不能用于聊天",
+                    summary: "图片生成模型不能用于通用 Agent",
                     statusLine: connector.modelName,
                     isFailure: true
                 )

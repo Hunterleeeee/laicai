@@ -654,9 +654,9 @@ public struct WikiBuildTool: LaicaiTool {
                     "save": FunctionProperty(type: "boolean", description: "是否写入 Vault；false 只生成预览"),
                     "useWeb": FunctionProperty(type: "boolean", description: "是否补充网页来源"),
                     "topK": FunctionProperty(type: "integer", description: "最多使用的本地笔记数量"),
-                    "sourceTitle": FunctionProperty(type: "string", description: "可选：当前任务已读取或提取的来源标题"),
-                    "sourcePath": FunctionProperty(type: "string", description: "可选：当前任务已读取或提取的来源路径"),
-                    "sourceText": FunctionProperty(type: "string", description: "可选：当前任务已读取或提取的正文材料，优先用于生成笔记")
+                    "sourceTitle": FunctionProperty(type: "string", description: "可选：当前会话 已读取或提取的来源标题"),
+                    "sourcePath": FunctionProperty(type: "string", description: "可选：当前会话 已读取或提取的来源路径"),
+                    "sourceText": FunctionProperty(type: "string", description: "可选：当前会话 已读取或提取的正文材料，优先用于生成笔记")
                 ],
                 required: ["topic"]
             )
@@ -800,8 +800,8 @@ public struct WikiBuildTool: LaicaiTool {
         let path = params.sourcePath?.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = params.sourceTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
         return WikiSource(
-            path: path?.isEmpty == false ? path! : "当前任务材料",
-            title: title?.isEmpty == false ? title! : "当前任务材料",
+            path: path?.isEmpty == false ? path! : "当前会话 材料",
+            title: title?.isEmpty == false ? title! : "当前会话 材料",
             preview: sourceText,
             kind: "task"
         )
@@ -826,7 +826,7 @@ public struct WikiBuildTool: LaicaiTool {
             .map { "- \(String($0.prefix(220)))" }
             .joined(separator: "\n")
         let source = sources.first(where: { $0.kind == "task" })
-        let sourceLine = source.map { "- \($0.title)：\($0.path)" } ?? "- 当前任务材料"
+        let sourceLine = source.map { "- \($0.title)：\($0.path)" } ?? "- 当前会话 材料"
 
         return """
         ---
@@ -840,7 +840,7 @@ public struct WikiBuildTool: LaicaiTool {
         \(heading)
 
         ## Summary
-        这篇笔记由当前任务读取/提取的真实材料整理而来，用于沉淀到本地 Wiki。
+        这篇笔记由当前会话 读取/提取的真实材料整理而来，用于沉淀到本地 Wiki。
 
         ## Key Points
         \(points.isEmpty ? "- 已读取材料，但未提取到可展示的行级要点。" : points)

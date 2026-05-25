@@ -140,7 +140,7 @@ struct ToolExecutionEngine {
             )
         } else {
             // Circuit breaker check + auto-repair
-            let cbTarget = callStep.toolParams?["path"] ?? callStep.toolParams?["query"] ?? ""
+            let cbTarget = AgentLoop.circuitBreakerTarget(for: callStep)
             let cbSig = "\(toolName):\(cbTarget.prefix(60))"
             if circuitBrokenTools.contains(cbSig) {
                 toolResult = await AgentLoop.attemptCircuitBreakerRepair(
@@ -333,6 +333,25 @@ struct ToolExecutionEngine {
                     onStep: onStep
                 )
             }
+            if toolResult.success,
+               toolName == "document.transform",
+               let action = toolResult.data?["action"],
+               ["apply", "copy", "render"].contains(action),
+               let outputPath = toolResult.data?["pdfPath"] ?? toolResult.data?["outputPath"] {
+                let reviewStep = TaskStep(
+                    kind: .reviewRequest,
+                    text: "已生成文档（可回滚）：\(outputPath)",
+                    toolName: toolName,
+                    toolParams: resultParams,
+                    toolCallId: callId,
+                    isCollapsible: false,
+                    isCollapsed: false,
+                    diffFilePath: outputPath,
+                    approved: true
+                )
+                state.task.steps.append(reviewStep)
+                onStep(reviewStep)
+            }
 
             // Emit result step (unless streamed)
             if toolResult.data?["streamed"] != "true" {
@@ -384,7 +403,7 @@ struct ToolExecutionEngine {
             // Circuit breaker tracking
             if !toolResult.success {
                 hadFailure = true
-                let target = callStep.toolParams?["path"] ?? callStep.toolParams?["command"] ?? "unknown"
+                let target = AgentLoop.circuitBreakerTarget(for: callStep)
                 let failKey = "\(toolName):\(target)"
                 state.toolFailureCounts[failKey, default: 0] += 1
                 let failCount = state.toolFailureCounts[failKey] ?? 1
@@ -392,13 +411,21 @@ struct ToolExecutionEngine {
                 // file.edit is especially prone to failure — after 1st failure, strongly hint file.write
                 if toolName == "file.edit" && failCount == 1 {
                     state.messages.append(ChatMessage(role: "system", content: "编排层：file.edit 对 \(URL(fileURLWithPath: target).lastPathComponent) 匹配失败。下次对该文件直接使用 file_write 全量写入（先 file_read 获取当前内容，在内容中做修改，然后 file_write 写回完整内容）。不要再尝试 file_edit。"))
+                } else if isDeterministicUnsupportedFileFailure(toolName: toolName, result: toolResult) {
+                    let alternatives = AgentLoop.suggestAlternatives(for: toolName, target: target)
+                    state.circuitBrokenTools.insert("\(toolName):\(target.prefix(60))")
+                    state.messages.append(ChatMessage(
+                        role: "system",
+                        content: "⚠️ \(toolName) 对 \(target) 返回确定性失败：\(toolResult.error ?? toolResult.output)。不要再用同一工具和同一参数重试。\n替代方案：\(alternatives)\n如果会话目标要求交付文件，必须改用可执行脚本/系统工具真实生成目标文件；不能只写方案或声称完成。"
+                    ))
                 } else if failCount >= state.maxRepeatedFailures {
+                    state.circuitBrokenTools.insert("\(toolName):\(target.prefix(60))")
                     let alternatives = AgentLoop.suggestAlternatives(for: toolName, target: target)
                     let circuitMsg = "⚠️ \(toolName) 对 \(target) 已失败 \(failCount) 次，禁止再用相同参数重试。\n替代方案：\(alternatives)"
                     state.messages.append(ChatMessage(role: "system", content: circuitMsg))
                 }
             } else {
-                let target = callStep.toolParams?["path"] ?? callStep.toolParams?["command"] ?? "unknown"
+                let target = AgentLoop.circuitBreakerTarget(for: callStep)
                 state.toolFailureCounts["\(toolName):\(target)"] = 0
             }
 
@@ -657,6 +684,22 @@ struct ToolExecutionEngine {
                 let fullPath = (state.taskContext.workspaceRoot as NSString).appendingPathComponent(path)
                 state.taskContext.memory.fileContentCache.removeValue(forKey: fullPath)
             }
+        } else if callStep.toolName == "document.transform",
+                  toolResult.success,
+                  let action = toolResult.data?["action"],
+                  ["workspace", "apply", "copy", "render"].contains(action),
+                  let path = toolResult.data?["workflowPath"] ?? toolResult.data?["pdfPath"] ?? toolResult.data?["outputPath"] {
+            let label = action == "workspace" ? "文档交付工作区" : (action == "render" ? "已渲染文档" : "已生成文档")
+            state.taskContext.memory.appendDecision("\(label)：\(path)")
+            state.taskContext.memory.fileContentCache.removeValue(forKey: path)
+        } else if callStep.toolName == "skill.manage",
+                  toolResult.success,
+                  let action = toolResult.data?["action"] ?? callStep.toolParams?["action"] {
+            let name = toolResult.data?["name"] ?? callStep.toolParams?["name"] ?? "技能"
+            if ["create", "update"].contains(action) {
+                let path = toolResult.data?["path"].map { "：\($0)" } ?? ""
+                state.taskContext.memory.appendDecision("已沉淀技能：\(name)\(path)")
+            }
         }
     }
 
@@ -677,23 +720,27 @@ struct ToolExecutionEngine {
         guard codeExts.contains(ext) && hasBuildSys && isToolAllowed("verify.build", config: config) else { return "" }
         guard let verifyTool = toolRegistry.tool(named: "verify_build") ?? toolRegistry.tool(named: "verify.build") else { return "" }
 
-        let verifyStep = TaskStep(kind: .toolCall, text: "编排层自动验证编译", toolName: "verify.build", isCollapsible: true, isCollapsed: true)
-        state.task.steps.append(verifyStep)
-        onStep(verifyStep)
+        let verifyStep = TaskStep(kind: .toolCall, text: "验证编译", toolName: "verify.build", isCollapsible: true, isCollapsed: true)
+        if config.emitDebugSteps {
+            state.task.steps.append(verifyStep)
+            onStep(verifyStep)
+        }
         let vr = try? await verifyTool.execute(argumentsJSON: "{}", context: state.taskContext)
         guard let vr else { return "" }
 
         let vrStep = TaskStep(kind: .toolResult, text: vr.success ? "✅ 编译通过" : "❌ 编译失败", toolName: "verify.build", isCollapsible: true, isCollapsed: vr.success)
         state.task.steps.append(vrStep)
-        onStep(vrStep)
+        if config.emitDebugSteps || !vr.success {
+            onStep(vrStep)
+        }
 
         if vr.success {
-            return "\n\n✅ 编排层自动验证：编译通过。"
+            return "\n\n✅ 自动验证：编译通过。"
         } else {
             let errLines = vr.output.components(separatedBy: .newlines)
                 .filter { $0.lowercased().contains("error:") || $0.lowercased().contains("fatal") }
                 .prefix(8).joined(separator: "\n")
-            return "\n\n❌ 编排层自动验证：编译失败。关键错误：\n\(errLines)\n\n请立即 file_edit 修复后再次等待编排层自动验证。"
+            return "\n\n❌ 自动验证：编译失败。关键错误：\n\(errLines)\n\n请根据错误继续修复后再次验证。"
         }
     }
 
@@ -718,11 +765,13 @@ struct ToolExecutionEngine {
         if rr.output.count < 100_000 {
             state.taskContext.memory.fileContentCache[bestPath] = rr.output
         }
-        let chainStep = TaskStep(kind: .toolResult, text: "编排层自动读取：\(bestPath)", toolName: "file.read", isCollapsible: true, isCollapsed: true)
-        state.task.steps.append(chainStep)
-        onStep(chainStep)
+        let chainStep = TaskStep(kind: .toolResult, text: "已读取：\(bestPath)", toolName: "file.read", isCollapsible: true, isCollapsed: true)
+        if config.emitDebugSteps {
+            state.task.steps.append(chainStep)
+            onStep(chainStep)
+        }
         let readContent = ToolResultFormatter.modelContent(toolName: "file.read", result: rr, limit: max(2000, config.maxTokensPerTurn / 2))
-        return "\n\n编排层已自动读取最相关文件 \(bestPath)：\n\(readContent)"
+        return "\n\n已读取最相关文件 \(bestPath)：\n\(readContent)"
     }
 
     // MARK: - Dynamic Token Limit
@@ -730,6 +779,7 @@ struct ToolExecutionEngine {
     private static func dynamicTokenLimit(toolName: String, success: Bool, config: AgentLoop.Config) -> Int {
         if !success { return config.maxTokensPerTurn }
         if toolName == "file.read" { return config.maxTokensPerTurn }
+        if toolName == "document.transform" { return min(max(config.maxTokensPerTurn, 8000), 40_000) }
         if toolName == "verify.build" { return 200 }
         if toolName == "workspace.index" || toolName == "code.search" { return min(3000, config.maxTokensPerTurn) }
         if toolName == "shell.exec" { return config.maxTokensPerTurn / 2 }
@@ -740,5 +790,11 @@ struct ToolExecutionEngine {
 
     private static func isToolAllowed(_ name: String, config: AgentLoop.Config) -> Bool {
         AgentLoop.allowsTool(name, allowedTools: config.allowedTools)
+    }
+
+    private static func isDeterministicUnsupportedFileFailure(toolName: String, result: ToolResult) -> Bool {
+        guard ["file.read", "file.extract", "document.transform"].contains(toolName) else { return false }
+        let code = result.error ?? ""
+        return code == "unsupported_binary_file" || code == "unsupported_file_type"
     }
 }

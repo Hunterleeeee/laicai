@@ -9,7 +9,7 @@ public struct GitTool: LaicaiTool {
 
     private static let readOnlySubcommands = ["diff", "status", "log", "branch", "show", "stash list", "remote", "tag"]
     private static let safeWriteSubcommands = ["add", "commit", "commit-auto", "checkout", "switch", "branch-create", "pr-desc"]
-    private static let dangerousPatterns = ["push --force", "reset --hard", "clean -fd", "rebase", "push -f"]
+    private static let dangerousPatterns = ["push --force", "reset --hard", "clean -fd", "clean -xdf", "rebase", "push -f"]
 
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(
@@ -63,9 +63,10 @@ public struct GitTool: LaicaiTool {
 
         // Dangerous command guard
         let fullCmd = "git \(subcommand) \(args)"
-        if Self.dangerousPatterns.contains(where: { fullCmd.contains($0) }) {
+        if Self.dangerousPatterns.contains(where: { fullCmd.contains($0) })
+            || DangerousOperationGuard.shellViolation(command: fullCmd) != nil {
             return ToolResult(
-                output: "安全拦截：\(fullCmd) 是破坏性操作，不允许自动执行。请手动在终端执行。",
+                output: "安全拦截：\(fullCmd) 是破坏性操作，不允许自动执行。请手动确认后再处理。",
                 data: ["command": fullCmd, "blocked": "true"],
                 success: false,
                 error: "dangerous_command"
@@ -143,7 +144,7 @@ public struct GitTool: LaicaiTool {
     static func pathFromStatusLine(_ line: String) -> String? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count > 3 else { return nil }
-        let rawPath = String(trimmed.dropFirst(3))
+        let rawPath = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
         let path = rawPath.components(separatedBy: " -> ").last ?? rawPath
         let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmedPath.isEmpty ? nil : trimmedPath
@@ -515,13 +516,9 @@ public struct ComfyUITool: LaicaiTool {
         if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
-        request.httpBody = try JSONEncoder().encode(ImagesAPIRequest(
-            model: modelName,
-            prompt: prompt,
-            n: 1,
-            size: size,
-            response_format: "b64_json"
-        ))
+        let escapedModel = modelName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedPrompt = prompt.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        request.httpBody = "{\"model\":\"\(escapedModel)\",\"prompt\":\"\(escapedPrompt)\",\"n\":1,\"size\":\"\(size)\",\"response_format\":\"b64_json\"}".data(using: .utf8)
         request.timeoutInterval = NetworkDefaults.imageRequest
 
         let (data, response): (Data, URLResponse)

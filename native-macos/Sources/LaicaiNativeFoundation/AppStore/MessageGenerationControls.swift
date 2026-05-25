@@ -8,7 +8,7 @@ extension AppStore {
         guard let threadID = state.selectedThreadID,
               let loop = agentLoops[threadID] else { return }
         loop.steer(message)
-        ToastCenter.shared.show("🔀 已发送方向修正")
+        notify("已发送方向修正")
     }
 
     public func stopGenerating() {
@@ -23,11 +23,12 @@ extension AppStore {
         state.liveActivity = ""
         if let threadID = state.selectedThreadID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }),
-           state.threads[threadIndex].source == .task,
+           state.threads[threadIndex].isExecutionAgent,
            state.threads[threadIndex].status == .running {
             flushStreamBuffer(for: threadID)
             state.threads[threadIndex].steps.append(TaskStep(kind: .error, text: "已中断", isFailure: false, recoverable: true, retryAction: "重试"))
             state.threads[threadIndex].status = .cancelled
+            syncAgentSnapshot(at: threadIndex)
             state.threads[threadIndex].updatedAt = .now
             BehaviorSignalTracker.record(signal: .cancel, thread: state.threads[threadIndex])
             persistThreads()
@@ -37,7 +38,7 @@ extension AppStore {
 
         if let threadID = state.selectedThreadID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }),
-           state.threads[threadIndex].source == .session {
+           state.threads[threadIndex].isAskAgent {
             var steps = state.threads[threadIndex].steps
             if let lastStep = steps.last, lastStep.kind == .textOutput {
                 if lastStep.text.isEmpty {

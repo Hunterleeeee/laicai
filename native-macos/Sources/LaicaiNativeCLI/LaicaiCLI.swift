@@ -1,4 +1,4 @@
-// 来财 CLI — 独立终端 Agent
+// 来财 CLI — 独立终端会话
 // 直接在终端运行 AgentLoop，不依赖桌面 App
 //
 // 用法：
@@ -138,7 +138,7 @@ struct CLIConfig {
 // MARK: - Help Text
 
 let helpText = """
-\(Term.bold)\(Term.cyan)来财\(Term.reset) — 本地终端 AI Agent
+\(Term.bold)\(Term.cyan)来财\(Term.reset) — 本地终端 AI会话
 
 \(Term.bold)用法：\(Term.reset)
   laicai <消息>                     单次执行任务
@@ -192,7 +192,7 @@ final class CLISession {
     }
 
     func printBanner() {
-        print(Term.header("来财 Terminal Agent"))
+        print(Term.header("来财 Terminal 会话"))
         print("\(Term.dim)  工作区: \(workspace)\(Term.reset)")
         print("\(Term.dim)  模型:   \(connector.modelName)\(Term.reset)")
         print("\(Term.dim)  端点:   \(connector.endpoint)\(Term.reset)")
@@ -214,21 +214,25 @@ final class CLISession {
     func runTask(message: String) async {
         taskCount += 1
         let startTime = Date()
+        let decision = IntentRouter.plan(message)
+        let intent = decision.intent
 
         let loopConfig = AgentLoop.Config(
-            maxIterations: 30,
+            maxIterations: intent == .chat ? 3 : 30,
             workspaceRoot: workspace,
-            supportsToolCalling: true,
+            supportsToolCalling: intent != .chat,
             contextMode: contextMode
         )
         let loop = await AgentLoop(config: loopConfig, runtime: runtime)
 
         let context = AutoContextEngine.buildContext(
             workspaceRoot: workspace,
-            userInput: message
+            userInput: message,
+            fileLimit: intent == .chat ? 0 : 200
         )
 
-        print(Term.header("任务 #\(taskCount)"))
+        print(Term.header("\(intent == .chat ? "问答" : "任务") #\(taskCount)"))
+        print("\(Term.dim)  路由: \(decision.routeLabel) · \(decision.reason)\(Term.reset)")
         print()
 
         var lastStepKind: TaskStepKind?
@@ -239,7 +243,7 @@ final class CLISession {
             let completedTask = try await loop.run(
                 taskID: taskID,
                 message: message,
-                intent: .task,
+                intent: intent,
                 connector: connector,
                 context: context,
                 onStep: { @MainActor step in

@@ -240,12 +240,12 @@ private struct AppTopBar: View {
 
     private var actionButtons: some View {
         HStack(spacing: AppSpace.xs) {
-            ToolbarButton(icon: "plus.message", tooltip: "新 Agent") {
-                store.newTask()
+            ToolbarButton(icon: "plus.message", tooltip: "新任务") {
+                store.newThread()
             }
 
             ToolbarButton(icon: "bubble.left.and.bubble.right", tooltip: "新会话") {
-                store.newSession()
+                store.newThread()
             }
 
             ToolbarButton(icon: "command", tooltip: "命令面板") {
@@ -266,7 +266,7 @@ private struct AppTopBar: View {
     private var currentTitle: String {
         guard let thread = store.state.selectedThread else { return "工作台" }
         let title = TextHelper.compactTitle(thread.title)
-        return title.isEmpty ? "新 Agent" : title
+        return title.isEmpty ? "新会话" : title
     }
 
     private var subtitle: String {
@@ -274,7 +274,7 @@ private struct AppTopBar: View {
             let live = store.state.liveActivity.trimmingCharacters(in: .whitespacesAndNewlines)
             return live.isEmpty ? "正在运行" : live
         }
-        guard let thread = store.state.selectedThread else { return "选择 Agent，或直接输入一个目标" }
+        guard let thread = store.state.selectedThread else { return "选择会话，或直接输入一个目标" }
         return "\(thread.agentState.title) · \(RelativeTimeFormatter.string(for: thread.updatedAt))"
     }
 

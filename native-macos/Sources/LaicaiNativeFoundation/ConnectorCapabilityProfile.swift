@@ -161,7 +161,7 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
     public static func imageOnlyModelChatMessage(modelName: String) -> String {
         let displayName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
         let modelLabel = displayName.isEmpty ? "当前模型" : "`\(displayName)`"
-        return "当前选择的是图片生成模型 \(modelLabel)，不能作为通用 Agent 模型使用。生成图片请直接发送“生成图片”，或切换到支持文字和工具的模型（如 gpt-5.5、gpt-4o、Claude）处理文字目标。"
+        return "当前选择的是图片生成模型 \(modelLabel)，不能作为通用会话模型使用。生成图片请直接发送“生成图片”，或切换到支持文字和工具的模型（如 gpt-5.5、gpt-4o、Claude）处理文字目标。"
     }
 
     public static func resolveToolCalling(for connector: ConnectorProfile) -> (supports: Bool, source: ConnectorToolCallingResolutionSource) {

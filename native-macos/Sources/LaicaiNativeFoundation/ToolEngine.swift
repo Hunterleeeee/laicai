@@ -11,6 +11,7 @@ public final class ToolRegistry {
     private init() {
         register(ReadFileTool())
         register(ExtractFileTool())
+        register(DocumentTransformTool())
         register(FileEditTool())
         register(WriteFileTool())
         register(ShellTool())
@@ -65,6 +66,7 @@ public enum ToolNameCodec {
         switch name {
         case "file_read": return "file.read"
         case "file_extract": return "file.extract"
+        case "document_transform": return "document.transform"
         case "file_edit": return "file.edit"
         case "file_write": return "file.write"
         case "code_search": return "code.search"
@@ -80,6 +82,7 @@ public enum ToolNameCodec {
         case "diff_apply": return "diff.apply"
         case "pm_agent": return "pm.agent"
         case "browser_real": return "browser.real"
+        case "computer_tool": return "computer"
         default: return name
         }
     }

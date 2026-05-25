@@ -4,6 +4,12 @@ import XCTest
 
 @MainActor
 final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
+    func testDisposableSmokeWorkspacesAreNotValidWorkspaceRoots() {
+        XCTAssertTrue(WorkspaceSandbox.isDisposableSmokeWorkspace("/tmp/laicai-pptx-smoke"))
+        XCTAssertTrue(WorkspaceSandbox.isDisposableSmokeWorkspace("/private/tmp/laicai-render-smoke"))
+        XCTAssertFalse(WorkspaceSandbox.isDisposableSmokeWorkspace("/tmp/laicai-real-project"))
+        XCTAssertFalse(WorkspaceSandbox.isDisposableSmokeWorkspace("/Users/test/Projects/laicai-smoke-app"))
+    }
     func testShellWhitelistAllowsPwdAndRejectsSudoAndProjectTraversal() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }

@@ -4,7 +4,60 @@ import XCTest
 
 @MainActor
 final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
-    func testTinyFollowUpWithoutSelectionRestoresRecentTask() async throws {
+    func testPreviewFollowUpFromNewPlaceholderRestoresRecentDeliverableTask() async throws {
+        let connector = makeConnector()
+        let original = Thread(
+            title: "出一个水生万物，财自流转的icon图",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "出一个水生万物，财自流转的icon图"),
+                TaskStep(kind: .toolCall, text: "准备写入文件：water-wealth-cycle-icon.svg", toolName: "file.write", toolParams: ["path": "water-wealth-cycle-icon.svg"]),
+                TaskStep(kind: .reviewRequest, text: "已写入文件（可回滚）：/tmp/water-wealth-cycle-icon.svg", toolName: "file.write", diffFilePath: "/tmp/water-wealth-cycle-icon.svg"),
+                TaskStep(kind: .toolResult, text: "已准备文件写入 · /tmp/water-wealth-cycle-icon.svg", toolName: "file.write", toolParams: ["path": "/tmp/water-wealth-cycle-icon.svg"]),
+                TaskStep(kind: .textOutput, text: "已生成 SVG icon 文件：/tmp/water-wealth-cycle-icon.svg")
+            ],
+            updatedAt: .now.addingTimeInterval(-30),
+            agentGoal: "出一个水生万物，财自流转的icon图"
+        )
+        let placeholder = Thread(title: "新 Agent", status: .queued, steps: [], updatedAt: .now)
+        let runtime = StreamingRuntime()
+        let store = AppStore(
+            state: testState(
+                threads: [placeholder, original],
+                selectedThreadID: placeholder.id,
+                workspacePath: "/tmp",
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+
+        store.updateDraft("在哪了？我要预览啊")
+        store.sendDraft()
+        try await waitUntilIdle(store)
+
+        XCTAssertEqual(store.state.selectedThreadID, original.id)
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == TaskStepKind.userInput }.last?.text, "在哪了？我要预览啊")
+    }
+
+    func testTaskLikeHistoricalSessionPromotesToExecutionAgent() {
+        let historical = Thread(
+            title: "出一个 icon",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "出一个 icon"),
+                TaskStep(kind: .toolCall, text: "写文件", toolName: "file.write"),
+                TaskStep(kind: .toolResult, text: "已写入", toolName: "file.write")
+            ],
+            agentState: .idle
+        )
+
+        XCTAssertTrue(historical.isExecutionAgent)
+        XCTAssertTrue(historical.canContinueAgent)
+    }
+
+    func testTinyFollowUpWithoutSelectionDoesNotRestoreRandomRecentTask() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
             title: "读取项目",
@@ -16,9 +69,23 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "聊天",
-                sessions: [],
-                selectedSessionID: nil,
+                modeLabel: "会话 问答",
+                threads: [Thread(
+                    id: task.id,
+                    title: task.title,
+                    preview: task.preview,
+                    status: task.status,
+                    steps: task.steps,
+                    connectorID: task.connectorID,
+                    workflowName: task.workflowName,
+                    context: task.context,
+                    updatedAt: task.updatedAt,
+                    agentState: Thread.inferAgentState(status: task.status),
+                    agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+                    taskProtocol: task.taskProtocol,
+                    executionLedger: task.executionLedger
+                )],
+                selectedThreadID: nil,
                 workbenchTab: .tools,
                 connectors: [connector],
                 activeConnectorID: connector.id,
@@ -26,9 +93,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
-                tasks: [task],
-                selectedTaskID: nil
+                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -43,10 +108,11 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertNil(store.state.selectedSessionID)
-        XCTAssertEqual(store.state.selectedTaskID, task.id)
-        XCTAssertEqual(store.state.tasks.count, 1)
-        XCTAssertEqual(store.state.selectedTask?.title, "读取项目")
+        XCTAssertNotNil(store.state.selectedThreadID)
+        XCTAssertTrue(store.state.threads.contains(where: { $0.id == task.id }))
+        XCTAssertEqual(store.state.threads.count, 2)
+        XCTAssertEqual(store.state.selectedThread?.steps.first?.text, "？")
+        XCTAssertNil(runtime.requests.last?.tools)
     }
     func testExplicitContinuationRestoresRecentTaskEvenFromEmptySession() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
@@ -56,14 +122,36 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             steps: [TaskStep(kind: .userInput, text: "读取本地项目")],
             updatedAt: .now
         )
-        let emptySession = ChatSession(title: "新线程", preview: "", modelName: "test", turns: [])
+        let emptyThread = Thread(
+            id: UUID(),
+            title: "新线程",
+            preview: "",
+            steps: [],
+            modelName: "test",
+            agentState: .idle
+        )
+        let taskThread = Thread(
+            id: task.id,
+            title: task.title,
+            preview: task.preview,
+            status: task.status,
+            steps: task.steps,
+            connectorID: task.connectorID,
+            workflowName: task.workflowName,
+            context: task.context,
+            updatedAt: task.updatedAt,
+            agentState: Thread.inferAgentState(status: task.status),
+            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            taskProtocol: task.taskProtocol,
+            executionLedger: task.executionLedger
+        )
         let runtime = CapturingToolsRuntime()
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "聊天",
-                sessions: [emptySession],
-                selectedSessionID: emptySession.id,
+                modeLabel: "会话 问答",
+                threads: [emptyThread, taskThread],
+                selectedThreadID: emptyThread.id,
                 workbenchTab: .tools,
                 connectors: [connector],
                 activeConnectorID: connector.id,
@@ -71,9 +159,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
-                tasks: [task],
-                selectedTaskID: nil
+                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -84,14 +170,12 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             )
         )
 
-        store.updateDraft("继续这个任务")
+        store.updateDraft("继续这个 Agent")
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertNil(store.state.selectedSessionID)
-        XCTAssertEqual(store.state.selectedTaskID, task.id)
-        XCTAssertTrue(store.state.sessions.isEmpty)
-        XCTAssertEqual(store.state.selectedTask?.steps.filter { $0.kind == .userInput }.last?.text, "继续这个任务")
+        XCTAssertEqual(store.state.selectedThreadID, task.id)
+        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == TaskStepKind.userInput }.last?.text, "继续这个 Agent")
     }
     func testContextualTaskReferenceFromEmptySessionRestoresRecentTask() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
@@ -104,14 +188,36 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             ],
             updatedAt: .now
         )
-        let emptySession = ChatSession(title: "新线程", preview: "", modelName: "test", turns: [])
+        let emptyThread = Thread(
+            id: UUID(),
+            title: "新线程",
+            preview: "",
+            steps: [],
+            modelName: "test",
+            agentState: .idle
+        )
+        let taskThread = Thread(
+            id: task.id,
+            title: task.title,
+            preview: task.preview,
+            status: task.status,
+            steps: task.steps,
+            connectorID: task.connectorID,
+            workflowName: task.workflowName,
+            context: task.context,
+            updatedAt: task.updatedAt,
+            agentState: Thread.inferAgentState(status: task.status),
+            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            taskProtocol: task.taskProtocol,
+            executionLedger: task.executionLedger
+        )
         let runtime = CapturingToolsRuntime()
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "聊天",
-                sessions: [emptySession],
-                selectedSessionID: emptySession.id,
+                modeLabel: "会话 问答",
+                threads: [emptyThread, taskThread],
+                selectedThreadID: emptyThread.id,
                 workbenchTab: .tools,
                 connectors: [connector],
                 activeConnectorID: connector.id,
@@ -119,9 +225,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
-                tasks: [task],
-                selectedTaskID: nil
+                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -136,10 +240,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertNil(store.state.selectedSessionID)
-        XCTAssertEqual(store.state.selectedTaskID, task.id)
-        XCTAssertTrue(store.state.sessions.isEmpty)
-        XCTAssertEqual(store.state.selectedTask?.steps.filter { $0.kind == .userInput }.last?.text, "刚才那个读取本地项目的对话输出没结束就被截断了")
+        XCTAssertNotNil(store.state.selectedThreadID)
+        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == TaskStepKind.userInput }.last?.text, "刚才那个读取本地项目的对话输出没结束就被截断了")
     }
     func testFrustratedEmptySessionRestoresRecentTask() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
@@ -149,14 +251,36 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             steps: [TaskStep(kind: .userInput, text: "读取本地项目")],
             updatedAt: .now
         )
-        let emptySession = ChatSession(title: "新线程", preview: "", modelName: "test", turns: [])
+        let emptyThread = Thread(
+            id: UUID(),
+            title: "新线程",
+            preview: "",
+            steps: [],
+            modelName: "test",
+            agentState: .idle
+        )
+        let taskThread = Thread(
+            id: task.id,
+            title: task.title,
+            preview: task.preview,
+            status: task.status,
+            steps: task.steps,
+            connectorID: task.connectorID,
+            workflowName: task.workflowName,
+            context: task.context,
+            updatedAt: task.updatedAt,
+            agentState: Thread.inferAgentState(status: task.status),
+            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            taskProtocol: task.taskProtocol,
+            executionLedger: task.executionLedger
+        )
         let runtime = CapturingToolsRuntime()
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "聊天",
-                sessions: [emptySession],
-                selectedSessionID: emptySession.id,
+                modeLabel: "会话 问答",
+                threads: [emptyThread, taskThread],
+                selectedThreadID: emptyThread.id,
                 workbenchTab: .tools,
                 connectors: [connector],
                 activeConnectorID: connector.id,
@@ -164,9 +288,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
-                tasks: [task],
-                selectedTaskID: nil
+                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -181,8 +303,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertNil(store.state.selectedSessionID)
-        XCTAssertEqual(store.state.selectedTaskID, task.id)
+        XCTAssertNotNil(store.state.selectedThreadID)
         XCTAssertTrue(runtime.requests.first?.messages?.contains { ($0.content ?? "").contains("证据优先修复模式") } == true)
     }
 }

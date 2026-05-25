@@ -79,7 +79,7 @@ struct MultiAgentPlanEditorView: View {
 
                 Menu {
                     if !agentRegistry.agents.isEmpty {
-                        Section("自定义 Agent") {
+                        Section("自定义会话") {
                             ForEach(agentRegistry.agents) { agent in
                                 Button {
                                     withAnimation(AppAnimation.quick) {
@@ -114,7 +114,7 @@ struct MultiAgentPlanEditorView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "person.badge.plus")
                             .font(.system(size: 11))
-                        Text("自建Agent")
+                        Text("自建会话")
                             .font(AppFont.captionMedium)
                     }
                     .foregroundStyle(Brand.primary)
@@ -523,7 +523,7 @@ struct ResumePlanButton: View {
                 HStack(spacing: AppSpace.sm) {
                     Image(systemName: "arrow.counterclockwise")
                         .font(.system(size: 12, weight: .medium))
-                    Text("从失败处继续（\(plan.failedAgents.count)个Agent）")
+                    Text("从失败处继续（\(plan.failedAgents.count)个会话）")
                         .font(AppFont.captionMedium)
                 }
                 .foregroundStyle(Semantic.warning)

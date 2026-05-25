@@ -282,7 +282,7 @@ struct KnowledgeContextProvider {
             result.append(ContextFragment(
                 tag: "knowledge.learned_skill",
                 priority: .medium,
-                content: "此类任务曾成功使用策略「\(skill.strategy)」，推荐工具序列：\(toolSequence)（成功率 \(Int(skill.successRate * 100))%，Q值 \(String(format: "%.2f", skill.qValue))）",
+                content: "此类会话目标曾成功使用策略「\(skill.strategy)」，推荐工具序列：\(toolSequence)（成功率 \(Int(skill.successRate * 100))%，Q值 \(String(format: "%.2f", skill.qValue))）",
                 heading: "已学技能提示"
             ))
         }
@@ -298,7 +298,7 @@ struct KnowledgeContextProvider {
             result.append(ContextFragment(
                 tag: "knowledge.failure_pattern",
                 priority: .high,
-                content: "上次类似任务因「\(topPattern.rootCause)」导致失败。本次策略：\(topPattern.preemptiveInstruction)",
+                content: "上次类似会话因「\(topPattern.rootCause)」导致失败。本次策略：\(topPattern.preemptiveInstruction)",
                 heading: "历史经验提醒"
             ))
         }
@@ -338,7 +338,7 @@ extension ContextBuilder {
                 tag: "custom.system_prompt",
                 priority: .high,
                 content: customPrompt,
-                heading: "当前指定 Agent"
+                heading: "当前指定会话"
             ))
         }
 
@@ -347,8 +347,16 @@ extension ContextBuilder {
             fragments.append(ContextFragment(
                 tag: "discipline.execution_plan",
                 priority: .high,
-                content: "严格按照上面的执行计划推进。每轮只做计划中的下一步。最终回复必须说明已验证什么、未验证什么。",
+                content: "严格按照上面的执行计划推进。每轮只做计划中的下一步。若当前是继续/追问已有会话，必须沿用检查点、最近失败和已读文件，从断点推进；不要把「继续」「为什么」「还有什么」当成新的独立目标。最终回复必须说明已验证什么、未验证什么。",
                 heading: "执行纪律"
+            ))
+        }
+        if state.intent != .chat {
+            fragments.append(ContextFragment(
+                tag: "discipline.business_execution",
+                priority: .high,
+                content: "默认完成实际业务，不停在回答层。遇到项目、文件、链接、报错、按钮、页面、文档或优化/修复/调整/继续时，先用工具取证；证据足够且风险可控时继续执行、验证和交付。只有用户明确说只分析/先别改/不要执行时才保持只读结论。",
+                heading: "业务执行原则"
             ))
         }
 

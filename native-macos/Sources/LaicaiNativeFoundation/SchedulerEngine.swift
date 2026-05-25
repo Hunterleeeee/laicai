@@ -183,7 +183,7 @@ public final class SchedulerEngine: ObservableObject {
             tasks[i].nextRun = computeNextRun(for: tasks[i].schedule, after: now)
 
             NotificationManager.shared.post(
-                title: "定时任务完成",
+                title: "定时会话完成",
                 body: "\(taskName)：\(entry.result ?? "完成")"
             )
         }

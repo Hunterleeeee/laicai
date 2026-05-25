@@ -32,7 +32,7 @@ extension AppStore {
                 intent: .chat,
                 confidence: max(decision.confidence, 0.82),
                 reason: "这是独立能力、概念或泛问题，不应续接当前执行任务。",
-                routeLabel: "Agent 问答",
+                routeLabel: "会话 问答",
                 expectedCapabilities: ["解释", "分析", "规划"]
             )
         }
@@ -45,26 +45,15 @@ extension AppStore {
             decision = PlannerDecision(
                 intent: .task,
                 confidence: max(decision.confidence, 0.75),
-                reason: decision.reason + " [当前 Agent 已有工具调用历史，自动切换为执行姿态]",
-                routeLabel: "Agent 执行",
+                reason: decision.reason + " [当前会话 已有工具调用历史，自动切换为执行姿态]",
+                routeLabel: "会话 执行",
                 expectedCapabilities: decision.expectedCapabilities + ["运行命令", "提出文件修改"]
             )
         }
 
         if decision.intent == .chat, agentInvocation == nil {
-            // Empty session placeholders should start a fresh chat
-            // UNLESS the message explicitly references a recent task to recover
-            if let tid = state.selectedThreadID,
-               let thread = state.threads.first(where: { $0.id == tid }),
-               thread.isEmptyPlaceholder && thread.source == .session,
-               !Self.canRecoverRecentThread(for: effectiveMessage, intent: decision.intent) {
-                sendDirectChatDraft(message: effectiveMessage, decision: decision)
-                return
-            }
-            if continuationTargetThreadID(message: effectiveMessage, intent: decision.intent) == nil {
-                sendDirectChatDraft(message: effectiveMessage, decision: decision)
-                return
-            }
+            // All messages flow through the same execution path regardless of thread type.
+            // The isChatIntent flag in sendTaskDraft dynamically limits iterations and tools.
         }
 
         let matchedSkill = SkillMatcher.match(input: effectiveMessage, intent: decision.intent)

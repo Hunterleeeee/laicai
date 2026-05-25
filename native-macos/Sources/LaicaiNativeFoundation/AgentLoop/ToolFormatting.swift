@@ -35,6 +35,39 @@ enum ToolResultFormatter {
             let lines = result.output.components(separatedBy: .newlines).count
             return "已提取 \(path) · \(lines) 行 · \(size) 字符"
 
+        case "document.transform":
+            let action = result.data?["action"] ?? arguments["action"] ?? "prepare"
+            let format = result.data?["format"]?.uppercased() ?? "文档"
+            let total = result.data?["totalTextRuns"] ?? "0"
+            let cjk = result.data?["cjkTextRuns"] ?? "0"
+            if action == "workspace" {
+                let workflow = result.data?["workflowPath"] ?? arguments["workflowPath"] ?? "交付工作区"
+                let manifest = result.data?["manifestPath"] ?? "manifest"
+                return "已创建 \(format) 交付工作区 · \(workflow) · \(manifest)"
+            }
+            if action == "apply" {
+                let path = result.data?["outputPath"] ?? arguments["outputPath"] ?? "输出文件"
+                let applied = result.data?["appliedReplacements"] ?? "0"
+                let remaining = result.data?["remainingCJK"] ?? cjk
+                return "已写回 \(format) 文档 · \(applied) 条替换 · 剩余中文 \(remaining) 条 · \(path)"
+            }
+            if action == "copy" {
+                let path = result.data?["outputPath"] ?? arguments["outputPath"] ?? "输出文件"
+                return "已复制 \(format) 文档 · \(path)"
+            }
+            if action == "verify" {
+                let complete = result.data?["complete"] == "true"
+                let path = result.data?["outputPath"] ?? arguments["outputPath"] ?? arguments["sourcePath"] ?? "文档"
+                let remaining = result.data?["remainingCJK"] ?? cjk
+                return complete ? "文档验证通过 · \(path)" : "文档仍需处理 · \(format) · 剩余中文 \(remaining) 条"
+            }
+            if action == "render" {
+                let pdf = result.data?["pdfPath"] ?? "PDF"
+                let pages = result.data?["renderedPages"] ?? "0"
+                return "已渲染 \(format) 文档 · \(pages) 页 · \(pdf)"
+            }
+            return "已检查 \(format) 文档 · \(total) 条可编辑文本 · \(cjk) 条含中文"
+
         case "code.search":
             let query = result.data?["query"] ?? arguments["query"] ?? ""
             let count = result.data?["count"].flatMap(Int.init) ?? nonEmptyLines(result.output).count
@@ -96,6 +129,14 @@ enum ToolResultFormatter {
                 ? "已保存 Wiki：\(topic) → \(path) · \(count) 条来源"
                 : "已生成 Wiki 预览：\(topic) → \(path) · \(count) 条来源"
 
+        case "skill.manage":
+            let action = result.data?["action"] ?? arguments["action"] ?? "skill"
+            let name = result.data?["name"] ?? arguments["name"] ?? "技能"
+            if let path = result.data?["path"] {
+                return "技能已\(action == "update" ? "更新" : "保存")：\(name) · \(path)"
+            }
+            return compact(result.output, limit: 220)
+
         case "shell.exec":
             let exitCode = result.data?["exitCode"] ?? "0"
             let firstLine = nonEmptyLines(result.output).first ?? "命令已完成"
@@ -119,7 +160,7 @@ enum ToolResultFormatter {
             if toolName == "code.search" {
                 errorContent += "\n\n提示：本地搜索未找到结果。如果这是一个外部工具、库或概念，请调用 web_search 联网搜索了解它是什么。"
             } else if toolName == "file.read", result.error == "unsupported_binary_file" {
-                errorContent += "\n\n提示：这是表格/文档类文件。请立即改用 file_extract 提取文本，不要把这个失败当作任务完成。"
+                errorContent += "\n\n提示：这是表格/文档类文件。若只是阅读请改用 file_extract；若用户要生成、翻译、改写或保存 Office 文档，请改用 document_transform。不要把这个失败当作会话完成。"
             }
             return errorContent
         }
@@ -134,7 +175,7 @@ enum ToolResultFormatter {
             return result.output
         }
 
-        if toolName == "file.read" || toolName == "file.extract" {
+        if toolName == "file.read" || toolName == "file.extract" || toolName == "document.transform" {
             let smartResult = smartTruncateCode(result.output, limit: boundedLimit)
             if !smartResult.isEmpty { return smartResult }
         }
@@ -163,7 +204,7 @@ enum ToolResultFormatter {
         return """
         \(head)
 
-        ... 省略 \(omitted) 字符 ...
+        ... 中间内容已省略 \(omitted) 字符 ...
 
         \(tail)
         """
@@ -226,6 +267,21 @@ enum ToolStepFormatter {
             return "正在读取文件：\(arguments["path"] ?? "目标文件")"
         case "file.extract":
             return "正在提取文件文本：\(arguments["path"] ?? "目标文件")"
+        case "document.transform":
+            let action = arguments["action"] ?? "prepare"
+            let path = arguments["sourcePath"] ?? arguments["path"] ?? arguments["outputPath"] ?? "目标文档"
+            switch action {
+            case "inspect":
+                return "正在检查文档：\(path)"
+            case "apply":
+                return "正在写回文档：\(arguments["outputPath"] ?? path)"
+            case "copy":
+                return "正在复制文档：\(arguments["outputPath"] ?? path)"
+            case "verify":
+                return "正在验证文档产物：\(arguments["outputPath"] ?? path)"
+            default:
+                return "正在准备文档分块：\(path)"
+            }
         case "code.search":
             let query = arguments["query"] ?? "相关内容"
             let scope = arguments["scope"] == "content" ? "内容" : "文件"
@@ -246,6 +302,15 @@ enum ToolStepFormatter {
             return "正在读取网页：\(arguments["url"] ?? "链接")"
         case "wiki.build":
             return "正在整理 Wiki：\(arguments["topic"] ?? "主题")"
+        case "skill.manage":
+            let action = arguments["action"] ?? "list"
+            let name = arguments["name"] ?? "技能"
+            switch action {
+            case "create": return "正在沉淀技能：\(name)"
+            case "update": return "正在更新技能：\(name)"
+            case "delete": return "正在删除技能：\(name)"
+            default: return "正在查看技能库"
+            }
         case "file.write":
             return "准备写入文件：\(arguments["path"] ?? "目标文件")"
         case "git":

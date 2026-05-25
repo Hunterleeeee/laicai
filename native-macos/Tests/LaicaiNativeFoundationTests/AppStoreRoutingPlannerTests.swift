@@ -42,7 +42,7 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
         for prompt in prompts {
             let decision = IntentRouter.plan(prompt)
             XCTAssertEqual(decision.intent, .task, prompt)
-            XCTAssertEqual(decision.routeLabel, "图片生成", prompt)
+            XCTAssertEqual(decision.routeLabel, "会话 图片", prompt)
             XCTAssertTrue(decision.expectedCapabilities.contains("生成图片"), prompt)
         }
     }
@@ -52,6 +52,26 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
     func testPoliteExplanationRequestStaysInChatMode() {
         XCTAssertEqual(IntentRouter.classify("请先解释一下"), .chat)
         XCTAssertEqual(IntentRouter.classify("请说说你的能力"), .chat)
+        XCTAssertEqual(IntentRouter.classify("你了解易经吗"), .chat)
+        XCTAssertEqual(IntentRouter.classify("你是什么模型"), .chat)
+    }
+    func testCreativePromptHelpStaysInChatMode() {
+        let prompts = [
+            "我想让Gemini作一首歌，带mv的，但是我不知道怎么描述prompt，你来帮我梳理一下",
+            "古风故事，男生，古风电子，电影感"
+        ]
+
+        for prompt in prompts {
+            let decision = IntentRouter.plan(prompt)
+            XCTAssertEqual(decision.intent, .chat, prompt)
+            XCTAssertEqual(decision.routeLabel, "会话 问答", prompt)
+        }
+    }
+    func testAmbiguousDomainQuestionsStayInChatMode() {
+        XCTAssertEqual(IntentRouter.classify("大小六壬 梅花易数呢"), .chat)
+        XCTAssertEqual(IntentRouter.classify("这个skill都能干嘛呢"), .chat)
+        XCTAssertEqual(IntentRouter.classify("数据不对"), .chat)
+        XCTAssertEqual(IntentRouter.classify("我说让你干啊 我只要结果"), .chat)
     }
     func testExplicitToolRequestsBecomeTask() {
         XCTAssertEqual(IntentRouter.classify("请帮我联网搜索一下 Qwen3.6 相比 3.5 有哪些新能力？"), .task)
@@ -78,6 +98,100 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(decision.expectedCapabilities.contains("读取工作区"))
         XCTAssertTrue(decision.expectedCapabilities.contains("提出文件修改"))
     }
+    func testProjectProgressInspectionDefaultsToExecutableAgent() {
+        let decision = IntentRouter.plan("看下项目现在最新的进展")
+
+        XCTAssertEqual(decision.intent, .task)
+        XCTAssertEqual(decision.routeLabel, "会话 执行")
+        XCTAssertTrue(decision.expectedCapabilities.contains("读取工作区"))
+        XCTAssertTrue(decision.expectedCapabilities.contains("形成可验证结果"))
+        XCTAssertTrue(decision.reason.contains("先读证据"))
+    }
+    func testPerformanceComplaintDefaultsToExecutableAgent() {
+        let decision = IntentRouter.plan("优化下性能，觉得各种卡")
+
+        XCTAssertEqual(decision.intent, .task)
+        XCTAssertEqual(decision.routeLabel, "会话 执行")
+        XCTAssertTrue(decision.expectedCapabilities.contains("读取工作区"))
+        XCTAssertTrue(decision.expectedCapabilities.contains("提出文件修改"))
+        XCTAssertTrue(decision.expectedCapabilities.contains("形成可验证结果"))
+    }
+    func testExplicitPlanOnlyKeepsAnalysisRouteWithoutMutationCapability() {
+        let decision = IntentRouter.plan("只分析一下这个项目，先别改")
+
+        XCTAssertEqual(decision.intent, .task)
+        XCTAssertEqual(decision.routeLabel, "会话 分析")
+        XCTAssertTrue(decision.expectedCapabilities.contains("读取工作区"))
+        XCTAssertFalse(decision.expectedCapabilities.contains("提出文件修改"))
+        XCTAssertFalse(decision.expectedCapabilities.contains("形成可验证结果"))
+    }
+    func testExplicitAnalysisRouteUsesReadOnlyToolSet() throws {
+        let settings = AppSettings(
+            workspacePath: "/tmp",
+            defaultConnectorName: "Test",
+            compactComposer: false,
+            showDebugPanels: false
+        )
+        let config = AppStore.agentLoopConfig(
+            settings: settings,
+            decision: IntentRouter.plan("只分析一下这个项目，先别改")
+        )
+        let allowed = try XCTUnwrap(config.allowedTools)
+
+        XCTAssertTrue(allowed.contains("file.read"))
+        XCTAssertTrue(allowed.contains("code.search"))
+        XCTAssertFalse(allowed.contains("file.write"))
+        XCTAssertFalse(allowed.contains("shell.exec"))
+        XCTAssertFalse(allowed.contains("diff.apply"))
+    }
+    func testInspectRequestBuildsInspectTaskProtocol() throws {
+        let decision = IntentRouter.plan("只分析一下这个项目，先别改")
+        let taskProtocol = AppStore.makeTaskProtocol(
+            threadID: UUID(),
+            message: "只分析一下这个项目，先别改",
+            context: TaskContext(workspaceRoot: "/tmp/project"),
+            decision: decision
+        )
+        let config = AppStore.agentLoopConfig(
+            settings: AppSettings(workspacePath: "/tmp/project"),
+            connector: makeConnector(),
+            decision: decision
+        )
+        let allowed = try XCTUnwrap(config.allowedTools)
+
+        XCTAssertEqual(taskProtocol.riskPolicy, .inspect)
+        XCTAssertTrue(taskProtocol.completionCriteria.contains("不写入文件"))
+        XCTAssertFalse(allowed.contains("file.write"))
+        XCTAssertFalse(allowed.contains("file.edit"))
+    }
+    func testDangerousRequestBuildsDangerousTaskProtocolAndBlocksWrites() throws {
+        let message = "删除所有缓存并 reset --hard"
+        let decision = IntentRouter.plan(message)
+        let taskProtocol = AppStore.makeTaskProtocol(
+            threadID: UUID(),
+            message: message,
+            context: TaskContext(workspaceRoot: "/tmp/project"),
+            decision: decision
+        )
+
+        XCTAssertEqual(taskProtocol.riskPolicy, .dangerous)
+        XCTAssertFalse(AgentLoop.meetsCompletionCriteria(
+            task: AgentTask(
+                title: "危险任务",
+                status: .completed,
+                steps: [
+                    TaskStep(kind: .userInput, text: message),
+                    TaskStep(kind: .textOutput, text: "完成")
+                ],
+                context: TaskContext(workspaceRoot: "/tmp/project"),
+                taskProtocol: taskProtocol
+            ),
+            intent: .task,
+            didComplete: true,
+            hadFailure: false,
+            wasTruncated: false
+        ))
+    }
     func testWorkflowRequestsRouteBySemanticGoal() {
         let decision = IntentRouter.plan("帮我审查一下这次改动")
 
@@ -91,13 +205,14 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(IntentRouter.classify("review 一下 Claude Code 和 Codex 的体验差距"), .chat)
         XCTAssertEqual(IntentRouter.classify("这个词怎么翻译更自然？"), .chat)
         XCTAssertEqual(IntentRouter.classify("帮我翻译这个文件"), .workflow("translate"))
+        XCTAssertEqual(IntentRouter.classify("把 /tmp/demo-cn.pptx 翻译成英文版并保存为 /tmp/demo-en.pptx"), .workflow("translate"))
     }
     func testPlannerDecisionExplainsRoute() {
         let decision = IntentRouter.plan("帮我搜一下 Qwen3.6 比 Qwen3.5 强多少")
 
         XCTAssertEqual(decision.intent, .task)
         XCTAssertGreaterThan(decision.confidence, 0.8)
-        XCTAssertEqual(decision.routeLabel, "任务")
+        XCTAssertEqual(decision.routeLabel, "会话 研究")
         XCTAssertTrue(decision.expectedCapabilities.contains("联网检索"))
         XCTAssertFalse(decision.reason.isEmpty)
     }

@@ -222,6 +222,9 @@ public struct DiffApplyTool: LaicaiTool {
         } catch {
             return ToolResult(output: "读取文件失败：\(error.localizedDescription)", success: false, error: "read_error")
         }
+        if let dangerousError = DangerousOperationGuard.writeViolation(path: fullPath, oldContent: oldContent, context: context) {
+            return ToolResult(output: dangerousError, success: false, error: "dangerous_operation")
+        }
 
         // Apply unified diff
         let result = applyUnifiedDiff(original: oldContent, diff: params.diff)
@@ -323,7 +326,8 @@ public struct SkillManageTool: LaicaiTool {
                     "description": FunctionProperty(type: "string", description: "技能描述（create/update 时使用）"),
                     "tools": FunctionProperty(type: "string", description: "逗号分隔的工具列表，如 file.read,code.search,file.write"),
                     "instructions": FunctionProperty(type: "string", description: "详细的执行步骤说明（SKILL.md 内容）"),
-                    "trigger": FunctionProperty(type: "string", description: "自动触发的关键词模式（可选）")
+                    "trigger": FunctionProperty(type: "string", description: "自动触发的关键词模式（可选）"),
+                    "category": FunctionProperty(type: "string", description: "技能分类，可用中文或英文：通用/general、知识/knowledge、营销/marketing、产品/product、内容/content、设计/design、数据/data、商业/business、分析/analysis、编辑/editing、执行/execution、研究/research、流程/workflow、元技能/meta")
                 ],
                 required: ["action"]
             )
@@ -337,6 +341,7 @@ public struct SkillManageTool: LaicaiTool {
         var tools: String?
         var instructions: String?
         var trigger: String?
+        var category: String?
     }
 
     public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
@@ -386,8 +391,9 @@ public struct SkillManageTool: LaicaiTool {
         let desc = params.description ?? name
         let instructions = params.instructions ?? "（待补充执行步骤）"
         let trigger = params.trigger ?? ""
+        let category = SkillRegistry.normalizeSkillCategory(params.category) ?? "general"
 
-        var md = "---\nname: \(name)\ndescription: \(desc)\ntools: [\(tools.joined(separator: ", "))]"
+        var md = "---\nname: \(name)\ndescription: \(desc)\ncategory: \(category)\ntools: [\(tools.joined(separator: ", "))]"
         if !trigger.isEmpty {
             md += "\ntrigger: \(trigger)"
         }
@@ -395,12 +401,12 @@ public struct SkillManageTool: LaicaiTool {
 
         try md.write(toFile: mdPath, atomically: true, encoding: .utf8)
 
-        let skill = SkillDefinition(name: name, description: desc, tools: tools, isBuiltin: false, isPublished: true)
+        let skill = SkillDefinition(name: name, description: desc, tools: tools, isBuiltin: false, isPublished: true, category: category)
         await SkillRegistry.shared.register(skill)
 
         return ToolResult(
-            output: "技能已创建：\(name)\n路径：\(mdPath)\n工具：\(tools.joined(separator: ", "))",
-            data: ["path": mdPath, "name": name]
+            output: "技能已创建：\(name)\n分类：\(categoryDisplayName(category))\n路径：\(mdPath)\n工具：\(tools.joined(separator: ", "))\n已写入结构化分类，Skill Hub 刷新后会显示在对应分类。",
+            data: ["action": "create", "path": mdPath, "name": name, "category": category]
         )
     }
 
@@ -428,6 +434,13 @@ public struct SkillManageTool: LaicaiTool {
         if let tools = params.tools {
             content = content.replacingOccurrences(of: #"tools: \[.*\]"#, with: "tools: [\(tools)]", options: .regularExpression)
         }
+        if let category = SkillRegistry.normalizeSkillCategory(params.category) {
+            if content.range(of: #"(?m)^category:\s*.*$"#, options: .regularExpression) != nil {
+                content = content.replacingOccurrences(of: #"(?m)^category:\s*.*$"#, with: "category: \(category)", options: .regularExpression)
+            } else if let range = content.range(of: "---\n", options: [], range: content.index(after: content.startIndex)..<content.endIndex) {
+                content.insert(contentsOf: "category: \(category)\n", at: range.lowerBound)
+            }
+        }
         if let instructions = params.instructions {
             if let range = content.range(of: "## 执行步骤") {
                 content = String(content[content.startIndex..<range.lowerBound]) + "## 执行步骤\n\n\(instructions)\n"
@@ -435,7 +448,11 @@ public struct SkillManageTool: LaicaiTool {
         }
 
         try content.write(toFile: path, atomically: true, encoding: .utf8)
-        return ToolResult(output: "技能已更新：\(name)", data: ["path": path, "name": name])
+        var data = ["action": "update", "path": path, "name": name]
+        if let category = SkillRegistry.normalizeSkillCategory(params.category) {
+            data["category"] = category
+        }
+        return ToolResult(output: "技能已更新：\(name)", data: data)
     }
 
     private func deleteSkill(params: SkillParams, skillDir: String) throws -> ToolResult {
@@ -453,23 +470,24 @@ public struct SkillManageTool: LaicaiTool {
         }
 
         try fm.removeItem(atPath: (skillDir as NSString).appendingPathComponent(existing))
-        return ToolResult(output: "技能已删除：\(name)")
+        return ToolResult(output: "技能已删除：\(name)", data: ["action": "delete", "name": name])
     }
 
     private func listSkills(skillDir: String) -> ToolResult {
         // 1. Builtin + custom skills (avoid MainActor-isolated SkillRegistry.shared.skills)
         var allSkills = SkillRegistry.loadBuiltinSkills()
-        let localSkills = SkillRegistry.loadLocalSkills(workspaceRoot: (skillDir as NSString).deletingLastPathComponent)
+        let workspaceRoot = Self.workspaceRoot(fromSkillDir: skillDir)
+        let localSkills = SkillRegistry.loadLocalSkills(workspaceRoot: workspaceRoot)
         for s in localSkills where !allSkills.contains(where: { $0.name == s.name }) {
             allSkills.append(s)
         }
         let builtinCount = allSkills.filter { $0.isBuiltin }.count
         let customSkills = allSkills.filter { !$0.isBuiltin }
 
-        // Group builtin skills by category
+        // Group all skills by category, including local markdown/json skills.
         var categoryGroups: [String: [String]] = [:]
-        for skill in allSkills where skill.isBuiltin {
-            let cat = skill.category ?? "general"
+        for skill in allSkills {
+            let cat = SkillRegistry.normalizeSkillCategory(skill.category) ?? "general"
             categoryGroups[cat, default: []].append(skill.name)
         }
 
@@ -506,5 +524,35 @@ public struct SkillManageTool: LaicaiTool {
         }
 
         return ToolResult(output: lines.joined(separator: "\n"), data: ["count": "\(allSkills.count)"])
+    }
+
+    private func categoryDisplayName(_ category: String) -> String {
+        [
+            "general": "通用",
+            "knowledge": "知识",
+            "marketing": "营销",
+            "product": "产品",
+            "content": "内容",
+            "design": "设计",
+            "data": "数据",
+            "business": "商业",
+            "analysis": "分析",
+            "editing": "编辑",
+            "execution": "执行",
+            "research": "研究",
+            "workflow": "流程",
+            "meta": "元技能"
+        ][category] ?? category
+    }
+
+    private static func workspaceRoot(fromSkillDir skillDir: String) -> String {
+        let ns = skillDir as NSString
+        if ns.lastPathComponent == "skills" {
+            let parent = ns.deletingLastPathComponent as NSString
+            if parent.lastPathComponent == ".laicai" {
+                return parent.deletingLastPathComponent
+            }
+        }
+        return ns.deletingLastPathComponent
     }
 }

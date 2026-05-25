@@ -2,11 +2,31 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
+    @discardableResult
+    func switchFromUnhealthyActiveConnectorIfNeeded() -> ConnectorProfile? {
+        guard let activeID = state.activeConnectorID,
+              let active = state.connectors.first(where: { $0.id == activeID }),
+              active.health != .ready,
+              let fallback = AgentLoop.fallbackConnector(after: active, allConnectors: state.connectors) else {
+            return state.activeConnector
+        }
+        state.activeConnectorID = fallback.id
+        state.settings.defaultConnectorName = fallback.name
+        if let threadIndex = state.threads.firstIndex(where: { $0.id == state.selectedThreadID }), state.threads[threadIndex].isAskAgent {
+            state.threads[threadIndex].modelName = fallback.name
+        }
+        notify("当前模型\(active.health == .offline ? "离线" : "不可用")，已自动切换到 \(AgentLoop.displayConnectorName(fallback))。", style: .info)
+        persistSettings()
+        persistConnectors()
+        persistThreads()
+        return fallback
+    }
+
     public func selectConnector(id: UUID) {
         guard let connector = state.connectors.first(where: { $0.id == id }) else { return }
         state.activeConnectorID = connector.id
         state.settings.defaultConnectorName = connector.name
-        if let threadIndex = state.threads.firstIndex(where: { $0.id == state.selectedThreadID }), state.threads[threadIndex].source == .session {
+        if let threadIndex = state.threads.firstIndex(where: { $0.id == state.selectedThreadID }), state.threads[threadIndex].isAskAgent {
             state.threads[threadIndex].modelName = connector.name
         }
         persistSettings()
@@ -39,7 +59,9 @@ extension AppStore {
         persistSettings()
         persistConnectors()
         if configurationChanged {
-            scheduleConnectorHealthRefreshIfNeeded(for: normalized, force: true)
+            Task { @MainActor in
+                self.scheduleConnectorHealthRefreshIfNeeded(for: normalized, force: true)
+            }
         }
     }
 

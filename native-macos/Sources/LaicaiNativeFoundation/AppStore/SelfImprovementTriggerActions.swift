@@ -29,7 +29,13 @@ extension AppStore {
             steps: [userStep, planStep],
             connectorID: state.activeConnectorID,
             context: context,
-            source: .task
+            agentState: .running,
+            agentGoal: message,
+            currentPlan: [
+                "定位自我改进问题：\(diagnosis.description)",
+                "修改最小必要代码",
+                "运行构建验证并记录结果"
+            ]
         )
         state.threads.insert(thread, at: 0)
         state.selectThread(id: thread.id)
@@ -45,7 +51,7 @@ extension AppStore {
             contextMode: .deep,
             modelName: connector.modelName
         )
-        loopConfig.allowedTools = ["file.read", "file.edit", "diff.apply", "code.search", "workspace.index", "shell.exec", "verify.build", "git"]
+        loopConfig.allowedTools = ["file.read", "file.edit", "diff.apply", "code.search", "workspace.index", "shell.exec", "verify.build", "skill.manage", "git"]
 
         let loop = AgentLoop(config: loopConfig, runtime: environment.runtimeClient)
         let targetID = thread.id
@@ -100,6 +106,7 @@ extension AppStore {
                         TaskStep(kind: .error, text: "自我改进失败：\(error.localizedDescription)", isFailure: true, recoverable: false)
                     )
                     self.state.threads[threadIndex].status = .failed
+                    self.syncAgentSnapshot(at: threadIndex)
                     self.state.threads[threadIndex].updatedAt = Date()
                     self.persistThreadsNow()
                 }

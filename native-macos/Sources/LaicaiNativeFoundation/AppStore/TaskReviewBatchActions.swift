@@ -9,7 +9,7 @@ extension AppStore {
             step.kind == .reviewRequest && step.approved == nil && step.diffFilePath != nil && step.diffNewContent != nil ? index : nil
         }
         guard !pendingIndices.isEmpty else {
-            ToastCenter.shared.show("没有待审查的变更")
+            notify("没有待审查的变更")
             return
         }
 
@@ -23,6 +23,7 @@ extension AppStore {
             if let securityError = SecurityManager.shared.checkWrite(path: fullPath) {
                 state.threads[threadIndex].steps[si].approved = false
                 appendReviewResult(to: threadIndex, approved: false, text: "批量写入被拦截（\(filePath)）：\(securityError)")
+                syncAgentSnapshot(at: threadIndex)
                 state.threads[threadIndex].updatedAt = .now
                 persistThreads()
                 return
@@ -31,6 +32,7 @@ extension AppStore {
                 if let currentContent = try? String(contentsOfFile: fullPath, encoding: .utf8), currentContent != oldContent {
                     state.threads[threadIndex].steps[si].approved = false
                     appendReviewResult(to: threadIndex, approved: false, text: "批量写入取消：\(filePath) 在审查期间被外部修改")
+                    syncAgentSnapshot(at: threadIndex)
                     state.threads[threadIndex].updatedAt = .now
                     persistThreads()
                     return
@@ -87,6 +89,7 @@ extension AppStore {
             schedulePostWriteVerification(threadIndex: threadIndex, filePath: sourceFilePath)
         }
 
+        syncAgentSnapshot(at: threadIndex)
         state.threads[threadIndex].updatedAt = .now
         persistThreads()
         updateDockBadge()

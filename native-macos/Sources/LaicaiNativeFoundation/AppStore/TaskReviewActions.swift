@@ -12,6 +12,7 @@ extension AppStore {
               let newContent = step.diffNewContent else {
             state.threads[threadIndex].steps[stepIndex].approved = false
             appendReviewResult(to: threadIndex, approved: false, text: "缺少文件变更内容，无法写入。")
+            syncAgentSnapshot(at: threadIndex)
             state.threads[threadIndex].updatedAt = .now
             persistThreads()
             return
@@ -24,6 +25,7 @@ extension AppStore {
         if let securityError = SecurityManager.shared.checkWrite(path: fullPath) {
             state.threads[threadIndex].steps[stepIndex].approved = false
             appendReviewResult(to: threadIndex, approved: false, text: "写入被安全策略拦截：\(securityError)")
+            syncAgentSnapshot(at: threadIndex)
             let toolName = step.toolName ?? "file.write"
             AuditLog.shared.record(tool: toolName, input: filePath, output: securityError, success: false)
             recordToolActivity(name: toolName, summary: "写入被拦截", statusLine: filePath, isFailure: true)
@@ -38,6 +40,7 @@ extension AppStore {
                currentContent != oldContent {
                 state.threads[threadIndex].steps[stepIndex].approved = false
                 appendReviewResult(to: threadIndex, approved: false, text: "文件在审查期间被外部修改，写入已取消。请重新读取文件并提交新变更。")
+                syncAgentSnapshot(at: threadIndex)
                 let toolName = step.toolName ?? "file.write"
                 AuditLog.shared.record(tool: toolName, input: filePath, output: "文件被外部修改", success: false)
                 recordToolActivity(name: toolName, summary: "写入取消：文件被外部修改", statusLine: filePath, isFailure: true)
@@ -62,6 +65,7 @@ extension AppStore {
             AuditLog.shared.record(tool: toolName, input: filePath, output: error.localizedDescription, success: false)
             recordToolActivity(name: toolName, summary: "写入失败", statusLine: error.localizedDescription, isFailure: true)
         }
+        syncAgentSnapshot(at: threadIndex)
         state.threads[threadIndex].updatedAt = .now
         persistThreads()
         updateDockBadge()
@@ -75,6 +79,7 @@ extension AppStore {
         hunks[hi].approved = true
         state.threads[ti].steps[si].diffHunks = hunks
         checkAllHunksDecided(threadIndex: ti, stepIndex: si)
+        syncAgentSnapshot(at: ti)
         state.threads[ti].updatedAt = .now
         persistThreads()
     }
@@ -87,6 +92,7 @@ extension AppStore {
         hunks[hi].approved = false
         state.threads[ti].steps[si].diffHunks = hunks
         checkAllHunksDecided(threadIndex: ti, stepIndex: si)
+        syncAgentSnapshot(at: ti)
         state.threads[ti].updatedAt = .now
         persistThreads()
     }
@@ -98,12 +104,14 @@ extension AppStore {
         if approvedHunks.isEmpty {
             state.threads[ti].steps[si].approved = false
             appendReviewResult(to: ti, approved: false, text: "所有 hunk 均已拒绝")
+            syncAgentSnapshot(at: ti)
             return
         }
         guard let filePath = state.threads[ti].steps[si].diffFilePath,
               let oldContent = state.threads[ti].steps[si].diffOldContent else {
             state.threads[ti].steps[si].approved = false
             appendReviewResult(to: ti, approved: false, text: "缺少文件信息")
+            syncAgentSnapshot(at: ti)
             return
         }
         var result = oldContent
@@ -116,6 +124,7 @@ extension AppStore {
         if let securityError = SecurityManager.shared.checkWrite(path: fullPath) {
             state.threads[ti].steps[si].approved = false
             appendReviewResult(to: ti, approved: false, text: "安全策略拦截：\(securityError)")
+            syncAgentSnapshot(at: ti)
             return
         }
         do {
@@ -130,6 +139,7 @@ extension AppStore {
             state.threads[ti].steps[si].approved = false
             appendReviewResult(to: ti, approved: false, text: "写入失败：\(error.localizedDescription)")
         }
+        syncAgentSnapshot(at: ti)
     }
 
     public func rejectReview(taskID: UUID, stepID: UUID) {
@@ -142,6 +152,7 @@ extension AppStore {
         let toolName = state.threads[threadIndex].steps[stepIndex].toolName ?? "file.write"
         AuditLog.shared.record(tool: toolName, input: filePath, output: "用户拒绝", success: false)
         recordToolActivity(name: toolName, summary: "已拒绝写入", statusLine: filePath, isFailure: true)
+        syncAgentSnapshot(at: threadIndex)
         state.threads[threadIndex].updatedAt = .now
         persistThreads()
     }

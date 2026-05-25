@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class AppStoreConnectorCrudTests: LaicaiNativeFoundationTestCase {
-    func testSelectingConnectorUpdatesDefaultConnectorName() {
+    func testSelectingConnectorUpdatesDefaultConnectorName() throws {
         let store = AppStore.preview()
         let target = try XCTUnwrap(store.state.connectors.last)
 
@@ -36,7 +36,7 @@ final class AppStoreConnectorCrudTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.connectors.count, 1)
         XCTAssertEqual(store.state.activeConnectorID, connector.id)
     }
-    func testDeleteConnectorFallsBackToFirstRemaining() {
+    func testDeleteConnectorFallsBackToFirstRemaining() throws {
         let store = AppStore.preview()
         let activeID = try XCTUnwrap(store.state.activeConnectorID)
 

@@ -17,13 +17,13 @@ final class AppStoreReviewEdgeCaseTests: LaicaiNativeFoundationTestCase {
             diffOldContent: ""
         )
         let task = AgentTask(title: "缺少内容", steps: [step], context: TaskContext(workspaceRoot: workspace.path))
-        let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id, workspacePath: workspace.path))
+        let store = AppStore(state: testState(tasks: [task], selectedThreadID: task.id, workspacePath: workspace.path))
 
         store.approveReview(taskID: task.id, stepID: step.id)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
-        XCTAssertEqual(store.state.selectedTask?.steps.first?.approved, false)
-        XCTAssertTrue(store.state.selectedTask?.steps.contains {
+        XCTAssertEqual(store.state.selectedThread?.steps.first?.approved, false)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains {
             $0.kind == .reviewResult && $0.text.contains("缺少文件变更内容")
         } == true)
     }
@@ -47,14 +47,14 @@ final class AppStoreReviewEdgeCaseTests: LaicaiNativeFoundationTestCase {
             diffHunks: [firstHunk, secondHunk]
         )
         let task = AgentTask(title: "拒绝 hunks", steps: [step], context: TaskContext(workspaceRoot: workspace.path))
-        let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id, workspacePath: workspace.path))
+        let store = AppStore(state: testState(tasks: [task], selectedThreadID: task.id, workspacePath: workspace.path))
 
         store.rejectHunk(taskID: task.id, stepID: step.id, hunkID: firstHunk.id)
         store.rejectHunk(taskID: task.id, stepID: step.id, hunkID: secondHunk.id)
 
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), oldContent)
-        XCTAssertEqual(store.state.selectedTask?.steps.first?.approved, false)
-        XCTAssertTrue(store.state.selectedTask?.steps.contains {
+        XCTAssertEqual(store.state.selectedThread?.steps.first?.approved, false)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains {
             $0.kind == .reviewResult && $0.text.contains("所有 hunk 均已拒绝")
         } == true)
     }
@@ -90,16 +90,16 @@ final class AppStoreReviewEdgeCaseTests: LaicaiNativeFoundationTestCase {
             steps: [firstStep, secondStep],
             context: TaskContext(workspaceRoot: workspace.path)
         )
-        let store = AppStore(state: testState(tasks: [task], selectedTaskID: task.id, workspacePath: workspace.path))
+        let store = AppStore(state: testState(tasks: [task], selectedThreadID: task.id, workspacePath: workspace.path))
         try "external second".write(to: second, atomically: true, encoding: .utf8)
 
         store.approveAllPendingReviews(taskID: task.id)
 
         XCTAssertEqual(try String(contentsOf: first, encoding: .utf8), "first old")
         XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "external second")
-        let reviewSteps = store.state.selectedTask?.steps.filter { $0.kind == .reviewRequest } ?? []
+        let reviewSteps = store.state.selectedThread?.steps.filter { $0.kind == .reviewRequest } ?? []
         XCTAssertEqual(reviewSteps.map(\.approved), [nil, false])
-        XCTAssertTrue(store.state.selectedTask?.steps.contains {
+        XCTAssertTrue(store.state.selectedThread?.steps.contains {
             $0.kind == .reviewResult && $0.text.contains("批量写入取消")
         } == true)
         XCTAssertFalse(AuditLog.shared.recentEntries.contains { $0.tool == "batch.apply" && $0.success })

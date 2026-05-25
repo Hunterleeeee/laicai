@@ -10,7 +10,8 @@ extension AppStore {
         message: String,
         decision: PlannerDecision? = nil,
         userParams: [String: String] = [:],
-        projectID: UUID? = nil
+        projectID: UUID? = nil,
+        reuseThreadID: UUID? = nil
     ) {
         guard let connector = state.activeConnector else {
             notify("请先选择一个连接器", style: .error)
@@ -20,33 +21,58 @@ extension AppStore {
             intent: .workflow(workflow.name),
             confidence: 0.95,
             reason: "用户手动选择了工作流。",
-            routeLabel: "工作流",
+            routeLabel: "会话 工作流",
             expectedCapabilities: workflow.steps.map(\.name)
         )
 
-        let thread = Thread(
-            title: String(taskTitle.prefix(32)),
-            status: .running,
-            steps: [
-                TaskStep(kind: .userInput, text: message, isCollapsible: false, isCollapsed: false),
-                TaskStep(
-                    kind: .aiThinking,
-                    text: Self.plannerStepText(for: plannerDecision),
-                    isCollapsible: true,
-                    isCollapsed: true
-                )
-            ],
-            connectorID: state.activeConnectorID,
-            workflowName: workflow.name,
-            context: context,
-            projectID: projectID
-        )
-        state.threads.insert(thread, at: 0)
-        state.selectThread(id: thread.id)
-        state.modeLabel = "工作流"
+        let initialSteps = [
+            TaskStep(kind: .userInput, text: message, isCollapsible: false, isCollapsed: false),
+            TaskStep(
+                kind: .aiThinking,
+                text: "规划：工作流 \(workflow.name) 正在准备执行。",
+                isCollapsible: true,
+                isCollapsed: true
+            )
+        ]
+        let threadID = reuseThreadID ?? UUID()
+        let plan = Self.agentPlanLines(for: plannerDecision, message: message)
+        if let reuseThreadID, let index = state.threads.firstIndex(where: { $0.id == reuseThreadID }) {
+            state.threads[index].title = String(taskTitle.prefix(32))
+            state.threads[index].status = .running
+            state.threads[index].steps = initialSteps
+            state.threads[index].connectorID = state.activeConnectorID
+            state.threads[index].workflowName = workflow.name
+            state.threads[index].context = context
+            state.threads[index].projectID = projectID
+            state.threads[index].agentState = .running
+            state.threads[index].agentGoal = message
+            state.threads[index].currentPlan = plan
+            state.threads[index].taskProtocol = Self.makeTaskProtocol(threadID: threadID, message: message, context: context, decision: plannerDecision)
+            state.threads[index].executionLedger = Self.makeExecutionLedger(threadID: threadID, message: message, context: context, decision: plannerDecision, plan: plan)
+            state.threads[index].updatedAt = .now
+        } else {
+            let thread = Thread(
+                id: threadID,
+                title: String(taskTitle.prefix(32)),
+                status: .running,
+                steps: initialSteps,
+                connectorID: state.activeConnectorID,
+                workflowName: workflow.name,
+                context: context,
+                projectID: projectID,
+                agentState: .running,
+                agentGoal: message,
+                currentPlan: plan,
+                taskProtocol: Self.makeTaskProtocol(threadID: threadID, message: message, context: context, decision: plannerDecision),
+                executionLedger: Self.makeExecutionLedger(threadID: threadID, message: message, context: context, decision: plannerDecision, plan: plan)
+            )
+            state.threads.insert(thread, at: 0)
+        }
+        state.selectThread(id: threadID)
+        state.modeLabel = "会话 工作流"
         state.isGenerating = true
         state.generationStartedAt = Date()
-        state.liveActivity = "正在执行工作流…"
+        state.liveActivity = "会话 正在执行工作流…"
         state.draftMessage = ""
         state.draftAttachments = []
         state.draftImages = []
@@ -55,7 +81,7 @@ extension AppStore {
         if state.workflowRuns.count > 20 { state.workflowRuns = Array(state.workflowRuns.prefix(20)) }
         persistThreads()
 
-        let wfThreadID = thread.id
+        let wfThreadID = threadID
         generationTasks[wfThreadID] = Task { [weak self] in
             guard let self else { return }
 
@@ -67,17 +93,19 @@ extension AppStore {
                 userParams: userParams,
                 onStepProgress: { [weak self] progress in
                     guard let self else { return }
-                    self.handleWorkflowStepProgress(progress, threadID: thread.id, runID: run.id)
+                    self.handleWorkflowStepProgress(progress, threadID: threadID, runID: run.id)
                 },
                 onStreamDelta: { _ in }
             )
 
             guard !Task.isCancelled else { return }
 
-            if let threadIndex = self.state.threads.firstIndex(where: { $0.id == thread.id }) {
+            if let threadIndex = self.state.threads.firstIndex(where: { $0.id == threadID }) {
                 let hasError = steps.contains { $0.isFailure }
                 self.state.threads[threadIndex].steps.append(Self.workflowCompletionCheckStep(steps: steps, hasError: hasError))
                 self.state.threads[threadIndex].status = hasError ? .failed : .completed
+                self.syncAgentSnapshot(at: threadIndex)
+                Self.ensureCheckpointIfNeeded(&self.state.threads[threadIndex])
                 self.state.threads[threadIndex].updatedAt = .now
                 if let runIndex = self.state.workflowRuns.firstIndex(where: { $0.id == run.id }) {
                     self.state.workflowRuns[runIndex].statusLine = hasError ? "失败" : "完成"
@@ -122,7 +150,7 @@ extension AppStore {
             context: context,
             message: message,
             userParams: userParams,
-            projectID: projectIDForNewThreadFromSelection()
+            projectID: nil
         )
     }
 

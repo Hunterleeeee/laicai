@@ -6,20 +6,20 @@ import XCTest
 final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
     func testDeleteSession() {
         let store = AppStore.preview()
-        let firstID = store.state.sessions.first?.id
+        let firstID = store.state.threads.first?.id
 
         if let id = firstID {
-            store.deleteSession(id: id)
-            XCTAssertNil(store.state.sessions.first(where: { $0.id == id }))
+            store.deleteThread(id: id)
+            XCTAssertNil(store.state.threads.first(where: { $0.id == id }))
         }
     }
-    func testPinSession() {
+    func testPinSession() throws {
         let store = AppStore.preview()
-        let firstID = try XCTUnwrap(store.state.sessions.first?.id)
-        let wasPinned = store.state.sessions.first?.isPinned ?? false
+        let firstID = try XCTUnwrap(store.state.threads.first?.id)
+        let wasPinned = store.state.threads.first?.isPinned ?? false
 
-        store.pinSession(id: firstID)
-        XCTAssertEqual(store.state.sessions.first?.isPinned, !wasPinned)
+        store.pinThread(id: firstID)
+        XCTAssertEqual(store.state.threads.first?.isPinned, !wasPinned)
     }
     func testSelectingSessionClearsSelectedTask() {
         let session = ChatSession(title: "会话", preview: "", modelName: "test")
@@ -41,27 +41,20 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
             selectedTaskID: task.id
         ))
 
-        store.selectSession(id: session.id)
+        store.selectThread(id: session.id)
 
-        XCTAssertEqual(store.state.selectedSessionID, session.id)
-        XCTAssertNil(store.state.selectedTaskID)
         XCTAssertEqual(store.state.selectedThreadID, session.id)
-        XCTAssertEqual(store.state.selectedThreadSource, .session)
     }
     func testSelectingTaskSetsAuthoritativeThreadSelection() {
         let session = ChatSession(title: "会话", preview: "", modelName: "test")
         let task = AgentTask(title: "任务")
-        let store = AppStore(state: testState(sessions: [session], tasks: [task], selectedTaskID: task.id))
+        let store = AppStore(state: testState(sessions: [session], tasks: [task], selectedThreadID: task.id))
 
-        store.selectSession(id: session.id)
+        store.selectThread(id: session.id)
         XCTAssertEqual(store.state.selectedThreadID, session.id)
-        XCTAssertEqual(store.state.selectedThreadSource, .session)
 
-        store.selectTask(id: task.id)
+        store.selectThread(id: task.id)
         XCTAssertEqual(store.state.selectedThreadID, task.id)
-        XCTAssertEqual(store.state.selectedThreadSource, .task)
-        XCTAssertEqual(store.state.selectedTaskID, task.id)
-        XCTAssertNil(store.state.selectedSessionID)
     }
     func testUnifiedThreadSearchMatchesTaskStepsAndTools() {
         let session = ChatSession(title: "普通聊天", preview: "你好", modelName: "test")
@@ -76,6 +69,43 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
 
         state.searchText = "file.read"
         XCTAssertEqual(state.filteredThreads.map(\.id), [task.id])
+    }
+    func testSidebarSummarySearchUsesDebouncedQuery() {
+        let session = ChatSession(title: "普通聊天", preview: "你好", modelName: "test")
+        let task = AgentTask(title: "性能优化任务", steps: [
+            TaskStep(kind: .userInput, text: "优化侧栏卡顿")
+        ])
+        var state = testState(sessions: [session], tasks: [task])
+        state.searchText = "性能"
+
+        XCTAssertEqual(state.filteredThreadRecordSummaries.map(\.id), [task.id])
+
+        state.debouncedSearchText = "普通"
+        XCTAssertEqual(state.filteredThreadRecordSummaries.map(\.id), [session.id])
+    }
+    func testAgentSnapshotInfersWaitingApprovalGoalPlanAndArtifact() {
+        var thread = Thread(
+            title: "修改文件",
+            status: .running,
+            steps: [
+                TaskStep(kind: .userInput, text: "修改 App.swift"),
+                TaskStep(
+                    kind: .reviewRequest,
+                    text: "准备写入",
+                    toolName: "file.write",
+                    diffFilePath: "App.swift",
+                    diffOldContent: "old",
+                    diffNewContent: "new"
+                )
+            ]
+        )
+
+        AppStore.syncAgentSnapshot(&thread)
+
+        XCTAssertEqual(thread.agentState, .waitingForApproval)
+        XCTAssertEqual(thread.agentGoal, "修改 App.swift")
+        XCTAssertFalse(thread.currentPlan.isEmpty)
+        XCTAssertEqual(thread.artifacts.map(\.path), ["App.swift"])
     }
     func testDeleteTurnUpdatesPreviewToRemainingLastMessage() {
         let first = ChatTurn(role: .user, text: "第一条")
@@ -98,7 +128,11 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
 
         store.deleteTurn(sessionID: session.id, turnID: second.id)
 
-        XCTAssertEqual(store.state.selectedSession?.turns.map(\.id), [first.id])
-        XCTAssertEqual(store.state.selectedSession?.preview, first.text)
+        XCTAssertEqual(store.state.selectedThread?.steps.map(\.id), [first.id])
+        XCTAssertEqual(store.state.selectedThread?.preview, first.text)
+    }
+
+    func testWorkbenchAgentsTabTitleUsesSessionWording() {
+        XCTAssertEqual(WorkbenchTab.agents.title, "会话")
     }
 }

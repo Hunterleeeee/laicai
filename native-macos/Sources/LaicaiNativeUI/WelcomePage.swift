@@ -110,7 +110,7 @@ struct WelcomeView: View {
 
     private var heroSubtitle: String {
         store.state.activeConnector == nil
-            ? "连接一个模型后，就可以启动 Agent、读取项目和运行工具。"
+            ? "连接一个模型后，就可以启动 会话、读取项目和运行工具。"
             : "从常用起点开始，或者直接在下方输入一个明确目标。"
     }
 
@@ -177,11 +177,20 @@ struct WelcomeView: View {
         return LazyVGrid(columns: columns, spacing: AppSpace.sm) {
             PrimaryActionTile(
                 icon: "plus.message",
-                title: "启动新 Agent",
+                title: "启动新任务",
                 subtitle: "给它一个目标",
                 tint: Brand.primary
             ) {
-                store.newTask()
+                store.newThread()
+            }
+
+            PrimaryActionTile(
+                icon: "bubble.left.and.bubble.right",
+                title: "启动新会话",
+                subtitle: "随意聊聊",
+                tint: Brand.teal
+            ) {
+                store.newThread()
             }
 
             if let lastTask = recentTask {
@@ -191,7 +200,7 @@ struct WelcomeView: View {
                     subtitle: "接着上次的处理",
                     tint: Brand.teal
                 ) {
-                    store.selectAgent(id: lastTask.id)
+                    store.selectThread(id: lastTask.id)
                 }
             } else {
                 PrimaryActionTile(
@@ -240,7 +249,8 @@ struct WelcomeView: View {
         HStack(spacing: AppSpace.lg) {
             KeyHint(keys: "↵", desc: "发送")
             KeyHint(keys: "⇧↵", desc: "换行")
-            KeyHint(keys: "⌘N", desc: "新 Agent")
+            KeyHint(keys: "⌘N", desc: "新任务")
+            KeyHint(keys: "⌘⇧N", desc: "新会话")
             KeyHint(keys: "⌘K", desc: "命令面板")
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -39,6 +39,7 @@ extension AgentLoop {
             connectorID: connector.id,
             context: taskContext
         )
+        hydrateRuntimeContract(from: taskContext, into: &task)
 
         // Emit user input step
         if !priorSteps.contains(where: { $0.kind == .userInput && $0.text == message }) {
@@ -48,10 +49,10 @@ extension AgentLoop {
         }
 
         // Inline planning hint
-        if intent != .chat, !priorSteps.contains(where: { $0.kind == .aiThinking }) {
+        if config.emitDebugSteps, intent != .chat, !priorSteps.contains(where: { $0.kind == .aiThinking }) {
             let startStep = TaskStep(
                 kind: .aiThinking,
-                text: "正在理解任务并准备执行。",
+                text: "正在理解会话目标并准备执行。",
                 isCollapsible: true,
                 isCollapsed: true
             )
@@ -150,7 +151,7 @@ extension AgentLoop {
                 if state.task.steps.count >= state.absoluteMaxSteps {
                     let limitStep = TaskStep(
                         kind: .aiThinking,
-                        text: "已达到步骤数上限（\(state.absoluteMaxSteps)步），强制结束。如需继续请新建任务。",
+                        text: "已达到步骤数上限（\(state.absoluteMaxSteps)步），强制结束。如需继续请新建会话。",
                         isCollapsible: false
                     )
                     state.task.steps.append(limitStep)
@@ -199,7 +200,7 @@ extension AgentLoop {
                 let request = SendMessageRequest(
                     sessionID: state.task.id,
                     message: "",
-                    connector: connector,
+                    connector: state.connector,
                     modeLabel: intentModeLabel,
                     systemPrompt: effectivePrompt,
                     tools: state.toolDefs.isEmpty ? nil : state.toolDefs,
@@ -223,6 +224,21 @@ extension AgentLoop {
                     }
                 } catch {
                     let isTransient = Self.isTransientError(error)
+                    if isTransient,
+                       !state.didConnectorFailover,
+                       let fallback = Self.fallbackConnector(after: state.connector, allConnectors: state.allConnectors) {
+                        state.didConnectorFailover = true
+                        let failed = state.connector
+                        state.connector = fallback
+                        state.task.connectorID = fallback.id
+                        state.usesOllamaChat = Self.usesOllamaChat(fallback)
+                        state.transientRetryCount = 0
+                        let failoverStep = Self.connectorFailoverStep(from: failed, to: fallback, reason: error.localizedDescription)
+                        state.task.steps.append(failoverStep)
+                        onStep(failoverStep)
+                        state.messages.append(Self.connectorFailoverMessage(from: failed, to: fallback, reason: error.localizedDescription))
+                        continue
+                    }
                     if isTransient, state.transientRetryCount < state.maxTransientRetries, state.iteration < state.effectiveMaxIterations {
                         state.transientRetryCount += 1
                         let retryStep = TaskStep(
@@ -231,8 +247,10 @@ extension AgentLoop {
                             isCollapsible: true,
                             isCollapsed: true
                         )
-                        state.task.steps.append(retryStep)
-                        onStep(retryStep)
+                        if config.emitDebugSteps {
+                            state.task.steps.append(retryStep)
+                            onStep(retryStep)
+                        }
                         let delaySec = min(Int(pow(2.0, Double(state.transientRetryCount))), 8)
                         try? await Task.sleep(for: .milliseconds(delaySec * 1000))
                         continue
@@ -258,9 +276,9 @@ extension AgentLoop {
                     ) {
                         let fallbackStep = TaskStep(
                             kind: .aiThinking,
-                            text: "检测到当前连接器不兼容工具调用请求，已自动切换为无工具模式继续；后续不会伪造搜索、读取、联网或写入结果。",
+                            text: "当前连接不兼容工具调用请求，换一种方式继续。",
                             isCollapsible: true,
-                            isCollapsed: false,
+                            isCollapsed: true,
                             retryAction: Self.toolCompatibilityFallbackAction
                         )
                         state.task.steps.append(fallbackStep)

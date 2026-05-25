@@ -67,7 +67,7 @@ public struct ChatSession: Identifiable, Equatable, Codable, Sendable {
         preview: String,
         updatedAt: Date = .now,
         isPinned: Bool = false,
-        category: SessionCategory,
+        category: SessionCategory = .inbox,
         modelName: String,
         unreadCount: Int = 0,
         turns: [ChatTurn] = []
@@ -454,6 +454,200 @@ public struct TaskMemory: Equatable, Codable, Sendable {
     }
 }
 
+public enum AgentRuntimeState: String, Codable, Sendable, CaseIterable {
+    case created
+    case planning
+    case gatheringEvidence
+    case executing
+    case verifying
+    case waitingUser
+    case paused
+    case completed
+    case failed
+    case cancelled
+
+    public var title: String {
+        switch self {
+        case .created: return "已创建"
+        case .planning: return "规划中"
+        case .gatheringEvidence: return "采集中"
+        case .executing: return "执行中"
+        case .verifying: return "验证中"
+        case .waitingUser: return "等待用户"
+        case .paused: return "已暂停"
+        case .completed: return "已完成"
+        case .failed: return "失败"
+        case .cancelled: return "已取消"
+        }
+    }
+}
+
+public enum AgentRiskPolicy: String, Codable, Sendable, CaseIterable {
+    case ask
+    case inspect
+    case act
+    case review
+    case dangerous
+
+    public var title: String {
+        switch self {
+        case .ask: return "问答"
+        case .inspect: return "只读"
+        case .act: return "执行"
+        case .review: return "审查"
+        case .dangerous: return "高风险"
+        }
+    }
+}
+
+public enum AgentContinuationPolicy: String, Codable, Sendable, CaseIterable {
+    case ownFollowUps
+    case pendingWhileRunning
+    case explicitNewThreadOnly
+
+    public var title: String {
+        switch self {
+        case .ownFollowUps: return "追问归属当前 Agent"
+        case .pendingWhileRunning: return "运行中追问排队"
+        case .explicitNewThreadOnly: return "显式新建才换线程"
+        }
+    }
+}
+
+public struct AgentTaskProtocol: Equatable, Codable, Sendable {
+    public var taskGoal: String
+    public var workspaceRoot: String
+    public var threadID: UUID
+    public var expectedOutcome: String
+    public var completionCriteria: [String]
+    public var riskPolicy: AgentRiskPolicy
+    public var continuationPolicy: AgentContinuationPolicy
+    public var createdAt: Date
+
+    public init(
+        taskGoal: String = "",
+        workspaceRoot: String = "",
+        threadID: UUID = UUID(),
+        expectedOutcome: String = "",
+        completionCriteria: [String] = [],
+        riskPolicy: AgentRiskPolicy = .act,
+        continuationPolicy: AgentContinuationPolicy = .ownFollowUps,
+        createdAt: Date = .now
+    ) {
+        self.taskGoal = taskGoal
+        self.workspaceRoot = workspaceRoot
+        self.threadID = threadID
+        self.expectedOutcome = expectedOutcome
+        self.completionCriteria = completionCriteria
+        self.riskPolicy = riskPolicy
+        self.continuationPolicy = continuationPolicy
+        self.createdAt = createdAt
+    }
+
+    public var isExecutable: Bool {
+        !taskGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !completionCriteria.isEmpty
+    }
+}
+
+public struct AgentExecutionLedger: Equatable, Codable, Sendable {
+    public var originalRequest: String
+    public var goal: String
+    public var state: AgentRuntimeState
+    public var stateHistory: [String]
+    public var plan: [String]
+    public var readFiles: [String]
+    public var searches: [String]
+    public var pages: [String]
+    public var modifiedFiles: [String]
+    public var artifacts: [String]
+    public var commands: [String]
+    public var verification: [String]
+    public var failedTools: [String]
+    public var errorReasons: [String]
+    public var alternativePaths: [String]
+    public var nextAction: String?
+    public var unfinishedWork: [String]
+    public var pendingFollowUp: String?
+    public var updatedAt: Date
+
+    public init(
+        originalRequest: String = "",
+        goal: String = "",
+        state: AgentRuntimeState = .created,
+        stateHistory: [String] = [],
+        plan: [String] = [],
+        readFiles: [String] = [],
+        searches: [String] = [],
+        pages: [String] = [],
+        modifiedFiles: [String] = [],
+        artifacts: [String] = [],
+        commands: [String] = [],
+        verification: [String] = [],
+        failedTools: [String] = [],
+        errorReasons: [String] = [],
+        alternativePaths: [String] = [],
+        nextAction: String? = nil,
+        unfinishedWork: [String] = [],
+        pendingFollowUp: String? = nil,
+        updatedAt: Date = .now
+    ) {
+        self.originalRequest = originalRequest
+        self.goal = goal
+        self.state = state
+        self.stateHistory = stateHistory
+        self.plan = plan
+        self.readFiles = readFiles
+        self.searches = searches
+        self.pages = pages
+        self.modifiedFiles = modifiedFiles
+        self.artifacts = artifacts
+        self.commands = commands
+        self.verification = verification
+        self.failedTools = failedTools
+        self.errorReasons = errorReasons
+        self.alternativePaths = alternativePaths
+        self.nextAction = nextAction
+        self.unfinishedWork = unfinishedWork
+        self.pendingFollowUp = pendingFollowUp
+        self.updatedAt = updatedAt
+    }
+
+    public var hasToolEvidence: Bool {
+        !readFiles.isEmpty
+            || !searches.isEmpty
+            || !pages.isEmpty
+            || !commands.isEmpty
+            || !verification.isEmpty
+            || !modifiedFiles.isEmpty
+            || !artifacts.isEmpty
+    }
+
+    public mutating func transition(to newState: AgentRuntimeState, reason: String) {
+        guard state != newState else { return }
+        let trimmedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let suffix = trimmedReason.isEmpty ? "" : "：\(trimmedReason)"
+        stateHistory.append("\(state.rawValue) -> \(newState.rawValue)\(suffix)")
+        if stateHistory.count > 40 {
+            stateHistory.removeFirst(stateHistory.count - 40)
+        }
+        state = newState
+        updatedAt = .now
+    }
+
+    public mutating func appendUnique(_ value: String, to keyPath: WritableKeyPath<AgentExecutionLedger, [String]>, cap: Int = 80) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if !self[keyPath: keyPath].contains(trimmed) {
+            self[keyPath: keyPath].append(trimmed)
+            if self[keyPath: keyPath].count > cap {
+                self[keyPath: keyPath].removeFirst(self[keyPath: keyPath].count - cap)
+            }
+        }
+        updatedAt = .now
+    }
+}
+
 public struct FileInfo: Identifiable, Equatable, Codable, Sendable {
     public var id: String { path }
     public var path: String
@@ -478,6 +672,8 @@ public struct AgentTask: Identifiable, Equatable, Codable, Sendable {
     public var workflowName: String?
     public var context: TaskContext
     public var multiAgentPlan: MultiAgentPlan?
+    public var taskProtocol: AgentTaskProtocol?
+    public var executionLedger: AgentExecutionLedger?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -490,6 +686,8 @@ public struct AgentTask: Identifiable, Equatable, Codable, Sendable {
         workflowName: String? = nil,
         context: TaskContext = TaskContext(),
         multiAgentPlan: MultiAgentPlan? = nil,
+        taskProtocol: AgentTaskProtocol? = nil,
+        executionLedger: AgentExecutionLedger? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -501,6 +699,8 @@ public struct AgentTask: Identifiable, Equatable, Codable, Sendable {
         self.workflowName = workflowName
         self.context = context
         self.multiAgentPlan = multiAgentPlan
+        self.taskProtocol = taskProtocol
+        self.executionLedger = executionLedger
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -515,6 +715,8 @@ public struct AgentTask: Identifiable, Equatable, Codable, Sendable {
         workflowName = thread.workflowName
         context = thread.context
         multiAgentPlan = thread.multiAgentPlan
+        taskProtocol = thread.taskProtocol
+        executionLedger = thread.executionLedger
         createdAt = thread.createdAt
         updatedAt = thread.updatedAt
     }
@@ -530,9 +732,72 @@ public struct AgentTask: Identifiable, Equatable, Codable, Sendable {
 
 // MARK: - Unified Thread Model
 
-public enum ThreadSource: String, Codable, Sendable {
-    case session
-    case task
+public enum AgentMode: String, Codable, Sendable {
+    case ask
+    case act
+    case research
+    case workflow
+    case image
+    case multiAgent
+
+    public var title: String {
+        switch self {
+        case .ask: return "Agent 问答"
+        case .act: return "Agent 执行"
+        case .research: return "Agent 研究"
+        case .workflow: return "Agent 工作流"
+        case .image: return "Agent 图片"
+        case .multiAgent: return "多 Agent 协同"
+        }
+    }
+}
+
+public enum AgentThreadState: String, Codable, Sendable {
+    case idle
+    case planning
+    case running
+    case waitingForApproval
+    case blocked
+    case paused
+    case failed
+    case completed
+    case archived
+
+    public var title: String {
+        switch self {
+        case .idle: return "空闲"
+        case .planning: return "规划中"
+        case .running: return "运行中"
+        case .waitingForApproval: return "待确认"
+        case .blocked: return "阻塞"
+        case .paused: return "已暂停"
+        case .failed: return "失败"
+        case .completed: return "已完成"
+        case .archived: return "已归档"
+        }
+    }
+}
+
+public struct AgentArtifact: Identifiable, Equatable, Codable, Sendable {
+    public var id: UUID
+    public var title: String
+    public var path: String
+    public var kind: String
+    public var createdAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        title: String,
+        path: String,
+        kind: String = "file",
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.title = title
+        self.path = path
+        self.kind = kind
+        self.createdAt = createdAt
+    }
 }
 
 public enum ThreadEventKind: String, Codable, Sendable {
@@ -577,6 +842,8 @@ public struct ThreadEvent: Identifiable, Equatable, Codable, Sendable {
 /// - `steps` is the canonical event stream (ChatTurn maps to .userInput/.textOutput).
 /// - `source` is a stored property, set at creation time. If not explicitly set, inferred from context.
 /// - Legacy `ChatSession` / `AgentTask` are kept for Codable migration.
+public typealias LaicaiThread = Thread
+
 public struct Thread: Identifiable, Equatable, Codable, Sendable {
     public let id: UUID
     public var title: String
@@ -596,8 +863,13 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
     public var userRating: Int  // 1-5 star rating from user feedback; 0 = unrated
     public var createdAt: Date
     public var updatedAt: Date
-    public var source: ThreadSource
     public var projectID: UUID?  // Codex-style: bind thread to a project
+    public var agentState: AgentThreadState
+    public var agentGoal: String?
+    public var currentPlan: [String]
+    public var artifacts: [AgentArtifact]
+    public var taskProtocol: AgentTaskProtocol?
+    public var executionLedger: AgentExecutionLedger?
 
     public init(
         id: UUID = UUID(),
@@ -618,8 +890,13 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         userRating: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now,
-        source: ThreadSource? = nil,
-        projectID: UUID? = nil
+        projectID: UUID? = nil,
+        agentState: AgentThreadState? = nil,
+        agentGoal: String? = nil,
+        currentPlan: [String] = [],
+        artifacts: [AgentArtifact] = [],
+        taskProtocol: AgentTaskProtocol? = nil,
+        executionLedger: AgentExecutionLedger? = nil
     ) {
         self.id = id
         self.title = title
@@ -639,16 +916,22 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         self.userRating = userRating
         self.createdAt = createdAt
         self.updatedAt = updatedAt
-        // Infer source if not explicitly set
-        self.source = source ?? Self.inferSource(context: context, workflowName: workflowName, steps: steps)
         self.projectID = projectID
+        self.agentState = agentState ?? Self.inferAgentState(status: status)
+        self.agentGoal = agentGoal
+        self.currentPlan = currentPlan
+        self.artifacts = artifacts
+        self.taskProtocol = taskProtocol
+        self.executionLedger = executionLedger
     }
 
     // Custom Codable: tolerate missing fields added after initial schema
     private enum CodingKeys: String, CodingKey {
         case id, title, preview, status, steps, connectorID, workflowName, context
         case modelName, category, isPinned, isArchived, unreadCount, summaryCache
-        case multiAgentPlan, userRating, createdAt, updatedAt, source, projectID
+        case multiAgentPlan, userRating, createdAt, updatedAt, projectID
+        case agentState, agentGoal, currentPlan, artifacts
+        case taskProtocol, executionLedger
     }
 
     public init(from decoder: Decoder) throws {
@@ -671,9 +954,14 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         userRating = try c.decodeIfPresent(Int.self, forKey: .userRating) ?? 0
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? updatedAt
-        source = try c.decodeIfPresent(ThreadSource.self, forKey: .source)
-            ?? Self.inferSource(context: context, workflowName: workflowName, steps: steps)
         projectID = try c.decodeIfPresent(UUID.self, forKey: .projectID)
+        agentState = try c.decodeIfPresent(AgentThreadState.self, forKey: .agentState)
+            ?? Self.inferAgentState(status: status)
+        agentGoal = try c.decodeIfPresent(String.self, forKey: .agentGoal)
+        currentPlan = try c.decodeIfPresent([String].self, forKey: .currentPlan) ?? []
+        artifacts = try c.decodeIfPresent([AgentArtifact].self, forKey: .artifacts) ?? []
+        taskProtocol = try c.decodeIfPresent(AgentTaskProtocol.self, forKey: .taskProtocol)
+        executionLedger = try c.decodeIfPresent(AgentExecutionLedger.self, forKey: .executionLedger)
     }
 
     /// Short human-readable ID (first 6 hex chars of UUID, uppercased)
@@ -681,11 +969,26 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         String(id.uuidString.prefix(6))
     }
 
-    /// Infer ThreadSource from content — used as fallback when source is not explicitly set
-    public static func inferSource(context: TaskContext, workflowName: String?, steps: [TaskStep]) -> ThreadSource {
-        context.workspaceRoot.isEmpty && workflowName == nil && steps.allSatisfy {
-            $0.kind == .userInput || $0.kind == .textOutput || $0.kind == .aiThinking || $0.kind == .error
-        } ? .session : .task
+    public static func inferAgentState(status: TaskStatus) -> AgentThreadState {
+        switch status {
+        case .queued:
+            return .idle
+        case .running:
+            return .running
+        case .waitingReview:
+            return .waitingForApproval
+        case .completed:
+            return .completed
+        case .failed:
+            return .failed
+        case .cancelled:
+            return .paused
+        }
+    }
+
+    public static func isPlaceholderTitle(_ title: String) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == "新 Agent" || trimmed == "新线程" || trimmed == "新会话" || trimmed == "新对话"
     }
 
     /// Create a Thread from a legacy ChatSession.
@@ -717,7 +1020,13 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         userRating = 0
         createdAt = session.updatedAt
         updatedAt = session.updatedAt
-        source = .session
+        projectID = nil
+        agentState = .idle
+        agentGoal = nil
+        currentPlan = []
+        artifacts = []
+        taskProtocol = nil
+        executionLedger = nil
     }
 
     /// Create a Thread from a legacy AgentTask.
@@ -740,7 +1049,13 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         userRating = 0
         createdAt = task.createdAt
         updatedAt = task.updatedAt
-        source = .task
+        projectID = nil
+        agentState = Self.inferAgentState(status: task.status)
+        agentGoal = task.steps.first(where: { $0.kind == .userInput })?.text
+        currentPlan = []
+        artifacts = []
+        taskProtocol = task.taskProtocol
+        executionLedger = task.executionLedger
     }
 
     public var isEmptyPlaceholder: Bool {
@@ -748,11 +1063,45 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
             && preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && status == .queued
     }
+
+    public var agentMode: AgentMode {
+        if multiAgentPlan != nil { return .multiAgent }
+        if workflowName != nil { return .workflow }
+        if steps.contains(where: { $0.toolName == "image.generate" }) { return .image }
+        if taskProtocol != nil || executionLedger != nil { return .act }
+        if steps.contains(where: { step in
+            step.kind == .toolCall
+                || step.kind == .toolResult
+                || step.kind == .reviewRequest
+                || step.kind == .reviewResult
+        }) { return .act }
+        if context.metadata["intent"] == "research" { return .research }
+        return .ask
+    }
+
+    public var isAskAgent: Bool {
+        agentMode == .ask
+    }
+
+    public var isExecutionAgent: Bool {
+        agentMode != .ask
+    }
+
+    public var canContinueAgent: Bool {
+        isExecutionAgent
+            || status == .failed
+            || status == .cancelled
+            || status == .waitingReview
+            || steps.contains { $0.kind == .toolCall || $0.kind == .toolResult || $0.kind == .reviewRequest }
+    }
+
+    public var events: [ThreadEvent] {
+        ThreadRecord(thread: self, includeEvents: true).events
+    }
 }
 
 public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
     public var id: UUID
-    public var source: ThreadSource
     public var title: String
     public var preview: String
     public var status: TaskStatus?
@@ -761,21 +1110,60 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
     public var isArchived: Bool
     public var hasContent: Bool
     public var events: [ThreadEvent]
-    public var session: ChatSession?
-    public var task: AgentTask?
     public var projectID: UUID?
+    public var agentState: AgentThreadState?
+    public var taskProtocol: AgentTaskProtocol?
+    public var executionLedger: AgentExecutionLedger?
 
     public var shortID: String { String(id.uuidString.prefix(6)) }
 
+    public var resolvedAgentState: AgentThreadState {
+        if let agentState { return agentState }
+        if let status { return Thread.inferAgentState(status: status) }
+        return .idle
+    }
+
+    public init(
+        id: UUID,
+        title: String,
+        preview: String,
+        status: TaskStatus?,
+        updatedAt: Date,
+        isPinned: Bool,
+        isArchived: Bool,
+        hasContent: Bool,
+        events: [ThreadEvent],
+        projectID: UUID? = nil,
+        agentState: AgentThreadState? = nil,
+        taskProtocol: AgentTaskProtocol? = nil,
+        executionLedger: AgentExecutionLedger? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.preview = preview
+        self.status = status
+        self.updatedAt = updatedAt
+        self.isPinned = isPinned
+        self.isArchived = isArchived
+        self.hasContent = hasContent
+        self.events = events
+        self.projectID = projectID
+        self.agentState = agentState
+        self.taskProtocol = taskProtocol
+        self.executionLedger = executionLedger
+    }
+
     public init(thread: Thread, includeEvents: Bool = true) {
         id = thread.id
-        source = thread.source
         title = thread.title
         preview = thread.preview
-        status = thread.source == .task ? thread.status : nil
+        status = thread.status
         updatedAt = thread.updatedAt
         isPinned = thread.isPinned
         projectID = thread.projectID
+        agentState = thread.agentState
+        taskProtocol = includeEvents ? thread.taskProtocol : nil
+        executionLedger = includeEvents ? thread.executionLedger : nil
         isArchived = thread.isArchived
         hasContent = !thread.steps.isEmpty
         events = includeEvents ? thread.steps.map { step in
@@ -788,61 +1176,6 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
                 metrics: step.metrics
             )
         } : []
-        if includeEvents {
-            session = thread.source == .session ? ChatSession(thread: thread) : nil
-            task = thread.source == .task ? AgentTask(thread: thread) : nil
-        } else {
-            session = nil
-            task = nil
-        }
-    }
-
-    public init(session: ChatSession, includeEvents: Bool = true) {
-        id = session.id
-        source = .session
-        title = session.title
-        preview = session.preview
-        status = nil
-        updatedAt = session.updatedAt
-        isPinned = session.isPinned
-        isArchived = false
-        hasContent = !session.turns.isEmpty
-        events = includeEvents ? session.turns.map { turn in
-            ThreadEvent(
-                id: turn.id,
-                kind: turn.role == .user ? .user : .assistant,
-                text: turn.text,
-                createdAt: turn.createdAt,
-                sourceTurnID: turn.id,
-                metrics: turn.metrics
-            )
-        } : []
-        self.session = session
-        task = nil
-    }
-
-    public init(task: AgentTask, includeEvents: Bool = true) {
-        id = task.id
-        source = .task
-        title = task.title
-        preview = task.preview
-        status = task.status
-        updatedAt = task.updatedAt
-        isPinned = false
-        isArchived = false
-        hasContent = !task.steps.isEmpty
-        events = includeEvents ? task.steps.map { step in
-            ThreadEvent(
-                id: step.id,
-                kind: Self.eventKind(for: step.kind, isFailure: step.isFailure),
-                text: step.text,
-                createdAt: step.createdAt,
-                sourceStepID: step.id,
-                metrics: step.metrics
-            )
-        } : []
-        session = nil
-        self.task = task
     }
 
     private static func eventKind(for stepKind: TaskStepKind, isFailure: Bool) -> ThreadEventKind {
@@ -855,6 +1188,103 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
         case .textOutput: return .assistant
         case .error: return .error
         case .reviewRequest, .reviewResult: return .review
+        }
+    }
+}
+
+public struct AgentRecord: Identifiable, Equatable, Codable, Sendable {
+    public var id: UUID
+    public var title: String
+    public var preview: String
+    public var mode: AgentMode
+    public var state: AgentThreadState
+    public var goal: String?
+    public var plan: [String]
+    public var artifacts: [AgentArtifact]
+    public var updatedAt: Date
+    public var isPinned: Bool
+    public var isArchived: Bool
+    public var hasContent: Bool
+    public var events: [ThreadEvent]
+    public var projectID: UUID?
+    public var taskProtocol: AgentTaskProtocol?
+    public var executionLedger: AgentExecutionLedger?
+
+    public var shortID: String { String(id.uuidString.prefix(6)) }
+
+    public init(thread: Thread, includeEvents: Bool = true) {
+        id = thread.id
+        title = thread.title
+        preview = thread.preview
+        mode = thread.agentMode
+        state = thread.agentState
+        goal = thread.agentGoal
+        plan = thread.currentPlan
+        artifacts = thread.artifacts
+        updatedAt = thread.updatedAt
+        isPinned = thread.isPinned
+        isArchived = thread.isArchived
+        hasContent = !thread.steps.isEmpty
+        projectID = thread.projectID
+        taskProtocol = includeEvents ? thread.taskProtocol : nil
+        executionLedger = includeEvents ? thread.executionLedger : nil
+        events = includeEvents ? thread.steps.map { step in
+            ThreadEvent(
+                id: step.id,
+                kind: Self.eventKind(for: step.kind, isFailure: step.isFailure),
+                text: step.text,
+                createdAt: step.createdAt,
+                sourceStepID: step.id,
+                metrics: step.metrics
+            )
+        } : []
+    }
+
+    public var threadRecord: ThreadRecord {
+        ThreadRecord(
+            id: id,
+            title: title,
+            preview: preview,
+            status: statusForState(state),
+            updatedAt: updatedAt,
+            isPinned: isPinned,
+            isArchived: isArchived,
+            hasContent: hasContent,
+            events: events,
+            projectID: projectID,
+            agentState: state,
+            taskProtocol: taskProtocol,
+            executionLedger: executionLedger
+        )
+    }
+
+    private static func eventKind(for stepKind: TaskStepKind, isFailure: Bool) -> ThreadEventKind {
+        if isFailure { return .error }
+        switch stepKind {
+        case .userInput: return .user
+        case .aiThinking: return .thinking
+        case .toolCall: return .toolCall
+        case .toolResult: return .toolResult
+        case .textOutput: return .assistant
+        case .error: return .error
+        case .reviewRequest, .reviewResult: return .review
+        }
+    }
+
+    private func statusForState(_ state: AgentThreadState) -> TaskStatus {
+        switch state {
+        case .idle, .planning:
+            return .queued
+        case .running:
+            return .running
+        case .waitingForApproval, .blocked:
+            return .waitingReview
+        case .paused, .archived:
+            return .cancelled
+        case .failed:
+            return .failed
+        case .completed:
+            return .completed
         }
     }
 }
@@ -1211,15 +1641,16 @@ public enum TaskPhase: String, Sendable, Equatable, CaseIterable {
     /// Restricting tools per phase was causing the agent to be unable to search,
     /// fetch web pages, or run commands when it needed to.
     public var allowedTools: Set<String> {
-        return [
-            "file.read", "file.write", "file.edit", "diff.apply",
-            "file.extract",
-            "code.search", "workspace.index",
-            "shell.exec", "verify.build",
-            "web.search", "web.fetch",
-            "wiki.build", "image.generate",
-            "git"
-        ]
+            return [
+                "file.read", "file.write", "file.edit", "diff.apply",
+                "file.extract", "document.transform",
+                "code.search", "workspace.index",
+                "shell.exec", "verify.build",
+                "web.search", "web.fetch",
+                "browser", "browser.real", "computer",
+                "wiki.build", "image.generate",
+                "skill.manage", "git"
+            ]
     }
 }
 
@@ -1257,15 +1688,35 @@ public enum AgentRole: String, Codable, Sendable, CaseIterable, Identifiable {
     public var allowedTools: Set<String> {
         switch self {
         case .planner:
-            return ["file.read", "file.extract", "code.search", "workspace.index"]
+            return ["file.read", "file.extract", "document.transform", "code.search", "workspace.index", "shell.exec", "skill.manage", "git"]
         case .coder:
-            return ["file.read", "file.extract", "code.search", "workspace.index", "file.write", "file.edit", "diff.apply", "shell.exec", "git", "image.generate"]
+            return [
+                "file.read", "file.extract", "document.transform", "code.search", "workspace.index",
+                "file.write", "file.edit", "diff.apply",
+                "shell.exec", "verify.build", "skill.manage", "git", "image.generate",
+                "browser", "browser.real", "computer"
+            ]
         case .reviewer:
-            return ["file.read", "file.extract", "code.search", "git"]
+            return ["file.read", "file.extract", "document.transform", "code.search", "workspace.index", "shell.exec", "verify.build", "git", "browser", "browser.real", "computer"]
         case .researcher:
-            return ["file.read", "file.extract", "code.search", "web.search", "web.fetch", "workspace.index"]
+            return ["file.read", "file.extract", "document.transform", "code.search", "web.search", "web.fetch", "workspace.index", "browser"]
         case .tester:
-            return ["file.read", "file.extract", "code.search", "shell.exec", "git"]
+            return ["file.read", "file.extract", "document.transform", "code.search", "workspace.index", "shell.exec", "verify.build", "skill.manage", "git", "browser", "browser.real", "computer"]
+        }
+    }
+
+    public var outputContract: String {
+        switch self {
+        case .planner:
+            return "输出 artifact: 任务分解、完成标准、风险、建议读取/修改文件；不得写入项目文件。"
+        case .researcher:
+            return "输出 artifact: 已读取来源、代码位置、关键事实和引用依据；不得写入项目文件。"
+        case .coder:
+            return "输出 artifact: 实际修改文件、变更摘要、验证记录或验证阻塞；Coder 是唯一允许写入项目文件的角色。"
+        case .tester:
+            return "输出 artifact: 运行命令、完整结果摘要、失败文件/关键错误、是否通过；不得写入项目文件。"
+        case .reviewer:
+            return "输出 artifact: 基于 diff/文件内容/验收标准的审查结论、严重问题和残余风险；不得写入项目文件。"
         }
     }
 }
@@ -1584,6 +2035,7 @@ public enum WorkbenchTab: String, Codable, Sendable, CaseIterable, Identifiable 
     case tools
     case workflows
     case skills
+    case schedules
     case agents
     case wiki
     case report
@@ -1604,8 +2056,10 @@ public enum WorkbenchTab: String, Codable, Sendable, CaseIterable, Identifiable 
             return "工作流"
         case .skills:
             return "技能"
+        case .schedules:
+            return "定时"
         case .agents:
-            return "Agent"
+            return "会话"
         case .wiki:
             return "Wiki"
         case .report:
@@ -1623,6 +2077,7 @@ public enum WorkbenchTab: String, Codable, Sendable, CaseIterable, Identifiable 
         case .tools: return "wrench.and.screwdriver"
         case .workflows: return "arrow.triangle.branch"
         case .skills: return "bolt.horizontal"
+        case .schedules: return "alarm"
         case .agents: return "person.3"
         case .wiki: return "book.closed"
         case .report: return "chart.bar.doc.horizontal"
@@ -1795,7 +2250,7 @@ public enum ContextMode: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .economy: return "更少文件、更短结果，适合轻量问答"
         case .balanced: return "默认预算，适合日常迭代"
-        case .deep: return "更多上下文和迭代，适合复杂任务"
+        case .deep: return "更多上下文和迭代，适合复杂 Agent"
         }
     }
 
@@ -1844,18 +2299,20 @@ public struct AppSettings: Equatable, Codable, Sendable {
     // G16: Multi-workspace support — recent workspace paths for quick switching
     public var recentWorkspaces: [String]
     public var usePipeline: Bool
+    public var leanMode: Bool
 
     public init(
         workspacePath: String,
         vaultPath: String = "",
-        defaultConnectorName: String,
-        compactComposer: Bool,
-        showDebugPanels: Bool,
+        defaultConnectorName: String = "None",
+        compactComposer: Bool = false,
+        showDebugPanels: Bool = false,
         contextMode: ContextMode = .balanced,
         comfyUIServerURL: String = "http://127.0.0.1:8188",
         comfyUIModelName: String = "",
         recentWorkspaces: [String] = [],
-        usePipeline: Bool = false
+        usePipeline: Bool = false,
+        leanMode: Bool = false
     ) {
         self.workspacePath = workspacePath
         self.vaultPath = vaultPath
@@ -1867,6 +2324,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         self.comfyUIModelName = comfyUIModelName
         self.recentWorkspaces = recentWorkspaces
         self.usePipeline = usePipeline
+        self.leanMode = leanMode
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1880,6 +2338,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         case comfyUIModelName
         case recentWorkspaces
         case usePipeline
+        case leanMode
     }
 
     public init(from decoder: Decoder) throws {
@@ -1894,6 +2353,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         comfyUIModelName = try container.decodeIfPresent(String.self, forKey: .comfyUIModelName) ?? ""
         recentWorkspaces = try container.decodeIfPresent([String].self, forKey: .recentWorkspaces) ?? []
         usePipeline = try container.decodeIfPresent(Bool.self, forKey: .usePipeline) ?? false
+        leanMode = try container.decodeIfPresent(Bool.self, forKey: .leanMode) ?? false
     }
 
     // G16: Switch active workspace and track in recents

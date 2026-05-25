@@ -9,7 +9,7 @@ struct PipelineState {
     // ── Identity ──
     var task: AgentTask
     var taskContext: TaskContext
-    let connector: ConnectorProfile
+    var connector: ConnectorProfile
     let allConnectors: [ConnectorProfile]
     let intent: UserIntent
     let message: String
@@ -40,12 +40,13 @@ struct PipelineState {
     var circuitBrokenTools: Set<String> = []
     var toolFailureCounts: [String: Int] = [:]
     var usedToolCompatibilityFallback: Bool = false
+    var didConnectorFailover: Bool = false
 
     // ── Derived Config (computed once) ──
     let needsPlanning: Bool
     let isPureContinuation: Bool
     let isReadOnlyRun: Bool
-    let usesOllamaChat: Bool
+    var usesOllamaChat: Bool
     var effectiveMaxIterations: Int
     let intentString: String
 
@@ -68,7 +69,8 @@ struct PipelineState {
         imageAttachments: [ImageAttachment],
         priorSteps: [TaskStep],
         summaryCache: String?,
-        config: AgentLoop.Config
+        config: AgentLoop.Config,
+        startTime: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()
     ) {
         self.task = task
         self.taskContext = taskContext
@@ -79,7 +81,7 @@ struct PipelineState {
         self.imageAttachments = imageAttachments
         self.priorSteps = priorSteps
         self.summaryCache = summaryCache
-        self.startTime = CFAbsoluteTimeGetCurrent()
+        self.startTime = startTime
 
         self.needsPlanning = intent != .chat
             && priorSteps.isEmpty
@@ -114,8 +116,8 @@ struct PipelineState {
 
         self.effectiveMaxIterations = config.maxIterations
         if let avgIter = TaskOutcomeRecorder.shared.avgIterations(intent: intentString) {
-            let learned = Int(ceil(avgIter * 1.5))
-            self.effectiveMaxIterations = max(3, min(learned, config.maxIterations))
+            let learned = max(1, Int(ceil(avgIter * 1.5)))
+            self.effectiveMaxIterations = min(config.maxIterations, max(3, learned))
         }
     }
 }

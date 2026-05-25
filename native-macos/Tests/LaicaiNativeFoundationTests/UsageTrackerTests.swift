@@ -47,6 +47,38 @@ final class UsageTrackerTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(usage.requestCount, 80)
     }
 
+    func testThreadUsageCacheInvalidatesWhenRecordingSameThread() async throws {
+        let base = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let tracker = UsageTracker(path: base.path)
+        let threadID = UUID().uuidString
+
+        tracker.record(
+            modelName: "test-model",
+            threadID: threadID,
+            inputTokens: 10,
+            outputTokens: 5,
+            durationSeconds: 0.1
+        )
+        try await Task.sleep(nanoseconds: 250_000_000)
+
+        XCTAssertEqual(tracker.threadUsage(threadID: threadID).requestCount, 1)
+
+        tracker.record(
+            modelName: "test-model",
+            threadID: threadID,
+            inputTokens: 7,
+            outputTokens: 3,
+            durationSeconds: 0.1
+        )
+        try await Task.sleep(nanoseconds: 250_000_000)
+
+        let usage = tracker.threadUsage(threadID: threadID)
+        XCTAssertEqual(usage.requestCount, 2)
+        XCTAssertEqual(usage.inputTokens, 17)
+        XCTAssertEqual(usage.outputTokens, 8)
+    }
+
     func testUsageTrackerCreatesThreadIndex() throws {
         let base = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: base) }

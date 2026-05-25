@@ -188,6 +188,7 @@ public final class SkillRegistry: ObservableObject {
         return urls
             .flatMap { url -> [URL] in
                 if url.pathExtension.lowercased() == "json" { return [url] }
+                if url.pathExtension.lowercased() == "md" { return [url] }
                 let nested = url.appendingPathComponent("skill.json")
                 return FileManager.default.fileExists(atPath: nested.path) ? [nested] : []
             }
@@ -211,6 +212,10 @@ public final class SkillRegistry: ObservableObject {
                         isPublished: true,
                         systemHint: prompt
                     )
+                } else if url.pathExtension.lowercased() == "md",
+                          let markdown = String(data: data, encoding: .utf8),
+                          let parsed = Self.skillFromMarkdown(markdown, url: url) {
+                    skill = parsed
                 } else {
                     return nil
                 }
@@ -240,6 +245,108 @@ public final class SkillRegistry: ObservableObject {
             }
         }
         return Array(Set(values.map(ToolNameCodec.canonicalName))).sorted()
+    }
+
+    private nonisolated static func skillFromMarkdown(_ markdown: String, url: URL) -> SkillDefinition? {
+        let frontmatter = parseFrontmatter(markdown)
+        let rawName = frontmatter["name"] ?? headingName(in: markdown)
+        guard let name = rawName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+            return nil
+        }
+        let description = (frontmatter["description"] ?? firstBodyParagraph(in: markdown) ?? "本地 skill：\(name)")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let tools = normalizedTools(fromFrontmatterValue: frontmatter["tools"])
+        let category = normalizeSkillCategory(frontmatter["category"])
+        let hint = markdown.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty.map { String($0.prefix(4000)) }
+        return SkillDefinition(
+            name: name,
+            description: description.isEmpty ? "本地 skill：\(name)" : description,
+            tools: tools,
+            workflowName: frontmatter["workflowName"]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            modelPreference: tools.contains("file.write") ? .code : .default,
+            isBuiltin: false,
+            isPublished: true,
+            systemHint: hint,
+            category: category
+        )
+    }
+
+    private nonisolated static func parseFrontmatter(_ markdown: String) -> [String: String] {
+        let lines = markdown.components(separatedBy: .newlines)
+        guard lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) == "---" else { return [:] }
+        var result: [String: String] = [:]
+        for line in lines.dropFirst() {
+            if line.trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
+                break
+            }
+            guard let separator = line.firstIndex(of: ":") else { continue }
+            let key = line[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = line[line.index(after: separator)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if !key.isEmpty {
+                result[key] = value
+            }
+        }
+        return result
+    }
+
+    private nonisolated static func normalizedTools(fromFrontmatterValue value: String?) -> [String] {
+        guard let value else { return [] }
+        let cleaned = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        let tools = cleaned
+            .components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) }
+            .filter { !$0.isEmpty }
+            .map(ToolNameCodec.canonicalName)
+        return Array(Set(tools)).sorted()
+    }
+
+    private nonisolated static func headingName(in markdown: String) -> String? {
+        markdown.components(separatedBy: .newlines).first { $0.hasPrefix("# ") }?
+            .dropFirst(2)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private nonisolated static func firstBodyParagraph(in markdown: String) -> String? {
+        var inFrontmatter = markdown.hasPrefix("---")
+        for line in markdown.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed == "---" {
+                inFrontmatter.toggle()
+                continue
+            }
+            guard !inFrontmatter else { continue }
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+            return trimmed
+        }
+        return nil
+    }
+
+    public nonisolated static func normalizeSkillCategory(_ value: String?) -> String? {
+        guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        let lower = raw.lowercased()
+        let aliases: [String: String] = [
+            "通用": "general", "通用/开发": "general", "默认": "general", "general": "general",
+            "知识": "knowledge", "知识库": "knowledge", "knowledge": "knowledge",
+            "营销": "marketing", "marketing": "marketing",
+            "产品": "product", "product": "product",
+            "内容": "content", "写作": "content", "content": "content",
+            "设计": "design", "design": "design",
+            "数据": "data", "data": "data",
+            "商业": "business", "business": "business",
+            "分析": "analysis", "analysis": "analysis",
+            "编辑": "editing", "editing": "editing",
+            "执行": "execution", "execution": "execution",
+            "研究": "research", "research": "research",
+            "流程": "workflow", "workflow": "workflow",
+            "元技能": "meta", "meta": "meta"
+        ]
+        return aliases[raw] ?? aliases[lower] ?? lower
     }
 
     private nonisolated static func loadPromptHint(for manifestURL: URL) -> String? {

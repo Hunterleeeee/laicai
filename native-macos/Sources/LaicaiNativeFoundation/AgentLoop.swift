@@ -49,6 +49,25 @@ public final class AgentLoop: ObservableObject {
         onReasoningDelta: @Sendable @MainActor (String) -> Void = { _ in },
         onCheckInterrupt: @MainActor () -> String? = { nil }
     ) async throws -> AgentTask {
+        // ── Lean mode delegation (Codex-style kernel) ──
+        if config.leanMode {
+            return try await runLean(
+                taskID: taskID,
+                message: message,
+                intent: intent,
+                connector: connector,
+                allConnectors: allConnectors,
+                context: context,
+                priorSteps: priorSteps,
+                summaryCache: summaryCache,
+                imageAttachments: imageAttachments,
+                onStep: onStep,
+                onStreamDelta: onStreamDelta,
+                onReasoningDelta: onReasoningDelta,
+                onCheckInterrupt: onCheckInterrupt
+            )
+        }
+
         // ── Pipeline delegation ──
         if config.usePipeline {
             return try await runPipeline(
@@ -67,7 +86,6 @@ public final class AgentLoop: ObservableObject {
         }
 
         let startTime = CFAbsoluteTimeGetCurrent()
-        let wasCancelled = false
         // PERF-3: Chat fast path — skip heavy file scan and git diff for simple chat
         var taskContext = prepareTaskContext(context, intent: intent, message: message)
 
@@ -78,6 +96,7 @@ public final class AgentLoop: ObservableObject {
             connectorID: connector.id,
             context: taskContext
         )
+        hydrateRuntimeContract(from: taskContext, into: &task)
 
         // Emit user input step
         if !priorSteps.contains(where: { $0.kind == .userInput && $0.text == message }) {
@@ -92,15 +111,29 @@ public final class AgentLoop: ObservableObject {
             && priorSteps.isEmpty
             && !Self.isPureContinuationCommand(message)
             && message.count > 10
-        if intent != .chat, !priorSteps.contains(where: { $0.kind == .aiThinking }) {
+        if config.emitDebugSteps, intent != .chat, !priorSteps.contains(where: { $0.kind == .aiThinking }) {
             let startStep = TaskStep(
                 kind: .aiThinking,
-                text: "正在理解任务并准备执行。",
+                text: "正在理解会话目标并准备执行。",
                 isCollapsible: true,
                 isCollapsed: true
             )
             task.steps.append(startStep)
             onStep(startStep)
+        }
+        if needsPlanning {
+            let planText = Self.stagePlan(for: message, intent: intent)
+            if !planText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let planStep = TaskStep(
+                    kind: .aiThinking,
+                    text: planText,
+                    isCollapsible: true,
+                    isCollapsed: true
+                )
+                task.steps.append(planStep)
+                onStep(planStep)
+                taskContext.memory.appendDecision("执行计划：\n\(planText)")
+            }
         }
 
         authorizeUserPathsAndNarrowWorkspace(message: message, intent: intent, taskContext: &taskContext)
@@ -156,8 +189,11 @@ public final class AgentLoop: ObservableObject {
 
         // Build system prompt
         var systemPrompt = PromptComposer.composeSystemPrompt(context: taskContext, intent: intent)
+        if needsPlanning {
+            systemPrompt += "\n\n## Plan / Execute / Verify / Summarize\n先形成可执行路径，再基于真实证据执行，最后验证并总结结果。"
+        }
 
-        // G1: Inject persistent cross-session memory
+        // G1: Inject persistent cross-Agent memory
         if !taskContext.workspaceRoot.isEmpty, let repo = Self.sharedRepository {
             let memories = repo.loadMemories(workspace: taskContext.workspaceRoot, limit: 20)
             if !memories.isEmpty {
@@ -230,11 +266,11 @@ public final class AgentLoop: ObservableObject {
 
         if let customSystemPrompt = config.customSystemPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
            !customSystemPrompt.isEmpty {
-            systemPrompt += "\n\n## 当前指定 Agent\n\(customSystemPrompt)"
+            systemPrompt += "\n\n## 当前指定 会话\n\(customSystemPrompt)"
         }
         let hasPlan = taskContext.memory.userDecisions.contains(where: { $0.hasPrefix("执行计划：") })
         if hasPlan {
-            systemPrompt += "\n\n## 执行纪律\n严格按照上面的执行计划推进。每轮只做计划中的下一步。最终回复必须说明已验证什么、未验证什么。"
+            systemPrompt += "\n\n## 执行纪律\n严格按照上面的执行计划推进。每轮只做计划中的下一步。若当前是继续/追问/修复已有会话，必须沿用检查点、最近失败和已读文件，从断点推进；不要把「继续」「为什么」「还有什么」「没反应」当成新的独立目标。最终回复必须说明已验证什么、未验证什么。"
         }
 
         // D4: Task-aware tool selection guidance
@@ -253,6 +289,15 @@ public final class AgentLoop: ObservableObject {
             if !toolHints.isEmpty {
                 systemPrompt += "\n\n## 工具使用提示\n" + toolHints.joined(separator: "\n")
             }
+            systemPrompt += """
+
+## 业务执行原则
+-会话的默认目标是完成实际业务，不是只回答问题。
+- 如果用户给的是项目、文件、链接、报错、按钮、页面、文档或“优化/修复/调整/继续”，必须先用工具取得证据。
+- 证据足够且风险可控时继续执行：改代码、生成文件、运行验证、整理交付；不要停在“建议/计划”。
+- 只有用户明确说“只分析/先别改/不要执行”时，才保持只读结论。
+- 做不到时要说清真实阻塞点和下一步需要的输入，不要把未执行的计划说成成果。
+"""
         }
 
         // Persist trim details from token budget estimation
@@ -366,12 +411,14 @@ public final class AgentLoop: ObservableObject {
                 task.steps.append(continuationStep)
                 onStep(continuationStep)
                 wasTruncated = continuationStep.text.contains("回复仍被截断")
-                didComplete = !wasTruncated
+                if !wasTruncated, !continuationStep.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    didComplete = true
+                }
             }
             if wasTruncated {
                 let stillTruncatedStep = TaskStep(
                     kind: .error,
-                    text: "续写仍被截断。请继续在这条任务里发送“接着说”，我会继续沿用当前上下文。",
+                    text: "续写仍被截断。请继续在这个会话里发送“接着说”，我会继续沿用当前上下文。",
                     isFailure: false,
                     recoverable: true,
                     retryAction: "接着说"
@@ -441,7 +488,7 @@ public final class AgentLoop: ObservableObject {
                 limit: min(4000, config.maxTokensPerTurn)
             )
             let instruction = toolResult.success
-                ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWebFetch, baseline: "我已读取用户提供的网页。请基于网页正文和当前任务继续工作，必要时再搜索或读取项目文件；不要声称无法访问该链接。")
+                ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWebFetch, baseline: "我已读取用户提供的网页。请基于网页正文和当前会话目标继续工作，必要时再搜索或读取项目文件；不要声称无法访问该链接。")
                 : PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWebFetch + "_fail", baseline: "我尝试读取用户提供的网页但失败。请明确说明失败原因，不能编造网页内容。")
             messages.append(ChatMessage(
                 role: "user",
@@ -508,7 +555,7 @@ public final class AgentLoop: ObservableObject {
                 limit: min(8000, config.maxTokensPerTurn)
             )
             let instruction = toolResult.success
-                ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapFileRead, baseline: "我已直接读取用户提供的本地路径。请基于真实读取结果继续完成任务；如果这是目录，先根据目录清单判断下一步该读哪些文件。")
+                ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapFileRead, baseline: "我已直接读取用户提供的本地路径。请基于真实读取结果继续推进当前会话目标；如果这是目录，先根据目录清单判断下一步该读哪些文件。")
                 : PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapFileRead + "_fail", baseline: "我尝试读取用户提供的本地路径但失败。请明确说明失败原因，不能编造文件内容。")
             messages.append(ChatMessage(
                 role: "user",
@@ -648,7 +695,7 @@ public final class AgentLoop: ObservableObject {
             let fileHints = taskContext.relevantFiles.prefix(12).map { "- \($0.path) (\($0.language))" }.joined(separator: "\n")
             let hintBlock = fileHints.isEmpty ? "" : "\n\n自动相关文件线索：\n\(fileHints)"
             let instruction = toolResult.success
-                ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWorkspaceSearch, baseline: "我已先搜索工作区，并尽量自动读取首个高相关文件片段。请基于这些真实线索继续完成任务；如果线索不足，再调用 file_read/code_search 等工具，不要凭空猜文件内容。")
+                ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWorkspaceSearch, baseline: "我已先搜索工作区，并尽量自动读取首个高相关文件片段。请基于这些真实线索继续推进当前会话目标；如果线索不足，再调用 file_read/code_search 等工具，不要凭空猜文件内容。")
                 : PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWorkspaceSearch + "_fail", baseline: "我尝试先搜索工作区但失败。请明确说明失败原因，必要时让用户检查工作区路径。")
             messages.append(ChatMessage(
                 role: "user",
@@ -728,7 +775,7 @@ public final class AgentLoop: ObservableObject {
             let patterns = repo.loadMemories(workspace: taskContext.workspaceRoot, limit: 50)
                 .filter { $0.category == "tool_pattern" && $0.key.hasPrefix("success_\(taskType)") }
             if let bestPattern = patterns.first {
-                systemPrompt += "\n\n## 历史成功路径\n此类任务（\(taskType)）曾用以下工具序列成功完成：\(bestPattern.value)\n请优先按此路径执行。"
+                systemPrompt += "\n\n## 历史成功路径\n此类会话目标（\(taskType)）曾用以下工具序列成功完成：\(bestPattern.value)\n请优先按此路径执行。"
             }
         }
 
@@ -742,17 +789,20 @@ public final class AgentLoop: ObservableObject {
                 task: &task,
                 messages: &messages,
                 toolRegistry: toolRegistry,
+                emitDebugSteps: config.emitDebugSteps,
                 onStep: onStep
             )
             if templateResult.executedSteps > 0 {
-                let templateStep = TaskStep(
-                    kind: .aiThinking,
-                    text: "编排层模板引擎：预执行 \(templateResult.executedSteps) 步（\(templateResult.templateName)）",
-                    isCollapsible: true,
-                    isCollapsed: true
-                )
-                task.steps.append(templateStep)
-                onStep(templateStep)
+                if config.emitDebugSteps {
+                    let templateStep = TaskStep(
+                        kind: .aiThinking,
+                        text: "会话 预处理完成：\(templateResult.executedSteps) 步（\(templateResult.templateName)）",
+                        isCollapsible: true,
+                        isCollapsed: true
+                    )
+                    task.steps.append(templateStep)
+                    onStep(templateStep)
+                }
 
                 // Inject a directive so the LLM knows everything is ready
                 messages.append(ChatMessage(role: "system", content: templateResult.directive))
@@ -774,12 +824,12 @@ public final class AgentLoop: ObservableObject {
         var toolFailureCounts: [String: Int] = [:]  // "toolName:target" → count
         var didInjectWorkingSet = false
         let maxRepeatedFailures = 2
-        let usesOllamaChat = Self.usesOllamaChat(connector)
+        var usesOllamaChat = Self.usesOllamaChat(connector)
         // A4: Dynamic iteration budget — learn from historical average
         var effectiveMaxIterations = config.maxIterations
         if let avgIter = TaskOutcomeRecorder.shared.avgIterations(intent: intentString) {
-            let learned = Int(ceil(avgIter * 1.5))
-            effectiveMaxIterations = max(3, min(learned, config.maxIterations))
+            let learned = max(1, Int(ceil(avgIter * 1.5)))
+            effectiveMaxIterations = min(config.maxIterations, max(3, learned))
         }
         // Auto-continuation: when iterations exhausted but task not done, auto-extend
         let maxAutoRounds = 3
@@ -795,7 +845,7 @@ public final class AgentLoop: ObservableObject {
             if task.steps.count >= absoluteMaxSteps {
                 let limitStep = TaskStep(
                     kind: .aiThinking,
-                    text: "已达到步骤数上限（\(absoluteMaxSteps)步），强制结束。如需继续请新建任务。",
+                    text: "已达到步骤数上限（\(absoluteMaxSteps)步），强制结束。如需继续请新建会话。",
                     isCollapsible: false
                 )
                 task.steps.append(limitStep)
@@ -859,14 +909,18 @@ public final class AgentLoop: ObservableObject {
                     if !allConnectors.isEmpty {
                         if let routed = ModelRouter.selectModel(forPhase: currentPhase, connectors: allConnectors, activeConnectorID: connector.id),
                            routed.id != connector.id {
-                            let routingStep = TaskStep(
-                                kind: .aiThinking,
-                                text: "切换到\(routed.modelName.isEmpty ? routed.name : routed.modelName)处理\(currentPhase.title)阶段",
-                                isCollapsible: true,
-                                isCollapsed: true
-                            )
-                            task.steps.append(routingStep)
-                            onStep(routingStep)
+                            connector = routed
+                            task.connectorID = routed.id
+                            if config.emitDebugSteps {
+                                let routingStep = TaskStep(
+                                    kind: .aiThinking,
+                                    text: "已调整处理策略，继续执行。",
+                                    isCollapsible: true,
+                                    isCollapsed: true
+                                )
+                                task.steps.append(routingStep)
+                                onStep(routingStep)
+                            }
                         }
                     }
                 }
@@ -974,7 +1028,7 @@ public final class AgentLoop: ObservableObject {
                 state.append("⏱ 迭代预算：已用 \(iteration)/\(effectiveMaxIterations)，剩余 \(remaining)")
 
                 if !state.isEmpty {
-                    messages.append(ChatMessage(role: "system", content: "## 任务状态（第 \(iteration) 轮）\n" + state.joined(separator: "\n")))
+                    messages.append(ChatMessage(role: "system", content: "##会话状态（第 \(iteration) 轮）\n" + state.joined(separator: "\n")))
                 }
             }
             // Budget warning when truly running low.
@@ -995,13 +1049,12 @@ public final class AgentLoop: ObservableObject {
                 }
                 effectiveSystemPrompt = sections.joined(separator: "\n## ")
                 // Add a terse action directive instead
-                effectiveSystemPrompt += "\n\n[第\(iteration)轮] 直接行动，不要计划或解释。用最少步骤完成任务。"
+                effectiveSystemPrompt += "\n\n[第\(iteration)轮] 直接行动，不要计划或解释。用最少步骤推进当前会话目标。"
             }
 
             // Context window management: compress old messages when approaching token budget
-            // Use conservative estimate: 128K tokens budget, keep 20% for response
-            let tokenBudget = 100_000
-            Self.compressMessages(&messages, estimatedTokenBudget: tokenBudget)
+            // Use connector-specific contextWindow (already used above for safeLimit)
+            Self.compressMessages(&messages, estimatedTokenBudget: safeLimit)
 
             // Send to LLM with tools
             let intentModeLabel: String = {
@@ -1069,34 +1122,49 @@ public final class AgentLoop: ObservableObject {
             } catch {
                 // Auto-retry on transient errors (network, timeout, rate limit)
                 let isTransient = Self.isTransientError(error)
+                if isTransient,
+                   !didConnectorFailover,
+                   let fallback = Self.fallbackConnector(after: connector, allConnectors: allConnectors) {
+                    didConnectorFailover = true
+                    let failed = connector
+                    connector = fallback
+                    task.connectorID = fallback.id
+                    usesOllamaChat = Self.usesOllamaChat(fallback)
+                    transientRetryCount = 0
+                    let failoverStep = Self.connectorFailoverStep(from: failed, to: fallback, reason: error.localizedDescription)
+                    task.steps.append(failoverStep)
+                    onStep(failoverStep)
+                    messages.append(Self.connectorFailoverMessage(from: failed, to: fallback, reason: error.localizedDescription))
+                    continue
+                }
                 if isTransient, transientRetryCount < maxTransientRetries, iteration < effectiveMaxIterations {
                     transientRetryCount += 1
                     let retryStep = TaskStep(
                         kind: .aiThinking,
                         text: "模型请求失败（\(error.localizedDescription)），自动重试（\(transientRetryCount)/\(maxTransientRetries)）…",
                         isCollapsible: true,
-                        isCollapsed: false
+                        isCollapsed: true
                     )
-                    task.steps.append(retryStep)
-                    onStep(retryStep)
+                    if config.emitDebugSteps {
+                        task.steps.append(retryStep)
+                        onStep(retryStep)
+                    }
                     let delaySec = min(Int(pow(2.0, Double(transientRetryCount))), 8)
                     try? await Task.sleep(for: .milliseconds(delaySec * 1000))
                     continue
                 }
-                // Connector failover: if we have alternatives and haven't tried failover yet, switch
                 if !didConnectorFailover,
-                   let fallback = allConnectors.first(where: { $0.id != connector.id && $0.health != .offline }) {
+                   let fallback = Self.fallbackConnector(after: connector, allConnectors: allConnectors) {
                     didConnectorFailover = true
+                    let failed = connector
                     connector = fallback
+                    task.connectorID = fallback.id
+                    usesOllamaChat = Self.usesOllamaChat(fallback)
                     transientRetryCount = 0
-                    let failoverStep = TaskStep(
-                        kind: .aiThinking,
-                        text: "主连接器 \(config.modelName) 连续失败，自动切换至备用连接器 \(fallback.name)（\(fallback.modelName)）",
-                        isCollapsible: true,
-                        isCollapsed: false
-                    )
+                    let failoverStep = Self.connectorFailoverStep(from: failed, to: fallback, reason: error.localizedDescription)
                     task.steps.append(failoverStep)
                     onStep(failoverStep)
+                    messages.append(Self.connectorFailoverMessage(from: failed, to: fallback, reason: error.localizedDescription))
                     continue
                 }
                 let errorStep = TaskStep(
@@ -1119,9 +1187,9 @@ public final class AgentLoop: ObservableObject {
                 ) {
                     let fallbackStep = TaskStep(
                         kind: .aiThinking,
-                        text: "检测到当前连接器不兼容工具调用请求，已自动切换为无工具模式继续；后续不会伪造搜索、读取、联网或写入结果。",
+                        text: "当前连接不兼容工具调用请求，换一种方式继续。",
                         isCollapsible: true,
-                        isCollapsed: false,
+                        isCollapsed: true,
                         retryAction: Self.toolCompatibilityFallbackAction
                     )
                     task.steps.append(fallbackStep)
@@ -1287,7 +1355,7 @@ public final class AgentLoop: ObservableObject {
                                 } else {
                                     // Hard circuit breaker: block tool+target combos that failed 3+ times
                                     // Auto-repair: try alternative tool path instead of just blocking
-                                    let cbTarget = callStep.toolParams?["path"] ?? callStep.toolParams?["query"] ?? ""
+                                    let cbTarget = Self.circuitBreakerTarget(for: callStep)
                                     let cbSig = "\(toolName):\(cbTarget.prefix(60))"
                                     if circuitBrokenTools.contains(cbSig) {
                                         toolResult = await Self.attemptCircuitBreakerRepair(
@@ -1427,6 +1495,25 @@ public final class AgentLoop: ObservableObject {
                             onStep(reviewStep)
                         }
                     }
+                    if toolResult.success,
+                       toolName == "document.transform",
+                       let action = toolResult.data?["action"],
+                       ["apply", "copy", "render"].contains(action),
+                       let outputPath = toolResult.data?["pdfPath"] ?? toolResult.data?["outputPath"] {
+                        let reviewStep = TaskStep(
+                            kind: .reviewRequest,
+                            text: "已生成文档（可回滚）：\(outputPath)",
+                            toolName: toolName,
+                            toolParams: resultParams,
+                            toolCallId: callId,
+                            isCollapsible: false,
+                            isCollapsed: false,
+                            diffFilePath: outputPath,
+                            approved: true
+                        )
+                        task.steps.append(reviewStep)
+                        onStep(reviewStep)
+                    }
                     if toolResult.data?["streamed"] != "true" {
                         let shouldShowFullOutput = ["shell.exec", "verify.build"].contains(toolName)
                         // Cap step text for UI: full output goes to model via modelContent,
@@ -1490,7 +1577,7 @@ public final class AgentLoop: ObservableObject {
                     if !toolResult.success {
                         hadFailure = true
                         // Circuit breaker: track repeated failures on same tool+target
-                        let target = callStep.toolParams?["path"] ?? callStep.toolParams?["command"] ?? "unknown"
+                    let target = Self.circuitBreakerTarget(for: callStep)
                         let failKey = "\(toolName):\(target)"
                         toolFailureCounts[failKey, default: 0] += 1
                         let failCount = toolFailureCounts[failKey]!
@@ -1498,13 +1585,14 @@ public final class AgentLoop: ObservableObject {
                         if toolName == "file.edit" && failCount == 1 {
                             messages.append(ChatMessage(role: "system", content: "编排层：file.edit 对 \(URL(fileURLWithPath: target).lastPathComponent) 匹配失败。下次对该文件直接使用 file_write 全量写入（先 file_read 获取当前内容，在内容中做修改，然后 file_write 写回完整内容）。不要再尝试 file_edit。"))
                         } else if failCount >= maxRepeatedFailures {
+                            circuitBrokenTools.insert("\(toolName):\(target.prefix(60))")
                             let alternatives = Self.suggestAlternatives(for: toolName, target: target)
                             let circuitMsg = "⚠️ \(toolName) 对 \(target) 已失败 \(failCount) 次，禁止再用相同参数重试。\n替代方案：\(alternatives)"
                             messages.append(ChatMessage(role: "system", content: circuitMsg))
                         }
                     } else {
                         // Reset failure count on success
-                        let target = callStep.toolParams?["path"] ?? callStep.toolParams?["command"] ?? "unknown"
+                        let target = Self.circuitBreakerTarget(for: callStep)
                         toolFailureCounts["\(toolName):\(target)"] = 0
                     }
 
@@ -1569,6 +1657,22 @@ public final class AgentLoop: ObservableObject {
                             let fullPath = (taskContext.workspaceRoot as NSString).appendingPathComponent(path)
                             taskContext.memory.fileContentCache.removeValue(forKey: fullPath)
                         }
+                    } else if callStep.toolName == "document.transform",
+                              toolResult.success,
+                              let action = toolResult.data?["action"],
+                              ["workspace", "apply", "copy", "render"].contains(action),
+                              let path = toolResult.data?["workflowPath"] ?? toolResult.data?["pdfPath"] ?? toolResult.data?["outputPath"] {
+                        let label = action == "workspace" ? "文档交付工作区" : (action == "render" ? "已渲染文档" : "已生成文档")
+                        taskContext.memory.appendDecision("\(label)：\(path)")
+                        taskContext.memory.fileContentCache.removeValue(forKey: path)
+                    } else if callStep.toolName == "skill.manage",
+                              toolResult.success,
+                              let action = toolResult.data?["action"] ?? callStep.toolParams?["action"] {
+                        let name = toolResult.data?["name"] ?? callStep.toolParams?["name"] ?? "技能"
+                        if ["create", "update"].contains(action) {
+                            let path = toolResult.data?["path"].map { "：\($0)" } ?? ""
+                            taskContext.memory.appendDecision("已沉淀技能：\(name)\(path)")
+                        }
                     }
 
                     // F1: Auto-verify engine — after successful code writes, automatically
@@ -1581,22 +1685,26 @@ public final class AgentLoop: ObservableObject {
                         let hasBuildSys = ValidationEngine.suggestVerificationCommand(workspaceRoot: taskContext.workspaceRoot) != nil
                         if codeExts.contains(ext) && hasBuildSys && isToolAllowed("verify.build") {
                             if let verifyTool = self.toolRegistry.tool(named: "verify_build") ?? self.toolRegistry.tool(named: "verify.build") {
-                                let verifyStep = TaskStep(kind: .toolCall, text: "编排层自动验证编译", toolName: "verify.build", isCollapsible: true, isCollapsed: true)
-                                task.steps.append(verifyStep)
-                                onStep(verifyStep)
+                                let verifyStep = TaskStep(kind: .toolCall, text: "验证编译", toolName: "verify.build", isCollapsible: true, isCollapsed: true)
+                                if config.emitDebugSteps {
+                                    task.steps.append(verifyStep)
+                                    onStep(verifyStep)
+                                }
                                 let vr = try? await verifyTool.execute(argumentsJSON: "{}", context: taskContext)
                                 if let vr {
                                     let vrStep = TaskStep(kind: .toolResult, text: vr.success ? "✅ 编译通过" : "❌ 编译失败", toolName: "verify.build", isCollapsible: true, isCollapsed: vr.success)
                                     task.steps.append(vrStep)
-                                    onStep(vrStep)
+                                    if config.emitDebugSteps || !vr.success {
+                                        onStep(vrStep)
+                                    }
                                     if vr.success {
-                                        autoVerifyContent = "\n\n✅ 编排层自动验证：编译通过。"
+                                        autoVerifyContent = "\n\n✅ 自动验证：编译通过。"
                                     } else {
                                         // Extract key error lines for the model
                                         let errLines = vr.output.components(separatedBy: .newlines)
                                             .filter { $0.lowercased().contains("error:") || $0.lowercased().contains("fatal") }
                                             .prefix(8).joined(separator: "\n")
-                                        autoVerifyContent = "\n\n❌ 编排层自动验证：编译失败。关键错误：\n\(errLines)\n\n请立即 file_edit 修复后再次等待编排层自动验证。"
+                                        autoVerifyContent = "\n\n❌ 自动验证：编译失败。关键错误：\n\(errLines)\n\n请根据错误继续修复后再次验证。"
                                     }
                                 }
                             }
@@ -1619,19 +1727,21 @@ public final class AgentLoop: ObservableObject {
                                 }
                                 let chainStep = TaskStep(
                                     kind: .toolResult,
-                                    text: "编排层自动读取：\(bestPath)",
+                                    text: "已读取：\(bestPath)",
                                     toolName: "file.read",
                                     isCollapsible: true,
                                     isCollapsed: true
                                 )
-                                task.steps.append(chainStep)
-                                onStep(chainStep)
+                                if config.emitDebugSteps {
+                                    task.steps.append(chainStep)
+                                    onStep(chainStep)
+                                }
                                 let readContent = ToolResultFormatter.modelContent(
                                     toolName: "file.read",
                                     result: rr,
                                     limit: max(2000, config.maxTokensPerTurn / 2)
                                 )
-                                chainedContent = "\n\n编排层已自动读取最相关文件 \(bestPath)：\n\(readContent)"
+                                chainedContent = "\n\n已读取最相关文件 \(bestPath)：\n\(readContent)"
                             }
                         }
                     }
@@ -1709,7 +1819,7 @@ public final class AgentLoop: ObservableObject {
                 let recentToolCalls = allToolCalls.suffix(30)
                 let recentSignatures = recentToolCalls.compactMap { step -> String? in
                     guard let name = step.toolName else { return nil }
-                    let target = step.toolParams?["path"] ?? step.toolParams?["query"] ?? step.toolParams?["command"] ?? ""
+                    let target = Self.circuitBreakerTarget(for: step)
                     return "\(name):\(target.prefix(60))"
                 }
 
@@ -1726,7 +1836,7 @@ public final class AgentLoop: ObservableObject {
                 let allToolResults = task.steps.filter { $0.kind == .toolResult }
                 let failedSignatures = allToolResults.compactMap { step -> String? in
                     guard step.isFailure, let name = step.toolName else { return nil }
-                    let target = step.toolParams?["path"] ?? step.toolParams?["query"] ?? ""
+                    let target = Self.circuitBreakerTarget(for: step)
                     return "\(name):\(target.prefix(60))"
                 }
                 let failedCounts = Dictionary(grouping: failedSignatures, by: { $0 }).mapValues(\.count)
@@ -1781,7 +1891,18 @@ public final class AgentLoop: ObservableObject {
                 }
 
                 if !orchestrationNotes.isEmpty {
-                    messages.append(ChatMessage(role: "system", content: "编排层提示：\n" + orchestrationNotes.joined(separator: "\n")))
+                    let noteContent = orchestrationNotes.joined(separator: "\n")
+                    messages.append(ChatMessage(role: "system", content: "编排层提示：\n" + noteContent))
+                    if config.emitDebugSteps {
+                        let debugStep = TaskStep(
+                            kind: .aiThinking,
+                            text: noteContent,
+                            isCollapsible: true,
+                            isCollapsed: true
+                        )
+                        task.steps.append(debugStep)
+                        onStep(debugStep)
+                    }
                 }
 
                 // Auto-fix loop: if we wrote CODE files but didn't verify, nudge to verify
@@ -1808,18 +1929,24 @@ public final class AgentLoop: ObservableObject {
                     callSteps[entry.0].1.toolName == "verify.build" && entry.1.success
                 }
                 let batchHadWrite = toolCallResults.contains { entry in
-                    Self.isFileChangeTool(callSteps[entry.0].1.toolName ?? "") && entry.1.success
+                    let step = callSteps[entry.0].1
+                    if Self.isFileChangeTool(step.toolName ?? "") && entry.1.success { return true }
+                    return entry.1.success && step.toolName == "document.transform" && ["apply", "copy", "render"].contains(entry.1.data?["action"] ?? "")
                 }
                 // Also check: non-code files written successfully (no verify needed)
                 let batchHadNonCodeWrite = toolCallResults.contains { entry in
                     let step = callSteps[entry.0].1
-                    guard entry.1.success, Self.isFileChangeTool(step.toolName ?? "") else { return false }
+                    guard entry.1.success else { return false }
+                    if step.toolName == "document.transform" {
+                        return ["apply", "copy", "render"].contains(entry.1.data?["action"] ?? "")
+                    }
+                    guard Self.isFileChangeTool(step.toolName ?? "") else { return false }
                     let path = Self.pathForFileChange(callStep: step, toolResult: entry.1)
                     let ext = (path as NSString).pathExtension.lowercased()
                     return !codeExtensions.contains(ext) && !ext.isEmpty
                 }
                 if (batchHadWrite && batchVerifyPassed) || (batchHadNonCodeWrite && !hasBuildSystem) {
-                    messages.append(ChatMessage(role: "system", content: "任务已完成：文件已成功写入\(batchVerifyPassed ? "且编译验证通过" : "")。请输出简短的完成总结，不要调用更多工具。"))
+                    messages.append(ChatMessage(role: "system", content: "会话目标已完成：文件已成功写入\(batchVerifyPassed ? "且编译验证通过" : "")。请输出简短的完成总结，不要调用更多工具。"))
                 }
             } else {
                 // LLM returned text only — check if it gave up too early
@@ -1853,6 +1980,36 @@ public final class AgentLoop: ObservableObject {
                         break
                     }
 
+                    // D5: On 2nd empty response, strip tools — thinking models sometimes choke on schemas
+                    if consecutiveEmptyResponses == 2 {
+                        toolDefs = []
+                        let stripStep = TaskStep(
+                            kind: .aiThinking,
+                            text: "模型连续空响应，临时移除工具定义，换一种方式继续。",
+                            isCollapsible: true,
+                            isCollapsed: true
+                        )
+                        task.steps.append(stripStep)
+                        onStep(stripStep)
+                        messages.append(ChatMessage(role: "system", content: "上一轮模型没有返回任何可见内容或工具调用。已临时移除工具 schema，请直接用文字给出基于已有材料的结论；如果用户要求保存/写入但工具不可用，请明确说明尚未保存。"))
+                        continue
+                    }
+
+                    // D5: On 2nd empty response, strip tools — thinking models sometimes choke on schemas
+                    if consecutiveEmptyResponses == 2 {
+                        toolDefs = []
+                        let stripStep = TaskStep(
+                            kind: .aiThinking,
+                            text: "模型连续空响应，临时移除工具定义，换一种方式继续。",
+                            isCollapsible: true,
+                            isCollapsed: true
+                        )
+                        task.steps.append(stripStep)
+                        onStep(stripStep)
+                        messages.append(ChatMessage(role: "system", content: "上一轮模型没有返回任何可见内容或工具调用。已临时移除工具 schema，请直接用文字给出基于已有材料的结论；如果用户要求保存/写入但工具不可用，请明确说明尚未保存。"))
+                        continue
+                    }
+
                     guard iteration < effectiveMaxIterations - 1 else {
                         let exhaustedStep = TaskStep(
                             kind: .error,
@@ -1870,7 +2027,7 @@ public final class AgentLoop: ObservableObject {
                         break
                     }
 
-                    if consecutiveEmptyResponses >= maxConsecutiveEmpty || (toolDefs.isEmpty && consecutiveEmptyResponses > 1) {
+                    if consecutiveEmptyResponses >= maxConsecutiveEmpty {
                         let stopStep = TaskStep(
                             kind: .error,
                             text: "模型连续 \(consecutiveEmptyResponses) 次返回空响应/纯思考内容，停止重试。本轮未形成可交付结果。",
@@ -1885,20 +2042,6 @@ public final class AgentLoop: ObservableObject {
                         hadFailure = true
                         didComplete = false
                         break
-                    }
-                    // D5: On 2nd empty response, strip tools — thinking models sometimes choke on schemas
-                    if consecutiveEmptyResponses == 2 && !toolDefs.isEmpty {
-                        toolDefs = []
-                        let stripStep = TaskStep(
-                            kind: .aiThinking,
-                            text: "编排层：连续空响应，临时移除工具定义重试（部分模型对工具 schema 敏感）。",
-                            isCollapsible: true,
-                            isCollapsed: true
-                        )
-                        task.steps.append(stripStep)
-                        onStep(stripStep)
-                        messages.append(ChatMessage(role: "system", content: "上一轮模型没有返回任何可见内容或工具调用。已临时移除工具 schema，请直接用文字给出基于已有材料的结论；如果用户要求保存/写入但工具不可用，请明确说明尚未保存。"))
-                        continue
                     }
                     // Auto-retry empty response once before giving up.
                     // Also peel off any trailing orchestration-injected nudge that may
@@ -1981,11 +2124,24 @@ public final class AgentLoop: ObservableObject {
                 let isEarlyTurn = iteration < 3 && !toolDefs.isEmpty
                 let onlyDidReads = toolCallCount > 0 && !hasWritten
                     && !task.steps.contains(where: { $0.kind == .toolCall && ["shell.exec", "wiki.build", "web.fetch", "file.extract"].contains($0.toolName ?? "") })
+                let expectsFurtherExecution = Self.expectsWriteOutput(message) || Self.expectsWikiOutput(message)
                 let isPlanOnly = isEarlyTurn && intent != .chat && !isReadOnlyRun
-                    && (toolCallCount == 0 || onlyDidReads)
+                    && (toolCallCount == 0 || (onlyDidReads && expectsFurtherExecution))
                     && Self.looksLikePlanOnly(text)
                     && !hasFakeToolCalls
                     && !Self.looksLikeProviderError(text)
+                let requiresToolEvidence = Self.shouldRequireToolEvidenceBeforeFinalText(
+                    message: message,
+                    intent: intent,
+                    isReadOnlyRun: isReadOnlyRun,
+                    toolCallCount: toolCallCount,
+                    toolDefs: toolDefs,
+                    usedToolCompatibilityFallback: usedToolCompatibilityFallback
+                )
+                    && iteration < effectiveMaxIterations - 1
+                    && !hasFakeToolCalls
+                    && !Self.looksLikeProviderError(text)
+                    && nudgeCount < maxNudges
                 if isPlanOnly {
                     messages.append(ChatMessage(role: "assistant", content: text))
                     let nudgeMsg = toolCallCount == 0
@@ -1994,19 +2150,38 @@ public final class AgentLoop: ObservableObject {
                     messages.append(ChatMessage(role: "system", content: nudgeMsg))
                     let planStep = TaskStep(
                         kind: .aiThinking,
-                        text: "编排层拦截：模型只输出计划未行动，强制要求继续执行。",
+                        text: "检测到还没真正执行，继续推进。",
                         isCollapsible: true,
                         isCollapsed: true
                     )
-                    task.steps.append(planStep)
-                    onStep(planStep)
+                    if config.emitDebugSteps {
+                        task.steps.append(planStep)
+                        onStep(planStep)
+                    }
+                    continue
+                }
+                if requiresToolEvidence {
+                    nudgeCount += 1
+                    messages.append(ChatMessage(role: "assistant", content: text))
+                    messages.append(ChatMessage(role: "system", content: "当前是会话执行任务，但你没有调用任何工具就给出了结论。不要裸答。请先调用 workspace_index、code_search、file_read、web_search 或更合适的工具取得真实证据；如果任务需要修改或验证，继续执行对应工具。"))
+                    let evidenceStep = TaskStep(
+                        kind: .aiThinking,
+                        text: "执行质量门：尚未调用工具取证，继续执行。",
+                        isCollapsible: true,
+                        isCollapsed: true
+                    )
+                    if config.emitDebugSteps {
+                        task.steps.append(evidenceStep)
+                        onStep(evidenceStep)
+                    }
                     continue
                 }
 
                 let isActMode = !isReadOnlyRun && isToolAllowed("shell.exec") && isToolAllowed("file.write")
-                let allReadNoWrite = isActMode && toolCallCount >= 5 && !hasWritten
-                let pastHalfBudget = iteration > effectiveMaxIterations / 2
+                let allReadNoWrite = isActMode && toolCallCount >= 3 && !hasWritten
+                let pastHalfBudget = iteration >= max(2, effectiveMaxIterations / 3)
                 let shouldNudge = allReadNoWrite && pastHalfBudget
+                    && expectsFurtherExecution
                     && intent != .chat && intent != .research
                     && nudgeCount < 1  // max 1 nudge ever
                     && !Self.looksLikeProviderError(text)
@@ -2022,7 +2197,7 @@ public final class AgentLoop: ObservableObject {
                 if hasFakeToolCalls && !usedToolCompatibilityFallback {
                     let warningStep = TaskStep(
                         kind: .aiThinking,
-                        text: "检测到模型将工具调用写成了文本，说明该模型不兼容函数调用。建议切换到支持 function calling 的云端模型（如 GPT-4o/5.5、Claude）来执行复杂任务。",
+                        text: "检测到模型将工具调用写成了文本，说明该模型不兼容函数调用。建议切换到支持 function calling 的云端模型（如 GPT-4o/5.5、Claude）来执行复杂会话。",
                         isCollapsible: false,
                         isCollapsed: false
                     )
@@ -2041,9 +2216,21 @@ public final class AgentLoop: ObservableObject {
                 }
                 // Completion-claim guard: model says "已修改/已写入/已保存" but no successful
                 // file.write/file.edit/wiki.build happened — append correction so user is not misled.
-                if Self.expectsWriteOutput(message) && !hasWritten && !Self.hasSavedWiki(in: task)
+                let missingDeliverables = Self.expectedDeliverablePaths(
+                    from: message,
+                    workspaceRoot: taskContext.workspaceRoot
+                ).filter { path in
+                    var isDirectory: ObjCBool = false
+                    return !FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) || isDirectory.boolValue
+                }
+                if Self.expectsWriteOutput(message)
+                    && (!hasWritten || !missingDeliverables.isEmpty)
+                    && !Self.hasSavedWiki(in: task)
                     && Self.containsFalseCompletionClaim(visibleText) {
-                    visibleText += "\n\n---\n⚠️ **来财提醒**：本轮未实际执行成功的写入/保存操作（`file.write` / `file.edit` / `wiki.build` 全部未成功）。上面的「已修改 / 已保存」等说法是模型自述，不代表磁盘上文件已变更。请检查上方工具结果，或要求重试。"
+                    let targetText = missingDeliverables.isEmpty
+                        ? ""
+                        : "目标文件尚未生成：\(missingDeliverables.prefix(3).map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "、"))。"
+                    visibleText += "\n\n---\n⚠️ **来财提醒**：\(targetText)本轮没有足够的真实交付证据。上面的「已修改 / 已保存 / 已创建」等说法是模型自述，请以上方工具结果和磁盘文件为准。"
                 }
 
                 if Self.looksLikeProviderError(text) {
@@ -2069,12 +2256,20 @@ public final class AgentLoop: ObservableObject {
                 )
                 task.steps.append(outputStep)
                 onStep(outputStep)
+                if response.finishReason != "length",
+                   intent == .task,
+                   !Self.expectsWriteAction(message),
+                   !Self.expectsWikiOutput(message),
+                   task.steps.contains(where: { $0.kind == .toolCall }) {
+                    didComplete = true
+                    break
+                }
                 if Self.needsWikiSaveNudge(message: message, task: task, isReadOnlyRun: isReadOnlyRun, hasWritten: hasWritten),
                    iteration < effectiveMaxIterations - 1 && nudgeCount < maxNudges {
                     nudgeCount += 1
                     let gateStep = TaskStep(
                         kind: .aiThinking,
-                        text: "完成质量门：Wiki 任务尚未保存任何笔记，继续执行 wiki_build。",
+                        text: "完成质量门：Wiki会话尚未保存任何笔记，继续执行 wiki_build。",
                         isCollapsible: true,
                         isCollapsed: true
                     )
@@ -2107,12 +2302,15 @@ public final class AgentLoop: ObservableObject {
                         maxOutputTokens: config.maxTokensPerTurn,
                         originalStepID: outputStep.id
                     ) {
-                        task.steps.append(continuationStep)
-                        onStep(continuationStep)
-                        if continuationStep.text.contains("回复仍被截断") {
+                        let continuationText = continuationStep.text
+                        if !continuationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            task.steps.append(continuationStep)
+                            onStep(continuationStep)
+                        }
+                        if continuationText.contains("回复仍被截断") {
                             let stillTruncatedStep = TaskStep(
                                 kind: .error,
-                                text: "第二段回复仍被截断。请继续在这条任务里发送“接着说”，我会继续沿用当前上下文。",
+                                text: "第二段回复仍被截断。请继续在这个会话里发送“接着说”，我会继续沿用当前上下文。",
                                 isFailure: false,
                                 recoverable: true,
                                 retryAction: "接着说"
@@ -2141,7 +2339,7 @@ public final class AgentLoop: ObservableObject {
                         didComplete = false
                         messages.append(ChatMessage(role: "assistant", content: text))
                         let wikiInstruction = expectsWiki
-                            ? "\n\nWiki 任务必须调用 wiki_build(mode=\"atomic\", save=true) 保存原子笔记，并在需要时调用 wiki_build(mode=\"moc\", save=true) 保存索引页。"
+                            ? "\n\nWiki会话必须调用 wiki_build(mode=\"atomic\", save=true) 保存原子笔记，并在需要时调用 wiki_build(mode=\"moc\", save=true) 保存索引页。"
                             : ""
                         messages.append(ChatMessage(role: "system", content: "⚠️ 完成质量检查未通过：\n" + qualityIssues.map { "- \($0)" }.joined(separator: "\n") + "\(wikiInstruction)\n\n请立即修复以上问题后再输出最终总结。"))
                         let gateStep = TaskStep(
@@ -2161,16 +2359,31 @@ public final class AgentLoop: ObservableObject {
         }
 
         if !didComplete && !hadFailure && !wasTruncated && !Task.isCancelled && autoRound < maxAutoRounds && intent != .chat {
-            autoRound += 1
-            iteration = 0
-            let progressSummary = Self.compactProgressSummary(task: task)
-            messages.append(ChatMessage(role: "system", content: "已完成第 \(autoRound) 段处理。以下是目前进展，请继续完成剩余工作，不要重复已成功的操作：\n\(progressSummary)"))
-            consecutiveEmptyResponses = 0
-            transientRetryCount = 0
-            didInjectWorkingSet = false
-            let roundStep = TaskStep(kind: .aiThinking, text: "继续处理中…", isCollapsible: true, isCollapsed: true)
-            task.steps.append(roundStep)
-            onStep(roundStep)
+            if effectiveMaxIterations <= 1 {
+                let maxStep = TaskStep(
+                    kind: .error,
+                    text: "达到最大迭代次数（\(effectiveMaxIterations)），会话 尚未完成。",
+                    isFailure: true,
+                    recoverable: true,
+                    retryAction: "继续处理"
+                )
+                task.steps.append(maxStep)
+                onStep(maxStep)
+                hadFailure = true
+            } else {
+                autoRound += 1
+                iteration = 0
+                hadFailure = false
+                didComplete = false
+                let progressSummary = Self.compactProgressSummary(task: task)
+                messages.append(ChatMessage(role: "system", content: "已完成第 \(autoRound) 段处理。以下是目前进展，请继续完成剩余工作，不要重复已成功的操作：\n\(progressSummary)"))
+                consecutiveEmptyResponses = 0
+                transientRetryCount = 0
+                didInjectWorkingSet = false
+                let roundStep = TaskStep(kind: .aiThinking, text: "继续处理中…", isCollapsible: true, isCollapsed: true)
+                task.steps.append(roundStep)
+                onStep(roundStep)
+            }
         }
         } while !didComplete && !hadFailure && !wasTruncated && autoRound > 0 && autoRound <= maxAutoRounds && intent != .chat
 
@@ -2187,314 +2400,48 @@ public final class AgentLoop: ObservableObject {
             }
         }
 
-        // Try to finalize even with minor failures — the agent may have gathered
-        // enough evidence from successful tools to produce a useful result.
-        if !didComplete && !wasTruncated {
-            if let summaryStep = try? await Self.finalizeFromCollectedEvidence(
-                task: task,
-                originalMessage: message,
-                connector: connector,
-                runtime: runtime,
-                systemPrompt: systemPrompt,
-                maxOutputTokens: config.maxTokensPerTurn
-            ) {
-                task.steps.append(summaryStep)
-                onStep(summaryStep)
-                didComplete = true
-            }
-        }
+        var finalState = PipelineState(
+            task: task,
+            taskContext: taskContext,
+            connector: connector,
+            allConnectors: allConnectors,
+            intent: intent,
+            message: message,
+            imageAttachments: imageAttachments,
+            priorSteps: priorSteps,
+            summaryCache: summaryCache,
+            config: config,
+            startTime: startTime
+        )
+        finalState.systemPrompt = systemPrompt
+        finalState.toolDefs = toolDefs
+        finalState.currentPhase = currentPhase
+        finalState.messages = messages
+        finalState.injectedPatternHashes = injectedPatternHashes
+        finalState.iteration = iteration
+        finalState.didComplete = didComplete
+        finalState.hadFailure = hadFailure
+        finalState.wasTruncated = wasTruncated
+        finalState.nudgeCount = nudgeCount
+        finalState.consecutiveEmptyResponses = consecutiveEmptyResponses
+        finalState.transientRetryCount = transientRetryCount
+        finalState.autoRound = autoRound
+        finalState.didInjectWorkingSet = didInjectWorkingSet
+        finalState.circuitBrokenTools = circuitBrokenTools
+        finalState.toolFailureCounts = toolFailureCounts
+        finalState.usedToolCompatibilityFallback = usedToolCompatibilityFallback
+        finalState.didConnectorFailover = didConnectorFailover
+        finalState.usesOllamaChat = Self.usesOllamaChat(connector)
+        finalState.effectiveMaxIterations = effectiveMaxIterations
 
-        if !didComplete && !hadFailure && !wasTruncated {
-            // All auto-rounds exhausted; offer manual continuation as last resort
-            let continueStep = TaskStep(
-                kind: .error,
-                text: "任务尚未完成，可以点击「继续」接着处理。",
-                isFailure: false,
-                recoverable: true,
-                retryAction: "继续处理"
-            )
-            task.steps.append(continueStep)
-            onStep(continueStep)
-        }
-
-        // Diagnostic audit steps ("完成检查"/"阶段总结"/"证据清单") were visually
-        // polluting timelines and getting fed back into the model's context, encouraging
-        // it to mimic the same internal audit format in user-visible output. They are
-        // disabled by default; only retained as collapsed annotations when there is a
-        // genuine failure that needs traceability.
-        if Self.hasSatisfiedImageGenerationRequest(task) && !wasTruncated {
-            didComplete = true
-        }
-
-        let toolCallCount = task.steps.filter { $0.kind == .toolCall }.count
-        let emitDiagnosticAudit = (hadFailure && toolCallCount > 0) || wasTruncated
-        if emitDiagnosticAudit {
-            // Single compact diagnostic, always collapsed so UI hides it (see TimelineCards aiThinking branch).
-            var checkStep = Self.completionCheckStep(for: task, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun)
-            checkStep.isCollapsible = true
-            checkStep.isCollapsed = true
-            task.steps.append(checkStep)
-            onStep(checkStep)
-        }
-
-        let finalStatus: TaskStatus = Self.meetsCompletionCriteria(task: task, intent: intent, didComplete: didComplete, hadFailure: hadFailure, wasTruncated: wasTruncated, isReadOnlyRun: isReadOnlyRun)
-            ? .completed
-            : .failed
-        task.status = finalStatus
-        task.updatedAt = .now
-
-        // Suggested next actions: after successful completion, suggest follow-ups
-        if finalStatus == .completed && !isReadOnlyRun && intent != .chat {
-            let hasFileEdits = task.steps.contains { Self.isFileChangeTool($0.toolName ?? "") && !$0.isFailure }
-            let hasVerify = task.steps.contains { $0.toolName == "verify.build" }
-            let hasGitCommit = task.steps.contains { $0.toolName == "git" && ($0.toolParams?["subcommand"] ?? "").contains("commit") }
-
-            var suggestions: [String] = []
-            if hasFileEdits && !hasVerify {
-                suggestions.append("运行构建验证（verify_build）确认无编译错误")
-            }
-            if hasFileEdits && !hasGitCommit {
-                suggestions.append("git commit 提交本次变更")
-            }
-            if hasFileEdits {
-                suggestions.append("编写或运行相关测试")
-            }
-
-            if !suggestions.isEmpty {
-                let nextStep = TaskStep(
-                    kind: .aiThinking,
-                    text: "建议下一步：\n" + suggestions.enumerated().map { "  \($0.offset + 1). \($0.element)" }.joined(separator: "\n"),
-                    isCollapsible: true,
-                    isCollapsed: false
-                )
-                task.steps.append(nextStep)
-                onStep(nextStep)
-            }
-        }
-
-        // G1: Persist key learnings for cross-session memory
-        if finalStatus == .completed, !taskContext.workspaceRoot.isEmpty, let repo = Self.sharedRepository {
-            // Save file summaries as persistent project knowledge
-            for (path, summary) in taskContext.memory.fileSummaries.prefix(10) {
-                repo.saveMemory(workspace: taskContext.workspaceRoot, category: "file_structure", key: path, value: String(summary.prefix(200)))
-            }
-            // Save build command if discovered
-            if let verifyStep = task.steps.first(where: { $0.toolName == "verify.build" && !$0.isFailure }),
-               let cmd = verifyStep.toolParams?["command"] ?? verifyStep.text.components(separatedBy: "命令：").last?.components(separatedBy: "\n").first {
-                repo.saveMemory(workspace: taskContext.workspaceRoot, category: "build", key: "build_command", value: String(cmd.prefix(200)))
-            }
-        }
-
-        // G5: Record successful tool sequences for pattern reuse
-        if finalStatus == .completed && iteration <= 5 && !taskContext.workspaceRoot.isEmpty, let repo = Self.sharedRepository {
-            let toolSequence = task.steps
-                .filter { $0.kind == .toolCall }
-                .compactMap { $0.toolName }
-            if toolSequence.count >= 2 && toolSequence.count <= 10 {
-                // Classify the task type for matching
-                let taskType: String
-                let lm = message.lowercased()
-                if lm.contains("修改") || lm.contains("fix") || lm.contains("修复") { taskType = "modify" }
-                else if lm.contains("创建") || lm.contains("新建") || lm.contains("create") { taskType = "create" }
-                else if lm.contains("搜索") || lm.contains("查找") || lm.contains("search") { taskType = "search" }
-                else if lm.contains("解释") || lm.contains("分析") || lm.contains("explain") { taskType = "explain" }
-                else { taskType = "general" }
-                let sequenceStr = toolSequence.joined(separator: " → ")
-                repo.saveMemory(
-                    workspace: taskContext.workspaceRoot,
-                    category: "tool_pattern",
-                    key: "success_\(taskType)_\(iteration)iter",
-                    value: sequenceStr
-                )
-            }
-        }
-
-        // Record outcome for self-evolution analytics
-        let duration = CFAbsoluteTimeGetCurrent() - startTime
-        let toolCalls = task.steps.filter { $0.kind == .toolCall }.count
-        let toolFailures = task.steps.filter { $0.kind == .toolResult && $0.isFailure }.count
-        let userFollowups = task.steps.filter { $0.kind == .userInput && $0.text != message }.count
-        let promptTag = PromptRegistry.shared.versionTag(for: PromptRegistry.tagContinueTask)
-        TaskOutcomeRecorder.shared.record(
-            taskID: task.id.uuidString,
-            intent: intentString,
-            routeLabel: "task",
-            executionMode: isReadOnlyRun ? "inspect" : (intent == .chat ? "ask" : "act"),
-            iterations: iteration,
-            status: finalStatus,
-            hadFailure: hadFailure,
-            wasCancelled: wasCancelled,
-            wasTruncated: wasTruncated,
-            toolCalls: toolCalls,
-            toolFailures: toolFailures,
-            durationSeconds: Double(duration),
-            userFollowupCount: userFollowups,
-            promptTag: promptTag,
-            modelName: config.modelName
+        await TaskFinalizer.finalize(
+            state: &finalState,
+            config: config,
+            systemPrompt: systemPrompt,
+            runtime: runtime,
+            onStep: onStep
         )
 
-        // Record failure patterns for proactive strategy learning
-        // Learning gate: only record if the outcome reward is clearly negative
-        let outcomeScore = ResultEvaluator.score(
-            status: finalStatus,
-            iterations: iteration,
-            maxIterations: effectiveMaxIterations,
-            hadFailure: hadFailure,
-            wasCancelled: wasCancelled,
-            wasTruncated: wasTruncated,
-            durationSeconds: Double(duration),
-            userFollowupCount: userFollowups
-        )
-        let rewardThreshold = 55 // only learn from clearly poor outcomes
-        let shouldLearn = (hadFailure || finalStatus == .failed || wasCancelled) && outcomeScore < rewardThreshold
-        if shouldLearn {
-            let recentTools = task.steps.filter { $0.kind == .toolCall }.compactMap { $0.toolName }
-            let failedToolNamesRaw = task.steps.filter { $0.kind == .toolResult && $0.isFailure }.compactMap { $0.toolName }
-            // Deduplicate and count occurrences
-            var failedCounts: [String: Int] = [:]
-            for t in failedToolNamesRaw { failedCounts[t, default: 0] += 1 }
-            let failedSummary = failedCounts.sorted(by: { $0.value > $1.value })
-                .prefix(5)
-                .map { $0.value > 1 ? "\($0.key)(\($0.value)次)" : $0.key }
-                .joined(separator: "、")
-            let rootCauseText: String
-            let instructionText: String
-            if wasCancelled {
-                if iteration <= 1 {
-                    rootCauseText = "用户在首轮即取消，路由或bootstrap可能错误"
-                    instructionText = "类似请求先确认是否需要工具，简单问题直接回答，不要自动触发工具。"
-                } else if iteration > 6 {
-                    rootCauseText = "用户在\(iteration)轮后取消，任务可能陷入循环"
-                    instructionText = "类似请求控制在5轮内完成，避免反复搜索或读取相同内容。"
-                } else {
-                    rootCauseText = "用户在\(iteration)轮后取消"
-                    instructionText = "类似请求需更高效，减少不必要的工具调用。"
-                }
-            } else if !failedCounts.isEmpty {
-                rootCauseText = "\(failedSummary)工具执行失败"
-                instructionText = "类似请求中\(failedSummary)曾失败，请预先检查参数有效性或使用替代方案。"
-            } else if hadFailure {
-                rootCauseText = "工具执行中出现错误"
-                instructionText = "类似请求曾出错，请更谨慎地验证工具参数和前置条件。"
-            } else {
-                rootCauseText = "任务未能完成"
-                instructionText = "遇到类似意图时，优先确认用户需求范围，避免过度执行。"
-            }
-            FailurePatternDB.shared.record(
-                intent: intentString,
-                triggerTools: Array(Set(recentTools)),
-                triggerKeywords: [message],
-                rootCause: rootCauseText,
-                preemptiveInstruction: instructionText,
-                modelName: config.modelName
-            )
-        }
-
-        // Close the loop: if patterns were injected and task succeeded, mark them as effective
-        if finalStatus == .completed && !injectedPatternHashes.isEmpty {
-            for hash in injectedPatternHashes {
-                FailurePatternDB.shared.markSuccess(patternHash: hash)
-            }
-        }
-
-        // Skill evolution: extract reusable skill from successful tasks
-        if finalStatus == .completed && outcomeScore >= 70 {
-            let usedTools = task.steps.filter { $0.kind == .toolCall }.compactMap { $0.toolName }
-            let uniqueTools = Array(Set(usedTools))
-            // A2: Extract actual tool call sequence instead of hardcoded templates
-            let orderedTools = task.steps
-                .filter { $0.kind == .toolCall }
-                .compactMap { $0.toolName }
-            let dedupedSequence: [String] = {
-                var seen = Set<String>()
-                return orderedTools.filter { seen.insert($0).inserted }
-            }()
-            let strategy = dedupedSequence.isEmpty ? "工具辅助完成" : dedupedSequence.prefix(8).joined(separator: " → ")
-            SkillEvolutionEngine.shared.extractSkill(
-                taskTitle: task.title,
-                intent: intentString,
-                toolsUsed: uniqueTools,
-                modelName: config.modelName,
-                outcomeScore: outcomeScore,
-                strategy: strategy
-            )
-        }
-
-        // Skill evolution: update Q-value if a learned skill was used
-        if let usedSkillID = task.context.metadata["learnedSkillID"].flatMap(Int.init) {
-            if finalStatus == .completed {
-                SkillEvolutionEngine.shared.updateQ(
-                    skillID: usedSkillID,
-                    outcomeScore: outcomeScore,
-                    succeeded: true
-                )
-            } else {
-                // Penalize skill on failure/cancel — faster decay for bad skills
-                SkillEvolutionEngine.shared.penalize(skillID: usedSkillID)
-            }
-        }
-
-        // Store compact execution trace for future GEPA-style analysis
-        let traceEntries = task.steps.filter { $0.kind == .toolCall || $0.kind == .toolResult }
-            .map { step -> [String: String] in
-                var entry: [String: String] = [
-                    "kind": step.kind == .toolCall ? "call" : "result",
-                    "tool": step.toolName ?? "",
-                    "text": String(step.text.prefix(200))
-                ]
-                if step.isFailure { entry["failure"] = "true" }
-                return entry
-            }
-        if let traceData = try? JSONSerialization.data(withJSONObject: traceEntries),
-           let traceJSON = String(data: traceData, encoding: .utf8) {
-            TaskOutcomeRecorder.shared.storeTrace(taskID: task.id.uuidString, traceJSON: traceJSON)
-        }
-
-        // Persist task memory for cross-session continuity
-        TaskMemoryStore.save(taskContext.memory, workspaceRoot: config.workspaceRoot)
-        TaskMemoryStore.appendHistory(memory: taskContext.memory, workspaceRoot: config.workspaceRoot, taskDescription: task.title)
-
-        // Update project knowledge from task results
-        if !config.workspaceRoot.isEmpty {
-            let summary = taskContext.memory.stageConclusions.last ?? task.title
-            let modified = Array(Set(taskContext.memory.pendingFiles))
-            ProjectManager.shared.learnFromTask(
-                rootPath: config.workspaceRoot,
-                summary: summary,
-                filesModified: modified,
-                conclusions: taskContext.memory.stageConclusions
-            )
-        }
-
-        // Codex-style diff review: capture git diff for the task
-        let workRoot = taskContext.metadata["worktreeOriginalRoot"] ?? config.workspaceRoot
-        if !workRoot.isEmpty, intent != .chat {
-            let diffProc = Process()
-            diffProc.launchPath = "/usr/bin/git"
-            diffProc.arguments = ["diff", "--stat"]
-            diffProc.currentDirectoryPath = taskContext.workspaceRoot
-            let diffPipe = Pipe()
-            diffProc.standardOutput = diffPipe
-            diffProc.standardError = diffPipe
-            try? diffProc.run()
-            diffProc.waitUntilExit()
-            let diffOutput = String(data: diffPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            if !diffOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let diffStep = TaskStep(
-                    kind: .toolResult,
-                    text: "📋 文件变更：\n```\n\(String(diffOutput.prefix(2000)))\n```",
-                    isCollapsible: true,
-                    isCollapsed: true
-                )
-                task.steps.append(diffStep)
-                onStep(diffStep)
-                task.context.metadata["diffStat"] = String(diffOutput.prefix(1000))
-            }
-        }
-
-        // Clear task-specific path allowances
-        WorkspaceSandbox.shared.clearAllowedPaths()
-
-        return task
+        return finalState.task
     }
 }

@@ -11,57 +11,21 @@ struct DiagnosticsPanel: View {
     @State private var copiedDiagnostics = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            // Header
-            HStack(spacing: AppSpace.sm) {
-                Image(systemName: "terminal")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Brand.primary)
-                Text("日志")
-                    .font(AppFont.subheadline)
-                    .foregroundStyle(TextGrade.primary)
-                Spacer()
-                Button {
-                    copyDiagnostics()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: copiedDiagnostics ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 9))
-                        Text(copiedDiagnostics ? "已复制" : "复制诊断")
-                            .font(AppFont.tiny)
-                    }
-                    .foregroundStyle(copiedDiagnostics ? Semantic.success : Brand.primary)
-                }
-                .buttonStyle(.plain)
-                .help("复制完整诊断信息到剪贴板")
-            }
-
-            // System status
-            VStack(spacing: 0) {
-                diagRow("状态", store.state.isGenerating ? "生成中" : "空闲",
-                        color: store.state.isGenerating ? Semantic.toolRunning : Semantic.success)
-                Divider().opacity(0.3)
-                diagRow("模型", store.state.activeConnector?.modelName ?? "未配置",
-                        color: store.state.activeConnector != nil ? TextGrade.primary : Semantic.warning)
-                Divider().opacity(0.3)
-                diagRow("端点", store.state.activeConnector?.endpoint ?? "—", color: TextGrade.secondary)
-            }
-            .padding(AppSpace.sm)
-            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card))
-            .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.border.opacity(0.3), lineWidth: 0.5))
+        VStack(alignment: .leading, spacing: AppSpace.lg) {
+            diagnosticsOverview
 
             // Stats grid
             HStack(spacing: AppSpace.sm) {
                 diagStatBadge(
-                    icon: "text.bubble",
-                    label: "会话",
-                    value: "\(store.state.threads.filter { $0.source == .session }.count)",
+                    icon: "rectangle.stack",
+                    label: "线程",
+                    value: "\(store.state.threads.count)",
                     color: Brand.primary
                 )
                 diagStatBadge(
-                    icon: "checklist",
-                    label: "任务",
-                    value: "\(store.state.threads.filter { $0.source == .task }.count)",
+                    icon: "waveform.path.ecg",
+                    label: "运行",
+                    value: "\(store.state.threads.filter { $0.agentState == .running || $0.agentState == .planning }.count)",
                     color: Brand.purple
                 )
                 diagStatBadge(
@@ -79,54 +43,40 @@ struct DiagnosticsPanel: View {
             }
 
             // Environment info
-            VStack(spacing: 0) {
-                diagRow("工作区", URL(fileURLWithPath: store.state.settings.workspacePath).lastPathComponent, color: TextGrade.secondary)
-                Divider().opacity(0.3)
-                diagRow("上下文", store.state.settings.contextMode.rawValue, color: TextGrade.secondary)
-                Divider().opacity(0.3)
-                diagRow("系统", "\(ProcessInfo.processInfo.operatingSystemVersionString)", color: TextGrade.secondary)
-                Divider().opacity(0.3)
-                diagRow("内存", formatMemory(), color: TextGrade.secondary)
+            contextSectionCard(title: "本机环境", tint: Brand.teal) {
+                VStack(spacing: 0) {
+                    diagRow("工作区", URL(fileURLWithPath: store.state.settings.workspacePath).lastPathComponent, color: TextGrade.secondary)
+                    Divider().opacity(0.3)
+                    diagRow("上下文", store.state.settings.contextMode.rawValue, color: TextGrade.secondary)
+                    Divider().opacity(0.3)
+                    diagRow("系统", "\(ProcessInfo.processInfo.operatingSystemVersionString)", color: TextGrade.secondary)
+                    Divider().opacity(0.3)
+                    diagRow("内存", formatMemory(), color: TextGrade.secondary)
+                }
             }
-            .padding(AppSpace.sm)
-            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card))
-            .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.border.opacity(0.3), lineWidth: 0.5))
 
             // Audit log
             if auditLog.recentEntries.isEmpty {
-                VStack(spacing: AppSpace.sm) {
-                    Image(systemName: "checkmark.shield")
-                        .font(.system(size: 22, weight: .light))
-                        .foregroundStyle(TextGrade.ghost)
-                    Text("暂无审计记录")
-                        .font(AppFont.caption)
-                        .foregroundStyle(TextGrade.muted)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, AppSpace.lg)
+                workbenchEmptyState(icon: "checkmark.shield", title: "暂无记录", hint: "本机操作会在这里留下简要记录")
             } else {
-                HStack {
-                    Text("审计记录")
-                        .font(AppFont.captionMedium)
-                        .foregroundStyle(TextGrade.secondary)
-                    Spacer()
-                    Text("\(auditLog.recentEntries.count) 条")
-                        .font(AppFont.tiny)
-                        .foregroundStyle(TextGrade.ghost)
-                    Button {
-                        confirmClearAudit = true
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Semantic.error.opacity(0.7))
+                VStack(alignment: .leading, spacing: AppSpace.sm) {
+                    HStack {
+                        workbenchSectionHeader(title: "最近记录", count: auditLog.recentEntries.count)
+                        Button {
+                            confirmClearAudit = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Semantic.error.opacity(0.7))
+                        }
+                        .buttonStyle(.plain)
+                        .help("清空记录")
                     }
-                    .buttonStyle(.plain)
-                    .help("清空审计记录")
-                }
 
-                VStack(spacing: AppSpace.xs) {
-                    ForEach(auditLog.recentEntries.prefix(15)) { entry in
-                        AuditEntryRow(entry: entry)
+                    VStack(spacing: AppSpace.xs) {
+                        ForEach(auditLog.recentEntries.prefix(15)) { entry in
+                            AuditEntryRow(entry: entry)
+                        }
                     }
                 }
             }
@@ -165,6 +115,39 @@ struct DiagnosticsPanel: View {
             }
         } message: {
             Text("这会删除本机当前保存的审计记录。")
+        }
+    }
+
+    private var diagnosticsOverview: some View {
+        workbenchHeroCard(
+            icon: store.state.isGenerating ? "waveform.path.ecg" : "checkmark.shield.fill",
+            title: "诊断",
+            subtitle: store.state.isGenerating ? "正在处理当前会话" : "运行正常 · 最近 \(auditLog.recentEntries.count) 条记录",
+            tint: store.state.isGenerating ? Brand.teal : Semantic.success
+        ) {
+            VStack(spacing: AppSpace.sm) {
+                diagRow("状态", store.state.isGenerating ? "生成中" : "空闲",
+                        color: store.state.isGenerating ? Semantic.toolRunning : Semantic.success)
+                Divider().opacity(0.3)
+                diagRow("模型", store.state.activeConnector?.modelName ?? "未配置",
+                        color: store.state.activeConnector != nil ? TextGrade.primary : Semantic.warning)
+                Divider().opacity(0.3)
+                diagRow("端点", store.state.activeConnector?.endpoint ?? "—", color: TextGrade.secondary)
+
+                Button {
+                    copyDiagnostics()
+                } label: {
+                    Label(copiedDiagnostics ? "已复制" : "复制信息", systemImage: copiedDiagnostics ? "checkmark" : "doc.on.doc")
+                        .font(AppFont.captionMedium)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(copiedDiagnostics ? Semantic.success : Brand.primary)
+                .padding(.vertical, AppSpace.sm)
+                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.62)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.8), lineWidth: 0.6))
+                .help("复制当前信息到剪贴板")
+            }
         }
     }
 
@@ -228,8 +211,8 @@ struct DiagnosticsPanel: View {
             "端点: \(conn?.endpoint ?? "—")",
             "工作区: \(store.state.settings.workspacePath)",
             "上下文模式: \(store.state.settings.contextMode.rawValue)",
-            "会话: \(store.state.threads.filter { $0.source == .session }.count)",
-            "任务: \(store.state.threads.filter { $0.source == .task }.count)",
+            "会话: \(store.state.threads.count)",
+            "运行中会话: \(store.state.threads.filter { $0.agentState == .running || $0.agentState == .planning }.count)",
             "工具活动: \(store.state.toolActivities.count)",
             "审计: \(auditLog.recentEntries.count)",
             "内存: \(formatMemory())",
@@ -425,7 +408,7 @@ struct SessionCostCard: View {
     var body: some View {
         let stats = aggregateMetrics()
         if stats.totalInput > 0 || stats.totalOutput > 0 {
-            contextSectionCard(title: "会话消耗") {
+                contextSectionCard(title: "会话消耗") {
                 VStack(alignment: .leading, spacing: AppSpace.sm) {
                     HStack(spacing: AppSpace.lg) {
                         costMetric(icon: "arrow.down.left", label: "输入", value: formatTokens(stats.totalInput), color: Brand.primary)
@@ -623,9 +606,9 @@ struct OutcomeStatsPanel: View {
 
     @ViewBuilder
     private var taskOutcomesSection: some View {
-        sectionHeader("任务完成率", icon: "chart.bar.fill")
+        sectionHeader("会话完成率", icon: "chart.bar.fill")
         if stats.isEmpty {
-            emptyHint(icon: "chart.bar", title: "暂无数据", hint: "完成任务后自动统计")
+            emptyHint(icon: "chart.bar", title: "暂无数据", hint: "会话完成后自动统计")
         } else {
             VStack(spacing: AppSpace.sm) {
                 ForEach(stats, id: \.intent) { row in
@@ -854,11 +837,11 @@ struct OutcomeStatsPanel: View {
 
     private func intentLabel(_ intent: String) -> String {
         switch intent {
-        case "chat": return "聊天"
+        case "chat": return "对话"
         case "research": return "研究"
-        case "task": return "任务"
+        case "task": return "执行"
         default:
-            if intent.hasPrefix("workflow:") { return "工作流" }
+            if intent.hasPrefix("workflow:") { return "流程" }
             return intent
         }
     }

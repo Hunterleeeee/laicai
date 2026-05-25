@@ -12,6 +12,9 @@ public final class UsageTracker {
 
     private let queue = DispatchQueue(label: "laicai.usage-tracker", qos: .utility)
     private let path: String
+    private let cacheLock = NSLock()
+    private var threadUsageCache: [String: CachedThreadUsage] = [:]
+    private let threadUsageCacheTTL: TimeInterval = 20
 
     public init(path: String? = nil) {
         let base = path ?? (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory())
@@ -119,6 +122,7 @@ public final class UsageTracker {
         isStreaming: Bool = false,
         intent: String = ""
     ) {
+        invalidateThreadUsageCache(threadID: threadID)
         withDatabaseAsync { db in
             let now = Date()
             let dateKey = Self.dateKey(from: now)
@@ -145,6 +149,7 @@ public final class UsageTracker {
             Self.bindText(stmt, 12, intent)
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
+            self.invalidateThreadUsageCache(threadID: threadID)
         }
     }
 
@@ -377,7 +382,10 @@ public final class UsageTracker {
     /// Quick lookup: total tokens + cost for a single thread
     public func threadUsage(threadID: String) -> (inputTokens: Int, outputTokens: Int, requestCount: Int, estimatedCost: Double) {
         guard !threadID.isEmpty else { return (0, 0, 0, 0) }
-        return withReadOnlyDatabase((0, 0, 0, 0)) { db in
+        if let cached = cachedThreadUsage(threadID: threadID) {
+            return cached
+        }
+        let usage = withReadOnlyDatabase((0, 0, 0, 0)) { db in
             let sql = "SELECT SUM(input_tokens), SUM(output_tokens), COUNT(*) FROM usage_records WHERE thread_id = ?;"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return (0, 0, 0, 0) }
@@ -390,9 +398,43 @@ public final class UsageTracker {
             let cost = (Double(input) * 3.0 / 1_000_000.0) + (Double(output) * 15.0 / 1_000_000.0)
             return (input, output, count, cost)
         }
+        cacheThreadUsage(usage, for: threadID)
+        return usage
     }
 
     // MARK: - Helpers
+
+    private struct CachedThreadUsage {
+        let value: (inputTokens: Int, outputTokens: Int, requestCount: Int, estimatedCost: Double)
+        let storedAt: Date
+    }
+
+    private func cachedThreadUsage(threadID: String) -> (inputTokens: Int, outputTokens: Int, requestCount: Int, estimatedCost: Double)? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        guard let cached = threadUsageCache[threadID] else { return nil }
+        if Date().timeIntervalSince(cached.storedAt) <= threadUsageCacheTTL {
+            return cached.value
+        }
+        threadUsageCache.removeValue(forKey: threadID)
+        return nil
+    }
+
+    private func cacheThreadUsage(
+        _ value: (inputTokens: Int, outputTokens: Int, requestCount: Int, estimatedCost: Double),
+        for threadID: String
+    ) {
+        cacheLock.lock()
+        threadUsageCache[threadID] = CachedThreadUsage(value: value, storedAt: Date())
+        cacheLock.unlock()
+    }
+
+    private func invalidateThreadUsageCache(threadID: String) {
+        guard !threadID.isEmpty else { return }
+        cacheLock.lock()
+        threadUsageCache.removeValue(forKey: threadID)
+        cacheLock.unlock()
+    }
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -462,6 +504,20 @@ public struct UsageTotals: Sendable {
     public var requestCount: Int = 0
     public var avgDuration: Double = 0
     public var avgSpeed: Double = 0
+
+    public init(
+        inputTokens: Int = 0,
+        outputTokens: Int = 0,
+        requestCount: Int = 0,
+        avgDuration: Double = 0,
+        avgSpeed: Double = 0
+    ) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.requestCount = requestCount
+        self.avgDuration = avgDuration
+        self.avgSpeed = avgSpeed
+    }
     public var totalTokens: Int { inputTokens + outputTokens }
     public var estimatedCost: Double {
         (Double(inputTokens) * 3.0 / 1_000_000.0) + (Double(outputTokens) * 15.0 / 1_000_000.0)
@@ -501,9 +557,9 @@ public struct IntentUsageRow: Sendable, Identifiable {
 
     public var displayName: String {
         switch intent {
-        case "chat": return "聊天"
-        case "task": return "任务"
-        case "research": return "研究"
+        case "chat": return "会话 问答"
+        case "task": return "会话 执行"
+        case "research": return "会话 研究"
         default: return intent
         }
     }

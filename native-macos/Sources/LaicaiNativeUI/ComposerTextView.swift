@@ -9,6 +9,7 @@ struct ComposerTextView: NSViewRepresentable {
     var onSend: () -> Void
     var onImagePaste: ((Data, String) -> Void)?  // (pngData, mediaType)
     @Binding var isFocused: Bool
+    @Binding var measuredHeight: CGFloat
 
     func makeNSView(context: Context) -> ComposerWrapperView {
         let wrapper = ComposerWrapperView()
@@ -24,9 +25,9 @@ struct ComposerTextView: NSViewRepresentable {
         textView.isEditable = true
         textView.isSelectable = true
         textView.font = NSFont.systemFont(ofSize: 14)
-        textView.textColor = NSColor(red: 0.83, green: 0.82, blue: 0.78, alpha: 1)
-        textView.insertionPointColor = NSColor(red: 0.43, green: 0.58, blue: 0.80, alpha: 1)
-        textView.textContainerInset = NSSize(width: 8, height: 6)
+        textView.textColor = NSColor.labelColor
+        textView.insertionPointColor = NSColor.controlAccentColor
+        textView.textContainerInset = NSSize(width: 2, height: 4)
         textView.textContainer?.lineBreakMode = .byWordWrapping
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(
@@ -47,6 +48,8 @@ struct ComposerTextView: NSViewRepresentable {
         wrapper.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         context.coordinator.placeholderString = placeholder
         context.coordinator.textView = textView
+        context.coordinator.wrapper = wrapper
+        context.coordinator.remeasure()
 
         return wrapper
     }
@@ -65,11 +68,12 @@ struct ComposerTextView: NSViewRepresentable {
         context.coordinator.placeholderString = placeholder
         context.coordinator.onSend = onSend
         context.coordinator.onImagePaste = onImagePaste
+        context.coordinator.remeasure()
         textView.needsDisplay = true
     }
 
     func makeCoordinator() -> Coordinator {
-        let coord = Coordinator(text: $text, isFocused: $isFocused, onSend: onSend)
+        let coord = Coordinator(text: $text, isFocused: $isFocused, measuredHeight: $measuredHeight, onSend: onSend)
         coord.onImagePaste = onImagePaste
         return coord
     }
@@ -83,14 +87,17 @@ struct ComposerTextView: NSViewRepresentable {
     class Coordinator: NSObject, NSTextViewDelegate {
         let text: Binding<String>
         let focused: Binding<Bool>
+        let measuredHeight: Binding<CGFloat>
         var onSend: () -> Void
         var onImagePaste: ((Data, String) -> Void)?
         var placeholderString: String = ""
         weak var textView: ComposerNSTextView?
+        weak var wrapper: ComposerWrapperView?
 
-        init(text: Binding<String>, isFocused: Binding<Bool>, onSend: @escaping () -> Void) {
+        init(text: Binding<String>, isFocused: Binding<Bool>, measuredHeight: Binding<CGFloat>, onSend: @escaping () -> Void) {
             self.text = text
             self.focused = isFocused
+            self.measuredHeight = measuredHeight
             self.onSend = onSend
         }
 
@@ -105,7 +112,25 @@ struct ComposerTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? ComposerNSTextView else { return }
             text.wrappedValue = tv.string
+            remeasure()
             tv.needsDisplay = true
+        }
+
+        func remeasure() {
+            guard let tv = textView else { return }
+            let width = max(1, wrapper?.bounds.width ?? tv.bounds.width)
+            tv.textContainer?.containerSize = NSSize(
+                width: max(1, width - tv.textContainerInset.width * 2),
+                height: CGFloat.greatestFiniteMagnitude
+            )
+            tv.layoutManager?.ensureLayout(for: tv.textContainer!)
+            let used = tv.layoutManager?.usedRect(for: tv.textContainer!).height ?? 0
+            let height = min(84, max(28, ceil(used + tv.textContainerInset.height * 2)))
+            DispatchQueue.main.async {
+                if abs(self.measuredHeight.wrappedValue - height) > 0.5 {
+                    self.measuredHeight.wrappedValue = height
+                }
+            }
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -154,6 +179,7 @@ final class ComposerWrapperView: NSView {
             width: max(0, bounds.width - tv.textContainerInset.width * 2),
             height: CGFloat.greatestFiniteMagnitude
         )
+        (tv.delegate as? ComposerTextView.Coordinator)?.remeasure()
     }
 
     override var acceptsFirstResponder: Bool { textView?.acceptsFirstResponder ?? false }
@@ -302,10 +328,10 @@ final class ComposerNSTextView: NSTextView {
             .font: font ?? NSFont.systemFont(ofSize: 14)
         ]
         let drawRect = NSRect(
-            x: origin.x + 5,
-            y: origin.y,
-            width: max(0, bounds.width - origin.x * 2 - 10),
-            height: 20
+            x: origin.x,
+            y: origin.y + 1,
+            width: max(0, bounds.width - origin.x * 2),
+            height: 18
         )
         (placeholder as NSString).draw(
             with: drawRect,

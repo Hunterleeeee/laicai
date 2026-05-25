@@ -147,9 +147,9 @@ public final class CustomToolRegistry: ObservableObject {
     // MARK: - All available tool names (built-in + custom)
 
     public static let builtinTools = [
-        "code.search", "file.read", "file.write", "file.edit", "diff.apply",
+        "code.search", "file.read", "file.extract", "document.transform", "file.write", "file.edit", "diff.apply",
         "shell.exec", "web.search", "web.fetch", "workspace.index",
-        "verify.build"
+        "verify.build", "skill.manage"
     ]
 
     public func allToolNames() -> [String] {

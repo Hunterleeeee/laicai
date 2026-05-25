@@ -34,6 +34,7 @@ struct ContextBuilder {
         enrichWithPersistentMemory(prompt: &prompt, state: state, config: config)
         enrichWithMemoryEngine(prompt: &prompt, message: state.message)
         enrichWithSkillGuidance(prompt: &prompt, state: &state, config: config)
+        enrichWithAdaptiveWorkflowContract(prompt: &prompt, state: state)
         enrichWithFailurePatterns(prompt: &prompt, state: &state, config: config, injectedHashes: &injectedPatternHashes)
         enrichWithCustomPrompt(prompt: &prompt, config: config)
         enrichWithExecutionDiscipline(prompt: &prompt, state: state)
@@ -100,7 +101,7 @@ struct ContextBuilder {
         let skillInjection = """
 
 ## 已学技能提示
-此类任务曾成功使用策略「\(learnedSkill.strategy)」，推荐工具序列：\(toolSequence)
+此类会话目标曾成功使用策略「\(learnedSkill.strategy)」，推荐工具序列：\(toolSequence)
 （成功率 \(Int(learnedSkill.successRate * 100))%，Q值 \(String(format: "%.2f", learnedSkill.qValue))）
 """
         prompt += skillInjection
@@ -113,6 +114,19 @@ struct ContextBuilder {
             isCollapsed: true
         )
         state.task.steps.append(skillStep)
+    }
+
+    private static func enrichWithAdaptiveWorkflowContract(prompt: inout String, state: PipelineState) {
+        guard state.intent != .chat else { return }
+        prompt += """
+
+## 自适应工作流契约
+- 你要为当前会话目标生成一个临时工作流，并在每次工具结果后更新它；工作流是执行假设，不是固定脚本。
+- Harness 会提供工具、证据、权限和失败提示；你负责判断下一步是否仍服务于用户目标。
+- 如果已有内置/本地 skill 能覆盖部分任务，可以借用；如果不匹配，自己组合工具完成。
+- 当本次形成了可复用流程，且不影响当前交付时，用 skill_manage(action="create" 或 "update") 沉淀为 skill。
+- 最终答案不要展示内部工作流，只报告交付物、验证结果和残余风险。
+"""
     }
 
     private static func enrichWithFailurePatterns(
@@ -151,14 +165,14 @@ struct ContextBuilder {
     private static func enrichWithCustomPrompt(prompt: inout String, config: AgentLoop.Config) {
         if let customSystemPrompt = config.customSystemPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
            !customSystemPrompt.isEmpty {
-            prompt += "\n\n## 当前指定 Agent\n\(customSystemPrompt)"
+            prompt += "\n\n## 当前指定 会话\n\(customSystemPrompt)"
         }
     }
 
     private static func enrichWithExecutionDiscipline(prompt: inout String, state: PipelineState) {
         let hasPlan = state.taskContext.memory.userDecisions.contains(where: { $0.hasPrefix("执行计划：") })
         if hasPlan {
-            prompt += "\n\n## 执行纪律\n严格按照上面的执行计划推进。每轮只做计划中的下一步。最终回复必须说明已验证什么、未验证什么。"
+            prompt += "\n\n## 执行纪律\n严格按照上面的执行计划推进。每轮只做计划中的下一步。若当前是继续/追问/修复已有会话，必须沿用检查点、最近失败和已读文件，从断点推进；不要把「继续」「为什么」「还有什么」「没反应」当成新的独立目标。最终回复必须说明已验证什么、未验证什么。"
         }
     }
 
@@ -187,7 +201,7 @@ struct ContextBuilder {
         phase: TaskPhase,
         toolRegistry: ToolRegistry
     ) -> [ToolDefinition] {
-        guard config.supportsToolCalling else { return [] }
+        guard config.supportsToolCalling, intent != .chat else { return [] }
         let allDefs = AgentLoop.toolDefinitions(for: intent, phase: phase, registry: toolRegistry)
         return filterToolDefinitions(allDefs, allowedTools: config.allowedTools)
     }
@@ -238,7 +252,7 @@ struct ContextBuilder {
 - 历史记录里出现过的工具名（即使本轮未启用）不代表当前可用，以本列表为准。
 """
         } else if !config.supportsToolCalling {
-            prompt += "\n\n## 当前真实可用工具\n本轮未启用任何工具（纯文本模式）。如需文件读写/搜索/执行，请提示用户切换到任务模式或换支持 function calling 的连接器。"
+            prompt += "\n\n## 当前真实可用工具\n本轮未启用任何工具（纯文本姿态）。如需文件读写/搜索/执行，请提示用户切换到支持工具调用的连接器后重试。"
         }
     }
 }

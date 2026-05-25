@@ -70,7 +70,7 @@ public final class AgentRegistry: ObservableObject {
             preferredConnectorID: preferredConnectorID
         )
         if agent.systemPrompt.isEmpty {
-            agent.systemPrompt = "你是\(agent.name)，角色是\(role.title)。请按该角色完成任务。"
+            agent.systemPrompt = "你是\(agent.name)，角色是\(role.title)。请按该角色推进当前会话目标。"
         }
         try save(agent, workspaceRoot: workspaceRoot)
         agents.append(agent)
