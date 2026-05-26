@@ -224,4 +224,79 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(capturedBody.contains(#""max_tokens""#))
         XCTAssertFalse(capturedBody.contains(#""keep_alive""#))
     }
+
+    func testLiveChatRuntimeStreamPreservesReasoningToolDeltasAndFinishReason() async throws {
+        let sseBody = [
+            #"data: {"choices":[{"delta":{"reasoning_content":"先看"},"finish_reason":null}]}"#,
+            #"data: {"choices":[{"delta":{"content":"结"},"finish_reason":null}]}"#,
+            #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"file_read","arguments":"{\"path\":"}}]},"finish_reason":null}]}"#,
+            #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"README.md\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+            "data: [DONE]"
+        ].joined(separator: "\n")
+        let session = makeStubbedSession(body: sseBody.data(using: .utf8)!)
+        let runtime = LiveChatRuntime(session: session)
+
+        var visible = ""
+        var reasoning = ""
+        let response = try await runtime.sendMessageStream(
+            SendMessageRequest(
+                sessionID: UUID(),
+                message: "读 README",
+                connector: ConnectorProfile(
+                    name: "Test",
+                    kind: "openai-compatible",
+                    endpoint: "https://api.example.com/v1/chat/completions",
+                    modelName: "test-model",
+                    note: "",
+                    health: .ready
+                ),
+                modeLabel: "测试"
+            ),
+            onChunk: { visible += $0 },
+            onReasoningChunk: { reasoning += $0 }
+        )
+
+        XCTAssertEqual(visible, "结")
+        XCTAssertEqual(reasoning, "先看")
+        XCTAssertEqual(response.reasoningContent, "先看")
+        XCTAssertEqual(response.finishReason, "tool_calls")
+        XCTAssertEqual(response.toolCalls.count, 1)
+        XCTAssertEqual(response.toolCalls.first?.id, "call_1")
+        XCTAssertEqual(response.toolCalls.first?.function.name, "file_read")
+        XCTAssertEqual(response.toolCalls.first?.function.arguments, #"{"path":"README.md"}"#)
+    }
+
+    func testChatRuntimeDefaultReasoningStreamFallbackForwardsChunks() async throws {
+        @MainActor
+        final class TwoArgOnlyRuntime: ChatRuntimeClient {
+            func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+                SendMessageResponse(assistantText: "fallback")
+            }
+
+            func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
+                onChunk("alpha")
+                onChunk("beta")
+                return SendMessageResponse(assistantText: "alphabeta")
+            }
+        }
+
+        let runtime = TwoArgOnlyRuntime()
+        var visible = ""
+        var reasoning = ""
+
+        let response = try await runtime.sendMessageStream(
+            SendMessageRequest(
+                sessionID: UUID(),
+                message: "ping",
+                connector: nil,
+                modeLabel: "测试"
+            ),
+            onChunk: { visible += $0 },
+            onReasoningChunk: { reasoning += $0 }
+        )
+
+        XCTAssertEqual(response.assistantText, "alphabeta")
+        XCTAssertEqual(visible, "alphabeta")
+        XCTAssertEqual(reasoning, "alphabeta")
+    }
 }

@@ -25,11 +25,11 @@ public final class AgentLoop: ObservableObject {
     public init(
         config: Config,
         runtime: any ChatRuntimeClient,
-        toolRegistry: ToolRegistry = .shared
+        toolRegistry: ToolRegistry? = nil
     ) {
         self.config = config
         self.runtime = runtime
-        self.toolRegistry = toolRegistry
+        self.toolRegistry = toolRegistry ?? .shared
     }
 
     /// Run the agent loop for a user message.
@@ -49,27 +49,11 @@ public final class AgentLoop: ObservableObject {
         onReasoningDelta: @Sendable @MainActor (String) -> Void = { _ in },
         onCheckInterrupt: @MainActor () -> String? = { nil }
     ) async throws -> AgentTask {
-        // ── Lean mode delegation (Codex-style kernel) ──
-        if config.leanMode {
-            return try await runLean(
-                taskID: taskID,
-                message: message,
-                intent: intent,
-                connector: connector,
-                allConnectors: allConnectors,
-                context: context,
-                priorSteps: priorSteps,
-                summaryCache: summaryCache,
-                imageAttachments: imageAttachments,
-                onStep: onStep,
-                onStreamDelta: onStreamDelta,
-                onReasoningDelta: onReasoningDelta,
-                onCheckInterrupt: onCheckInterrupt
-            )
-        }
-
-        // ── Pipeline delegation ──
-        if config.usePipeline {
+        // ── Kernel mode delegation ──
+        switch config.kernelMode {
+        case .codexFull:
+            break
+        case .pipeline:
             return try await runPipeline(
                 taskID: taskID,
                 message: message,
@@ -83,6 +67,8 @@ public final class AgentLoop: ObservableObject {
                 onStep: onStep,
                 onStreamDelta: onStreamDelta
             )
+        case .legacy:
+            break
         }
 
         let startTime = CFAbsoluteTimeGetCurrent()

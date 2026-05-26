@@ -46,8 +46,6 @@ public struct MemoryTool: LaicaiTool {
             return ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params")
         }
 
-        let engine = MemoryEngine.shared
-
         switch params.action {
         case "store":
             guard let content = params.content, !content.isEmpty else {
@@ -57,7 +55,7 @@ public struct MemoryTool: LaicaiTool {
             let tags = (params.tags ?? "").components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
 
             let entry = MemoryEntry(kind: kind, content: content, tags: tags)
-            let ok = await engine.store(entry)
+            let ok = await MainActor.run { MemoryEngine.shared.store(entry) }
             return ok
                 ? ToolResult(output: "已存储记忆（\(kind.rawValue)）")
                 : ToolResult(output: "存储失败", success: false, error: "store_failed")
@@ -66,7 +64,7 @@ public struct MemoryTool: LaicaiTool {
             guard let query = params.query, !query.isEmpty else {
                 return ToolResult(output: "缺少 query 参数", success: false, error: "missing_query")
             }
-            let results = await engine.recall(query: query, limit: 8)
+            let results = await MainActor.run { MemoryEngine.shared.recall(query: query, limit: 8) }
             if results.isEmpty {
                 return ToolResult(output: "未找到相关记忆")
             }
@@ -88,7 +86,7 @@ public struct MemoryTool: LaicaiTool {
             guard let query = params.query, !query.isEmpty else {
                 return ToolResult(output: "缺少 query 参数", success: false, error: "missing_query")
             }
-            let results = await engine.recallByKeyword(query, limit: 10)
+            let results = await MainActor.run { MemoryEngine.shared.recallByKeyword(query, limit: 10) }
             if results.isEmpty {
                 return ToolResult(output: "未找到匹配记忆")
             }
@@ -100,10 +98,10 @@ public struct MemoryTool: LaicaiTool {
                 return ToolResult(output: "缺少 key 参数", success: false, error: "missing_key")
             }
             if let value = params.value, !value.isEmpty {
-                await engine.storePreference(key: key, value: value)
+                await MainActor.run { MemoryEngine.shared.storePreference(key: key, value: value) }
                 return ToolResult(output: "已保存偏好：\(key) = \(value)")
             } else {
-                let results = await engine.recallByKeyword("偏好:\(key)", limit: 1)
+                let results = await MainActor.run { MemoryEngine.shared.recallByKeyword("偏好:\(key)", limit: 1) }
                 if let found = results.first {
                     return ToolResult(output: found.content)
                 }
@@ -111,7 +109,7 @@ public struct MemoryTool: LaicaiTool {
             }
 
         case "stats":
-            let s = await engine.stats
+            let s = await MainActor.run { MemoryEngine.shared.stats }
             return ToolResult(output: "记忆统计：共 \(s.total) 条（知识 \(s.facts)，历史 \(s.outcomes)，偏好 \(s.preferences)）")
 
         default:

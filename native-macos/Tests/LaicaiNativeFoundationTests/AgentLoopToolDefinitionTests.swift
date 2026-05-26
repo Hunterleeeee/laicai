@@ -44,8 +44,7 @@ final class AgentLoopToolDefinitionTests: LaicaiNativeFoundationTestCase {
                 maxIterations: 3,
                 maxTokensPerTurn: 1024,
                 workspaceRoot: "/tmp",
-                allowedTools: ["browser.real"],
-                usePipeline: false
+                allowedTools: ["browser.real"]
             ),
             runtime: runtime
         )

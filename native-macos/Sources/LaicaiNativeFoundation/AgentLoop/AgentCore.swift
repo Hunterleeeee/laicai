@@ -111,11 +111,11 @@ public final class AgentCore {
 
     public init(
         runtime: any ChatRuntimeClient,
-        toolRegistry: ToolRegistry = .shared,
+        toolRegistry: ToolRegistry? = nil,
         config: AgentCoreConfig = AgentCoreConfig()
     ) {
         self.runtime = runtime
-        self.toolRegistry = toolRegistry
+        self.toolRegistry = toolRegistry ?? .shared
         self.config = config
     }
 

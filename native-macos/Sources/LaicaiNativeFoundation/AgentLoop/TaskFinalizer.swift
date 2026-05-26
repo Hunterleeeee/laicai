@@ -334,7 +334,7 @@ struct TaskFinalizer {
             taskID: state.task.id.uuidString,
             intent: state.intentString,
             routeLabel: "会话 执行",
-            executionMode: state.isReadOnlyRun ? "inspect" : (state.intent == .chat ? "ask" : "act"),
+            executionMode: executionModeLabel(state: state, config: config),
             iterations: state.iteration,
             status: finalStatus,
             hadFailure: state.hadFailure,
@@ -347,6 +347,18 @@ struct TaskFinalizer {
             promptTag: promptTag,
             modelName: config.modelName
         )
+    }
+
+    static func executionModeLabel(state: PipelineState, config: AgentLoop.Config) -> String {
+        if state.isReadOnlyRun { return "inspect" }
+        switch config.kernelMode {
+        case .legacy:
+            return "legacy"
+        case .pipeline:
+            return "pipeline"
+        case .codexFull:
+            return "codexFull"
+        }
     }
 
     private static func computeOutcomeScore(state: PipelineState, config: AgentLoop.Config, finalStatus: TaskStatus, duration: Double) -> Int {

@@ -13,6 +13,13 @@ extension AppStore {
 
     static func agentLoopConfig(settings: AppSettings, connector: ConnectorProfile? = nil) -> AgentLoop.Config {
         let profile = ConnectorCapabilityProfile.infer(for: connector, mode: settings.contextMode)
+        let kernelMode: AgentLoop.KernelMode = {
+            switch settings.kernelMode {
+            case .legacy: return .legacy
+            case .pipeline: return .pipeline
+            case .codexFull: return .codexFull
+            }
+        }()
         return AgentLoop.Config(
             maxIterations: profile.maxIterations,
             maxTokensPerTurn: profile.maxTokensPerTurn,
@@ -24,8 +31,7 @@ extension AppStore {
             connectorEndpoint: connector?.endpoint ?? "",
             apiKey: connector?.note ?? "",
             emitDebugSteps: settings.showDebugPanels,
-            usePipeline: settings.usePipeline,
-            leanMode: settings.leanMode
+            kernelMode: kernelMode
         )
     }
 

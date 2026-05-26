@@ -205,7 +205,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         store.updateDraft("我想让Gemini作一首歌，带mv的，但是我不知道怎么描述prompt，你来帮我梳理一下")
         store.sendDraft()
         try await waitUntilIdle(store)
-        let firstThreadID = try XCTUnwrap(store.state.selectedThreadID)
+        _ = try XCTUnwrap(store.state.selectedThreadID)
 
         store.updateDraft("古风故事，男生，古风电子，电影感")
         store.sendDraft()
@@ -270,12 +270,11 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        let assistant = try XCTUnwrap(store.state.selectedThread?.steps.last)
-        XCTAssertEqual(assistant.kind, .textOutput)
+        let assistant = try XCTUnwrap(store.state.selectedThread?.steps.last(where: { $0.kind == .textOutput }))
         XCTAssertEqual(assistant.text, "你好，世界")
         XCTAssertEqual(assistant.metrics?.inputTokens, 12)
         XCTAssertEqual(assistant.metrics?.outputTokens, 4)
-        XCTAssertEqual(store.state.selectedThread?.events.last?.metrics?.outputTokens, 4)
+        XCTAssertEqual(store.state.selectedThread?.events.last(where: { $0.kind == .assistant })?.metrics?.outputTokens, 4)
     }
     func testFrustratedDirectChatAddsRepairGuidance() async throws {
         let connector = makeConnector()

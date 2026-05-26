@@ -109,7 +109,10 @@ extension ChatRuntimeClient {
     }
 
     public func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void, onReasoningChunk: @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
-        return try await sendMessageStream(request, onChunk: onChunk)
+        return try await sendMessageStream(request, onChunk: { chunk in
+            onChunk(chunk)
+            onReasoningChunk(chunk)
+        })
     }
 
     public func healthCheck(endpoint: String, model: String, apiKey: String, kind: String = "openai-compatible") async throws -> ConnectorHealth {

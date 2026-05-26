@@ -66,4 +66,54 @@ final class TaskOutcomeRecorderTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(recorder.toolStats(days: 1).first?.total, 80)
         XCTAssertFalse(recorder.recentFailures(intent: "task").isEmpty)
     }
+
+    func testStatsSplitByExecutionModeForSameIntentAndRoute() async throws {
+        let base = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let recorder = TaskOutcomeRecorder(path: base.path)
+
+        recorder.record(
+            taskID: "legacy-1",
+            intent: "task",
+            routeLabel: "会话 执行",
+            executionMode: "pipeline",
+            iterations: 4,
+            status: .completed,
+            hadFailure: false,
+            wasCancelled: false,
+            wasTruncated: false,
+            toolCalls: 3,
+            toolFailures: 0,
+            durationSeconds: 1.2,
+            userFollowupCount: 0,
+            modelName: "test-model"
+        )
+        recorder.record(
+            taskID: "codex-1",
+            intent: "task",
+            routeLabel: "会话 执行",
+            executionMode: "codexFull",
+            iterations: 6,
+            status: .failed,
+            hadFailure: true,
+            wasCancelled: false,
+            wasTruncated: false,
+            toolCalls: 4,
+            toolFailures: 1,
+            durationSeconds: 2.3,
+            userFollowupCount: 1,
+            modelName: "test-model"
+        )
+
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let rows = recorder.stats(days: 1).filter { $0.intent == "task" && $0.routeLabel == "会话 执行" }
+
+        let pipeline = try XCTUnwrap(rows.first { $0.executionMode == "pipeline" })
+        XCTAssertEqual(pipeline.total, 1)
+        XCTAssertEqual(pipeline.completed, 1)
+
+        let codex = try XCTUnwrap(rows.first { $0.executionMode == "codexFull" })
+        XCTAssertEqual(codex.total, 1)
+        XCTAssertEqual(codex.completed, 0)
+    }
 }

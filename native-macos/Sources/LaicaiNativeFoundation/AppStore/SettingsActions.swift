@@ -100,11 +100,6 @@ extension AppStore {
         persistSettings()
     }
 
-    public func toggleLeanMode(_ enabled: Bool) {
-        state.settings.leanMode = enabled
-        persistSettings()
-    }
-
     public func updateContextMode(_ mode: ContextMode) {
         state.settings.contextMode = mode
         persistSettings()

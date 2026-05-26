@@ -164,6 +164,30 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(allowed.contains("file.write"))
         XCTAssertFalse(allowed.contains("file.edit"))
     }
+
+    func testAgentLoopConfigKernelModeDefaultsToCodexFull() {
+        let settings = AppSettings(workspacePath: "/tmp/project")
+        let config = AppStore.agentLoopConfig(settings: settings, connector: makeConnector())
+
+        XCTAssertEqual(config.kernelMode, .codexFull)
+    }
+
+    func testAgentLoopConfigKernelModeFollowsSettingsKernelMode() {
+        var settings = AppSettings(workspacePath: "/tmp/project")
+
+        settings.kernelMode = .pipeline
+        var config = AppStore.agentLoopConfig(settings: settings, connector: makeConnector())
+        XCTAssertEqual(config.kernelMode, .pipeline)
+
+        settings.kernelMode = .codexFull
+        config = AppStore.agentLoopConfig(settings: settings, connector: makeConnector())
+        XCTAssertEqual(config.kernelMode, .codexFull)
+
+        settings.kernelMode = .legacy
+        config = AppStore.agentLoopConfig(settings: settings, connector: makeConnector())
+        XCTAssertEqual(config.kernelMode, .legacy)
+    }
+
     func testDangerousRequestBuildsDangerousTaskProtocolAndBlocksWrites() throws {
         let message = "删除所有缓存并 reset --hard"
         let decision = IntentRouter.plan(message)

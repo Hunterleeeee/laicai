@@ -28,11 +28,11 @@ public final class MultiAgentOrchestrator: ObservableObject {
     public init(
         config: Config,
         runtime: any ChatRuntimeClient,
-        toolRegistry: ToolRegistry = .shared
+        toolRegistry: ToolRegistry? = nil
     ) {
         self.config = config
         self.runtime = runtime
-        self.toolRegistry = toolRegistry
+        self.toolRegistry = toolRegistry ?? .shared
     }
 
     // MARK: - Plan Creation
@@ -633,6 +633,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
                 node: node, agentInput: agentInput, intent: intent,
                 connector: agentConnector, allConnectors: allConnectors,
                 context: context,
+                kernelModeOverride: nil,
                 onStep: { step in
                     var taggedStep = step
                     taggedStep.agentRole = node.role
@@ -647,10 +648,51 @@ public final class MultiAgentOrchestrator: ObservableObject {
             case .success(let output):
                 return (output, .completed, [])
             case .failure(let error):
-                lastError = error
-                plan.agents[index].errorMessage = error
-                if attempt < maxRetries {
-                    continue
+                if Self.preferredKernelMode(for: node.role) == .codexFull {
+                    let downgradeStep = TaskStep(
+                        kind: .aiThinking,
+                        text: "[\(node.role.title)] codexFull 失败，降级到 pipeline 复跑一次…",
+                        isCollapsible: true,
+                        isCollapsed: true,
+                        agentRole: node.role
+                    )
+                    task.steps.append(downgradeStep)
+                    onStep(downgradeStep)
+
+                    let pipelineResult = await executeSingleAgentLoop(
+                        node: node,
+                        agentInput: agentInput,
+                        intent: intent,
+                        connector: agentConnector,
+                        allConnectors: allConnectors,
+                        context: context,
+                        kernelModeOverride: .pipeline,
+                        onStep: { step in
+                            var taggedStep = step
+                            taggedStep.agentRole = node.role
+                            task.steps.append(taggedStep)
+                            plan.agents[index].stepIDs.append(taggedStep.id)
+                            onStep(taggedStep)
+                        },
+                        onStreamDelta: onStreamDelta
+                    )
+
+                    switch pipelineResult {
+                    case .success(let output):
+                        return (output, .completed, [])
+                    case .failure(let pipelineError):
+                        lastError = "codexFull: \(error) | pipeline: \(pipelineError)"
+                        plan.agents[index].errorMessage = lastError
+                        if attempt < maxRetries {
+                            continue
+                        }
+                    }
+                } else {
+                    lastError = error
+                    plan.agents[index].errorMessage = error
+                    if attempt < maxRetries {
+                        continue
+                    }
                 }
             }
         }
@@ -707,6 +749,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
                 node: node, agentInput: agentInput, intent: intent,
                 connector: agentConnector, allConnectors: allConnectors,
                 context: context,
+                kernelModeOverride: nil,
                 onStep: { step in
                     var taggedStep = step
                     taggedStep.agentRole = node.role
@@ -719,7 +762,47 @@ public final class MultiAgentOrchestrator: ObservableObject {
             case .success(let output):
                 return (node.id, output, .completed, collectedSteps)
             case .failure(let error):
-                if attempt == Self.maxAgentRetries {
+                if Self.preferredKernelMode(for: node.role) == .codexFull {
+                    let downgradeStep = TaskStep(
+                        kind: .aiThinking,
+                        text: "[\(node.role.title)] codexFull 失败，降级到 pipeline 复跑一次…",
+                        isCollapsible: true,
+                        isCollapsed: true,
+                        agentRole: node.role
+                    )
+                    collectedSteps.append(downgradeStep)
+
+                    let pipelineResult = await executeSingleAgentLoop(
+                        node: node,
+                        agentInput: agentInput,
+                        intent: intent,
+                        connector: agentConnector,
+                        allConnectors: allConnectors,
+                        context: context,
+                        kernelModeOverride: .pipeline,
+                        onStep: { step in
+                            var taggedStep = step
+                            taggedStep.agentRole = node.role
+                            collectedSteps.append(taggedStep)
+                        },
+                        onStreamDelta: { _ in }
+                    )
+
+                    switch pipelineResult {
+                    case .success(let output):
+                        return (node.id, output, .completed, collectedSteps)
+                    case .failure(let pipelineError):
+                        if attempt == Self.maxAgentRetries {
+                            let errorStep = TaskStep(
+                                kind: .error,
+                                text: "[\(node.role.title)] 执行失败：codexFull=\(error) | pipeline=\(pipelineError)",
+                                isFailure: true, recoverable: true, agentRole: node.role
+                            )
+                            collectedSteps.append(errorStep)
+                            return (node.id, nil, .failed, collectedSteps)
+                        }
+                    }
+                } else if attempt == Self.maxAgentRetries {
                     let errorStep = TaskStep(
                         kind: .error,
                         text: "[\(node.role.title)] 执行失败：\(error)",
@@ -741,6 +824,15 @@ public final class MultiAgentOrchestrator: ObservableObject {
         case failure(String)
     }
 
+    static func preferredKernelMode(for role: AgentRole) -> AgentLoop.KernelMode {
+        switch role {
+        case .planner, .coder, .tester, .reviewer:
+            return .codexFull
+        case .researcher:
+            return .pipeline
+        }
+    }
+
     private func executeSingleAgentLoop(
         node: AgentNode,
         agentInput: String,
@@ -748,6 +840,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
         connector: ConnectorProfile,
         allConnectors: [ConnectorProfile],
         context: TaskContext,
+        kernelModeOverride: AgentLoop.KernelMode? = nil,
         onStep: @MainActor (TaskStep) -> Void,
         onStreamDelta: @Sendable @MainActor (String) -> Void
     ) async -> AgentResult {
@@ -765,6 +858,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
             connectorEndpoint: connector.endpoint,
             apiKey: connector.note
         )
+        agentConfig.kernelMode = kernelModeOverride ?? Self.preferredKernelMode(for: node.role)
         if node.role == .coder {
             agentConfig.maxIterations = max(agentConfig.maxIterations, 24)
         } else if node.role == .tester {

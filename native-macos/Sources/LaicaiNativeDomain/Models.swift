@@ -2287,6 +2287,12 @@ public enum ContextMode: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
+public enum AppKernelMode: String, Codable, Sendable, CaseIterable {
+    case legacy
+    case pipeline
+    case codexFull
+}
+
 public struct AppSettings: Equatable, Codable, Sendable {
     public var workspacePath: String
     public var vaultPath: String
@@ -2298,8 +2304,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
     public var comfyUIModelName: String
     // G16: Multi-workspace support — recent workspace paths for quick switching
     public var recentWorkspaces: [String]
-    public var usePipeline: Bool
-    public var leanMode: Bool
+    public var kernelMode: AppKernelMode
 
     public init(
         workspacePath: String,
@@ -2311,8 +2316,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         comfyUIServerURL: String = "http://127.0.0.1:8188",
         comfyUIModelName: String = "",
         recentWorkspaces: [String] = [],
-        usePipeline: Bool = false,
-        leanMode: Bool = false
+        kernelMode: AppKernelMode = .codexFull
     ) {
         self.workspacePath = workspacePath
         self.vaultPath = vaultPath
@@ -2323,8 +2327,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         self.comfyUIServerURL = comfyUIServerURL
         self.comfyUIModelName = comfyUIModelName
         self.recentWorkspaces = recentWorkspaces
-        self.usePipeline = usePipeline
-        self.leanMode = leanMode
+        self.kernelMode = kernelMode
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -2337,6 +2340,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         case comfyUIServerURL
         case comfyUIModelName
         case recentWorkspaces
+        case kernelMode
         case usePipeline
         case leanMode
     }
@@ -2352,8 +2356,33 @@ public struct AppSettings: Equatable, Codable, Sendable {
         comfyUIServerURL = try container.decodeIfPresent(String.self, forKey: .comfyUIServerURL) ?? "http://127.0.0.1:8188"
         comfyUIModelName = try container.decodeIfPresent(String.self, forKey: .comfyUIModelName) ?? ""
         recentWorkspaces = try container.decodeIfPresent([String].self, forKey: .recentWorkspaces) ?? []
-        usePipeline = try container.decodeIfPresent(Bool.self, forKey: .usePipeline) ?? false
-        leanMode = try container.decodeIfPresent(Bool.self, forKey: .leanMode) ?? false
+        if let decodedKernelMode = try container.decodeIfPresent(AppKernelMode.self, forKey: .kernelMode) {
+            kernelMode = decodedKernelMode
+        } else {
+            let usePipeline = try container.decodeIfPresent(Bool.self, forKey: .usePipeline) ?? false
+            let leanMode = try container.decodeIfPresent(Bool.self, forKey: .leanMode) ?? false
+            if leanMode {
+                kernelMode = .codexFull
+            } else if usePipeline {
+                kernelMode = .pipeline
+            } else {
+                kernelMode = .legacy
+            }
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(workspacePath, forKey: .workspacePath)
+        try container.encode(vaultPath, forKey: .vaultPath)
+        try container.encode(defaultConnectorName, forKey: .defaultConnectorName)
+        try container.encode(compactComposer, forKey: .compactComposer)
+        try container.encode(showDebugPanels, forKey: .showDebugPanels)
+        try container.encode(contextMode, forKey: .contextMode)
+        try container.encode(comfyUIServerURL, forKey: .comfyUIServerURL)
+        try container.encode(comfyUIModelName, forKey: .comfyUIModelName)
+        try container.encode(recentWorkspaces, forKey: .recentWorkspaces)
+        try container.encode(kernelMode, forKey: .kernelMode)
     }
 
     // G16: Switch active workspace and track in recents

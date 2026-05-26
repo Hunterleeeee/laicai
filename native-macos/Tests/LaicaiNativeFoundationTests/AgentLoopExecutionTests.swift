@@ -271,6 +271,65 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("证据清单") })
         XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("Plan / Execute / Verify / Summarize") == true)
     }
+
+    func testCodexFullKernelUsesCodexFullPathInsteadOfLeanPlaceholder() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        try "hello".write(to: workspace.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+        let runtime = CapturingToolsRuntime()
+        var config = AgentLoop.Config(
+            maxIterations: 2,
+            maxTokensPerTurn: 1024,
+            workspaceRoot: workspace.path
+        )
+        config.kernelMode = .codexFull
+        let loop = AgentLoop(
+            config: config,
+            runtime: runtime
+        )
+
+        let task = try await loop.run(
+            message: "全量读取这个项目并找问题",
+            intent: .task,
+            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+
+        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("执行计划") })
+        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("阶段总结") })
+        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("证据清单") })
+        XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("Plan / Execute / Verify / Summarize") == true)
+        XCTAssertFalse(runtime.requests.first?.systemPrompt?.contains("[kernelMode=codexFull]") == true)
+    }
+    func testLegacyKernelUsesKernelModeOnlyForRouting() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        try "hello".write(to: workspace.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+        let runtime = CapturingToolsRuntime()
+        var config = AgentLoop.Config(
+            maxIterations: 2,
+            maxTokensPerTurn: 1024,
+            workspaceRoot: workspace.path
+        )
+        config.kernelMode = .legacy
+        let loop = AgentLoop(
+            config: config,
+            runtime: runtime
+        )
+
+        let task = try await loop.run(
+            message: "全量读取这个项目并找问题",
+            intent: .task,
+            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+
+        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("执行计划") })
+        XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("Plan / Execute / Verify / Summarize") == true)
+    }
+
     func testAgentLoopStopsAtMaxIterations() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }

@@ -728,20 +728,6 @@ private struct InputSettingsTab: View {
                         .toggleStyle(.switch)
                     }
 
-                    settingsRow(label: "精简模式") {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Toggle("Codex 风格内核（实验）", isOn: Binding(
-                                get: { store.state.settings.leanMode },
-                                set: { store.toggleLeanMode($0) }
-                            ))
-                            .font(.system(size: 12))
-                            .toggleStyle(.switch)
-                            Text("跳过编排层（阶段切换、模式匹配、自动恢复等），直接由模型驱动工具调用。更快、更省 token，但容错性较低。")
-                                .font(.system(size: 11))
-                                .foregroundStyle(TextGrade.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
                 }
             }
             .padding(AppSpace.xl)

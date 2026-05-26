@@ -10,6 +10,20 @@ final class ContextConnectorCapabilityTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertEqual(settings.contextMode, .balanced)
     }
+
+    func testAppSettingsDecodesLegacyCompatFlagsIntoKernelMode() throws {
+        let json = #"{"workspacePath":"/tmp","defaultConnectorName":"Test","compactComposer":false,"showDebugPanels":false,"usePipeline":true,"leanMode":false}"#
+        let settings = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8))
+
+        XCTAssertEqual(settings.kernelMode, .pipeline)
+    }
+
+    func testAppSettingsKernelModeOverridesLegacyCompatFlagsWhenBothPresent() throws {
+        let json = #"{"workspacePath":"/tmp","defaultConnectorName":"Test","compactComposer":false,"showDebugPanels":false,"kernelMode":"legacy","usePipeline":true,"leanMode":true}"#
+        let settings = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8))
+
+        XCTAssertEqual(settings.kernelMode, .legacy)
+    }
     func testAutoContextRespectsRelevantFileLimit() throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }

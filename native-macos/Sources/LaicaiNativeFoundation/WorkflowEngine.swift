@@ -368,7 +368,7 @@ public struct StepExecutor {
     public static func executeStep(
         _ step: WorkflowStep,
         context: TaskContext,
-        registry: ToolRegistry = .shared,
+        registry: ToolRegistry? = nil,
         runtime: (any ChatRuntimeClient)? = nil,
         connector: ConnectorProfile? = nil,
         accumulatedResults: [String] = [],
@@ -376,6 +376,7 @@ public struct StepExecutor {
         onStreamDelta: @Sendable @MainActor (String) -> Void = { _ in }
     ) async -> ToolResult {
         let renderedStep = render(step: step, context: context, accumulatedResults: accumulatedResults, userParams: userParams)
+        let registry = registry ?? .shared
 
         // "llm" is a special tool type for LLM decision nodes
         if renderedStep.tool == "llm" {
@@ -539,11 +540,12 @@ public struct StepExecutor {
         context: TaskContext,
         connector: ConnectorProfile? = nil,
         runtime: (any ChatRuntimeClient)? = nil,
-        registry: ToolRegistry = .shared,
+        registry: ToolRegistry? = nil,
         userParams: [String: String] = [:],
         onStepProgress: @MainActor (StepProgress) -> Void = { _ in },
         onStreamDelta: @Sendable @MainActor (String) -> Void = { _ in }
     ) async -> [TaskStep] {
+        let registry = registry ?? .shared
         var taskSteps: [TaskStep] = []
         var accumulatedResults: [String] = []
         var hadFailure = false

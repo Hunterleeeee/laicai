@@ -2,6 +2,7 @@ import XCTest
 @testable import LaicaiNativeFoundation
 @testable import LaicaiNativeDomain
 
+@MainActor
 final class MultiAgentContractTests: LaicaiNativeFoundationTestCase {
     func testOnlyCoderRoleCanWriteProjectFiles() {
         let writeTools: Set<String> = ["file.write", "file.edit", "diff.apply"]
@@ -35,4 +36,13 @@ final class MultiAgentContractTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(tester?.dependsOn, coderID.map { [$0] })
         XCTAssertEqual(reviewer?.dependsOn, tester.map { [$0.id] })
     }
+
+    func testCodingRolesPreferCodexFullKernelMode() {
+        XCTAssertEqual(MultiAgentOrchestrator.preferredKernelMode(for: .planner), .codexFull)
+        XCTAssertEqual(MultiAgentOrchestrator.preferredKernelMode(for: .coder), .codexFull)
+        XCTAssertEqual(MultiAgentOrchestrator.preferredKernelMode(for: .tester), .codexFull)
+        XCTAssertEqual(MultiAgentOrchestrator.preferredKernelMode(for: .reviewer), .codexFull)
+        XCTAssertEqual(MultiAgentOrchestrator.preferredKernelMode(for: .researcher), .pipeline)
+    }
+
 }

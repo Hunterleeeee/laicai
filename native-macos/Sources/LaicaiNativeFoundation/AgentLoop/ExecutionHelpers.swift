@@ -1697,8 +1697,8 @@ extension AgentLoop {
         )
     }
 
-    public static func toolDefinitions(for intent: UserIntent, phase: TaskPhase = .explore, registry: ToolRegistry = .shared) -> [ToolDefinition] {
-        let allDefs = registry.toolDefinitions
+    public static func toolDefinitions(for intent: UserIntent, phase: TaskPhase = .explore, registry: ToolRegistry? = nil) -> [ToolDefinition] {
+        let allDefs = (registry ?? .shared).toolDefinitions
         let phaseDefs: [ToolDefinition]
         switch intent {
         case .chat:

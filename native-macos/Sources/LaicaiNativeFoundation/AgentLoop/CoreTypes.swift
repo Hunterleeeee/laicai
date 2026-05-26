@@ -36,6 +36,12 @@ extension Notification.Name {
 extension AgentLoop {
     public static let connectorFailoverAction = "connector.failover"
 
+    public enum KernelMode: String, Sendable, Codable, CaseIterable {
+        case legacy
+        case pipeline
+        case codexFull
+    }
+
     public struct Config: Sendable {
         public var maxIterations: Int
         public var maxTokensPerTurn: Int
@@ -49,12 +55,7 @@ extension AgentLoop {
         public var connectorEndpoint: String
         public var apiKey: String
         public var emitDebugSteps: Bool
-        /// Feature flag: when true, run() delegates to runPipeline().
-        /// Default false — flip to true after integration testing confirms parity.
-        public var usePipeline: Bool
-        /// Feature flag: when true, run() delegates to runLean() (Codex-style minimal kernel).
-        /// Takes priority over usePipeline.
-        public var leanMode: Bool
+        public var kernelMode: KernelMode
 
         public init(
             maxIterations: Int = 50,
@@ -69,8 +70,7 @@ extension AgentLoop {
             connectorEndpoint: String = "",
             apiKey: String = "",
             emitDebugSteps: Bool = false,
-            usePipeline: Bool = false,
-            leanMode: Bool = false
+            kernelMode: KernelMode = .legacy
         ) {
             self.maxIterations = maxIterations
             self.maxTokensPerTurn = maxTokensPerTurn
@@ -84,8 +84,7 @@ extension AgentLoop {
             self.connectorEndpoint = connectorEndpoint
             self.apiKey = apiKey
             self.emitDebugSteps = emitDebugSteps
-            self.usePipeline = usePipeline
-            self.leanMode = leanMode
+            self.kernelMode = kernelMode
         }
     }
 
