@@ -19,7 +19,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             updatedAt: .now.addingTimeInterval(-30),
             goal: "出一个水生万物，财自流转的icon图"
         )
-        let placeholder = Thread(title: "新 Agent", status: .queued, steps: [], updatedAt: .now)
+        let placeholder = Thread(title: "新会话", status: .queued, steps: [], updatedAt: .now)
         let runtime = StreamingRuntime()
         let store = AppStore(
             state: testState(

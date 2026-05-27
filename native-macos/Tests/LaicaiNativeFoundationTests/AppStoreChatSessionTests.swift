@@ -48,7 +48,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         let connector = makeConnector()
         let runtime = CapturingToolsRuntime()
         let store = makeTestStore(
-            modeLabel: "Agent",
+            modeLabel: "执行",
             defaultConnectorName: "Test",
             connectors: [connector],
             activeConnectorID: connector.id,
@@ -78,7 +78,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         )
         let runtime = CapturingToolsRuntime()
         let store = makeTestStore(
-            modeLabel: "Agent",
+            modeLabel: "执行",
             tasks: [task],
             selectedThreadID: task.id,
             defaultConnectorName: "Test",
@@ -112,7 +112,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         let store = makeTestStore(
             sessions: [session],
             selectedSessionID: session.id,
-            modeLabel: "Agent",
+            modeLabel: "执行",
             defaultConnectorName: "Test",
             connectors: [connector],
             activeConnectorID: connector.id,
@@ -141,7 +141,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         let store = makeTestStore(
             sessions: [session],
             selectedSessionID: session.id,
-            modeLabel: "Agent",
+            modeLabel: "执行",
             defaultConnectorName: "Test",
             connectors: [connector],
             activeConnectorID: connector.id,
@@ -233,7 +233,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         let store = makeTestStore(
             sessions: [session],
             selectedSessionID: session.id,
-            modeLabel: "Agent",
+            modeLabel: "执行",
             defaultConnectorName: "Test",
             connectors: [connector],
             activeConnectorID: connector.id,
@@ -260,7 +260,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
     func testDirectSessionStreamsAndStoresMetrics() async throws {
         let connector = makeConnector()
         let store = makeTestStore(
-            modeLabel: "Agent",
+            modeLabel: "执行",
             defaultConnectorName: "Test",
             connectors: [connector],
             activeConnectorID: connector.id,

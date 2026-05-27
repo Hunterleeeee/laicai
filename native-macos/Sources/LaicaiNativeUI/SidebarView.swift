@@ -909,7 +909,7 @@ private struct ExpandedThreadRow: View, Equatable {
 
     private var rowTitle: String {
         let trimmed = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == "新 Agent" || trimmed == "新线程" || trimmed == "新对话" {
+        if trimmed.isEmpty || trimmed == "新线程" || trimmed == "新对话" {
             return "新对话"
         }
         return TextHelper.compactTitle(trimmed)

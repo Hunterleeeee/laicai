@@ -988,7 +988,7 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
 
     public static func isPlaceholderTitle(_ title: String) -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty || trimmed == "新 Agent" || trimmed == "新线程" || trimmed == "新会话" || trimmed == "新对话"
+        return trimmed.isEmpty || trimmed == "新线程" || trimmed == "新会话" || trimmed == "新对话"
     }
 
     /// Create a Thread from a legacy ChatSession.

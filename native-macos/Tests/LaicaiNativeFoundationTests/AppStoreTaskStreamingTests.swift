@@ -7,7 +7,7 @@ final class AppStoreTaskStreamingTests: LaicaiNativeFoundationTestCase {
     func testStreamingOutputIsCoalescedAndFinalStepCarriesMetrics() async throws {
         let connector = makeConnector()
         let store = makeTestStore(
-            modeLabel: "Agent",
+            modeLabel: "执行",
             defaultConnectorName: "Test",
             connectors: [connector],
             activeConnectorID: connector.id,

@@ -8,7 +8,7 @@ final class AppStoreChatTokenBudgetTests: LaicaiNativeFoundationTestCase {
         let connector = makeConnector(name: "Local Ollama", kind: "ollama", endpoint: "http://127.0.0.1:11434/v1", modelName: "qwen3.5:9b-q4_K_M")
         let runtime = CapturingToolsRuntime()
         let store = makeTestStore(
-            modeLabel: "Agent",
+            modeLabel: "执行",
             defaultConnectorName: "Local Ollama",
             connectors: [connector],
             activeConnectorID: connector.id,
@@ -25,7 +25,7 @@ final class AppStoreChatTokenBudgetTests: LaicaiNativeFoundationTestCase {
         let connector = makeConnector(name: "Local Ollama", kind: "ollama", endpoint: "http://127.0.0.1:11434/v1", modelName: "qwen3.5:9b-q4_K_M")
         let runtime = CapturingToolsRuntime()
         let store = makeTestStore(
-            modeLabel: "Agent",
+            modeLabel: "执行",
             defaultConnectorName: "Local Ollama",
             contextMode: .deep,
             connectors: [connector],
@@ -43,7 +43,7 @@ final class AppStoreChatTokenBudgetTests: LaicaiNativeFoundationTestCase {
         let connector = makeConnector(name: "Qwen API", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", modelName: "qwen-plus")
         let runtime = CapturingToolsRuntime()
         let store = makeTestStore(
-            modeLabel: "Agent",
+            modeLabel: "执行",
             defaultConnectorName: "Qwen API",
             contextMode: .deep,
             connectors: [connector],

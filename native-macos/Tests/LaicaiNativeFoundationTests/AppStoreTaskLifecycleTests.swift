@@ -261,7 +261,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "Agent",
+                modeLabel: "执行",
                 threads: [thread],
                 selectedThreadID: thread.id,
                 workbenchTab: .tools,
@@ -314,7 +314,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "Agent",
+                modeLabel: "执行",
                 threads: [thread],
                 selectedThreadID: thread.id,
                 workbenchTab: .tools,

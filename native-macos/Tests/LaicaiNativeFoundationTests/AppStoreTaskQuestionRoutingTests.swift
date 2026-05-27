@@ -45,7 +45,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "Agent",
+                modeLabel: "执行",
                 sessions: [],
                 selectedSessionID: nil,
                 workbenchTab: .tools,
@@ -93,7 +93,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "Agent",
+                modeLabel: "执行",
                 sessions: [],
                 selectedSessionID: nil,
                 workbenchTab: .tools,
@@ -145,7 +145,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
             let store = AppStore(
                 state: .init(
                     workspaceName: "Test",
-                    modeLabel: "Agent",
+                    modeLabel: "执行",
                     sessions: [],
                     selectedSessionID: nil,
                     workbenchTab: .tools,
@@ -195,7 +195,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "Agent",
+                modeLabel: "执行",
                 sessions: [],
                 selectedSessionID: nil,
                 workbenchTab: .tools,
@@ -242,7 +242,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "Agent",
+                modeLabel: "执行",
                 sessions: [],
                 selectedSessionID: nil,
                 workbenchTab: .tools,
@@ -291,7 +291,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "Agent",
+                modeLabel: "执行",
                 sessions: [],
                 selectedSessionID: nil,
                 workbenchTab: .tools,
@@ -337,7 +337,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
-                modeLabel: "Agent",
+                modeLabel: "执行",
                 sessions: [],
                 selectedSessionID: nil,
                 workbenchTab: .tools,

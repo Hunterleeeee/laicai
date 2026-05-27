@@ -86,12 +86,12 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         let thread = Thread()
 
         XCTAssertEqual(thread.title, "新会话")
-        XCTAssertTrue(Thread.isPlaceholderTitle("新 Agent"))
+        XCTAssertTrue(Thread.isPlaceholderTitle("新会话"))
     }
 
     func testSelectedEmptyPlaceholderStaysVisibleAsDraftAgent() {
         let placeholder = Thread(
-            title: "新 Agent",
+            title: "新会话",
             preview: "",
             status: .queued,
             steps: [],
