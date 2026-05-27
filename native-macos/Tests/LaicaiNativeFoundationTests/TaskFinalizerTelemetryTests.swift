@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class TaskFinalizerTelemetryTests: LaicaiNativeFoundationTestCase {
-    func testExecutionModeLabelUsesKernelMode() {
+    func testExecutionModeLabelReturnsCodexFullOrInspect() {
         let root = NSTemporaryDirectory()
 
         func makeState(allowedTools: Set<String>?) -> PipelineState {
@@ -43,30 +43,16 @@ final class TaskFinalizerTelemetryTests: LaicaiNativeFoundationTestCase {
                     modelName: "gpt-5.5",
                     connectorEndpoint: "https://api.example.com/v1/chat/completions",
                     apiKey: "",
-                    emitDebugSteps: false,
-                    kernelMode: .legacy
+                    emitDebugSteps: false
                 )
             )
         }
 
         let readOnlyState = makeState(allowedTools: Set(["file.read"]))
-        var codexConfig = AgentLoop.Config(workspaceRoot: root)
-        codexConfig.kernelMode = .codexFull
-        XCTAssertEqual(TaskFinalizer.executionModeLabel(state: readOnlyState, config: codexConfig), "inspect")
+        let config = AgentLoop.Config(workspaceRoot: root)
+        XCTAssertEqual(TaskFinalizer.executionModeLabel(state: readOnlyState, config: config), "inspect")
 
         let writableState = makeState(allowedTools: nil)
-
-        var legacyConfig = AgentLoop.Config(workspaceRoot: root)
-        legacyConfig.kernelMode = .legacy
-        XCTAssertEqual(TaskFinalizer.executionModeLabel(state: writableState, config: legacyConfig), "legacy")
-
-        var pipelineConfig = AgentLoop.Config(workspaceRoot: root)
-        pipelineConfig.kernelMode = .pipeline
-        XCTAssertEqual(TaskFinalizer.executionModeLabel(state: writableState, config: pipelineConfig), "pipeline")
-
-        var codexFullConfig = AgentLoop.Config(workspaceRoot: root)
-        codexFullConfig.kernelMode = .codexFull
-        XCTAssertEqual(TaskFinalizer.executionModeLabel(state: writableState, config: codexFullConfig), "codexFull")
-
+        XCTAssertEqual(TaskFinalizer.executionModeLabel(state: writableState, config: config), "codexFull")
     }
 }

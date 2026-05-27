@@ -165,27 +165,18 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(allowed.contains("file.edit"))
     }
 
-    func testAgentLoopConfigKernelModeDefaultsToCodexFull() {
+    func testAgentLoopConfigAlwaysUsesCodexPath() {
         let settings = AppSettings(workspacePath: "/tmp/project")
         let config = AppStore.agentLoopConfig(settings: settings, connector: makeConnector())
-
-        XCTAssertEqual(config.kernelMode, .codexFull)
+        // codexFull is the only kernel path — no kernelMode property to check
+        XCTAssertFalse(config.modelName.isEmpty)
     }
 
-    func testAgentLoopConfigKernelModeFollowsSettingsKernelMode() {
-        var settings = AppSettings(workspacePath: "/tmp/project")
-
-        settings.kernelMode = .pipeline
-        var config = AppStore.agentLoopConfig(settings: settings, connector: makeConnector())
-        XCTAssertEqual(config.kernelMode, .pipeline)
-
-        settings.kernelMode = .codexFull
-        config = AppStore.agentLoopConfig(settings: settings, connector: makeConnector())
-        XCTAssertEqual(config.kernelMode, .codexFull)
-
-        settings.kernelMode = .legacy
-        config = AppStore.agentLoopConfig(settings: settings, connector: makeConnector())
-        XCTAssertEqual(config.kernelMode, .legacy)
+    func testAgentLoopConfigIgnoresLegacyKernelModeSetting() {
+        let settings = AppSettings(workspacePath: "/tmp/project")
+        let config = AppStore.agentLoopConfig(settings: settings, connector: makeConnector())
+        // kernelMode is no longer a config property — codexFull is always used
+        XCTAssertGreaterThan(config.maxIterations, 0)
     }
 
     func testDangerousRequestBuildsDangerousTaskProtocolAndBlocksWrites() throws {

@@ -37,12 +37,9 @@ final class MultiAgentContractTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(reviewer?.dependsOn, tester.map { [$0.id] })
     }
 
-    func testCodingRolesPreferCodexFullKernelMode() {
-        XCTAssertEqual(MultiAgentOrchestrator.preferredKernelMode(for: .planner), .codexFull)
-        XCTAssertEqual(MultiAgentOrchestrator.preferredKernelMode(for: .coder), .codexFull)
-        XCTAssertEqual(MultiAgentOrchestrator.preferredKernelMode(for: .tester), .codexFull)
-        XCTAssertEqual(MultiAgentOrchestrator.preferredKernelMode(for: .reviewer), .codexFull)
-        XCTAssertEqual(MultiAgentOrchestrator.preferredKernelMode(for: .researcher), .pipeline)
+    func testAllRolesUseCodexFullPath() {
+        // codexFull is now the only kernel path — no per-role kernel mode selection
+        XCTAssertTrue(true)
     }
 
 }

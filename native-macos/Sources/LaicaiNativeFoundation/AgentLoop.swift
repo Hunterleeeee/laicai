@@ -49,28 +49,6 @@ public final class AgentLoop: ObservableObject {
         onReasoningDelta: @Sendable @MainActor (String) -> Void = { _ in },
         onCheckInterrupt: @MainActor () -> String? = { nil }
     ) async throws -> AgentTask {
-        // ── Kernel mode delegation ──
-        switch config.kernelMode {
-        case .codexFull:
-            break
-        case .pipeline:
-            return try await runPipeline(
-                taskID: taskID,
-                message: message,
-                intent: intent,
-                connector: connector,
-                allConnectors: allConnectors,
-                context: context,
-                priorSteps: priorSteps,
-                summaryCache: summaryCache,
-                imageAttachments: imageAttachments,
-                onStep: onStep,
-                onStreamDelta: onStreamDelta
-            )
-        case .legacy:
-            break
-        }
-
         let startTime = CFAbsoluteTimeGetCurrent()
         // PERF-3: Chat fast path — skip heavy file scan and git diff for simple chat
         var taskContext = prepareTaskContext(context, intent: intent, message: message)

@@ -2287,12 +2287,6 @@ public enum ContextMode: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
-public enum AppKernelMode: String, Codable, Sendable, CaseIterable {
-    case legacy
-    case pipeline
-    case codexFull
-}
-
 public struct AppSettings: Equatable, Codable, Sendable {
     public var workspacePath: String
     public var vaultPath: String
@@ -2304,7 +2298,6 @@ public struct AppSettings: Equatable, Codable, Sendable {
     public var comfyUIModelName: String
     // G16: Multi-workspace support — recent workspace paths for quick switching
     public var recentWorkspaces: [String]
-    public var kernelMode: AppKernelMode
 
     public init(
         workspacePath: String,
@@ -2315,8 +2308,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         contextMode: ContextMode = .balanced,
         comfyUIServerURL: String = "http://127.0.0.1:8188",
         comfyUIModelName: String = "",
-        recentWorkspaces: [String] = [],
-        kernelMode: AppKernelMode = .codexFull
+        recentWorkspaces: [String] = []
     ) {
         self.workspacePath = workspacePath
         self.vaultPath = vaultPath
@@ -2327,7 +2319,6 @@ public struct AppSettings: Equatable, Codable, Sendable {
         self.comfyUIServerURL = comfyUIServerURL
         self.comfyUIModelName = comfyUIModelName
         self.recentWorkspaces = recentWorkspaces
-        self.kernelMode = kernelMode
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -2356,19 +2347,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         comfyUIServerURL = try container.decodeIfPresent(String.self, forKey: .comfyUIServerURL) ?? "http://127.0.0.1:8188"
         comfyUIModelName = try container.decodeIfPresent(String.self, forKey: .comfyUIModelName) ?? ""
         recentWorkspaces = try container.decodeIfPresent([String].self, forKey: .recentWorkspaces) ?? []
-        if let decodedKernelMode = try container.decodeIfPresent(AppKernelMode.self, forKey: .kernelMode) {
-            kernelMode = decodedKernelMode
-        } else {
-            let usePipeline = try container.decodeIfPresent(Bool.self, forKey: .usePipeline) ?? false
-            let leanMode = try container.decodeIfPresent(Bool.self, forKey: .leanMode) ?? false
-            if leanMode {
-                kernelMode = .codexFull
-            } else if usePipeline {
-                kernelMode = .pipeline
-            } else {
-                kernelMode = .legacy
-            }
-        }
+        // kernelMode is ignored — codexFull is the only runtime path
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -2382,7 +2361,6 @@ public struct AppSettings: Equatable, Codable, Sendable {
         try container.encode(comfyUIServerURL, forKey: .comfyUIServerURL)
         try container.encode(comfyUIModelName, forKey: .comfyUIModelName)
         try container.encode(recentWorkspaces, forKey: .recentWorkspaces)
-        try container.encode(kernelMode, forKey: .kernelMode)
     }
 
     // G16: Switch active workspace and track in recents

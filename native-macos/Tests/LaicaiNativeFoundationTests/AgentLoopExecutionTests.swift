@@ -335,12 +335,11 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         try "hello".write(to: workspace.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
 
         let runtime = CapturingToolsRuntime()
-        var config = AgentLoop.Config(
+        let config = AgentLoop.Config(
             maxIterations: 2,
             maxTokensPerTurn: 1024,
             workspaceRoot: workspace.path
         )
-        config.kernelMode = .codexFull
         let loop = AgentLoop(
             config: config,
             runtime: runtime
@@ -359,18 +358,17 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("Plan / Execute / Verify / Summarize") == true)
         XCTAssertFalse(runtime.requests.first?.systemPrompt?.contains("[kernelMode=codexFull]") == true)
     }
-    func testLegacyKernelUsesKernelModeOnlyForRouting() async throws {
+    func testAgentLoopUsesCodexFullPath() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         try "hello".write(to: workspace.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
 
         let runtime = CapturingToolsRuntime()
-        var config = AgentLoop.Config(
+        let config = AgentLoop.Config(
             maxIterations: 2,
             maxTokensPerTurn: 1024,
             workspaceRoot: workspace.path
         )
-        config.kernelMode = .legacy
         let loop = AgentLoop(
             config: config,
             runtime: runtime

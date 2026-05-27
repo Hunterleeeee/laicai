@@ -351,14 +351,7 @@ struct TaskFinalizer {
 
     static func executionModeLabel(state: PipelineState, config: AgentLoop.Config) -> String {
         if state.isReadOnlyRun { return "inspect" }
-        switch config.kernelMode {
-        case .legacy:
-            return "legacy"
-        case .pipeline:
-            return "pipeline"
-        case .codexFull:
-            return "codexFull"
-        }
+        return "codexFull"
     }
 
     private static func computeOutcomeScore(state: PipelineState, config: AgentLoop.Config, finalStatus: TaskStatus, duration: Double) -> Int {
