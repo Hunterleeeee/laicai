@@ -263,9 +263,9 @@
 ### Codex 内核集成剩余问题（2026-05-27）
 
 - [x] **去掉 `kernelMode` 用户可见开关** — commit `2fd3ae3`：移除 `AppKernelMode`/`KernelMode` 枚举、`AppSettings.kernelMode`、`AgentLoop.Config.kernelMode`、`preferredKernelMode()`、pipeline fallback；`codexFull` 成唯一路径。
-- [ ] **Agent 命名残留** — `agentState`、`agentGoal`、`canContinueAgent`、`isExecutionAgent`、`isAskAgent` 还在 Thread 模型和 UI 层大量使用；应统一为通用命名。
-- [ ] **用户可见字符串 "新 Agent"** — `Models.swift:991`、`SidebarView:912`、测试文件里还在用；应统一为 "新会话"。
-- [ ] **路由逻辑依赖旧属性** — `shouldContinueCurrentSelectedThread` 靠 `isExecutionAgent`/`canContinueAgent` 判断追问归属。
+- [x] **Agent 命名残留** — commit `f6849ab`：`agentState`→`executionState`、`agentGoal`→`goal`、`canContinueAgent`→`canContinue`、`isExecutionAgent`→`isExecution`、`isAskAgent`→`isChatOnly`；28 文件更新。
+- [x] **用户可见字符串 "新 Agent"** — commit `6c02bc1`：移除 "新 Agent" 占位符检查，测试统一为 "新会话"。
+- [x] **路由逻辑依赖旧属性** — 命名已更新，路由逻辑本身无需改动。
 
 ---
 
