@@ -257,7 +257,15 @@
 - [x] 最终收口构建安装：`LAICAI_ARCHS=arm64 bash native-macos/build.sh` 通过，产出 `2026.5.19 (build 1507)`；`native-macos/dist/install_laicai.command` 已安装到 `/Applications/Laicai.app`；CLI help 正常；Info.plist 显示 `CFBundleDisplayName=来财`、`CFBundleIconFile=laicai`、`CFBundleVersion=1507`。
 - [x] 滚动卡死止血：启动不再自动加载历史 timeline，而是进入轻量工作台；超大任务默认只渲染最近 4 步；移除 timeline 滚动监听回写、侧栏滚动行 hover 状态动画和长 Markdown SwiftUI 分块渲染；build `1507` 重启 smoke 显示单窗口、轻量工作台、可手动点开 170k token 历史任务且只展开最近步骤。
 - [x] 修复真实会话暴露的追问误建新会话：复盘 `2026-05-19 16:50` “出一个水生万物，财自流转的icon图” 与 `16:51` “在哪了？我要预览啊” 被拆成两个线程的样本；现在追问归属会先看当前线程，失败时回找最近可归属执行线程；有工具调用、审查、任务协议或执行账本的历史 session 会被视为执行 Agent；新增回归覆盖“空白新 Agent 中询问预览仍回到原产物线程”；build `1750` 通过并已安装。
-- [ ] `swift test --package-path native-macos --filter 'AppStoreTaskLifecycleTests|AppStorePersistenceAndRuntimeTests|AppStoreTaskFollowUpRoutingTests'` 仍被本机 CommandLineTools `xcrun --show-sdk-platform-path` / `PlatformPath` 问题阻塞，未进入测试编译阶段。
+- [ ] `swift test` 能编译但执行极慢（12分钟+未出结果），CommandLineTools `xcrun --show-sdk-platform-path` 已恢复正常，测试阻塞原因待进一步定位。
+- [x] Codex 内核收口提交 `56e27fa`：统一伪工具调用清理 `sanitizeAssistantVisibleText()`；拒绝 `/var/folders/` 等临时路径作为 workspace root；硬化证据门禁 `hasActionableEvidence()`；TaskFinalizer 改用现代 API。
+
+### Codex 内核集成剩余问题（2026-05-27）
+
+- [ ] **去掉 `kernelMode` 用户可见开关** — `AppSettings.kernelMode`、`MultiAgentOrchestrator.kernelModeOverride`、`TaskStateHelpers`、`AgentLoop.CoreTypes`、`TaskFinalizer` 还在读取/切换；应让 `codexFull` 成为唯一默认路径，移除用户设置入口。
+- [ ] **Agent 命名残留** — `agentState`、`agentGoal`、`canContinueAgent`、`isExecutionAgent`、`isAskAgent` 还在 Thread 模型和 UI 层大量使用；应统一为通用命名。
+- [ ] **用户可见字符串 "新 Agent"** — `Models.swift:991`、`SidebarView:912`、测试文件里还在用；应统一为 "新会话"。
+- [ ] **路由逻辑依赖旧属性** — `shouldContinueCurrentSelectedThread` 靠 `isExecutionAgent`/`canContinueAgent` 判断追问归属。
 
 ---
 
