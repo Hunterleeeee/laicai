@@ -483,13 +483,18 @@ struct TaskFinalizer {
         guard !workRoot.isEmpty, state.intent != .chat else { return }
 
         let diffProc = Process()
-        diffProc.launchPath = "/usr/bin/git"
+        diffProc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         diffProc.arguments = ["diff", "--stat"]
-        diffProc.currentDirectoryPath = state.taskContext.workspaceRoot
+        diffProc.currentDirectoryURL = URL(fileURLWithPath: workRoot)
         let diffPipe = Pipe()
         diffProc.standardOutput = diffPipe
         diffProc.standardError = diffPipe
-        try? diffProc.run()
+
+        do {
+            try diffProc.run()
+        } catch {
+            return
+        }
         diffProc.waitUntilExit()
 
         let diffOutput = String(data: diffPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""

@@ -1203,11 +1203,14 @@ public final class AgentLoop: ObservableObject {
             // Process response
             if response.hasToolCalls {
                 // LLM wants to call tools
+                let sanitizedAssistant = Self.sanitizeAssistantVisibleText(response.assistantText)
+                let assistantVisibleText = sanitizedAssistant.text ?? ""
+
                 // First, emit any text the assistant said alongside the tool calls
-                if !response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || response.reasoningContent != nil {
+                if !assistantVisibleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || response.reasoningContent != nil {
                     let thinkingStep = TaskStep(
                         kind: .aiThinking,
-                        text: response.assistantText,
+                        text: assistantVisibleText,
                         isCollapsible: true,
                         reasoningContent: response.reasoningContent
                     )
@@ -1230,7 +1233,7 @@ public final class AgentLoop: ObservableObject {
                 } else {
                     messages.append(ChatMessage(
                         role: "assistant",
-                        content: response.assistantText.isEmpty ? nil : response.assistantText,
+                        content: assistantVisibleText.isEmpty ? nil : assistantVisibleText,
                         reasoningContent: response.reasoningContent,
                         toolCalls: response.toolCalls
                     ))

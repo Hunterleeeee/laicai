@@ -591,7 +591,7 @@ extension AgentLoop {
             "<function_calls>", "</function_calls>",
             "<invoke name=",
             "<tool_call>", "</tool_call>",
-            "<|tool_call|>", "<|/tool_call|>",
+            "<|tool_call|>", "<|/tool_call|>", "</|tool_call|>",
             "<|assistant_tool_call|>"
         ]
         if strongPatterns.contains(where: { text.contains($0) }) { return true }
@@ -623,6 +623,15 @@ extension AgentLoop {
         return containsFakeToolCallSyntax(text)
     }
 
+    static func sanitizeAssistantVisibleText(_ text: String) -> (text: String?, sanitized: Bool) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return (nil, false) }
+        guard let cleaned = stripFakeToolCallBlocks(from: trimmed) else {
+            return ("（已隐藏一段未执行的伪工具调用文本，请重新提问或切换支持 function calling 的模型）", true)
+        }
+        return (cleaned, cleaned != trimmed)
+    }
+
     /// Strip fake tool-call blocks from user-visible text. Used when the model leaks
     /// DSML / function_calls / invoke syntax inline. Returns cleaned prose; if everything
     /// would be stripped, returns nil so caller can fall back to a generic message.
@@ -637,7 +646,7 @@ extension AgentLoop {
             #"<invoke[\s\S]*?</invoke>"#,
             #"<invoke[\s\S]*?(?=\n\n|$)"#,
             #"<tool_call>[\s\S]*?</tool_call>"#,
-            #"<\|tool_call\|>[\s\S]*?(<\|/tool_call\|>|$)"#,
+            #"<\|tool_call\|>[\s\S]*?(<\|/tool_call\|>|</\|tool_call\|>|$)"#,
             #"<\|assistant_tool_call\|>[\s\S]*?(?=\n\n|$)"#
         ]
         for pattern in blockPatterns {

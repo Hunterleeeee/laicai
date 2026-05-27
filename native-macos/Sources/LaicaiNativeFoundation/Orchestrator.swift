@@ -802,12 +802,22 @@ public struct AutoContextEngine {
         comfyUIModelName: String? = nil
     ) -> TaskContext {
         let cleanVault = vaultRoot?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeWorkspaceRoot: String
+        if WorkspaceSandbox.isOverlyBroadWorkspace(workspaceRoot)
+            || WorkspaceSandbox.isDisposableSmokeWorkspace(workspaceRoot) {
+            safeWorkspaceRoot = ""
+        } else {
+            safeWorkspaceRoot = workspaceRoot
+        }
         var context = TaskContext(
-            workspaceRoot: workspaceRoot,
+            workspaceRoot: safeWorkspaceRoot,
             vaultRoot: cleanVault?.isEmpty == false ? cleanVault : nil,
             comfyUIServerURL: comfyUIServerURL,
             comfyUIModelName: comfyUIModelName
         )
+        if safeWorkspaceRoot.isEmpty, !workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            context.metadata["workspaceRootRejected"] = workspaceRoot
+        }
 
         // PERF-1+3: Run git + file scan in parallel; skip heavy ops for chat (fileLimit=0)
         let isChatFastPath = fileLimit == 0
@@ -820,23 +830,23 @@ public struct AutoContextEngine {
         let q = DispatchQueue(label: "laicai.context-build", attributes: .concurrent)
         group.enter()
         q.async {
-            claudeMD = loadProjectInstructions(workspaceRoot: workspaceRoot)
+            claudeMD = loadProjectInstructions(workspaceRoot: safeWorkspaceRoot)
             group.leave()
         }
         group.enter()
         q.async {
-            gitBranch = currentGitBranch(workspaceRoot: workspaceRoot)
+            gitBranch = currentGitBranch(workspaceRoot: safeWorkspaceRoot)
             group.leave()
         }
         if !isChatFastPath {
             group.enter()
             q.async {
-                gitDiff = currentGitDiff(workspaceRoot: workspaceRoot)
+                gitDiff = currentGitDiff(workspaceRoot: safeWorkspaceRoot)
                 group.leave()
             }
             group.enter()
             q.async {
-                relevantFiles = findRelevantFiles(workspaceRoot: workspaceRoot, query: userInput, limit: fileLimit)
+                relevantFiles = findRelevantFiles(workspaceRoot: safeWorkspaceRoot, query: userInput, limit: fileLimit)
                 group.leave()
             }
         }

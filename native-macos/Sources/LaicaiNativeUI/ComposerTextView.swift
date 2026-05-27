@@ -56,20 +56,24 @@ struct ComposerTextView: NSViewRepresentable {
 
     func updateNSView(_ wrapper: ComposerWrapperView, context: Context) {
         guard let textView = wrapper.textView else { return }
+        let previousPlaceholder = context.coordinator.placeholderString
         if textView.string != text {
             let selected = textView.selectedRanges
             textView.string = text
             if !selected.isEmpty {
                 textView.selectedRanges = selected
             }
+            context.coordinator.remeasure(force: true)
+            textView.needsDisplay = true
         }
         textView.onSend = onSend
         textView.onImagePaste = context.coordinator.handleImagePaste
         context.coordinator.placeholderString = placeholder
         context.coordinator.onSend = onSend
         context.coordinator.onImagePaste = onImagePaste
-        context.coordinator.remeasure()
-        textView.needsDisplay = true
+        if previousPlaceholder != placeholder {
+            textView.needsDisplay = true
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -109,16 +113,26 @@ struct ComposerTextView: NSViewRepresentable {
             focused.wrappedValue = value
         }
 
+        private var lastMeasuredText: String = ""
+        private var lastMeasuredWidth: CGFloat = 0
+
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? ComposerNSTextView else { return }
             text.wrappedValue = tv.string
-            remeasure()
+            remeasure(force: true)
             tv.needsDisplay = true
         }
 
-        func remeasure() {
+        func remeasure(force: Bool = false) {
             guard let tv = textView else { return }
             let width = max(1, wrapper?.bounds.width ?? tv.bounds.width)
+            if !force,
+               lastMeasuredText == tv.string,
+               abs(lastMeasuredWidth - width) < 0.5 {
+                return
+            }
+            lastMeasuredText = tv.string
+            lastMeasuredWidth = width
             tv.textContainer?.containerSize = NSSize(
                 width: max(1, width - tv.textContainerInset.width * 2),
                 height: CGFloat.greatestFiniteMagnitude

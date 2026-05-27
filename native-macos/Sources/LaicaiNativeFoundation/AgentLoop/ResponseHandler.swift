@@ -176,14 +176,8 @@ struct ResponseHandler {
         }
 
         // ── Sanitize & guard ──
-        var visibleText = text
-        if hasFakeToolCalls {
-            if let cleaned = AgentLoop.stripFakeToolCallBlocks(from: text) {
-                visibleText = cleaned
-            } else {
-                visibleText = "（已隐藏一段未执行的伪工具调用文本，请重新提问或切换支持 function calling 的模型）"
-            }
-        }
+        let sanitized = AgentLoop.sanitizeAssistantVisibleText(text)
+        var visibleText = sanitized.text ?? text
         // Completion-claim guard
         let missingDeliverables = AgentLoop.expectedDeliverablePaths(
             from: state.message,

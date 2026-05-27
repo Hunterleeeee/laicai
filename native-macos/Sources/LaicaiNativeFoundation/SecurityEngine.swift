@@ -430,7 +430,10 @@ public final class WorkspaceSandbox: ObservableObject {
         let standardized = URL(fileURLWithPath: cleaned).standardizedFileURL.path
         let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
         let dangerousPaths: Set<String> = ["/", "/Users", "/var", "/tmp", "/private", home]
-        return dangerousPaths.contains(standardized)
+        if dangerousPaths.contains(standardized) {
+            return true
+        }
+        return isEphemeralWorkspacePath(standardized)
     }
 
     /// Development smoke-test workspaces are intentionally disposable. They must
@@ -441,8 +444,26 @@ public final class WorkspaceSandbox: ObservableObject {
         let standardized = URL(fileURLWithPath: cleaned).standardizedFileURL.path
         let lower = standardized.lowercased()
         let last = URL(fileURLWithPath: standardized).lastPathComponent.lowercased()
+        if isEphemeralWorkspacePath(standardized), lower.contains("laicai-") {
+            return true
+        }
         return (lower.hasPrefix("/tmp/laicai-") || lower.hasPrefix("/private/tmp/laicai-"))
             && (last.contains("smoke") || lower.contains("-smoke"))
+    }
+
+    private nonisolated static func isEphemeralWorkspacePath(_ standardizedPath: String) -> Bool {
+        let lower = standardizedPath.lowercased()
+        if lower.hasPrefix("/var/folders/") || lower.hasPrefix("/private/var/folders/") {
+            return true
+        }
+        if lower.hasPrefix("/var/tmp/") || lower.hasPrefix("/private/var/tmp/") {
+            return true
+        }
+        let tempRoot = URL(fileURLWithPath: NSTemporaryDirectory()).standardizedFileURL.path.lowercased()
+        if !tempRoot.isEmpty, tempRoot != "/", lower.hasPrefix(tempRoot) {
+            return true
+        }
+        return false
     }
     
     /// Set permission override for a specific action

@@ -151,7 +151,7 @@ extension LaicaiNativeFoundationTestCase {
         activeConnectorID: UUID? = nil,
         runtime: (any ChatRuntimeClient)? = nil
     ) -> AppStore {
-        AppStore(
+        let store = AppStore(
             state: testState(
                 sessions: sessions,
                 selectedSessionID: selectedSessionID,
@@ -166,5 +166,9 @@ extension LaicaiNativeFoundationTestCase {
             ),
             environment: makeTestEnvironment(runtime: runtime)
         )
+        addTeardownBlock { @MainActor in
+            store.stopGenerating()
+        }
+        return store
     }
 }

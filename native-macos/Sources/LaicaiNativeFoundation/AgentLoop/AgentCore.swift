@@ -228,7 +228,8 @@ public final class AgentCore {
                 consecutiveEmpty = 0
 
                 // Surface assistant thinking/text alongside tool calls.
-                let preface = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let sanitizedAssistant = AgentLoop.sanitizeAssistantVisibleText(response.assistantText)
+                let preface = (sanitizedAssistant.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !preface.isEmpty || response.reasoningContent != nil {
                     let step = TaskStep(
                         kind: .aiThinking,
@@ -239,7 +240,6 @@ public final class AgentCore {
                     newSteps.append(step)
                     onStep(step)
                 }
-
                 // Add assistant message to history. Ollama-style replays use a flat
                 // text summary because some local models reject role=tool follow-ups.
                 switch config.toolReplayMode {
@@ -251,7 +251,7 @@ public final class AgentCore {
                 case .openAIToolCalls:
                     messages.append(ChatMessage(
                         role: "assistant",
-                        content: response.assistantText.isEmpty ? nil : response.assistantText,
+                        content: sanitizedAssistant.text,
                         reasoningContent: response.reasoningContent,
                         toolCalls: response.toolCalls
                     ))

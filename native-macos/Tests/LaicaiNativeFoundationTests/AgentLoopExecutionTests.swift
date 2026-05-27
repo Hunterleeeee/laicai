@@ -147,6 +147,38 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             wasTruncated: false
         ))
     }
+    func testTaskCompletionNeedsRealEvidenceNotOnlyWorkspacePathLedger() {
+        var task = AgentTask(
+            title: "看下项目结构",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "看下项目结构"),
+                TaskStep(kind: .textOutput, text: "我已经完成了项目结构检查")
+            ],
+            context: TaskContext(workspaceRoot: "/Users/test/project"),
+            taskProtocol: AgentTaskProtocol(
+                taskGoal: "看下项目结构",
+                workspaceRoot: "/Users/test/project",
+                completionCriteria: ["形成可验证结果"],
+                riskPolicy: .act
+            )
+        )
+        task.executionLedger = AgentExecutionLedger(
+            originalRequest: "看下项目结构",
+            goal: "看下项目结构",
+            state: .completed,
+            pages: ["/var/folders/aa/bb/T/demo"]
+        )
+
+        XCTAssertFalse(AgentLoop.meetsCompletionCriteria(
+            task: task,
+            intent: .task,
+            didComplete: true,
+            hadFailure: false,
+            wasTruncated: false
+        ))
+    }
+
     func testAgentLoopIncludesToolsForTasks() async throws {
         let runtime = CapturingToolsRuntime()
         let loop = AgentLoop(
@@ -208,6 +240,31 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(output.contains(#""cmd""#))
         XCTAssertFalse(output.contains("laicai-pptx-smoke"))
     }
+
+    func testToolCallThinkingOutputHidesFakeToolCallBlocks() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let runtime = FakeToolCallBlockThenToolRuntime()
+        let loop = AgentLoop(
+            config: .init(maxIterations: 3, maxTokensPerTurn: 1024, workspaceRoot: workspace.path),
+            runtime: runtime
+        )
+
+        let task = try await loop.run(
+            message: "看下项目结构",
+            intent: .task,
+            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+
+        let visibleTexts = task.steps
+            .filter { $0.kind == .aiThinking || $0.kind == .textOutput }
+            .map(\.text)
+            .joined(separator: "\n")
+        XCTAssertFalse(visibleTexts.contains("<|tool_call|>"))
+        XCTAssertFalse(visibleTexts.contains("</|tool_call|>"))
+    }
+
     func testAgentLoopOmitsToolsWhenConfigDisablesToolCalling() async throws {
         let runtime = CapturingToolsRuntime()
         let loop = AgentLoop(

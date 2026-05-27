@@ -602,20 +602,23 @@ public struct ShellTool: LaicaiTool {
         }
 
         return await Task.detached(priority: .utility) {
+            let stdoutHandle = stdout.fileHandleForReading
+            let stderrHandle = stderr.fileHandleForReading
+            async let outDataAsync: Data? = try? stdoutHandle.readToEnd()
+            async let errDataAsync: Data? = try? stderrHandle.readToEnd()
+
             let deadline = Date().addingTimeInterval(timeout)
             while process.isRunning && Date() < deadline {
                 usleep(50_000)
             }
             if process.isRunning {
                 process.terminate()
-                process.waitUntilExit()
-            } else {
-                process.waitUntilExit()
             }
+            process.waitUntilExit()
 
             let exitCode = process.terminationStatus
-            let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-            let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+            let outData = await outDataAsync ?? Data()
+            let errData = await errDataAsync ?? Data()
             let output = String(data: outData, encoding: .utf8) ?? ""
             let errorOutput = String(data: errData, encoding: .utf8) ?? ""
 

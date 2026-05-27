@@ -35,6 +35,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
             connectors: [connector],
             activeConnectorID: connector.id
         ))
+        defer { store.stopGenerating() }
 
         store.updateDraft("请继续 native rewrite")
         store.sendDraft()

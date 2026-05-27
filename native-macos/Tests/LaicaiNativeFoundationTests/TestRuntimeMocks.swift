@@ -94,6 +94,27 @@ final class InlineCommandJSONRuntime: ChatRuntimeClient {
 }
 
 @MainActor
+final class FakeToolCallBlockThenToolRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        if requests.count == 1 {
+            return SendMessageResponse(
+                assistantText: "我先查看目录。\n\n<|tool_call|>\n```json\n{\n  \"name\": \"list_directory\",\n  \"arguments\": {\"path\": \"/var/folders/aa/bb/T/demo\"}\n}\n```\n</|tool_call|>",
+                toolCalls: [
+                    FunctionCallResponse(
+                        id: "call_index",
+                        function: FunctionCallDetail(name: "workspace_index", arguments: #"{}"#)
+                    )
+                ]
+            )
+        }
+        return SendMessageResponse(assistantText: "已完成。")
+    }
+}
+
+@MainActor
 final class UIInspectThenFinalRuntime: ChatRuntimeClient {
     var requests: [SendMessageRequest] = []
 

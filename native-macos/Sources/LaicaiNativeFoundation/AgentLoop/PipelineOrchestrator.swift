@@ -305,11 +305,13 @@ extension AgentLoop {
 
                 // ── STAGE 2: Execute (tool calls) ──
                 if response.hasToolCalls {
+                    let sanitizedAssistant = AgentLoop.sanitizeAssistantVisibleText(response.assistantText)
+                    let assistantThinkingText = sanitizedAssistant.text ?? ""
                     // Emit thinking step
-                    if !response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || response.reasoningContent != nil {
+                    if !assistantThinkingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || response.reasoningContent != nil {
                         let thinkingStep = TaskStep(
                             kind: .aiThinking,
-                            text: response.assistantText,
+                            text: assistantThinkingText,
                             isCollapsible: true,
                             reasoningContent: response.reasoningContent
                         )
@@ -325,7 +327,7 @@ extension AgentLoop {
                     } else {
                         state.messages.append(ChatMessage(
                             role: "assistant",
-                            content: response.assistantText.isEmpty ? nil : response.assistantText,
+                            content: assistantThinkingText.isEmpty ? nil : assistantThinkingText,
                             reasoningContent: response.reasoningContent,
                             toolCalls: response.toolCalls
                         ))

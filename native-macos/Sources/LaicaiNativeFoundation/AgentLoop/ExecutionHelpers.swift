@@ -200,8 +200,8 @@ extension AgentLoop {
         let hasSavedWiki = Self.hasSavedWiki(in: task)
         let expectsWikiOutput = Self.expectsWikiOutput(message)
         let riskPolicy = task.taskProtocol?.riskPolicy
-        let ledgerHasEvidence = task.executionLedger?.hasToolEvidence == true
-        let hasEvidence = ledgerHasEvidence || !successfulResults.isEmpty || task.steps.contains { $0.kind == .reviewRequest && $0.approved == true }
+        let hasEvidence = hasActionableEvidence(task: task, successfulResults: successfulResults)
+            || task.steps.contains { $0.kind == .reviewRequest && $0.approved == true }
         let missingDeliverables = expectedDeliverablePaths(from: message, workspaceRoot: task.context.workspaceRoot).filter { path in
             var isDirectory: ObjCBool = false
             return !FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) || isDirectory.boolValue
@@ -211,7 +211,6 @@ extension AgentLoop {
         let requiresUIEvidence = Self.expectsUIEvidence(message: message, protocolCriteria: task.taskProtocol?.completionCriteria ?? [])
         let hasUIEvidence = Self.hasUIEvidence(in: task)
         let requiresEvidence = intent != .chat
-            && riskPolicy != .ask
             && configRequiresEvidence(task: task, isReadOnlyRun: isReadOnlyRun)
 
         if riskPolicy == .dangerous {
@@ -255,7 +254,7 @@ extension AgentLoop {
             if isReadOnlyRun {
                 return hasFinalOutput && (!requiresEvidence || hasEvidence)
             }
-            if hasFinalOutput && hasEvidence && !expectsWriteOutput(message) && !expectsWikiOutput {
+            if hasFinalOutput && (!requiresEvidence || hasEvidence) && !expectsWriteOutput(message) && !expectsWikiOutput {
                 return true
             }
             if hasVerificationFailure { return false }
@@ -266,7 +265,32 @@ extension AgentLoop {
             if hasWrite {
                 return hasFinalOutput || successfulResults.contains { isFileChangeTool($0.toolName ?? "") }
             }
-            return hasFinalOutput && (!hadFailure || successfulResults.count >= 2)
+            return hasFinalOutput && hasEvidence && (!hadFailure || successfulResults.count >= 2)
+        }
+    }
+
+    private static func hasActionableEvidence(task: AgentTask, successfulResults: [TaskStep]) -> Bool {
+        if !successfulResults.isEmpty {
+            return true
+        }
+        guard let ledger = task.executionLedger else {
+            return false
+        }
+        if !ledger.readFiles.isEmpty || !ledger.searches.isEmpty || !ledger.modifiedFiles.isEmpty || !ledger.commands.isEmpty || !ledger.verification.isEmpty {
+            return true
+        }
+        return ledger.pages.contains { page in
+            let lower = page.lowercased()
+            if lower.hasPrefix("http://") || lower.hasPrefix("https://") || lower.hasPrefix("file://") {
+                return true
+            }
+            if page.hasPrefix("/") {
+                if WorkspaceSandbox.isOverlyBroadWorkspace(page) || WorkspaceSandbox.isDisposableSmokeWorkspace(page) {
+                    return false
+                }
+                return true
+            }
+            return lower.contains("screenshot") || lower.contains("accessibility") || lower.contains(".png") || lower.contains(".jpg")
         }
     }
 
