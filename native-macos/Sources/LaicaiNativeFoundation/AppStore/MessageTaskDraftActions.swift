@@ -171,14 +171,14 @@ extension AppStore {
             }
             Self.markAgentRunning(
                 &state.threads[threadIndex],
-                goal: Self.agentGoal(for: state.threads[threadIndex], incomingMessage: message, isContinuation: !isEmptyPlaceholder),
+                goal: Self.goal(for: state.threads[threadIndex], incomingMessage: message, isContinuation: !isEmptyPlaceholder),
                 plan: Self.agentPlanLines(for: decision, message: message)
             )
             let plan = state.threads[threadIndex].currentPlan
             if state.threads[threadIndex].taskProtocol == nil || state.threads[threadIndex].taskProtocol?.threadID != selectedID {
                 state.threads[threadIndex].taskProtocol = Self.makeTaskProtocol(
                     threadID: selectedID,
-                    message: state.threads[threadIndex].agentGoal ?? message,
+                    message: state.threads[threadIndex].goal ?? message,
                     context: context,
                     decision: decision
                 )
@@ -186,13 +186,13 @@ extension AppStore {
             if state.threads[threadIndex].executionLedger == nil {
                 state.threads[threadIndex].executionLedger = Self.makeExecutionLedger(
                     threadID: selectedID,
-                    message: state.threads[threadIndex].agentGoal ?? message,
+                    message: state.threads[threadIndex].goal ?? message,
                     context: context,
                     decision: decision,
                     plan: plan
                 )
             }
-            state.threads[threadIndex].executionLedger?.goal = state.threads[threadIndex].agentGoal ?? message
+            state.threads[threadIndex].executionLedger?.goal = state.threads[threadIndex].goal ?? message
             state.threads[threadIndex].executionLedger?.plan = plan
             state.threads[threadIndex].executionLedger?.pendingFollowUp = nil
             state.threads[threadIndex].executionLedger?.nextAction = "继续处理当前会话：\(message)"
@@ -239,8 +239,8 @@ extension AppStore {
             state.threads[threadIndex].workflowName = workflowName
             state.threads[threadIndex].context = context
             state.threads[threadIndex].projectID = newThreadProjectID
-            state.threads[threadIndex].agentState = .running
-            state.threads[threadIndex].agentGoal = message
+            state.threads[threadIndex].executionState = .running
+            state.threads[threadIndex].goal = message
             state.threads[threadIndex].currentPlan = plan
             state.threads[threadIndex].taskProtocol = taskProtocol
             state.threads[threadIndex].executionLedger = ledger
@@ -272,8 +272,8 @@ extension AppStore {
                 workflowName: workflowName,
                 context: context,
                 projectID: newThreadProjectID,
-                agentState: .running,
-                agentGoal: message,
+                executionState: .running,
+                goal: message,
                 currentPlan: plan,
                 taskProtocol: taskProtocol,
                 executionLedger: ledger
@@ -470,7 +470,7 @@ extension AppStore {
         guard !thread.steps.isEmpty else {
             return !Self.canRecoverRecentThread(for: trimmed, intent: intent)
         }
-        let selectedSourceIsExecution = thread.isExecutionAgent || thread.steps.contains { $0.kind == .toolCall }
+        let selectedSourceIsExecution = thread.isExecution || thread.steps.contains { $0.kind == .toolCall }
         if !selectedSourceIsExecution {
             if intent == .chat {
                 if Self.isContinuationCommand(trimmed) || Self.isContextualFollowUp(trimmed, thread: thread) {
@@ -515,7 +515,7 @@ extension AppStore {
                 thread.id != selectedID
                     && !thread.isEmptyPlaceholder
                     && thread.status != .running
-                    && thread.canContinueAgent
+                    && thread.canContinue
             }
             .sorted { lhs, rhs in lhs.updatedAt > rhs.updatedAt }
             .first { thread in
@@ -598,10 +598,10 @@ extension AppStore {
         return sharedKeywords.count >= 2
     }
 
-    static func agentGoal(for thread: Thread, incomingMessage: String, isContinuation: Bool) -> String {
+    static func goal(for thread: Thread, incomingMessage: String, isContinuation: Bool) -> String {
         let trimmed = incomingMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         if isContinuation,
-           let existing = thread.agentGoal?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let existing = thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines),
            !existing.isEmpty {
             return existing
         }

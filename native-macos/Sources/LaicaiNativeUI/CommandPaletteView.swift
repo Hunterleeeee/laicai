@@ -177,7 +177,7 @@ struct CommandPaletteView: View {
             .init(kind: .settings, icon: "gearshape", title: "设置", subtitle: "模型、工作区与运行配置", keywords: ["settings", "model"])
         ]
 
-        if store.state.selectedThread?.canContinueAgent == true {
+        if store.state.selectedThread?.canContinue == true {
             result.insert(.init(kind: .continueThread, icon: "arrow.turn.down.right", title: "继续当前 \(typeLabel)", subtitle: "沿用当前 \(typeLabel) 的上下文", keywords: ["continue", "resume"]), at: 2)
         }
         if store.state.selectedThread != nil {
@@ -187,7 +187,7 @@ struct CommandPaletteView: View {
             result.append(.init(kind: .exportWorkflowYAML, icon: "arrow.triangle.branch", title: "导出为工作流 YAML", subtitle: "将步骤转为可重放工作流", keywords: ["export", "workflow", "yaml"]))
             result.append(.init(kind: .archiveThread, icon: "archivebox", title: "归档当前 \(typeLabel)", subtitle: "从侧栏隐藏", keywords: ["archive", "hide"]))
         }
-        if store.state.selectedThread?.canContinueAgent == true {
+        if store.state.selectedThread?.canContinue == true {
             result.append(.init(kind: .copyEvidence, icon: "checklist", title: "复制证据清单", subtitle: "导出已读文件、工具和验证状态", keywords: ["evidence", "verify", "proof"]))
         }
         if store.state.activeConnector != nil {

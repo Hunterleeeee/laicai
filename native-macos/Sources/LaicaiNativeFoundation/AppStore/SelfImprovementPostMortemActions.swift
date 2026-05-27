@@ -43,8 +43,8 @@ extension AppStore {
             context: context,
             modelName: connector.modelName,
             category: .engineering,
-            agentState: .running,
-            agentGoal: message,
+            executionState: .running,
+            goal: message,
             currentPlan: [
                 "读取后检建议定位根因",
                 "修改最小必要代码",

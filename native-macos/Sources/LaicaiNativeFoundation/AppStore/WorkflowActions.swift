@@ -44,8 +44,8 @@ extension AppStore {
             state.threads[index].workflowName = workflow.name
             state.threads[index].context = context
             state.threads[index].projectID = projectID
-            state.threads[index].agentState = .running
-            state.threads[index].agentGoal = message
+            state.threads[index].executionState = .running
+            state.threads[index].goal = message
             state.threads[index].currentPlan = plan
             state.threads[index].taskProtocol = Self.makeTaskProtocol(threadID: threadID, message: message, context: context, decision: plannerDecision)
             state.threads[index].executionLedger = Self.makeExecutionLedger(threadID: threadID, message: message, context: context, decision: plannerDecision, plan: plan)
@@ -60,8 +60,8 @@ extension AppStore {
                 workflowName: workflow.name,
                 context: context,
                 projectID: projectID,
-                agentState: .running,
-                agentGoal: message,
+                executionState: .running,
+                goal: message,
                 currentPlan: plan,
                 taskProtocol: Self.makeTaskProtocol(threadID: threadID, message: message, context: context, decision: plannerDecision),
                 executionLedger: Self.makeExecutionLedger(threadID: threadID, message: message, context: context, decision: plannerDecision, plan: plan)

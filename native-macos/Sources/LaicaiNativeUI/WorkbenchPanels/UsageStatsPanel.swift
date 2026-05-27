@@ -644,7 +644,7 @@ struct OrchestrationHealthSection: View {
     private var currentTask: AgentTask? {
         guard let id = store.state.selectedThreadID,
               let thread = store.state.threads.first(where: { $0.id == id }),
-              thread.isExecutionAgent else { return nil }
+              thread.isExecution else { return nil }
         return AgentTask(thread: thread)
     }
 

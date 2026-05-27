@@ -36,8 +36,8 @@ extension AppStore {
         let title = thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "新会话" : thread.title
         var lines: [String] = ["# \(title)", ""]
         lines.append("- 类型：会话")
-        lines.append("- 状态：\(thread.agentState.title)")
-        if let goal = thread.agentGoal?.trimmingCharacters(in: .whitespacesAndNewlines), !goal.isEmpty {
+        lines.append("- 状态：\(thread.executionState.title)")
+        if let goal = thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines), !goal.isEmpty {
             lines.append("- 目标：\(goal)")
         }
         if !thread.currentPlan.isEmpty {
@@ -79,7 +79,7 @@ extension AppStore {
     }
 
     public func exportSelectedTaskEvidenceMarkdown() -> String? {
-        guard let thread = state.selectedThread, thread.canContinueAgent else { return nil }
+        guard let thread = state.selectedThread, thread.canContinue else { return nil }
         let steps = thread.steps
         let toolCalls = steps.filter { $0.kind == .toolCall }
         let readFiles = Self.uniqueMemoryValues(steps
@@ -101,7 +101,7 @@ extension AppStore {
 
         let title = thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "新会话" : thread.title
         var lines: [String] = ["# 会话证据清单：\(title)", ""]
-        lines.append("- 状态：\(thread.agentState.title)")
+        lines.append("- 状态：\(thread.executionState.title)")
         lines.append("- 步骤：\(steps.count)")
         lines.append("- 更新时间：\(thread.updatedAt)")
         if indexed { lines.append("- 项目索引：已建立") }

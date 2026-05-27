@@ -102,8 +102,8 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
 
         AppStore.syncAgentSnapshot(&thread)
 
-        XCTAssertEqual(thread.agentState, .waitingForApproval)
-        XCTAssertEqual(thread.agentGoal, "修改 App.swift")
+        XCTAssertEqual(thread.executionState, .waitingForApproval)
+        XCTAssertEqual(thread.goal, "修改 App.swift")
         XCTAssertFalse(thread.currentPlan.isEmpty)
         XCTAssertEqual(thread.artifacts.map(\.path), ["App.swift"])
     }

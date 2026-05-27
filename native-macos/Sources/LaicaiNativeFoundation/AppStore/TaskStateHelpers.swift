@@ -205,15 +205,15 @@ extension AppStore {
 
     nonisolated static func syncAgentSnapshot(_ thread: inout Thread) {
         if thread.isArchived {
-            thread.agentState = .archived
+            thread.executionState = .archived
         } else if hasPendingReview(in: thread) {
-            thread.agentState = .waitingForApproval
+            thread.executionState = .waitingForApproval
         } else {
-            thread.agentState = Thread.inferAgentState(status: thread.status)
+            thread.executionState = Thread.inferAgentState(status: thread.status)
         }
 
-        if thread.agentGoal?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
-            thread.agentGoal = fallbackAgentGoal(for: thread)
+        if thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+            thread.goal = fallbackAgentGoal(for: thread)
         }
         if thread.currentPlan.isEmpty {
             thread.currentPlan = fallbackAgentPlan(for: thread)
@@ -227,8 +227,8 @@ extension AppStore {
         plan: [String]
     ) {
         thread.status = .running
-        thread.agentState = .running
-        thread.agentGoal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        thread.executionState = .running
+        thread.goal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         thread.currentPlan = plan
         thread.artifacts = agentArtifacts(from: thread)
         if thread.executionLedger == nil {
@@ -262,9 +262,9 @@ extension AppStore {
     nonisolated static func fallbackAgentPlan(for thread: Thread) -> [String] {
         guard !thread.steps.isEmpty else { return [] }
         if let plan = thread.multiAgentPlan {
-            return agentPlanLines(for: plan, message: thread.agentGoal ?? thread.title)
+            return agentPlanLines(for: plan, message: thread.goal ?? thread.title)
         }
-        switch thread.agentState {
+        switch thread.executionState {
         case .idle:
             return ["等待目标", "建立上下文", "按证据推进"]
         case .planning:

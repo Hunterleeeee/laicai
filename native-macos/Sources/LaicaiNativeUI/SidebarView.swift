@@ -565,7 +565,7 @@ struct SidebarView: View {
             Label("重命名", systemImage: "pencil")
         }
         Divider()
-        if thread?.canContinueAgent == true {
+        if thread?.canContinue == true {
             Button { store.continueThread(id: item.id) } label: { Label("继续", systemImage: "arrow.turn.down.right") }
         }
         Button { store.cloneThread(id: item.id) } label: {

@@ -275,7 +275,7 @@ private struct AppTopBar: View {
             return live.isEmpty ? "正在运行" : live
         }
         guard let thread = store.state.selectedThread else { return "选择会话，或直接输入一个目标" }
-        return "\(thread.agentState.title) · \(RelativeTimeFormatter.string(for: thread.updatedAt))"
+        return "\(thread.executionState.title) · \(RelativeTimeFormatter.string(for: thread.updatedAt))"
     }
 
     private var selectedThreadProjectName: String? {
@@ -288,7 +288,7 @@ private struct AppTopBar: View {
 
     private func threadTint(_ thread: Thread) -> Color {
         if store.state.isGenerating && thread.id == store.state.selectedThreadID { return Semantic.toolRunning }
-        switch thread.agentState {
+        switch thread.executionState {
         case .running, .planning: return Semantic.toolRunning
         case .waitingForApproval: return Semantic.warning
         case .blocked, .failed: return Semantic.error
@@ -299,7 +299,7 @@ private struct AppTopBar: View {
     }
 
     private func agentIcon(for thread: Thread) -> String {
-        switch thread.agentState {
+        switch thread.executionState {
         case .running: return "waveform.path.ecg"
         case .planning: return "brain.head.profile"
         case .waitingForApproval: return "eye"

@@ -137,12 +137,12 @@ extension AppStore {
         for index in state.threads.indices {
             let isStale = now.timeIntervalSince(state.threads[index].updatedAt) > timeout
             let shouldCancelRunning = state.threads[index].status == .running && isStale
-            let shouldCancelStaleReview = state.threads[index].isExecutionAgent
+            let shouldCancelStaleReview = state.threads[index].isExecution
                 && state.threads[index].status == .waitingReview
                 && isStale
             guard shouldCancelRunning || shouldCancelStaleReview else { continue }
             state.threads[index].status = .cancelled
-            state.threads[index].agentState = .paused
+            state.threads[index].executionState = .paused
             state.threads[index].updatedAt = now
             if state.threads[index].steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) {
                 continue
@@ -154,7 +154,7 @@ extension AppStore {
                 recoverable: true,
                 retryAction: "继续"
             ))
-            if state.threads[index].isExecutionAgent {
+            if state.threads[index].isExecution {
                 ensureCheckpointIfNeeded(&state.threads[index])
             }
         }

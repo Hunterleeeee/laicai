@@ -17,7 +17,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .textOutput, text: "已生成 SVG icon 文件：/tmp/water-wealth-cycle-icon.svg")
             ],
             updatedAt: .now.addingTimeInterval(-30),
-            agentGoal: "出一个水生万物，财自流转的icon图"
+            goal: "出一个水生万物，财自流转的icon图"
         )
         let placeholder = Thread(title: "新 Agent", status: .queued, steps: [], updatedAt: .now)
         let runtime = StreamingRuntime()
@@ -50,11 +50,11 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .toolCall, text: "写文件", toolName: "file.write"),
                 TaskStep(kind: .toolResult, text: "已写入", toolName: "file.write")
             ],
-            agentState: .idle
+            executionState: .idle
         )
 
-        XCTAssertTrue(historical.isExecutionAgent)
-        XCTAssertTrue(historical.canContinueAgent)
+        XCTAssertTrue(historical.isExecution)
+        XCTAssertTrue(historical.canContinue)
     }
 
     func testTinyFollowUpWithoutSelectionDoesNotRestoreRandomRecentTask() async throws {
@@ -80,8 +80,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                     workflowName: task.workflowName,
                     context: task.context,
                     updatedAt: task.updatedAt,
-                    agentState: Thread.inferAgentState(status: task.status),
-                    agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+                    executionState: Thread.inferAgentState(status: task.status),
+                    goal: task.steps.first(where: { $0.kind == .userInput })?.text,
                     taskProtocol: task.taskProtocol,
                     executionLedger: task.executionLedger
                 )],
@@ -128,7 +128,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             preview: "",
             steps: [],
             modelName: "test",
-            agentState: .idle
+            executionState: .idle
         )
         let taskThread = Thread(
             id: task.id,
@@ -140,8 +140,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             workflowName: task.workflowName,
             context: task.context,
             updatedAt: task.updatedAt,
-            agentState: Thread.inferAgentState(status: task.status),
-            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            executionState: Thread.inferAgentState(status: task.status),
+            goal: task.steps.first(where: { $0.kind == .userInput })?.text,
             taskProtocol: task.taskProtocol,
             executionLedger: task.executionLedger
         )
@@ -194,7 +194,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             preview: "",
             steps: [],
             modelName: "test",
-            agentState: .idle
+            executionState: .idle
         )
         let taskThread = Thread(
             id: task.id,
@@ -206,8 +206,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             workflowName: task.workflowName,
             context: task.context,
             updatedAt: task.updatedAt,
-            agentState: Thread.inferAgentState(status: task.status),
-            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            executionState: Thread.inferAgentState(status: task.status),
+            goal: task.steps.first(where: { $0.kind == .userInput })?.text,
             taskProtocol: task.taskProtocol,
             executionLedger: task.executionLedger
         )
@@ -257,7 +257,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             preview: "",
             steps: [],
             modelName: "test",
-            agentState: .idle
+            executionState: .idle
         )
         let taskThread = Thread(
             id: task.id,
@@ -269,8 +269,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             workflowName: task.workflowName,
             context: task.context,
             updatedAt: task.updatedAt,
-            agentState: Thread.inferAgentState(status: task.status),
-            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            executionState: Thread.inferAgentState(status: task.status),
+            goal: task.steps.first(where: { $0.kind == .userInput })?.text,
             taskProtocol: task.taskProtocol,
             executionLedger: task.executionLedger
         )

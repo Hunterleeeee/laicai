@@ -40,7 +40,7 @@ extension AppStore {
         if decision.intent == .chat,
            let tid = state.selectedThreadID,
            let thread = state.threads.first(where: { $0.id == tid }),
-           (thread.isExecutionAgent || thread.steps.contains(where: { $0.kind == .toolCall })),
+           (thread.isExecution || thread.steps.contains(where: { $0.kind == .toolCall })),
            Self.shouldRouteChatFollowUpIntoSelectedTask(message: effectiveMessage, task: AgentTask(thread: thread)) {
             decision = PlannerDecision(
                 intent: .task,

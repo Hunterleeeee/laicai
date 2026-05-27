@@ -5,7 +5,7 @@ extension AppStore {
     public func retryLastMessage() {
         guard !state.isGenerating else { return }
 
-        if let thread = state.selectedThread, thread.isExecutionAgent {
+        if let thread = state.selectedThread, thread.isExecution {
             guard thread.status != .running else { return }
             guard let lastUserStep = thread.steps.last(where: { $0.kind == .userInput }) else { return }
             BehaviorSignalTracker.record(signal: .retry, thread: thread)
@@ -15,7 +15,7 @@ extension AppStore {
             return
         }
 
-        guard let thread = state.selectedThread, thread.isAskAgent else { return }
+        guard let thread = state.selectedThread, thread.isChatOnly else { return }
         guard let lastUserIndex = thread.steps.lastIndex(where: { $0.kind == .userInput }) else { return }
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == thread.id }) else { return }
         let lastUserStep = thread.steps[lastUserIndex]
@@ -37,7 +37,7 @@ extension AppStore {
             return
         }
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == id }) else { return }
-        guard state.threads[threadIndex].canContinueAgent else {
+        guard state.threads[threadIndex].canContinue else {
             notify("这个对话暂时没有可继续的执行现场。", style: .info)
             return
         }
@@ -68,8 +68,8 @@ extension AppStore {
               let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }) else { return }
         state.threads[threadIndex].steps = []
         state.threads[threadIndex].status = .queued
-        state.threads[threadIndex].agentState = .idle
-        state.threads[threadIndex].agentGoal = nil
+        state.threads[threadIndex].executionState = .idle
+        state.threads[threadIndex].goal = nil
         state.threads[threadIndex].currentPlan = []
         state.threads[threadIndex].artifacts = []
         state.threads[threadIndex].taskProtocol = nil

@@ -95,7 +95,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             preview: "",
             status: .queued,
             steps: [],
-            agentState: .idle
+            executionState: .idle
         )
         let real = Thread(
             title: "真实会话",
@@ -116,8 +116,8 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             preview: "",
             status: .running,
             steps: [],
-            agentState: .running,
-            agentGoal: "你了解易经吗"
+            executionState: .running,
+            goal: "你了解易经吗"
         )
         var state = testState(threads: [running], selectedThreadID: running.id)
         state.isGenerating = true
@@ -125,7 +125,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(running.isEmptyPlaceholder)
         XCTAssertEqual(state.threadRecordSummaries.map(\.id), [running.id])
         XCTAssertEqual(state.selectedThread?.id, running.id)
-        XCTAssertEqual(state.selectedThread?.agentState, .running)
+        XCTAssertEqual(state.selectedThread?.executionState, .running)
     }
 
     func testMultiAgentStartCreatesVisibleInitialSteps() {

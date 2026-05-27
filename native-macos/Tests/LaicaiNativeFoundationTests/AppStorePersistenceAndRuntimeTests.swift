@@ -94,8 +94,8 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
             workflowName: task.workflowName,
             context: task.context,
             updatedAt: task.updatedAt,
-            agentState: Thread.inferAgentState(status: task.status),
-            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            executionState: Thread.inferAgentState(status: task.status),
+            goal: task.steps.first(where: { $0.kind == .userInput })?.text,
             taskProtocol: task.taskProtocol,
             executionLedger: task.executionLedger
         )
@@ -207,7 +207,7 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
             title: "",
             status: .completed,
             steps: [TaskStep(kind: .toolCall, text: "读取文件", toolName: "file.read")],
-            agentState: .completed
+            executionState: .completed
         )
         let store = AppStore(state: testState(threads: [thread], selectedThreadID: thread.id))
 
@@ -228,8 +228,8 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000111")!,
             title: "翻译文档",
             status: .running,
-            agentState: .running,
-            agentGoal: "把文档翻译成英文",
+            executionState: .running,
+            goal: "把文档翻译成英文",
             currentPlan: ["读取源文档", "生成译文", "导出 PDF"],
             artifacts: [artifact]
         )
@@ -237,7 +237,7 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(thread)
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-        XCTAssertTrue(json.contains("agentState"))
+        XCTAssertTrue(json.contains("executionState"))
         XCTAssertTrue(json.contains("currentPlan"))
         XCTAssertTrue(json.contains("artifacts"))
 
@@ -245,8 +245,8 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         decoder.dateDecodingStrategy = .iso8601
         let decoded = try decoder.decode(Thread.self, from: data)
 
-        XCTAssertEqual(decoded.agentState, .running)
-        XCTAssertEqual(decoded.agentGoal, "把文档翻译成英文")
+        XCTAssertEqual(decoded.executionState, .running)
+        XCTAssertEqual(decoded.goal, "把文档翻译成英文")
         XCTAssertEqual(decoded.currentPlan, ["读取源文档", "生成译文", "导出 PDF"])
         XCTAssertEqual(decoded.artifacts, [artifact])
     }

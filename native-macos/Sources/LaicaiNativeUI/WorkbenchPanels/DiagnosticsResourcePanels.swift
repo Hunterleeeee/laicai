@@ -25,7 +25,7 @@ struct DiagnosticsPanel: View {
                 diagStatBadge(
                     icon: "waveform.path.ecg",
                     label: "运行",
-                    value: "\(store.state.threads.filter { $0.agentState == .running || $0.agentState == .planning }.count)",
+                    value: "\(store.state.threads.filter { $0.executionState == .running || $0.executionState == .planning }.count)",
                     color: Brand.purple
                 )
                 diagStatBadge(
@@ -212,7 +212,7 @@ struct DiagnosticsPanel: View {
             "工作区: \(store.state.settings.workspacePath)",
             "上下文模式: \(store.state.settings.contextMode.rawValue)",
             "会话: \(store.state.threads.count)",
-            "运行中会话: \(store.state.threads.filter { $0.agentState == .running || $0.agentState == .planning }.count)",
+            "运行中会话: \(store.state.threads.filter { $0.executionState == .running || $0.executionState == .planning }.count)",
             "工具活动: \(store.state.toolActivities.count)",
             "审计: \(auditLog.recentEntries.count)",
             "内存: \(formatMemory())",

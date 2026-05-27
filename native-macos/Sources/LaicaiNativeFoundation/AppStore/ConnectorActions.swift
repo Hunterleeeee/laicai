@@ -12,7 +12,7 @@ extension AppStore {
         }
         state.activeConnectorID = fallback.id
         state.settings.defaultConnectorName = fallback.name
-        if let threadIndex = state.threads.firstIndex(where: { $0.id == state.selectedThreadID }), state.threads[threadIndex].isAskAgent {
+        if let threadIndex = state.threads.firstIndex(where: { $0.id == state.selectedThreadID }), state.threads[threadIndex].isChatOnly {
             state.threads[threadIndex].modelName = fallback.name
         }
         notify("当前模型\(active.health == .offline ? "离线" : "不可用")，已自动切换到 \(AgentLoop.displayConnectorName(fallback))。", style: .info)
@@ -26,7 +26,7 @@ extension AppStore {
         guard let connector = state.connectors.first(where: { $0.id == id }) else { return }
         state.activeConnectorID = connector.id
         state.settings.defaultConnectorName = connector.name
-        if let threadIndex = state.threads.firstIndex(where: { $0.id == state.selectedThreadID }), state.threads[threadIndex].isAskAgent {
+        if let threadIndex = state.threads.firstIndex(where: { $0.id == state.selectedThreadID }), state.threads[threadIndex].isChatOnly {
             state.threads[threadIndex].modelName = connector.name
         }
         persistSettings()

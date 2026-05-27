@@ -82,7 +82,7 @@ extension AppStore {
         guard let agentID = state.selectedAgentID,
               let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }) else { return }
         let thread = state.threads[threadIndex]
-        guard thread.isAskAgent && !thread.steps.isEmpty else { return }
+        guard thread.isChatOnly && !thread.steps.isEmpty else { return }
         // The Agent already has a unified event stream; add workspace context to enable tools.
         state.threads[threadIndex].context = TaskContext(workspaceRoot: state.settings.workspacePath, vaultRoot: cleanVaultPath())
         state.threads[threadIndex].connectorID = state.activeConnectorID
@@ -165,7 +165,7 @@ extension AppStore {
     func answerSelectedTaskStatusQuestion(_ message: String) -> Bool {
         guard let agentID = state.selectedAgentID,
               let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }),
-              state.threads[threadIndex].isExecutionAgent,
+              state.threads[threadIndex].isExecution,
               state.threads[threadIndex].status != .running,
               Self.isTaskStatusQuestion(message) else { return false }
 

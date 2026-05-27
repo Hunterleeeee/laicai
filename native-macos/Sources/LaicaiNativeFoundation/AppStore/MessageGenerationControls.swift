@@ -23,7 +23,7 @@ extension AppStore {
         state.liveActivity = ""
         if let threadID = state.selectedThreadID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }),
-           state.threads[threadIndex].isExecutionAgent,
+           state.threads[threadIndex].isExecution,
            state.threads[threadIndex].status == .running {
             flushStreamBuffer(for: threadID)
             state.threads[threadIndex].steps.append(TaskStep(kind: .error, text: "已中断", isFailure: false, recoverable: true, retryAction: "重试"))
@@ -38,7 +38,7 @@ extension AppStore {
 
         if let threadID = state.selectedThreadID,
            let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }),
-           state.threads[threadIndex].isAskAgent {
+           state.threads[threadIndex].isChatOnly {
             var steps = state.threads[threadIndex].steps
             if let lastStep = steps.last, lastStep.kind == .textOutput {
                 if lastStep.text.isEmpty {

@@ -268,9 +268,9 @@ public struct ReportGenerator {
         let today = Calendar.current.startOfDay(for: Date())
         let todayThreads = threads.filter { $0.updatedAt >= today }
             .sorted { $0.updatedAt > $1.updatedAt }
-        let completedAgents = todayThreads.filter { $0.agentState == .completed }
-        let failedAgents = todayThreads.filter { $0.agentState == .failed || $0.agentState == .blocked }
-        let runningAgents = todayThreads.filter { $0.agentState == .running || $0.agentState == .planning }
+        let completedAgents = todayThreads.filter { $0.executionState == .completed }
+        let failedAgents = todayThreads.filter { $0.executionState == .failed || $0.executionState == .blocked }
+        let runningAgents = todayThreads.filter { $0.executionState == .running || $0.executionState == .planning }
 
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd (EEEE)"
@@ -297,7 +297,7 @@ public struct ReportGenerator {
             let timeFmt = DateFormatter()
             timeFmt.dateFormat = "HH:mm"
             for thread in todayThreads {
-                let icon = agentStatusIcon(thread.agentState)
+                let icon = agentStatusIcon(thread.executionState)
                 let time = timeFmt.string(from: thread.createdAt)
                 lines.append("### \(icon) \(thread.title)  `\(time)`")
                 lines.append("")
@@ -389,8 +389,8 @@ public struct ReportGenerator {
         let weekAgo = cal.date(byAdding: .day, value: -7, to: Date()) ?? Date()
         let weekThreads = threads.filter { $0.updatedAt >= weekAgo }
             .sorted { $0.updatedAt > $1.updatedAt }
-        let completedAgents = weekThreads.filter { $0.agentState == .completed }
-        let failedAgents = weekThreads.filter { $0.agentState == .failed || $0.agentState == .blocked }
+        let completedAgents = weekThreads.filter { $0.executionState == .completed }
+        let failedAgents = weekThreads.filter { $0.executionState == .failed || $0.executionState == .blocked }
 
         let fmt = DateFormatter()
         fmt.dateFormat = "MM/dd"
@@ -420,10 +420,10 @@ public struct ReportGenerator {
             let dayFmt = DateFormatter()
             dayFmt.dateFormat = "MM/dd (E)"
             dayFmt.locale = Locale(identifier: "zh_CN")
-            let dayCompleted = dayThreads.filter { $0.agentState == .completed }
+            let dayCompleted = dayThreads.filter { $0.executionState == .completed }
             lines.append("**\(dayFmt.string(from: day))**：\(dayThreads.count) 个会话，\(dayCompleted.count) 个完成")
             for t in dayThreads.prefix(5) {
-                let icon = agentStatusIcon(t.agentState)
+                let icon = agentStatusIcon(t.executionState)
                 lines.append("  - \(icon) \(t.title)")
             }
             if dayThreads.count > 5 {

@@ -23,8 +23,8 @@ extension AppStore {
             state.threads[index].context = context
             state.threads[index].multiAgentPlan = plan
             state.threads[index].projectID = projectID
-            state.threads[index].agentState = .running
-            state.threads[index].agentGoal = message
+            state.threads[index].executionState = .running
+            state.threads[index].goal = message
             state.threads[index].currentPlan = planLines
             state.threads[index].taskProtocol = Self.makeTaskProtocol(
                 threadID: threadID,
@@ -50,8 +50,8 @@ extension AppStore {
                 context: context,
                 multiAgentPlan: plan,
                 projectID: projectID,
-                agentState: .running,
-                agentGoal: message,
+                executionState: .running,
+                goal: message,
                 currentPlan: planLines,
                 taskProtocol: Self.makeTaskProtocol(
                     threadID: threadID,
@@ -152,7 +152,7 @@ extension AppStore {
     public func updateMultiAgentPlan(_ plan: MultiAgentPlan, for threadID: UUID) {
         if let idx = state.threads.firstIndex(where: { $0.id == threadID }) {
             state.threads[idx].multiAgentPlan = plan
-            state.threads[idx].currentPlan = Self.agentPlanLines(for: plan, message: state.threads[idx].agentGoal ?? state.threads[idx].title)
+            state.threads[idx].currentPlan = Self.agentPlanLines(for: plan, message: state.threads[idx].goal ?? state.threads[idx].title)
             syncAgentSnapshot(at: idx)
         }
     }

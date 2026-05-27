@@ -68,7 +68,7 @@ extension AppStore {
             }
             Self.markAgentRunning(
                 &state.threads[threadIndex],
-                goal: Self.agentGoal(for: state.threads[threadIndex], incomingMessage: message, isContinuation: !isEmptyPlaceholder),
+                goal: Self.goal(for: state.threads[threadIndex], incomingMessage: message, isContinuation: !isEmptyPlaceholder),
                 plan: Self.agentPlanLines(for: decision, message: message)
             )
             state.threads[threadIndex].connectorID = connector.id
@@ -92,8 +92,8 @@ extension AppStore {
             state.threads[threadIndex].connectorID = connector.id
             state.threads[threadIndex].context = context
             state.threads[threadIndex].projectID = projectID
-            state.threads[threadIndex].agentState = .running
-            state.threads[threadIndex].agentGoal = message
+            state.threads[threadIndex].executionState = .running
+            state.threads[threadIndex].goal = message
             state.threads[threadIndex].currentPlan = Self.agentPlanLines(for: decision, message: message)
             state.threads[threadIndex].taskProtocol = Self.makeTaskProtocol(threadID: selectedID, message: message, context: context, decision: decision)
             state.threads[threadIndex].executionLedger = Self.makeExecutionLedger(threadID: selectedID, message: message, context: context, decision: decision, plan: state.threads[threadIndex].currentPlan)
@@ -110,8 +110,8 @@ extension AppStore {
                 connectorID: connector.id,
                 context: context,
                 projectID: projectID,
-                agentState: .running,
-                agentGoal: message,
+                executionState: .running,
+                goal: message,
                 currentPlan: plan,
                 taskProtocol: Self.makeTaskProtocol(threadID: threadID, message: message, context: context, decision: decision),
                 executionLedger: Self.makeExecutionLedger(threadID: threadID, message: message, context: context, decision: decision, plan: plan)

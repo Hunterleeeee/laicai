@@ -48,7 +48,7 @@ public final class AppStore: ObservableObject {
             hasher.combine(thread.isPinned)
             hasher.combine(thread.isArchived)
             hasher.combine(thread.projectID)
-            hasher.combine(thread.agentState.rawValue)
+            hasher.combine(thread.executionState.rawValue)
         }
         return hasher.finalize()
     }

@@ -48,7 +48,7 @@ struct ChatDetailView: View {
 
     private func shouldShowTimeline(for thread: Thread) -> Bool {
         if !thread.steps.isEmpty { return true }
-        if thread.status == .running || thread.agentState == .running { return true }
+        if thread.status == .running || thread.executionState == .running { return true }
         if store.state.isGenerating, thread.id == store.state.selectedThreadID { return true }
         if thread.multiAgentPlan != nil { return true }
         return false
@@ -579,7 +579,7 @@ struct ChatDetailView: View {
         if store.state.activeConnector == nil { return "先连接模型…" }
         let base = "输入问题或目标…"
         if store.state.isGenerating { return "补充一句，让它调整方向…" }
-        if let agent = store.state.selectedThread, agent.canContinueAgent {
+        if let agent = store.state.selectedThread, agent.canContinue {
             switch agent.status {
             case .cancelled: return "继续处理，或输入新的处理方式…"
             case .failed: return "描述如何处理失败，或直接重试…"

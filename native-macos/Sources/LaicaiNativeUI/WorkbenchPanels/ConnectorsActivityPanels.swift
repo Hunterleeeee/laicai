@@ -370,7 +370,7 @@ struct ActivityPanel: View {
                             }
                         }
 
-                        agentGoalCard(for: thread)
+                        goalCard(for: thread)
                         agentPlanCard(for: thread)
                         agentLedgerCard(for: thread)
                         agentArtifactCard(for: thread)
@@ -447,8 +447,8 @@ struct ActivityPanel: View {
         InspectorEmptyRow(icon: "sparkles", title: "暂无活动", subtitle: "工具、流程和错误会在这里汇总。")
     }
 
-    private func agentGoalCard(for thread: Thread) -> some View {
-        let goal = thread.agentGoal?.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func goalCard(for thread: Thread) -> some View {
+        let goal = thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines)
         return VStack(alignment: .leading, spacing: AppSpace.xs) {
             Text("目标")
                 .font(AppFont.tiny)
@@ -473,7 +473,7 @@ struct ActivityPanel: View {
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.muted)
                 Spacer()
-                Text(thread.agentState.title)
+                Text(thread.executionState.title)
                     .font(AppFont.tiny)
                     .foregroundStyle(statusTint(for: thread))
             }
@@ -581,13 +581,13 @@ struct ActivityPanel: View {
     }
 
     private var canContinue: Bool {
-        guard !store.state.isGenerating, let thread = store.state.selectedThread, thread.canContinueAgent else { return false }
+        guard !store.state.isGenerating, let thread = store.state.selectedThread, thread.canContinue else { return false }
         return thread.status != .running
     }
 
     private func statusTint(for thread: Thread) -> Color {
         if store.state.isGenerating && thread.id == store.state.selectedThreadID { return Semantic.toolRunning }
-        switch thread.agentState {
+        switch thread.executionState {
         case .running, .planning: return Semantic.toolRunning
         case .waitingForApproval: return Semantic.warning
         case .blocked, .failed: return Semantic.error
@@ -595,13 +595,13 @@ struct ActivityPanel: View {
         case .completed: return Semantic.success
         case .idle, .archived: break
         }
-        if thread.isExecutionAgent { return thread.status.color }
+        if thread.isExecution { return thread.status.color }
         return Brand.primary
     }
 
     private func pulseIcon(for thread: Thread) -> String {
         if store.state.isGenerating && thread.id == store.state.selectedThreadID { return "waveform.path.ecg" }
-        if thread.isExecutionAgent { return thread.status.icon }
+        if thread.isExecution { return thread.status.icon }
         return thread.steps.isEmpty ? "text.bubble" : "bubble.left.and.bubble.right"
     }
 
@@ -614,7 +614,7 @@ struct ActivityPanel: View {
         let tint = statusTint(for: thread)
         let label: String = {
             if store.state.isGenerating && thread.id == store.state.selectedThreadID { return "运行中" }
-            return thread.agentState.title
+            return thread.executionState.title
         }()
         return Text(label)
             .font(AppFont.tiny)
@@ -649,10 +649,10 @@ struct ActivityPanel: View {
            !followUp.isEmpty {
             return "已收到补充：\(followUp)"
         }
-        if thread.isExecutionAgent && thread.status == .failed {
+        if thread.isExecution && thread.status == .failed {
             return failedTaskSummary(for: thread)
         }
-        if thread.isExecutionAgent && thread.status == .cancelled {
+        if thread.isExecution && thread.status == .cancelled {
             return "这个会话已暂停。可以继续处理，或改写目标后再发送。"
         }
         if let latest = latestThreadSummary(thread) {
@@ -682,7 +682,7 @@ struct ActivityPanel: View {
         } else {
             lines.append("基于已读文件继续执行")
         }
-        if thread.isExecutionAgent {
+        if thread.isExecution {
             lines.append("验证结果并形成交付")
         } else {
             lines.append("回答用户并等待下一步")
@@ -722,7 +722,7 @@ struct ActivityPanel: View {
             .init(icon: thread.projectID == nil ? "tray" : "folder", title: "空间", value: projectLabel(for: thread), tint: thread.projectID == nil ? TextGrade.muted : Brand.teal),
             .init(icon: "clock", title: "更新", value: RelativeTimeFormatter.string(for: thread.updatedAt), tint: TextGrade.muted)
         ]
-        if thread.isExecutionAgent {
+        if thread.isExecution {
             facts[1] = .init(icon: "doc.text", title: "文件", value: "\(thread.context.relevantFiles.count)", tint: Brand.teal)
         }
         if let start = store.state.generationStartedAt, store.state.isGenerating, thread.id == store.state.selectedThreadID {

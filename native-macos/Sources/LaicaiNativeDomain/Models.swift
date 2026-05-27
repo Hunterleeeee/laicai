@@ -864,8 +864,8 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
     public var createdAt: Date
     public var updatedAt: Date
     public var projectID: UUID?  // Codex-style: bind thread to a project
-    public var agentState: AgentThreadState
-    public var agentGoal: String?
+    public var executionState: AgentThreadState
+    public var goal: String?
     public var currentPlan: [String]
     public var artifacts: [AgentArtifact]
     public var taskProtocol: AgentTaskProtocol?
@@ -891,8 +891,8 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         createdAt: Date = .now,
         updatedAt: Date = .now,
         projectID: UUID? = nil,
-        agentState: AgentThreadState? = nil,
-        agentGoal: String? = nil,
+        executionState: AgentThreadState? = nil,
+        goal: String? = nil,
         currentPlan: [String] = [],
         artifacts: [AgentArtifact] = [],
         taskProtocol: AgentTaskProtocol? = nil,
@@ -917,8 +917,8 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.projectID = projectID
-        self.agentState = agentState ?? Self.inferAgentState(status: status)
-        self.agentGoal = agentGoal
+        self.executionState = executionState ?? Self.inferAgentState(status: status)
+        self.goal = goal
         self.currentPlan = currentPlan
         self.artifacts = artifacts
         self.taskProtocol = taskProtocol
@@ -930,7 +930,7 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         case id, title, preview, status, steps, connectorID, workflowName, context
         case modelName, category, isPinned, isArchived, unreadCount, summaryCache
         case multiAgentPlan, userRating, createdAt, updatedAt, projectID
-        case agentState, agentGoal, currentPlan, artifacts
+        case executionState = "agentState", goal = "agentGoal", currentPlan, artifacts
         case taskProtocol, executionLedger
     }
 
@@ -955,9 +955,9 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? updatedAt
         projectID = try c.decodeIfPresent(UUID.self, forKey: .projectID)
-        agentState = try c.decodeIfPresent(AgentThreadState.self, forKey: .agentState)
+        executionState = try c.decodeIfPresent(AgentThreadState.self, forKey: .executionState)
             ?? Self.inferAgentState(status: status)
-        agentGoal = try c.decodeIfPresent(String.self, forKey: .agentGoal)
+        goal = try c.decodeIfPresent(String.self, forKey: .goal)
         currentPlan = try c.decodeIfPresent([String].self, forKey: .currentPlan) ?? []
         artifacts = try c.decodeIfPresent([AgentArtifact].self, forKey: .artifacts) ?? []
         taskProtocol = try c.decodeIfPresent(AgentTaskProtocol.self, forKey: .taskProtocol)
@@ -1021,8 +1021,8 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         createdAt = session.updatedAt
         updatedAt = session.updatedAt
         projectID = nil
-        agentState = .idle
-        agentGoal = nil
+        executionState = .idle
+        goal = nil
         currentPlan = []
         artifacts = []
         taskProtocol = nil
@@ -1050,8 +1050,8 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         createdAt = task.createdAt
         updatedAt = task.updatedAt
         projectID = nil
-        agentState = Self.inferAgentState(status: task.status)
-        agentGoal = task.steps.first(where: { $0.kind == .userInput })?.text
+        executionState = Self.inferAgentState(status: task.status)
+        goal = task.steps.first(where: { $0.kind == .userInput })?.text
         currentPlan = []
         artifacts = []
         taskProtocol = task.taskProtocol
@@ -1079,16 +1079,16 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         return .ask
     }
 
-    public var isAskAgent: Bool {
+    public var isChatOnly: Bool {
         agentMode == .ask
     }
 
-    public var isExecutionAgent: Bool {
+    public var isExecution: Bool {
         agentMode != .ask
     }
 
-    public var canContinueAgent: Bool {
-        isExecutionAgent
+    public var canContinue: Bool {
+        isExecution
             || status == .failed
             || status == .cancelled
             || status == .waitingReview
@@ -1111,14 +1111,14 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
     public var hasContent: Bool
     public var events: [ThreadEvent]
     public var projectID: UUID?
-    public var agentState: AgentThreadState?
+    public var executionState: AgentThreadState?
     public var taskProtocol: AgentTaskProtocol?
     public var executionLedger: AgentExecutionLedger?
 
     public var shortID: String { String(id.uuidString.prefix(6)) }
 
     public var resolvedAgentState: AgentThreadState {
-        if let agentState { return agentState }
+        if let executionState { return executionState }
         if let status { return Thread.inferAgentState(status: status) }
         return .idle
     }
@@ -1134,7 +1134,7 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
         hasContent: Bool,
         events: [ThreadEvent],
         projectID: UUID? = nil,
-        agentState: AgentThreadState? = nil,
+        executionState: AgentThreadState? = nil,
         taskProtocol: AgentTaskProtocol? = nil,
         executionLedger: AgentExecutionLedger? = nil
     ) {
@@ -1148,7 +1148,7 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
         self.hasContent = hasContent
         self.events = events
         self.projectID = projectID
-        self.agentState = agentState
+        self.executionState = executionState
         self.taskProtocol = taskProtocol
         self.executionLedger = executionLedger
     }
@@ -1161,7 +1161,7 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
         updatedAt = thread.updatedAt
         isPinned = thread.isPinned
         projectID = thread.projectID
-        agentState = thread.agentState
+        executionState = thread.executionState
         taskProtocol = includeEvents ? thread.taskProtocol : nil
         executionLedger = includeEvents ? thread.executionLedger : nil
         isArchived = thread.isArchived
@@ -1217,8 +1217,8 @@ public struct AgentRecord: Identifiable, Equatable, Codable, Sendable {
         title = thread.title
         preview = thread.preview
         mode = thread.agentMode
-        state = thread.agentState
-        goal = thread.agentGoal
+        state = thread.executionState
+        goal = thread.goal
         plan = thread.currentPlan
         artifacts = thread.artifacts
         updatedAt = thread.updatedAt
@@ -1252,7 +1252,7 @@ public struct AgentRecord: Identifiable, Equatable, Codable, Sendable {
             hasContent: hasContent,
             events: events,
             projectID: projectID,
-            agentState: state,
+            executionState: state,
             taskProtocol: taskProtocol,
             executionLedger: executionLedger
         )

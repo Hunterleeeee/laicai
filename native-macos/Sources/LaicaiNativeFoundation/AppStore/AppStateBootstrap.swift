@@ -109,7 +109,7 @@ public extension AppState {
 
         var normalizedThreads = false
         for index in state.threads.indices {
-            if state.threads[index].isAskAgent {
+            if state.threads[index].isChatOnly {
                 if Thread.isPlaceholderTitle(state.threads[index].title) {
                     let firstMsg = state.threads[index].steps.first(where: { $0.kind == .userInput })?.text ?? ""
                     let title = String(firstMsg.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
@@ -118,7 +118,7 @@ public extension AppState {
                 state.threads[index].preview = normalizedSessionPreview(state.threads[index].preview)
             } else if state.threads[index].status == .running {
                 state.threads[index].status = .cancelled
-                state.threads[index].agentState = .paused
+                state.threads[index].executionState = .paused
                 if !state.threads[index].steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) {
                     state.threads[index].steps.append(TaskStep(
                         kind: .error,
@@ -131,19 +131,19 @@ public extension AppState {
                 normalizedThreads = true
             }
 
-            let beforeAgentState = state.threads[index].agentState
-            let beforeAgentGoal = state.threads[index].agentGoal
+            let beforeAgentState = state.threads[index].executionState
+            let beforeAgentGoal = state.threads[index].goal
             let beforePlan = state.threads[index].currentPlan
             let beforeArtifacts = state.threads[index].artifacts
             AppStore.syncAgentSnapshot(&state.threads[index])
-            if state.threads[index].agentState != beforeAgentState
-                || state.threads[index].agentGoal != beforeAgentGoal
+            if state.threads[index].executionState != beforeAgentState
+                || state.threads[index].goal != beforeAgentGoal
                 || state.threads[index].currentPlan != beforePlan
                 || state.threads[index].artifacts != beforeArtifacts {
                 normalizedThreads = true
             }
 
-            if state.threads[index].isAskAgent,
+            if state.threads[index].isChatOnly,
                state.threads[index].projectID != nil,
                !threadNeedsProjectScope(state.threads[index]) {
                 state.threads[index].projectID = nil
@@ -188,7 +188,7 @@ private func normalizedBootstrapConnector(_ connector: ConnectorProfile) -> Conn
 }
 
 private func threadNeedsProjectScope(_ thread: Thread) -> Bool {
-    if thread.isExecutionAgent { return true }
+    if thread.isExecution { return true }
     return thread.workflowName != nil
         || thread.steps.contains { step in
             step.kind == .toolCall || step.kind == .toolResult || step.kind == .reviewRequest || step.kind == .reviewResult

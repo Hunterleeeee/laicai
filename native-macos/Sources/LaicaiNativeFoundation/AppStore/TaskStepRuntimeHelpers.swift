@@ -194,11 +194,11 @@ extension AppStore {
     }
 
     nonisolated static func ensureAgentRuntimeContract(_ thread: inout Thread) {
-        let goal = (thread.agentGoal?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+        let goal = (thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
             ?? thread.steps.first(where: { $0.kind == .userInput })?.text.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? thread.title
-        if thread.agentGoal?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
-            thread.agentGoal = goal
+        if thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+            thread.goal = goal
         }
         if thread.currentPlan.isEmpty {
             thread.currentPlan = fallbackAgentPlan(for: thread)
@@ -235,12 +235,12 @@ extension AppStore {
         ensureAgentRuntimeContract(&thread)
         var ledger = thread.executionLedger ?? AgentExecutionLedger(
             originalRequest: thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title,
-            goal: thread.agentGoal ?? thread.title,
+            goal: thread.goal ?? thread.title,
             state: .created,
             plan: thread.currentPlan,
             nextAction: "继续处理当前会话"
         )
-        ledger.goal = thread.agentGoal ?? ledger.goal
+        ledger.goal = thread.goal ?? ledger.goal
         ledger.plan = thread.currentPlan
         thread.executionLedger = ledger
         let steps = thread.steps
@@ -282,7 +282,7 @@ extension AppStore {
         if thread.executionLedger == nil {
             thread.executionLedger = AgentExecutionLedger(
                 originalRequest: thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title,
-                goal: thread.agentGoal ?? thread.title,
+                goal: thread.goal ?? thread.title,
                 state: .created,
                 plan: thread.currentPlan,
                 nextAction: "继续处理当前会话"
@@ -438,7 +438,7 @@ extension AppStore {
     private nonisolated static func unfinishedWork(for thread: Thread, ledger: AgentExecutionLedger? = nil) -> [String] {
         let currentLedger = ledger ?? thread.executionLedger
         var items: [String] = []
-        if thread.isExecutionAgent && currentLedger?.hasToolEvidence != true {
+        if thread.isExecution && currentLedger?.hasToolEvidence != true {
             items.append("缺少真实工具证据")
         }
         if thread.steps.contains(where: { $0.kind == .toolResult && $0.isFailure }) {
@@ -449,7 +449,7 @@ extension AppStore {
         }
         let request = [
             thread.executionLedger?.originalRequest,
-            thread.agentGoal,
+            thread.goal,
             thread.taskProtocol?.completionCriteria.joined(separator: " ")
         ].compactMap { $0 }.joined(separator: " ")
         if AgentLoop.expectsUIEvidence(message: request, protocolCriteria: thread.taskProtocol?.completionCriteria ?? []),

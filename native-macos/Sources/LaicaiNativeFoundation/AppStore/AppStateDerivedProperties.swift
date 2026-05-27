@@ -14,10 +14,10 @@ extension AppState {
         var parts = [
             thread.title,
             thread.preview,
-            thread.agentGoal ?? "",
+            thread.goal ?? "",
             thread.modelName,
             thread.status.title,
-            thread.agentState.title,
+            thread.executionState.title,
             thread.context.workspaceRoot
         ]
         let recentStepParts = thread.steps.suffix(summarySearchRecentStepLimit).flatMap { step in
@@ -58,7 +58,7 @@ extension AppState {
     }
 
     public var continuableAgents: [AgentRecord] {
-        visibleThreads.filter { !$0.isEmptyPlaceholder && $0.canContinueAgent }
+        visibleThreads.filter { !$0.isEmptyPlaceholder && $0.canContinue }
             .map { AgentRecord(thread: $0, includeEvents: false) }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
@@ -118,11 +118,11 @@ extension AppState {
             let metadata = [
                 thread.title,
                 thread.preview,
-                thread.agentGoal ?? "",
+                thread.goal ?? "",
                 thread.steps.last?.text ?? "",
                 thread.modelName,
                     thread.status.title,
-                thread.agentState.title,
+                thread.executionState.title,
                 thread.context.workspaceRoot
             ].joined(separator: " ").lowercased()
             guard metadata.contains(lower) || thread.steps.suffix(12).contains(where: { step in

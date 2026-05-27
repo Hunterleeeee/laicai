@@ -36,7 +36,7 @@ extension AppStore {
             modelName: connectorName,
             category: .engineering,
             projectID: nil,
-            agentState: .idle
+            executionState: .idle
         )
         state.threads.insert(thread, at: 0)
         state.selectThread(id: thread.id)
@@ -63,7 +63,7 @@ extension AppStore {
             modelName: connectorName,
             category: .engineering,
             projectID: projectID,
-            agentState: .idle
+            executionState: .idle
         )
         state.threads.insert(thread, at: 0)
         state.selectThread(id: thread.id)
@@ -148,8 +148,8 @@ extension AppStore {
             summaryCache: thread.summaryCache,
             multiAgentPlan: thread.multiAgentPlan,
             projectID: thread.projectID,
-            agentState: thread.status == .running ? .paused : thread.agentState,
-            agentGoal: thread.agentGoal,
+            executionState: thread.status == .running ? .paused : thread.executionState,
+            goal: thread.goal,
             currentPlan: thread.currentPlan,
             artifacts: thread.artifacts
         )
@@ -171,8 +171,8 @@ extension AppStore {
             context: thread.context,
             modelName: thread.modelName,
             projectID: thread.projectID,
-            agentState: thread.agentState,
-            agentGoal: thread.agentGoal,
+            executionState: thread.executionState,
+            goal: thread.goal,
             currentPlan: thread.currentPlan,
             artifacts: thread.artifacts
         )

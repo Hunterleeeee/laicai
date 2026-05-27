@@ -11,7 +11,7 @@ extension AppStore {
         if state.threads[threadIndex].executionLedger == nil {
             state.threads[threadIndex].executionLedger = AgentExecutionLedger(
                 originalRequest: state.threads[threadIndex].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[threadIndex].title,
-                goal: state.threads[threadIndex].agentGoal ?? state.threads[threadIndex].title,
+                goal: state.threads[threadIndex].goal ?? state.threads[threadIndex].title,
                 state: .executing,
                 plan: state.threads[threadIndex].currentPlan
             )

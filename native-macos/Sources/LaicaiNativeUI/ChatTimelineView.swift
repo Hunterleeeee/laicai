@@ -65,16 +65,16 @@ struct ThreadTimelineView: View {
     @State private var expandedPhases: Set<String> = []
 
     var body: some View {
-        let executionSteps = thread.isExecutionAgent ? visibleSteps(for: thread) : []
-        let executionStats = thread.isExecutionAgent ? TaskStepStats(thread: thread, visibleSteps: executionSteps) : nil
-        let sessionSteps = thread.isExecutionAgent ? [] : visibleSessionSteps
+        let executionSteps = thread.isExecution ? visibleSteps(for: thread) : []
+        let executionStats = thread.isExecution ? TaskStepStats(thread: thread, visibleSteps: executionSteps) : nil
+        let sessionSteps = thread.isExecution ? [] : visibleSessionSteps
         let showsEmptyRunningState = thread.steps.isEmpty
 
         return ScrollViewReader { proxy in
             ZStack(alignment: .bottom) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: AppSpace.xl) {
-                        if thread.isExecutionAgent, let executionStats {
+                        if thread.isExecution, let executionStats {
                             TaskSummaryCard(thread: thread, stats: executionStats)
                             if thread.status == .completed || thread.status == .failed {
                                 TaskCompletionSummaryCard(thread: thread)
@@ -346,12 +346,12 @@ private struct EmptyRunningThreadCard: View {
 
     private var statusLine: String {
         if thread.multiAgentPlan != nil { return "多会话计划已创建，正在启动第一步…" }
-        if thread.status == .running || thread.agentState == .running { return "会话已创建，正在准备上下文…" }
+        if thread.status == .running || thread.executionState == .running { return "会话已创建，正在准备上下文…" }
         return "正在准备…"
     }
 
     private var visibleGoal: String? {
-        let raw = thread.agentGoal?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? thread.executionLedger?.goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let raw, !raw.isEmpty else { return nil }
         return raw
@@ -1586,7 +1586,7 @@ private struct TaskCompletionSummaryCard: View {
                 Image(systemName: thread.status == .completed ? "checkmark.seal.fill" : "xmark.seal.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(thread.status == .completed ? Semantic.success : Semantic.error)
-                Text(thread.agentState == .completed || thread.status == .completed ? "会话完成" : "会话失败")
+                Text(thread.executionState == .completed || thread.status == .completed ? "会话完成" : "会话失败")
                     .font(AppFont.subheadline)
                     .foregroundStyle(thread.status == .completed ? Semantic.success : Semantic.error)
                 if let dur = duration {

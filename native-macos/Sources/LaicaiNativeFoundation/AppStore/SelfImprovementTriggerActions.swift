@@ -29,8 +29,8 @@ extension AppStore {
             steps: [userStep, planStep],
             connectorID: state.activeConnectorID,
             context: context,
-            agentState: .running,
-            agentGoal: message,
+            executionState: .running,
+            goal: message,
             currentPlan: [
                 "定位自我改进问题：\(diagnosis.description)",
                 "修改最小必要代码",

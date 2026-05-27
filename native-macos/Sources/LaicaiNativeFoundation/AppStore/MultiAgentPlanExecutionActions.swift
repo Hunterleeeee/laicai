@@ -13,8 +13,8 @@ extension AppStore {
         state.threads[idx].multiAgentPlan = plan
         Self.markAgentRunning(
             &state.threads[idx],
-            goal: state.threads[idx].agentGoal ?? state.threads[idx].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[idx].title,
-            plan: Self.agentPlanLines(for: plan, message: state.threads[idx].agentGoal ?? state.threads[idx].title)
+            goal: state.threads[idx].goal ?? state.threads[idx].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[idx].title,
+            plan: Self.agentPlanLines(for: plan, message: state.threads[idx].goal ?? state.threads[idx].title)
         )
         state.threads[idx].updatedAt = .now
 
@@ -92,8 +92,8 @@ extension AppStore {
         state.threads[idx].multiAgentPlan = plan
         Self.markAgentRunning(
             &state.threads[idx],
-            goal: state.threads[idx].agentGoal ?? state.threads[idx].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[idx].title,
-            plan: Self.agentPlanLines(for: plan, message: state.threads[idx].agentGoal ?? state.threads[idx].title)
+            goal: state.threads[idx].goal ?? state.threads[idx].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[idx].title,
+            plan: Self.agentPlanLines(for: plan, message: state.threads[idx].goal ?? state.threads[idx].title)
         )
         state.threads[idx].updatedAt = .now
 

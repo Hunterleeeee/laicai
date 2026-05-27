@@ -4,7 +4,7 @@ import LaicaiNativeDomain
 extension AppStore {
     public func autoResumeInterruptedTask() {
         let interrupted = state.threads
-            .filter { $0.isExecutionAgent && $0.status == .cancelled }
+            .filter { $0.isExecution && $0.status == .cancelled }
             .filter { $0.steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) }
             .sorted { $0.updatedAt > $1.updatedAt }
 

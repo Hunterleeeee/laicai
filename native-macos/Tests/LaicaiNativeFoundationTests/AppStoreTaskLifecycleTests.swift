@@ -39,8 +39,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.threads.count, 1)
         XCTAssertEqual(store.state.selectedThreadID, threadID)
         XCTAssertEqual(store.state.selectedThread?.status, .completed)
-        XCTAssertEqual(store.state.selectedThread?.agentState, .completed)
-        XCTAssertEqual(store.state.selectedThread?.agentGoal, "帮我生成一个 README")
+        XCTAssertEqual(store.state.selectedThread?.executionState, .completed)
+        XCTAssertEqual(store.state.selectedThread?.goal, "帮我生成一个 README")
         XCTAssertFalse(store.state.selectedThread?.currentPlan.isEmpty ?? true)
         XCTAssertEqual(store.state.selectedThread?.taskProtocol?.taskGoal, "帮我生成一个 README")
         XCTAssertEqual(store.state.selectedThread?.taskProtocol?.threadID, threadID)
@@ -126,7 +126,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             category: session.category,
             isPinned: session.isPinned,
             updatedAt: session.updatedAt,
-            agentState: .idle
+            executionState: .idle
         )
         let runtime = CapturingToolsRuntime()
         let store = AppStore(
@@ -184,8 +184,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             workflowName: failedTask.workflowName,
             context: failedTask.context,
             updatedAt: failedTask.updatedAt,
-            agentState: Thread.inferAgentState(status: failedTask.status),
-            agentGoal: failedTask.steps.first(where: { $0.kind == .userInput })?.text,
+            executionState: Thread.inferAgentState(status: failedTask.status),
+            goal: failedTask.steps.first(where: { $0.kind == .userInput })?.text,
             taskProtocol: failedTask.taskProtocol,
             executionLedger: failedTask.executionLedger
         )
@@ -223,8 +223,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             workflowName: task.workflowName,
             context: task.context,
             updatedAt: task.updatedAt,
-            agentState: Thread.inferAgentState(status: task.status),
-            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            executionState: Thread.inferAgentState(status: task.status),
+            goal: task.steps.first(where: { $0.kind == .userInput })?.text,
             taskProtocol: task.taskProtocol,
             executionLedger: task.executionLedger
         )
@@ -252,8 +252,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             workflowName: task.workflowName,
             context: task.context,
             updatedAt: task.updatedAt,
-            agentState: Thread.inferAgentState(status: task.status),
-            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            executionState: Thread.inferAgentState(status: task.status),
+            goal: task.steps.first(where: { $0.kind == .userInput })?.text,
             taskProtocol: task.taskProtocol,
             executionLedger: task.executionLedger
         )
@@ -305,8 +305,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             workflowName: task.workflowName,
             context: task.context,
             updatedAt: task.updatedAt,
-            agentState: Thread.inferAgentState(status: task.status),
-            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            executionState: Thread.inferAgentState(status: task.status),
+            goal: task.steps.first(where: { $0.kind == .userInput })?.text,
             taskProtocol: task.taskProtocol,
             executionLedger: task.executionLedger
         )
@@ -406,8 +406,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             workflowName: task.workflowName,
             context: task.context,
             updatedAt: task.updatedAt,
-            agentState: Thread.inferAgentState(status: task.status),
-            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            executionState: Thread.inferAgentState(status: task.status),
+            goal: task.steps.first(where: { $0.kind == .userInput })?.text,
             taskProtocol: task.taskProtocol,
             executionLedger: task.executionLedger
         )
@@ -445,8 +445,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             workflowName: task.workflowName,
             context: task.context,
             updatedAt: task.updatedAt,
-            agentState: Thread.inferAgentState(status: task.status),
-            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            executionState: Thread.inferAgentState(status: task.status),
+            goal: task.steps.first(where: { $0.kind == .userInput })?.text,
             taskProtocol: task.taskProtocol,
             executionLedger: task.executionLedger
         )
@@ -489,8 +489,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             workflowName: task.workflowName,
             context: task.context,
             updatedAt: task.updatedAt,
-            agentState: Thread.inferAgentState(status: task.status),
-            agentGoal: task.steps.first(where: { $0.kind == .userInput })?.text,
+            executionState: Thread.inferAgentState(status: task.status),
+            goal: task.steps.first(where: { $0.kind == .userInput })?.text,
             taskProtocol: task.taskProtocol,
             executionLedger: task.executionLedger
         )
@@ -523,8 +523,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .userInput, text: "修复文件"),
                 TaskStep(kind: .toolResult, text: "oldText 匹配失败", toolName: "file.edit", isFailure: true)
             ],
-            agentState: .failed,
-            agentGoal: "修复文件"
+            executionState: .failed,
+            goal: "修复文件"
         )
 
         AppStore.rebuildExecutionLedger(&thread)
