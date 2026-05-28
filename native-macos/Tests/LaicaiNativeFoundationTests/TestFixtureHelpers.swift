@@ -6,6 +6,18 @@ typealias Thread = LaicaiThread
 
 @MainActor
 extension LaicaiNativeFoundationTestCase {
+    /// Default test workspace path that passes `isOverlyBroadWorkspace` and `isEphemeralWorkspacePath` checks.
+    nonisolated static let safeTestWorkspacePath: String = {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let url = URL(fileURLWithPath: home).appendingPathComponent(".laicai-test-workspace")
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let readme = url.appendingPathComponent("README.md")
+        if !FileManager.default.fileExists(atPath: readme.path) {
+            try? "# Test Workspace\nThis is a test workspace.".write(to: readme, atomically: true, encoding: .utf8)
+        }
+        return url.path
+    }()
+
     func makeTemporaryWorkspace() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -70,7 +82,7 @@ extension LaicaiNativeFoundationTestCase {
         modeLabel: String = "Build",
         tasks: [AgentTask] = [],
         selectedThreadID: UUID? = nil,
-        workspacePath: String = "/tmp",
+        workspacePath: String = LaicaiNativeFoundationTestCase.safeTestWorkspacePath,
         defaultConnectorName: String = "None",
         contextMode: ContextMode = .balanced,
         connectors: [ConnectorProfile] = [],
@@ -144,7 +156,7 @@ extension LaicaiNativeFoundationTestCase {
         modeLabel: String = "Build",
         tasks: [AgentTask] = [],
         selectedThreadID: UUID? = nil,
-        workspacePath: String = "/tmp",
+        workspacePath: String = LaicaiNativeFoundationTestCase.safeTestWorkspacePath,
         defaultConnectorName: String = "None",
         contextMode: ContextMode = .balanced,
         connectors: [ConnectorProfile] = [],

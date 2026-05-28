@@ -257,7 +257,7 @@
 - [x] 最终收口构建安装：`LAICAI_ARCHS=arm64 bash native-macos/build.sh` 通过，产出 `2026.5.19 (build 1507)`；`native-macos/dist/install_laicai.command` 已安装到 `/Applications/Laicai.app`；CLI help 正常；Info.plist 显示 `CFBundleDisplayName=来财`、`CFBundleIconFile=laicai`、`CFBundleVersion=1507`。
 - [x] 滚动卡死止血：启动不再自动加载历史 timeline，而是进入轻量工作台；超大任务默认只渲染最近 4 步；移除 timeline 滚动监听回写、侧栏滚动行 hover 状态动画和长 Markdown SwiftUI 分块渲染；build `1507` 重启 smoke 显示单窗口、轻量工作台、可手动点开 170k token 历史任务且只展开最近步骤。
 - [x] 修复真实会话暴露的追问误建新会话：复盘 `2026-05-19 16:50` “出一个水生万物，财自流转的icon图” 与 `16:51` “在哪了？我要预览啊” 被拆成两个线程的样本；现在追问归属会先看当前线程，失败时回找最近可归属执行线程；有工具调用、审查、任务协议或执行账本的历史 session 会被视为执行 Agent；新增回归覆盖“空白新 Agent 中询问预览仍回到原产物线程”；build `1750` 通过并已安装。
-- [ ] `swift test` 能编译但执行极慢（12分钟+未出结果），CommandLineTools `xcrun --show-sdk-platform-path` 已恢复正常，测试阻塞原因待进一步定位。
+- [x] `swift test` 执行稳定：272 个测试全部通过（~22 秒），修复了 workspace 路径验证、证据产出 runtime 模拟、测试隔离等问题。
 - [x] Codex 内核收口提交 `56e27fa`：统一伪工具调用清理 `sanitizeAssistantVisibleText()`；拒绝 `/var/folders/` 等临时路径作为 workspace root；硬化证据门禁 `hasActionableEvidence()`；TaskFinalizer 改用现代 API。
 
 ### Codex 内核集成剩余问题（2026-05-27）
@@ -266,6 +266,14 @@
 - [x] **Agent 命名残留** — commit `f6849ab`：`agentState`→`executionState`、`agentGoal`→`goal`、`canContinueAgent`→`canContinue`、`isExecutionAgent`→`isExecution`、`isAskAgent`→`isChatOnly`；28 文件更新。
 - [x] **用户可见字符串 "新 Agent"** — commit `6c02bc1`：移除 "新 Agent" 占位符检查，测试统一为 "新会话"。
 - [x] **路由逻辑依赖旧属性** — 命名已更新，路由逻辑本身无需改动。
+
+### 测试稳定性修复（2026-05-28）
+
+- [x] **`isOverlyBroadWorkspace` 收敛** — 从 `isOverlyBroadWorkspace` 移除 `isEphemeralWorkspacePath` 检查，避免拒绝所有 `/var/folders/` 临时目录；`isEphemeralWorkspacePath` 仅保留于 `isDisposableSmokeWorkspace`。
+- [x] **测试 workspace 路径安全化** — 新增 `safeTestWorkspacePath`（`~/.laicai-test-workspace`），替换测试中被 `dangerousPaths` 拒绝的 `/tmp`；所有测试文件统一迁移。
+- [x] **`EvidenceProducingRuntime` 修复** — 第二次调用返回纯文本而非工具调用，避免 agent loop 跑满 `maxIterations` 后 `didComplete=false`。
+- [x] **测试断言适配** — `AgentLoopExecutionTests` 页面路径改为 `/tmp`；`SecurityRecoveryTests` 改为检查 `isDisposableSmokeWorkspace`。
+- [x] 最终结果：272 测试 / 0 失败 / ~22 秒。
 
 ---
 

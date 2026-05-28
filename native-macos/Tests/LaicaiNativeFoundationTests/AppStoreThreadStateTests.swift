@@ -36,7 +36,7 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
             workflowRuns: [],
             draftMessage: "",
             isGenerating: false,
-            settings: .init(workspacePath: "/tmp", defaultConnectorName: "None", compactComposer: false, showDebugPanels: false),
+            settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None", compactComposer: false, showDebugPanels: false),
             tasks: [task],
             selectedTaskID: task.id
         ))
@@ -123,7 +123,7 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
             workflowRuns: [],
             draftMessage: "",
             isGenerating: false,
-            settings: .init(workspacePath: "/tmp", defaultConnectorName: "None", compactComposer: false, showDebugPanels: false)
+            settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None", compactComposer: false, showDebugPanels: false)
         ))
 
         store.deleteTurn(sessionID: session.id, turnID: second.id)

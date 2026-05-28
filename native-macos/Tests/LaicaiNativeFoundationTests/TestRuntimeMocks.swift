@@ -81,6 +81,28 @@ final class CapturingToolsRuntime: ChatRuntimeClient {
     }
 }
 
+/// Runtime that produces tool call evidence for tests requiring task completion.
+@MainActor
+final class EvidenceProducingRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        if requests.count == 1 {
+            return SendMessageResponse(
+                assistantText: "完成",
+                toolCalls: [
+                    FunctionCallResponse(
+                        id: "call_evidence_\(requests.count)",
+                        function: FunctionCallDetail(name: "file.read", arguments: #"{"path":"README.md"}"#)
+                    )
+                ]
+            )
+        }
+        return SendMessageResponse(assistantText: "已基于读取的文件完成任务。")
+    }
+}
+
 @MainActor
 final class InlineCommandJSONRuntime: ChatRuntimeClient {
     var requests: [SendMessageRequest] = []

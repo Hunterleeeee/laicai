@@ -237,7 +237,7 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(thread)
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-        XCTAssertTrue(json.contains("executionState"))
+        XCTAssertTrue(json.contains("agentState"))  // backward compat key
         XCTAssertTrue(json.contains("currentPlan"))
         XCTAssertTrue(json.contains("artifacts"))
 

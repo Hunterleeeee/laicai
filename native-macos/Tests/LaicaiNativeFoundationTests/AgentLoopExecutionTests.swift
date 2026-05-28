@@ -167,7 +167,7 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             originalRequest: "看下项目结构",
             goal: "看下项目结构",
             state: .completed,
-            pages: ["/var/folders/aa/bb/T/demo"]
+            pages: ["/tmp"]
         )
 
         XCTAssertFalse(AgentLoop.meetsCompletionCriteria(

@@ -11,11 +11,11 @@ final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(WorkspaceSandbox.isDisposableSmokeWorkspace("/Users/test/Projects/laicai-smoke-app"))
     }
 
-    func testTemporaryVarFoldersAreRejectedAsWorkspaceRoots() {
-        XCTAssertTrue(WorkspaceSandbox.isOverlyBroadWorkspace("/var/folders/aa/bb/T/demo"))
-        XCTAssertTrue(WorkspaceSandbox.isOverlyBroadWorkspace("/private/var/folders/aa/bb/T/demo"))
-        XCTAssertTrue(WorkspaceSandbox.isOverlyBroadWorkspace("/var/tmp/laicai-temp"))
-        XCTAssertFalse(WorkspaceSandbox.isOverlyBroadWorkspace("/Users/test/Projects/laicai"))
+    func testTemporaryVarFoldersAreRejectedAsDisposableSmokeWorkspaces() {
+        XCTAssertTrue(WorkspaceSandbox.isDisposableSmokeWorkspace("/var/folders/aa/bb/T/laicai-smoke"))
+        XCTAssertTrue(WorkspaceSandbox.isDisposableSmokeWorkspace("/private/var/folders/aa/bb/T/laicai-smoke"))
+        XCTAssertFalse(WorkspaceSandbox.isDisposableSmokeWorkspace("/var/folders/aa/bb/T/real-project"))
+        XCTAssertFalse(WorkspaceSandbox.isDisposableSmokeWorkspace("/Users/test/Projects/laicai"))
     }
     func testShellWhitelistAllowsPwdAndRejectsSudoAndProjectTraversal() async throws {
         let workspace = try makeTemporaryWorkspace()

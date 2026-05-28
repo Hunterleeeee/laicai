@@ -55,7 +55,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
             ),
@@ -103,7 +103,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
             ),
@@ -155,7 +155,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                     workflowRuns: [],
                     draftMessage: "",
                     isGenerating: false,
-                    settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                    settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
                     tasks: [task],
                     selectedTaskID: task.id
                 ),
@@ -205,7 +205,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
             ),
@@ -252,7 +252,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: nil
             ),
@@ -301,7 +301,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
             ),
@@ -347,7 +347,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
             ),

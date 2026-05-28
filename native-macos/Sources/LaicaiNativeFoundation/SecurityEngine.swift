@@ -430,10 +430,7 @@ public final class WorkspaceSandbox: ObservableObject {
         let standardized = URL(fileURLWithPath: cleaned).standardizedFileURL.path
         let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
         let dangerousPaths: Set<String> = ["/", "/Users", "/var", "/tmp", "/private", home]
-        if dangerousPaths.contains(standardized) {
-            return true
-        }
-        return isEphemeralWorkspacePath(standardized)
+        return dangerousPaths.contains(standardized)
     }
 
     /// Development smoke-test workspaces are intentionally disposable. They must

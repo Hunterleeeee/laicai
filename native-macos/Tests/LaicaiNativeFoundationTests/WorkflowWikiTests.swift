@@ -18,7 +18,7 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
             workflowRuns: [],
             draftMessage: "",
             isGenerating: false,
-            settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+            settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
         ))
 
         store.startWorkflow(named: "code-review")

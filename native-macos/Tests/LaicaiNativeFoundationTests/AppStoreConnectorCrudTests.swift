@@ -27,7 +27,7 @@ final class AppStoreConnectorCrudTests: LaicaiNativeFoundationTestCase {
             workflowRuns: [],
             draftMessage: "",
             isGenerating: false,
-            settings: .init(workspacePath: "/tmp", defaultConnectorName: "None", compactComposer: false, showDebugPanels: false)
+            settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None", compactComposer: false, showDebugPanels: false)
         ))
 
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .ready)

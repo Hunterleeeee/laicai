@@ -77,7 +77,7 @@ final class AppStoreConnectorLearningTests: LaicaiNativeFoundationTestCase {
     }
     func testTaskSuccessLearnsToolCallingSupportForAutomaticMode() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "", health: .ready)
-        let runtime = CapturingToolsRuntime()
+        let runtime = EvidenceProducingRuntime()
         let store = AppStore(
             state: testState(connectors: [connector], activeConnectorID: connector.id),
             environment: AppEnvironment(

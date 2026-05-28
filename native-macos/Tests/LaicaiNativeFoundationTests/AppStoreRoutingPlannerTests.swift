@@ -127,7 +127,7 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
     }
     func testExplicitAnalysisRouteUsesReadOnlyToolSet() throws {
         let settings = AppSettings(
-            workspacePath: "/tmp",
+            workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath,
             defaultConnectorName: "Test",
             compactComposer: false,
             showDebugPanels: false

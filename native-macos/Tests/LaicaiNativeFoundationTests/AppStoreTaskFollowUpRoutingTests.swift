@@ -25,7 +25,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             state: testState(
                 threads: [placeholder, original],
                 selectedThreadID: placeholder.id,
-                workspacePath: "/tmp",
+                workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath,
                 connectors: [connector],
                 activeConnectorID: connector.id
             ),
@@ -93,7 +93,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -159,7 +159,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -225,7 +225,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -288,7 +288,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,

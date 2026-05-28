@@ -6,7 +6,7 @@ import XCTest
 final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
     func testCompletedAgentTaskKeepsSelectedThreadAndContinuesInPlace() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
-        let runtime = CapturingToolsRuntime()
+        let runtime = EvidenceProducingRuntime()
         let store = AppStore(
             state: .init(
                 workspaceName: "Test",
@@ -20,7 +20,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -75,7 +75,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -142,7 +142,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -201,7 +201,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             workflowRuns: [],
             draftMessage: "",
             isGenerating: false,
-            settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+            settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
         ))
 
         store.retryLastMessage()
@@ -271,7 +271,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -324,7 +324,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: "/tmp", defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -415,7 +415,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             state: testState(
                 threads: [thread],
                 selectedThreadID: thread.id,
-                workspacePath: "/tmp",
+                workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath,
                 connectors: [connector],
                 activeConnectorID: connector.id
             ),
