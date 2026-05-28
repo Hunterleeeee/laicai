@@ -978,6 +978,7 @@ struct IconButton: View {
 
 struct NewProjectSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
     @State private var projectName = ""
     @State private var selectedPath = ""
     @State private var createNew = false
@@ -1135,7 +1136,8 @@ struct NewProjectSheet: View {
             rootPath = selectedPath
         }
         guard !rootPath.isEmpty else { return }
-        let _ = ProjectManager.shared.createProject(name: projectName, rootPath: rootPath)
+        let project = ProjectManager.shared.createProject(name: projectName, rootPath: rootPath)
+        store.switchWorkspace(to: project.rootPath)
     }
 
     private func pickFolder(completion: @escaping (String) -> Void) {
