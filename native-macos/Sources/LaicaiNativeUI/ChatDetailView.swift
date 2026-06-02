@@ -14,12 +14,10 @@ struct ChatDetailView: View {
     @State private var gaugeTokens: Int = 0
     @State private var gaugePct: Double = 0
     @State private var gaugeLastThread: UUID?
-
-    private var predictedIntent: UserIntent {
-        let draft = store.state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !draft.isEmpty else { return .chat }
-        return IntentRouter.classify(draft)
-    }
+    @State private var localDraftMessage = ""
+    @State private var predictedIntent: UserIntent = .chat
+    @State private var draftSyncTask: Task<Void, Never>?
+    @State private var intentClassificationTask: Task<Void, Never>?
 
     private var intentModeLabel: (text: String, icon: String, color: Color) {
         switch predictedIntent {
@@ -37,7 +35,17 @@ struct ChatDetailView: View {
             composer
         }
         .background(SurfaceGrade.base)
-        .onAppear { PasteImageMonitor.install(store: store) }
+        .onAppear {
+            PasteImageMonitor.install(store: store)
+            syncLocalDraftFromStore(force: true)
+        }
+        .onDisappear {
+            draftSyncTask?.cancel()
+            intentClassificationTask?.cancel()
+        }
+        .onChange(of: store.state.draftMessage) {
+            syncLocalDraftFromStore(force: false)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .laicaiNewThread)) { _ in
             store.newThread()
             composerFocused = true
@@ -83,18 +91,14 @@ struct ChatDetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ComposerTextView(
                     text: Binding(
-                        get: { store.state.draftMessage },
+                        get: { localDraftMessage },
                         set: { newValue in
-                            store.updateDraft(newValue)
+                            updateLocalDraft(newValue)
                         }
                     ),
                     placeholder: composerPlaceholder,
                     onSend: {
-                        if store.state.isGenerating {
-                            store.submitFollowUp()
-                        } else {
-                            store.sendDraft()
-                        }
+                        submitLocalDraft()
                     },
                     onImagePaste: { data, mediaType in
                         let idx = store.state.draftImages.count + 1
@@ -121,7 +125,7 @@ struct ChatDetailView: View {
                     contextGauge
 
                     // Intent mode label
-                    if !store.state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if !localDraftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         let mode = intentModeLabel
                         HStack(spacing: 3) {
                             Image(systemName: mode.icon)
@@ -327,7 +331,7 @@ struct ChatDetailView: View {
             template = "请使用\(skill.tools.joined(separator: "、"))处理以下目标："
         }
         if !template.isEmpty {
-            store.updateDraft(template)
+            setLocalDraft(template, publishImmediately: true)
             composerFocused = true
         }
     }
@@ -451,8 +455,8 @@ struct ChatDetailView: View {
     }
 
     private var draftBudgetInput: String {
-        guard !store.state.draftAttachments.isEmpty else { return store.state.draftMessage }
-        return store.state.draftMessage + "\n" + store.state.draftAttachments.joined(separator: "\n")
+        guard !store.state.draftAttachments.isEmpty else { return localDraftMessage }
+        return localDraftMessage + "\n" + store.state.draftAttachments.joined(separator: "\n")
     }
 
     private func composerChip(icon: String, text: String, tone: ComposerChipTone = .neutral) -> some View {
@@ -534,11 +538,7 @@ struct ChatDetailView: View {
 
     private var sendButton: some View {
         Button {
-            if store.state.isGenerating {
-                store.submitFollowUp()
-            } else {
-                store.sendDraft()
-            }
+            submitLocalDraft()
         } label: {
             Group {
                 if store.state.isGenerating {
@@ -573,20 +573,19 @@ struct ChatDetailView: View {
     }
 
     private var canSend: Bool {
-        let hasText = !store.state.draftMessage
+        let hasText = !localDraftMessage
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .isEmpty
         return (hasText || !store.state.draftAttachments.isEmpty || !store.state.draftImages.isEmpty) && store.state.activeConnector != nil
     }
 
     private var hasPendingFollowUp: Bool {
-        let text = store.state.draftMessage
-        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !localDraftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var appendInstructionButton: some View {
         Button {
-            store.submitFollowUp()
+            submitLocalDraft()
         } label: {
             HStack(spacing: AppSpace.xs) {
                 Image(systemName: "plus.bubble.fill")
@@ -699,6 +698,73 @@ struct ChatDetailView: View {
 
     private var selectedContext: TaskContext? {
         store.state.selectedThread?.context
+    }
+
+    private func updateLocalDraft(_ value: String) {
+        guard localDraftMessage != value else { return }
+        localDraftMessage = value
+        scheduleDraftSync(value)
+        scheduleIntentClassification(value)
+    }
+
+    private func setLocalDraft(_ value: String, publishImmediately: Bool) {
+        localDraftMessage = value
+        scheduleIntentClassification(value)
+        if publishImmediately {
+            syncDraftImmediately()
+        } else {
+            scheduleDraftSync(value)
+        }
+    }
+
+    private func syncLocalDraftFromStore(force: Bool) {
+        let storeDraft = store.state.draftMessage
+        guard force || localDraftMessage != storeDraft else { return }
+        draftSyncTask?.cancel()
+        localDraftMessage = storeDraft
+        scheduleIntentClassification(storeDraft)
+    }
+
+    private func scheduleDraftSync(_ value: String) {
+        draftSyncTask?.cancel()
+        draftSyncTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(260))
+            guard !Task.isCancelled else { return }
+            if store.state.draftMessage != value {
+                store.updateDraft(value)
+            }
+        }
+    }
+
+    private func syncDraftImmediately() {
+        draftSyncTask?.cancel()
+        if store.state.draftMessage != localDraftMessage {
+            store.updateDraft(localDraftMessage)
+        }
+    }
+
+    private func scheduleIntentClassification(_ value: String) {
+        intentClassificationTask?.cancel()
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            predictedIntent = .chat
+            return
+        }
+        intentClassificationTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            predictedIntent = IntentRouter.classify(trimmed)
+        }
+    }
+
+    private func submitLocalDraft() {
+        syncDraftImmediately()
+        if store.state.isGenerating {
+            store.submitFollowUp()
+        } else {
+            store.sendDraft()
+        }
+        setLocalDraft(store.state.draftMessage, publishImmediately: false)
     }
 
 }
