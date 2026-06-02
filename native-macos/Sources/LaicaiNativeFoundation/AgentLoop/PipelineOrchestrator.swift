@@ -516,8 +516,10 @@ extension AgentLoop {
             }
         } while !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound > 0 && state.autoRound <= 1 && state.intent != .chat
 
-        // Fallback wiki build (uses instance method)
-        if !state.didComplete && !state.hadFailure && !state.wasTruncated && state.intent != .chat {
+        // Fallback wiki build (uses instance method). Run this even when the
+        // model produced final text, because Wiki persistence requires a real
+        // wiki_build(save=true) result rather than a recommendation.
+        if !state.hadFailure && !state.wasTruncated && state.intent != .chat {
             var taskContext = state.taskContext
             var task = state.task
             if let fallbackSaved = await runFallbackWikiBuildIfNeeded(

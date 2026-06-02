@@ -14,6 +14,9 @@ extension AgentLoop {
             return [:]
         }
         return dict.mapValues { value in
+            if let bool = value as? Bool {
+                return bool ? "true" : "false"
+            }
             if let str = value as? String {
                 return String(str.prefix(100))
             }
@@ -235,7 +238,7 @@ extension AgentLoop {
             return false
         }
         if expectsWikiOutput {
-            return hasFinalOutput && (hasSavedWiki || hasWrite) && !hasUnrecoveredFailure
+            return hasFinalOutput && hasSavedWiki && !hasUnrecoveredFailure
         }
         if hasUnrecoveredFailure && !isReadOnlyRun {
             return false
@@ -491,7 +494,6 @@ extension AgentLoop {
         expectsWikiOutput(message)
             && !isReadOnlyRun
             && !hasSavedWiki(in: task)
-            && !hasWritten
     }
 
     static func completionQualityIssues(
@@ -531,7 +533,7 @@ extension AgentLoop {
             let names = missingDeliverables.prefix(3).map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "、")
             issues.append("用户要求交付的目标文件尚未生成：\(names)")
         }
-        if expectsWiki && !hasSavedWiki(in: task) && !hasWritten {
+        if expectsWiki && !hasSavedWiki(in: task) {
             issues.append("用户要求整理到 Wiki/知识库，但没有保存任何 Wiki 笔记")
         }
         return issues
@@ -634,8 +636,7 @@ extension AgentLoop {
         onStep: @MainActor (TaskStep) -> Void
     ) async -> Bool? {
         guard Self.expectsWikiOutput(message),
-              !Self.hasSavedWiki(in: task),
-              !Self.hasSuccessfulWrite(in: task) else {
+              !Self.hasSavedWiki(in: task) else {
             return nil
         }
 
@@ -686,7 +687,7 @@ extension AgentLoop {
         task.steps.append(gateStep)
         onStep(gateStep)
 
-        let topic = Self.fallbackWikiTopic(message: message, sourcePath: source.path)
+        let topic = Self.fallbackWikiTopic(message: message, source: source)
         guard let atomicResult = await executeFallbackWikiBuild(
             tool: wikiTool,
             topic: topic,
@@ -818,6 +819,22 @@ extension AgentLoop {
                 guard let content = taskContext.memory.fileContentCache[variant] ?? taskContext.memory.fileContentCache[path] else { continue }
                 let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { continue }
+                if path.hasPrefix("__thread_output_") {
+                    let title = inferredTitle(from: trimmed) ?? "当前会话输出"
+                    return FallbackWikiSource(
+                        path: "current-thread-output",
+                        title: title,
+                        text: trimmed
+                    )
+                }
+                if path.hasPrefix("web:") {
+                    let title = inferredTitle(from: trimmed) ?? "已读取网页"
+                    return FallbackWikiSource(
+                        path: String(path.dropFirst("web:".count)),
+                        title: title,
+                        text: trimmed
+                    )
+                }
                 return FallbackWikiSource(
                     path: variant,
                     title: URL(fileURLWithPath: variant).lastPathComponent,
@@ -828,8 +845,15 @@ extension AgentLoop {
         return nil
     }
 
-    private static func fallbackWikiTopic(message: String, sourcePath: String) -> String {
-        if let path = firstLocalPath(in: message) ?? (sourcePath.isEmpty ? nil : sourcePath) {
+    private static func fallbackWikiTopic(message: String, source: FallbackWikiSource) -> String {
+        if source.path == "current-thread-output",
+           let title = cleanFallbackTopic(source.title),
+           title != "当前会话输出" {
+            return title
+        }
+        let internalSourcePaths: Set<String> = ["current-thread-output"]
+        let sourcePath = source.path
+        if let path = firstLocalPath(in: message) ?? (sourcePath.isEmpty || internalSourcePaths.contains(sourcePath) ? nil : sourcePath) {
             let fileBase = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
                 .replacingOccurrences(of: #"[\s_-]?(20\d{2}|[01]?\d[0-3]?\d)$"#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -838,10 +862,62 @@ extension AgentLoop {
         let compact = message
             .components(separatedBy: .newlines)
             .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
+            .replacingOccurrences(of: "我觉得你的这个输出，需要", with: "")
+            .replacingOccurrences(of: "这个输出", with: "")
+            .replacingOccurrences(of: "当前输出", with: "")
             .replacingOccurrences(of: "整理到", with: "")
+            .replacingOccurrences(of: "沉淀到", with: "")
+            .replacingOccurrences(of: "沉淀", with: "")
+            .replacingOccurrences(of: "保存到", with: "")
+            .replacingOccurrences(of: "写进", with: "")
+            .replacingOccurrences(of: "写入", with: "")
             .replacingOccurrences(of: "wiki", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "知识库", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return compact?.isEmpty == false ? String(compact!.prefix(80)) : "整理资料"
+        if let compact, let topic = cleanFallbackTopic(compact) {
+            return topic
+        }
+        if let sourceTitle = cleanFallbackTopic(source.title) {
+            return sourceTitle
+        }
+        return "整理资料"
+    }
+
+    private static func inferredTitle(from text: String) -> String? {
+        let lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        for line in lines.prefix(20) {
+            let stripped = line
+                .replacingOccurrences(of: #"^#+\s*"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: #"^\*\*(.+)\*\*$"#, with: "$1", options: .regularExpression)
+                .trimmingCharacters(in: CharacterSet(charactersIn: " -:：`*"))
+            guard stripped.count >= 4,
+                  stripped.count <= 80,
+                  !stripped.contains("```"),
+                  !stripped.hasPrefix("|"),
+                  !stripped.hasPrefix(">") else {
+                continue
+            }
+            if stripped.contains("标题") || stripped.contains("清单") || stripped.contains("总结") || stripped.contains("方案") || stripped.contains("要点") {
+                return stripped
+            }
+            if line.hasPrefix("#") {
+                return stripped
+            }
+        }
+        return nil
+    }
+
+    private static func cleanFallbackTopic(_ raw: String) -> String? {
+        let cleaned = raw
+            .replacingOccurrences(of: "标题可以叫", with: "")
+            .replacingOccurrences(of: "标题", with: "")
+            .replacingOccurrences(of: "#", with: "")
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: " -:：`*")))
+        guard !cleaned.isEmpty else { return nil }
+        return String(cleaned.prefix(80))
     }
 
     static func autoExtractUnsupportedRead(path: String, extractTool: any LaicaiTool, context: TaskContext) async -> ToolResult? {

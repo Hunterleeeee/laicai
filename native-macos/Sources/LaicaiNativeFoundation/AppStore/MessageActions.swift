@@ -42,12 +42,16 @@ extension AppStore {
            let thread = state.threads.first(where: { $0.id == tid }),
            (thread.isExecution || thread.steps.contains(where: { $0.kind == .toolCall })),
            Self.shouldRouteChatFollowUpIntoSelectedTask(message: effectiveMessage, task: AgentTask(thread: thread)) {
+            var expectedCapabilities = decision.expectedCapabilities + ["运行命令", "提出文件修改"]
+            if Self.isWikiPersistenceFollowUp(effectiveMessage) {
+                expectedCapabilities.append("写入知识库")
+            }
             decision = PlannerDecision(
                 intent: .task,
                 confidence: max(decision.confidence, 0.75),
                 reason: decision.reason + " [当前会话 已有工具调用历史，自动切换为执行姿态]",
                 routeLabel: "会话 执行",
-                expectedCapabilities: decision.expectedCapabilities + ["运行命令", "提出文件修改"]
+                expectedCapabilities: Array(Set(expectedCapabilities))
             )
         }
 

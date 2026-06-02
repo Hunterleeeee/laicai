@@ -21,13 +21,9 @@ final class AgentLoopWikiSkillTests: LaicaiNativeFoundationTestCase {
             context: TaskContext(workspaceRoot: workspace.path, vaultRoot: workspace.path)
         )
 
-        // With effectiveMaxIterations minimum of 4 and wiki save nudge budget
-        // constrained (iteration < effectiveMaxIterations - 1), the fallback
-        // wiki build no longer fires — the task fails when the model cannot
-        // produce wiki.build within the iteration budget.
-        XCTAssertEqual(task.status, .failed)
-        XCTAssertFalse(task.steps.contains { $0.kind == .toolCall && $0.toolName == "wiki.build" })
-        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("02 Atomic/notes.md").path))
+        XCTAssertEqual(task.status, .completed)
+        XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "wiki.build" })
+        XCTAssertTrue(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("02 Atomic/notes.md").path))
     }
     func testAgentLoopDoesNotCompleteWikiTaskWithoutSavedWikiInReadOnlyMode() {
         let task = AgentTask(

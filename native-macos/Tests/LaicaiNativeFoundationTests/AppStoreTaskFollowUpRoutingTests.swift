@@ -4,6 +4,49 @@ import XCTest
 
 @MainActor
 final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
+    func testWikiPersistenceFollowUpFallsBackWhenModelOnlySuggestsWiki() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let connector = makeConnector()
+        let original = Thread(
+            title: "https://mp.weixin.qq.com/s/JKfkg",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA 阅读并理解，整理"),
+                TaskStep(kind: .toolCall, text: "正在读取网页：https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA", toolName: "web.fetch", toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
+                TaskStep(kind: .toolResult, text: "已读取网页：mp.weixin.qq.com · 4188 字符", toolName: "web.fetch", toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
+                TaskStep(kind: .textOutput, text: "## Vibe Coding 产品上线安全检查清单\n\n- 供应链安全\n- 权限边界\n- 上线前验证")
+            ],
+            connectorID: connector.id,
+            updatedAt: .now.addingTimeInterval(-30),
+            goal: "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA 阅读并理解，整理"
+        )
+        let runtime = WikiPlanOnlyRuntime()
+        let store = AppStore(
+            state: testState(
+                threads: [original],
+                selectedThreadID: original.id,
+                workspacePath: workspace.path,
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+
+        store.updateDraft("我觉得你的这个输出，需要沉淀到wiki")
+        store.sendDraft()
+        try await waitUntilIdle(store)
+
+        let selected = try XCTUnwrap(store.state.selectedThread)
+        let stepDump = selected.steps.map { "\($0.kind.rawValue):\($0.toolName ?? "-"):\($0.toolParams ?? [:]):\($0.text.prefix(80))" }.joined(separator: "\n")
+        XCTAssertEqual(selected.id, original.id)
+        XCTAssertTrue(runtime.requests.first?.tools?.contains { ToolNameCodec.canonicalName($0.function.name) == "wiki.build" } == true)
+        XCTAssertTrue(selected.steps.contains { $0.kind == .toolCall && $0.toolName == "wiki.build" && $0.toolParams?["save"] == "true" }, stepDump)
+        XCTAssertTrue(selected.steps.contains { $0.kind == .toolResult && $0.toolName == "wiki.build" && !$0.isFailure }, stepDump)
+        XCTAssertFalse(selected.steps.contains { $0.toolName == "wiki.build" && ($0.toolParams?["topic"] ?? "").contains("__thread_output") })
+        XCTAssertTrue(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("02 Atomic/Vibe Coding 产品上线安全检查清单.md").path))
+    }
+
     func testWikiPersistenceFollowUpContinuesSelectedWebThreadAndSavesWiki() async throws {
         let workspace = try makeTemporaryWorkspace()
         let connector = makeConnector()

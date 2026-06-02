@@ -108,6 +108,27 @@ final class WikiBuildWhenAvailableRuntime: ChatRuntimeClient {
     }
 }
 
+@MainActor
+final class WikiPlanOnlyRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        return SendMessageResponse(
+            assistantText: """
+            同意，建议沉淀成一篇 Wiki，定位为：
+
+            ```text
+            docs/wiki/vibe-coding-security-checklist.md
+            ```
+
+            标题可以叫：
+            # Vibe Coding 产品上线安全检查清单
+            """
+        )
+    }
+}
+
 /// Runtime that produces tool call evidence for tests requiring task completion.
 @MainActor
 final class EvidenceProducingRuntime: ChatRuntimeClient {
