@@ -286,7 +286,8 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertEqual(runtime.requests.first?.tools?.isEmpty ?? true, true)
+        // Chat mode now provides read-only tools instead of nil
+        XCTAssertFalse(runtime.requests.first?.tools?.isEmpty ?? true)
         // With unified routing, the message flow changed for frustrated messages
         // XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("证据优先修复模式") == true)
     }

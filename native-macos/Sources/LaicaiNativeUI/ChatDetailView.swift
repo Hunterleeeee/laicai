@@ -15,6 +15,21 @@ struct ChatDetailView: View {
     @State private var gaugePct: Double = 0
     @State private var gaugeLastThread: UUID?
 
+    private var predictedIntent: UserIntent {
+        let draft = store.state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else { return .chat }
+        return IntentRouter.classify(draft)
+    }
+
+    private var intentModeLabel: (text: String, icon: String, color: Color) {
+        switch predictedIntent {
+        case .chat: return ("问答", "bubble.left.and.bubble.right", .blue)
+        case .research: return ("研究", "magnifyingglass", .purple)
+        case .task: return ("执行", "hammer", .orange)
+        case .workflow: return ("工作流", "arrow.triangle.branch", .green)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             content
@@ -104,6 +119,23 @@ struct ChatDetailView: View {
                     attachFileButton
                     skillPickerMenu
                     contextGauge
+
+                    // Intent mode label
+                    if !store.state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let mode = intentModeLabel
+                        HStack(spacing: 3) {
+                            Image(systemName: mode.icon)
+                                .font(.system(size: 9, weight: .semibold))
+                            Text(mode.text)
+                                .font(.system(size: 10, weight: .medium))
+                        }
+                        .foregroundStyle(mode.color)
+                        .padding(.horizontal, 6)
+                        .frame(height: 24)
+                        .background(Capsule().fill(mode.color.opacity(0.10)))
+                        .overlay(Capsule().strokeBorder(mode.color.opacity(0.22), lineWidth: 0.6))
+                        .help("当前意图模式：\(mode.text)")
+                    }
 
                     Spacer(minLength: AppSpace.sm)
 

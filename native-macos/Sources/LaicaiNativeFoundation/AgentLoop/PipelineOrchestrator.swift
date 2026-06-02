@@ -25,7 +25,9 @@ extension AgentLoop {
         summaryCache: String? = nil,
         imageAttachments: [ImageAttachment] = [],
         onStep: @MainActor (TaskStep) -> Void = { _ in },
-        onStreamDelta: @Sendable @MainActor (String) -> Void = { _ in }
+        onStreamDelta: @Sendable @MainActor (String) -> Void = { _ in },
+        onReasoningDelta: @Sendable @MainActor (String) -> Void = { _ in },
+        onCheckInterrupt: @MainActor () -> String? = { nil }
     ) async throws -> AgentTask {
 
         // ════════════════════════════════════════
@@ -160,6 +162,34 @@ extension AgentLoop {
                     break
                 }
                 state.iteration += 1
+                let iterationStartTime = Date()
+
+                // Codex-style steer: check for injected user correction
+                if let steerMsg = pendingSteer {
+                    pendingSteer = nil
+                    let steerStep = TaskStep(
+                        kind: .userInput,
+                        text: "🔀 \(steerMsg)",
+                        isCollapsible: false,
+                        isCollapsed: false
+                    )
+                    state.task.steps.append(steerStep)
+                    onStep(steerStep)
+                    state.messages.append(ChatMessage(role: "user", content: "[方向修正] 用户在执行中插入了新指令，请立即调整方向：\n\(steerMsg)"))
+                }
+
+                // Check for user interrupt (pending follow-up injection)
+                if let interrupt = onCheckInterrupt() {
+                    let interruptStep = TaskStep(
+                        kind: .userInput,
+                        text: interrupt,
+                        isCollapsible: false,
+                        isCollapsed: false
+                    )
+                    state.task.steps.append(interruptStep)
+                    onStep(interruptStep)
+                    state.messages.append(ChatMessage(role: "user", content: interrupt))
+                }
 
                 // Prepare iteration: phase refresh, compression, progress
                 IterationEngine.prepareIteration(
@@ -210,7 +240,25 @@ extension AgentLoop {
 
                 let response: SendMessageResponse
                 do {
-                    response = try await runtime.sendMessageStream(request, onChunk: onStreamDelta)
+                    response = try await runtime.sendMessageStream(request, onChunk: onStreamDelta, onReasoningChunk: onReasoningDelta)
+
+                    // Record per-request token usage for analytics
+                    if let m = response.metrics {
+                        let projectName = ProjectManager.shared.activeProject?.name ?? ""
+                        UsageTracker.shared.record(
+                            modelName: config.modelName,
+                            connectorName: state.connector.name,
+                            projectName: projectName,
+                            threadID: state.task.id.uuidString,
+                            inputTokens: m.inputTokens ?? 0,
+                            outputTokens: m.outputTokens ?? 0,
+                            durationSeconds: m.totalDuration,
+                            tokensPerSecond: m.tokensPerSecond ?? 0,
+                            isStreaming: true,
+                            intent: state.intentString
+                        )
+                    }
+
                     // Merge speculative results
                     let specResult = await speculativeTask.value
                     for (path, content) in specResult.cachedFiles {
@@ -223,10 +271,18 @@ extension AgentLoop {
                         state.taskContext.memory.fileSummaries[path] = summary
                     }
                 } catch {
-                    let isTransient = Self.isTransientError(error)
-                    if isTransient,
-                       !state.didConnectorFailover,
-                       let fallback = Self.fallbackConnector(after: state.connector, allConnectors: state.allConnectors) {
+                    let recovery = Self.resolveErrorRecovery(
+                        error: error,
+                        currentConnector: state.connector,
+                        allConnectors: state.allConnectors,
+                        didConnectorFailover: state.didConnectorFailover,
+                        transientRetryCount: state.transientRetryCount,
+                        maxTransientRetries: state.maxTransientRetries,
+                        iteration: state.iteration,
+                        effectiveMaxIterations: state.effectiveMaxIterations
+                    )
+                    switch recovery {
+                    case .connectorFailover(let fallback):
                         state.didConnectorFailover = true
                         let failed = state.connector
                         state.connector = fallback
@@ -238,8 +294,7 @@ extension AgentLoop {
                         onStep(failoverStep)
                         state.messages.append(Self.connectorFailoverMessage(from: failed, to: fallback, reason: error.localizedDescription))
                         continue
-                    }
-                    if isTransient, state.transientRetryCount < state.maxTransientRetries, state.iteration < state.effectiveMaxIterations {
+                    case .transientRetry(let delaySec):
                         state.transientRetryCount += 1
                         let retryStep = TaskStep(
                             kind: .aiThinking,
@@ -251,20 +306,20 @@ extension AgentLoop {
                             state.task.steps.append(retryStep)
                             onStep(retryStep)
                         }
-                        let delaySec = min(Int(pow(2.0, Double(state.transientRetryCount))), 8)
                         try? await Task.sleep(for: .milliseconds(delaySec * 1000))
                         continue
+                    case .fatal:
+                        let errorStep = TaskStep(
+                            kind: .error,
+                            text: "模型请求失败：\(error.localizedDescription)",
+                            isFailure: true,
+                            recoverable: true
+                        )
+                        state.task.steps.append(errorStep)
+                        onStep(errorStep)
+                        state.task.status = .failed
+                        return state.task
                     }
-                    let errorStep = TaskStep(
-                        kind: .error,
-                        text: "模型请求失败：\(error.localizedDescription)",
-                        isFailure: true,
-                        recoverable: true
-                    )
-                    state.task.steps.append(errorStep)
-                    onStep(errorStep)
-                    state.task.status = .failed
-                    return state.task
                 }
 
                 // Tool compatibility fallback
@@ -348,6 +403,39 @@ extension AgentLoop {
                         state: &state,
                         config: config
                     )
+
+                    // Log iteration with tool calls
+                    let iterationDuration = Date().timeIntervalSince(iterationStartTime)
+                    let toolLogs = execResult.callSteps.enumerated().map { idx, callEntry in
+                        let result = idx < execResult.toolCallResults.count ? execResult.toolCallResults[idx].1 : nil
+                        return AgentIterationLog.ToolCallLog(
+                            toolName: callEntry.2,  // apiToolName is at index 2
+                            success: result?.success ?? false,
+                            durationSeconds: result?.data?["durationSeconds"].flatMap(Double.init) ?? 0,
+                            errorDetail: result?.error
+                        )
+                    }
+                    let tokenLog: AgentIterationLog.TokenUsageLog? = response.metrics.map { m in
+                        AgentIterationLog.TokenUsageLog(
+                            inputTokens: m.inputTokens ?? 0,
+                            outputTokens: m.outputTokens ?? 0,
+                            tokensPerSecond: m.tokensPerSecond ?? 0
+                        )
+                    }
+                    AgentLogger.shared.logIteration(AgentIterationLog(
+                        timestamp: iterationStartTime,
+                        taskID: state.task.id.uuidString,
+                        iteration: state.iteration,
+                        phase: state.currentPhase.rawValue,
+                        intent: state.intentString,
+                        connectorName: state.connector.name,
+                        toolCalls: toolLogs,
+                        tokenUsage: tokenLog,
+                        error: nil,
+                        durationSeconds: iterationDuration,
+                        messageCount: state.messages.count,
+                        stepCount: state.task.steps.count
+                    ))
                 } else {
                     // ── STAGE 3: Text response → Verify + Output ──
                     let action = await ResponseHandler.handle(
@@ -358,6 +446,31 @@ extension AgentLoop {
                         toolRegistry: toolRegistry,
                         onStep: onStep
                     )
+
+                    // Log iteration with text response
+                    let iterationDuration = Date().timeIntervalSince(iterationStartTime)
+                    let tokenLog: AgentIterationLog.TokenUsageLog? = response.metrics.map { m in
+                        AgentIterationLog.TokenUsageLog(
+                            inputTokens: m.inputTokens ?? 0,
+                            outputTokens: m.outputTokens ?? 0,
+                            tokensPerSecond: m.tokensPerSecond ?? 0
+                        )
+                    }
+                    AgentLogger.shared.logIteration(AgentIterationLog(
+                        timestamp: iterationStartTime,
+                        taskID: state.task.id.uuidString,
+                        iteration: state.iteration,
+                        phase: state.currentPhase.rawValue,
+                        intent: state.intentString,
+                        connectorName: state.connector.name,
+                        toolCalls: [],
+                        tokenUsage: tokenLog,
+                        error: nil,
+                        durationSeconds: iterationDuration,
+                        messageCount: state.messages.count,
+                        stepCount: state.task.steps.count
+                    ))
+
                     switch action {
                     case .continueLoop: continue
                     case .breakLoop: break
@@ -366,30 +479,55 @@ extension AgentLoop {
                 }
             }
 
-            // Auto-continuation
-            if !state.didComplete && !state.hadFailure && !state.wasTruncated && !Task.isCancelled && state.autoRound < state.maxAutoRounds && state.intent != .chat {
+            // Inner while exited — if auto-round already fired and still not done, mark failure
+            if !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound >= 1 {
+                state.hadFailure = true
+                state.didComplete = false
+                let maxIterStep = TaskStep(
+                    kind: .error,
+                    text: "已达到最大迭代次数（\(state.effectiveMaxIterations)），未能在限定步骤内完成。",
+                    isFailure: true,
+                    recoverable: true,
+                    retryAction: "继续处理"
+                )
+                state.task.steps.append(maxIterStep)
+                onStep(maxIterStep)
+            }
+
+            // Auto-continuation (max 1 round, with context compression)
+            if !state.didComplete && !state.hadFailure && !state.wasTruncated && !Task.isCancelled && state.autoRound < 1 && state.intent != .chat {
                 state.autoRound += 1
                 state.iteration = 0
+
+                // Compress context before continuing — keep system prompt + last 6 messages + progress summary
                 let progressSummary = Self.compactProgressSummary(task: state.task)
-                state.messages.append(ChatMessage(role: "system", content: "已完成第 \(state.autoRound) 段处理。以下是目前进展，请继续完成剩余工作，不要重复已成功的操作：\n\(progressSummary)"))
+                let systemMsgs = state.messages.filter { $0.role == "system" }
+                let recentMsgs = state.messages.suffix(6)
+                state.messages = Array(systemMsgs.prefix(2)) + Array(recentMsgs)
+                state.messages.append(ChatMessage(role: "system", content: "自动继续中（已压缩上下文）。\n当前进展：\n\(progressSummary)\n请继续完成剩余工作，不要重复已成功的操作。"))
+
                 state.consecutiveEmptyResponses = 0
                 state.transientRetryCount = 0
                 state.didInjectWorkingSet = false
-                let roundStep = TaskStep(kind: .aiThinking, text: "继续处理中…", isCollapsible: true, isCollapsed: true)
+                let roundStep = TaskStep(kind: .aiThinking, text: "自动继续处理中（第 1 轮）…", isCollapsible: true, isCollapsed: false)
                 state.task.steps.append(roundStep)
                 onStep(roundStep)
             }
-        } while !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound > 0 && state.autoRound <= state.maxAutoRounds && state.intent != .chat
+        } while !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound > 0 && state.autoRound <= 1 && state.intent != .chat
 
         // Fallback wiki build (uses instance method)
         if !state.didComplete && !state.hadFailure && !state.wasTruncated && state.intent != .chat {
+            var taskContext = state.taskContext
+            var task = state.task
             if let fallbackSaved = await runFallbackWikiBuildIfNeeded(
                 message: message,
-                taskContext: &state.taskContext,
-                task: &state.task,
+                taskContext: &taskContext,
+                task: &task,
                 emitMissingMaterialFailure: false,
                 onStep: onStep
             ) {
+                state.taskContext = taskContext
+                state.task = task
                 state.didComplete = fallbackSaved
                 state.hadFailure = !fallbackSaved
             }

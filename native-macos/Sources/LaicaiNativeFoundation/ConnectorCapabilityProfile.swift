@@ -106,7 +106,7 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
             ?? (supports: true, source: .automaticHeuristic)
         let learnedCapability = connector?.toolCallingCapability
         let model = connector?.modelName.lowercased() ?? ""
-        let contextLen = inferContextLength(model: model, isLocal: local)
+        let contextLen = connector?.probedContextWindow ?? inferContextLength(model: model, isLocal: local)
         let speed = inferSpeedTier(model: model, isLocal: local)
         let stability = inferStability(connector: connector, isLocal: local)
         let maxTokensPerTurn: Int

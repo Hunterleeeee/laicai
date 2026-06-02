@@ -322,7 +322,7 @@ extension AppStore {
         if isChatIntent {
             loopConfig.maxIterations = min(loopConfig.maxIterations, 3)
         }
-        let attemptedToolCalling = loopConfig.supportsToolCalling && !isChatIntent
+        let attemptedToolCalling = loopConfig.supportsToolCalling
 
         if !isChatIntent, let threadIdx = state.threads.firstIndex(where: { $0.id == targetTaskID }) {
             let intentStr: String = { switch intent { case .chat: return "chat"; case .research: return "research"; case .task: return "task"; case .workflow(let n): return "workflow:\(n)" } }()

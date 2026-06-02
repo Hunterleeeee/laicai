@@ -85,13 +85,16 @@ public struct SendMessageResponse: Sendable, Equatable {
 public struct ConnectorProbeResult: Sendable, Equatable {
     public var health: ConnectorHealth
     public var toolCallingCapability: ConnectorToolCallingCapability?
+    public var contextWindow: Int?
 
     public init(
         health: ConnectorHealth,
-        toolCallingCapability: ConnectorToolCallingCapability? = nil
+        toolCallingCapability: ConnectorToolCallingCapability? = nil,
+        contextWindow: Int? = nil
     ) {
         self.health = health
         self.toolCallingCapability = toolCallingCapability
+        self.contextWindow = contextWindow
     }
 }
 

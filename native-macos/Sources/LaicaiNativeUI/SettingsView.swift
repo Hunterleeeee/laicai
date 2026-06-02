@@ -270,7 +270,7 @@ private struct GeneralSettingsTab: View {
 private struct ConnectorsSettingsTab: View {
     @EnvironmentObject private var store: AppStore
     @State private var showingAddSheet = false
-    @State private var editingConnector: ConnectorProfile?
+    @State private var editingConnectorID: UUID?
     @State private var deletingConnector: ConnectorProfile?
 
     var body: some View {
@@ -325,10 +325,10 @@ private struct ConnectorsSettingsTab: View {
                         ForEach(store.state.connectors) { conn in
                             ConnectorSettingsRow(
                                 conn: conn,
-                                onEdit: { editingConnector = conn },
+                                onEdit: { editingConnectorID = conn.id },
                                 onDelete: { deletingConnector = conn }
                             )
-                                .onTapGesture { editingConnector = conn }
+                                .onTapGesture { editingConnectorID = conn.id }
                             Divider().padding(.leading, AppSpace.xxl)
                         }
                     }
@@ -346,14 +346,20 @@ private struct ConnectorsSettingsTab: View {
                 ToastCenter.shared.show("正在测试 \(conn.name)")
             }
         }
-        .sheet(item: $editingConnector) { conn in
-            ConnectorEditSheet(mode: .edit(conn)) { updated in
-                store.updateConnector(updated)
-                ToastCenter.shared.success("已更新 \(updated.name)")
-            } onSaveAndTest: { updated in
-                store.updateConnector(updated)
-                store.checkConnectorHealth(id: updated.id)
-                ToastCenter.shared.show("正在测试 \(updated.name)")
+        .sheet(isPresented: Binding(
+            get: { editingConnectorID != nil },
+            set: { if !$0 { editingConnectorID = nil } }
+        )) {
+            if let connID = editingConnectorID,
+               let conn = store.state.connectors.first(where: { $0.id == connID }) {
+                ConnectorEditSheet(mode: .edit(conn)) { updated in
+                    store.updateConnector(updated)
+                    ToastCenter.shared.success("已更新 \(updated.name)")
+                } onSaveAndTest: { updated in
+                    store.updateConnector(updated)
+                    store.checkConnectorHealth(id: updated.id)
+                    ToastCenter.shared.show("正在测试 \(updated.name)")
+                }
             }
         }
         .alert("删除连接器", isPresented: Binding(

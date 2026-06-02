@@ -447,7 +447,7 @@ struct BootstrapEngine {
             toolParams: toolParams,
             toolCallId: callId,
             isCollapsible: true,
-            isCollapsed: true
+            isCollapsed: false
         )
         state.task.steps.append(callStep)
         onStep(callStep)
@@ -474,7 +474,7 @@ struct BootstrapEngine {
             toolName: toolName,
             toolCallId: callId,
             isCollapsible: true,
-            isCollapsed: true,
+            isCollapsed: false,
             isFailure: !toolResult.success
         )
         state.task.steps.append(resultStep)

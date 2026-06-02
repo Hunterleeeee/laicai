@@ -75,7 +75,7 @@ struct ThreadTimelineView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: AppSpace.xl) {
                         if thread.isExecution, let executionStats {
-                            TaskSummaryCard(thread: thread, stats: executionStats)
+                            TaskSummaryCard(thread: thread, stats: executionStats, connectors: store.state.connectors)
                             if thread.status == .completed || thread.status == .failed {
                                 TaskCompletionSummaryCard(thread: thread)
                                 TaskRatingBar(threadID: thread.id, currentRating: store.state.threads.first(where: { $0.id == thread.id })?.userRating ?? 0)
@@ -1191,6 +1191,7 @@ private struct TaskStepStats {
 private struct TaskSummaryCard: View {
     let thread: Thread
     let stats: TaskStepStats
+    let connectors: [ConnectorProfile]
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpace.md) {
@@ -1213,6 +1214,16 @@ private struct TaskSummaryCard: View {
                     Text(summaryLine)
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.muted)
+
+                    // Intent & connector pills
+                    HStack(spacing: AppSpace.xs) {
+                        intentPill
+                        if let connectorName = resolvedConnectorName {
+                            connectorPill(connectorName)
+                        }
+                    }
+                    .padding(.top, 2)
+
                     if !stats.memoryPills.isEmpty {
                         HStack(spacing: AppSpace.xs) {
                             ForEach(stats.memoryPills.prefix(3), id: \.self) { pill in
@@ -1347,6 +1358,82 @@ private struct TaskSummaryCard: View {
     private func phaseTooltip(_ phase: TaskPhase, stepCount: Int, tools: [String]) -> String {
         if stepCount == 0 { return "\(phase.title)阶段：暂无步骤" }
         return "\(phase.title)阶段：\(stepCount) 步" + (tools.isEmpty ? "" : "（\(tools.joined(separator: "、"))）")
+    }
+
+    // MARK: - Intent & Connector Display
+
+    private enum IntentMode: String {
+        case chat = "问答"
+        case research = "研究"
+        case task = "执行"
+        case workflow = "工作流"
+
+        var icon: String {
+            switch self {
+            case .chat: return "bubble.left.and.bubble.right"
+            case .research: return "magnifyingglass"
+            case .task: return "hammer"
+            case .workflow: return "arrow.triangle.branch"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .chat: return .blue
+            case .research: return .purple
+            case .task: return .orange
+            case .workflow: return .green
+            }
+        }
+    }
+
+    private var inferredIntent: IntentMode {
+        if thread.workflowName != nil { return .workflow }
+        let hasToolCalls = thread.steps.contains { $0.kind == .toolCall }
+        let hasSearch = thread.steps.contains { $0.toolName == "web.search" || $0.toolName == "web_fetch" }
+        if hasSearch && !hasToolCalls { return .research }
+        return hasToolCalls ? .task : .chat
+    }
+
+    private var resolvedConnectorName: String? {
+        guard let connectorID = thread.connectorID else { return nil }
+        return connectors.first(where: { $0.id == connectorID })?.name
+    }
+
+    private var intentPill: some View {
+        let intent = inferredIntent
+        return HStack(spacing: 4) {
+            Image(systemName: intent.icon)
+                .font(.system(size: 9, weight: .semibold))
+            Text(intent.rawValue + "模式")
+                .font(AppFont.tiny)
+                .fontWeight(.medium)
+        }
+        .foregroundStyle(intent.color)
+        .padding(.horizontal, AppSpace.sm)
+        .padding(.vertical, 3)
+        .background(
+            Capsule()
+                .fill(intent.color.opacity(0.12))
+        )
+    }
+
+    private func connectorPill(_ name: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "cpu")
+                .font(.system(size: 9, weight: .semibold))
+            Text(name)
+                .font(AppFont.tiny)
+                .fontWeight(.medium)
+                .lineLimit(1)
+        }
+        .foregroundStyle(TextGrade.secondary)
+        .padding(.horizontal, AppSpace.sm)
+        .padding(.vertical, 3)
+        .background(
+            Capsule()
+                .fill(SurfaceGrade.sunken.opacity(0.72))
+        )
     }
 
     private var summaryLine: String {

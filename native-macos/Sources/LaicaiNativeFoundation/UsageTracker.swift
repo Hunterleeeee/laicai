@@ -97,7 +97,10 @@ public final class UsageTracker {
                 duration_seconds REAL NOT NULL DEFAULT 0,
                 tokens_per_second REAL NOT NULL DEFAULT 0,
                 is_streaming INTEGER NOT NULL DEFAULT 0,
-                intent TEXT NOT NULL DEFAULT ''
+                intent TEXT NOT NULL DEFAULT '',
+                phase TEXT NOT NULL DEFAULT '',
+                tool_call_count INTEGER NOT NULL DEFAULT 0,
+                error_count INTEGER NOT NULL DEFAULT 0
             );
             """, on: db)
             Self.exec("CREATE INDEX IF NOT EXISTS idx_usage_date ON usage_records(date_key);", on: db)
@@ -105,6 +108,11 @@ public final class UsageTracker {
             Self.exec("CREATE INDEX IF NOT EXISTS idx_usage_project ON usage_records(project_name);", on: db)
             Self.exec("CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_records(timestamp);", on: db)
             Self.exec("CREATE INDEX IF NOT EXISTS idx_usage_thread ON usage_records(thread_id);", on: db)
+
+            // Migration: add columns if they don't exist
+            Self.exec("ALTER TABLE usage_records ADD COLUMN phase TEXT NOT NULL DEFAULT '';", on: db)
+            Self.exec("ALTER TABLE usage_records ADD COLUMN tool_call_count INTEGER NOT NULL DEFAULT 0;", on: db)
+            Self.exec("ALTER TABLE usage_records ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0;", on: db)
         }
     }
 
@@ -120,7 +128,10 @@ public final class UsageTracker {
         durationSeconds: Double,
         tokensPerSecond: Double = 0,
         isStreaming: Bool = false,
-        intent: String = ""
+        intent: String = "",
+        phase: String = "",
+        toolCallCount: Int = 0,
+        errorCount: Int = 0
     ) {
         invalidateThreadUsageCache(threadID: threadID)
         withDatabaseAsync { db in
@@ -130,8 +141,8 @@ public final class UsageTracker {
             INSERT INTO usage_records (
                 timestamp, date_key, model_name, connector_name, project_name,
                 thread_id, input_tokens, output_tokens, duration_seconds,
-                tokens_per_second, is_streaming, intent
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                tokens_per_second, is_streaming, intent, phase, tool_call_count, error_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
@@ -147,6 +158,9 @@ public final class UsageTracker {
             sqlite3_bind_double(stmt, 10, tokensPerSecond)
             sqlite3_bind_int(stmt, 11, isStreaming ? 1 : 0)
             Self.bindText(stmt, 12, intent)
+            Self.bindText(stmt, 13, phase)
+            sqlite3_bind_int(stmt, 14, Int32(toolCallCount))
+            sqlite3_bind_int(stmt, 15, Int32(errorCount))
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
             self.invalidateThreadUsageCache(threadID: threadID)

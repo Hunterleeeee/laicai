@@ -1199,125 +1199,66 @@ public struct PromptComposer {
     public static func composeSystemPrompt(context: TaskContext, intent: UserIntent) -> String {
         var parts: [String] = []
 
-        parts.append("你是来财（Laicai），macOS 本机 AI 编排助手。\(currentDateString())。")
-        if intent != .chat {
-            parts.append("""
-            ##会话操作协议
-            目标只有一个：完成用户交给当前会话 的目标。不要无脑调用工具，也不要套固定工作流。
+        parts.append("你是来财（Laicai），macOS 本机 AI 助手。\(currentDateString())。")
 
-            ### Harness 与模型的分工
-            - Harness 层负责：暴露真实工具、执行文件/命令、维护工作区边界、记录证据、失败恢复提示、跨轮记忆和可用工具列表。
-            - 模型层负责：理解目标、拆解任务、设计临时工作流、选择工具/skill、根据结果修改工作流、判断何时收口。
-            - 你不能否认可用工具，也不能假装工具结果；以 Harness 返回的证据为准。
-
-            ### 动态工作流
-            1. 先判断交付物和完成标准：要改什么、生成什么、验证什么。
-            2. 把目标拆成 3-7 个可执行步骤，形成当前会话 的临时工作流。
-            3. 立即执行最小必要的第一步；已有证据足够时直接动手，不重复探索。
-            4. 每次工具返回后重新评估：继续、改步骤、换工具、扩大/缩小范围，或收口。
-            5. 失败不是结束：同参数不重试，换工具/参数/路径；连续失败才向用户说明阻塞。
-            6. 只有交付物真实存在、修改已落盘、验证符合完成标准，才能说完成。
-
-            ### Skill 与沉淀
-            - Skill 是可复用经验，不是当前目标的借口。先完成当前会话 的目标。
-            - 当你发现非平凡流程未来会复用，或用户要求“以后都这样做”，可用 skill.manage 创建/更新 skill。
-            - 创建 skill 只在当前目标已完成或不会打断当前会话 时进行；skill 内容要写清触发条件、步骤、工具、验证标准和失败换路。
-
-            ### 执行纪律
-            - 证据优先：没读过的文件不判断内容。只读工具可并行。
-            - 编辑：已有文件优先 file_edit；匹配失败再 file_read→file_write 全量。新文件 file_write。代码改后 verify_build。
-            - 不认识的概念/版本/新闻→web_search。有 URL→web_fetch。
-            - UI/页面/按钮/窗口任务必须留下页面检查证据：优先 browser/browser.real 的 extract/screenshot，必要时 computer 的 windows/screenshot。没有截图、页面内容或窗口证据不能收口。
-            - 危险操作（删除、重置、覆盖用户改动、sudo/系统安装、密钥、发布/强推）默认停止并说明风险，除非用户明确授权且 Harness 放行。
-            - 收口只说：做了什么、验证了什么、剩余风险。不输出内部工作流标签。
-            - 禁止声称完成未做操作。禁止编造文件内容。禁止输出 Plan/Execute/Verify 等框架。
-            - 记忆持久化用 memory(action="store")。整理知识库用 wiki_build。
-            """)
-            if let protocolGoal = context.metadata["taskProtocolGoal"] {
-                let risk = context.metadata["taskProtocolRisk"] ?? "act"
-                parts.append("""
-
-            ## 当前任务协议（Harness 已建立）
-            - taskGoal: \(protocolGoal)
-            - workspaceRoot: \(context.workspaceRoot.isEmpty ? "未指定" : context.workspaceRoot)
-            - riskPolicy: \(risk)
-            - completion: 必须满足真实证据、执行记录、验证或明确阻塞后才能收口。
-            """)
-            }
-        } else {
-            parts.append("直接回答问题。简洁、准确、不啰嗦。")
-        }
-
-        // Chat mode: minimal context for speed
         if intent == .chat {
+            parts.append("直接回答问题。简洁、准确、不啰嗦。")
             if let claudeMD = context.claudeMD {
                 parts.append("\n## 项目记忆\n\(claudeMD)")
             }
-            parts.append("\n##会话姿态\n当前为问答姿态。优先直接回答用户问题；如需读取文件或操作项目，可以使用工具，但不要主动发起复杂操作。")
             return parts.joined(separator: "\n")
         }
 
-        // Non-chat modes: context injection (keep concise to avoid prompt bloat)
+        // Non-chat: compact workflow protocol
+        parts.append("""
+        ## 核心原则
+        - 目标：完成用户交给的任务。根据当前证据决定下一步，不盲目调用工具，不套固定流程。
+        - 证据优先：没读过的文件不判断内容。以工具返回的结果为准。
+        - 失败恢复：同参数不重试，换工具/参数/路径。连续失败才向用户说明阻塞。
+        - 危险操作（删除、sudo、密钥、强推）默认停止并说明风险，除非用户明确授权。
+        - 收口只说：做了什么、验证了什么、剩余风险。
+        """)
 
+        if let protocolGoal = context.metadata["taskProtocolGoal"] {
+            parts.append("\n## 任务协议\n目标：\(protocolGoal)\n工作区：\(context.workspaceRoot.isEmpty ? "未指定" : context.workspaceRoot)")
+        }
+
+        // Context injection
         if let claudeMD = context.claudeMD {
             parts.append("\n## 项目记忆\n\(claudeMD)")
         }
-
-        // Inject structured project context (tech stack, conventions, active tasks)
         if let projectCtx = ProjectManager.buildProjectContext(projects: ProjectManager.cachedProjects, rootPath: context.workspaceRoot) {
             parts.append("\n## 项目概况\n\(projectCtx)")
         }
-
         if let branch = context.gitBranch {
-            parts.append("\n## 当前分支\n\(branch)")
+            parts.append("\n## 分支\n\(branch)")
         } else if !context.workspaceRoot.isEmpty {
             let isGit = FileManager.default.fileExists(atPath: (context.workspaceRoot as NSString).appendingPathComponent(".git"))
-            if !isGit {
-                parts.append("\n## ⚠️ 非 Git 工作区\n当前工作区不是 git 仓库，不要调用 git 工具。")
-            }
+            if !isGit { parts.append("\n## 非 Git 工作区\n不要调用 git 工具。") }
         }
-
         if let diff = context.gitDiff {
             parts.append("\n## 未提交变更\n\(diff)")
         }
-
         if let vaultRoot = context.vaultRoot, !vaultRoot.isEmpty {
-            parts.append("\n## Vault\n\(vaultRoot)\nwiki_build: mode=atomic 拆概念, mode=moc 做索引。save=true 自动双链。")
+            parts.append("\n## Vault\n\(vaultRoot)")
         }
-
         if !context.relevantFiles.isEmpty {
-            let fileList = context.relevantFiles.prefix(15).map { "- \($0.path) (\($0.language))" }.joined(separator: "\n")
-            parts.append("\n## 工作区文件\n\(fileList)")
+            let fileList = context.relevantFiles.prefix(10).map { "- \($0.path)" }.joined(separator: "\n")
+            parts.append("\n## 相关文件\n\(fileList)")
         }
 
-        if !context.memory.readFiles.isEmpty {
-            let cachedList = context.memory.readFiles.prefix(10).map { "- \($0)" + (context.memory.fileSummaries[$0].map { "：\($0)" } ?? "") }.joined(separator: "\n")
-            parts.append("\n## 已读文件\n\(cachedList)")
-        }
-
+        // Intent-specific mode
         switch intent {
-        case .chat:
-            break // handled above
+        case .chat: break
         case .research:
-            parts.append("""
-            ## 模式
-            研究模式。用户需要外部信息检索和整理：
-            1. 优先 web_search 获取真实来源
-            2. 对关键来源 web_fetch 读取详情
-            3. 基于来源整理结论
-            4. 不写文件不装软件，除非用户明确要求
-            """)
+            parts.append("\n## 研究模式\n优先 web_search 获取来源，web_fetch 读详情，基于来源整理结论。不写文件不装软件，除非用户要求。")
         case .task:
-            parts.append("""
-            ##会话执行姿态
-            根据用户目标生成当前会话 的临时工作流，边执行边调整。file_edit 改已有文件，file_write 新建文件。不自行 git commit。
-            PM 文档类需求用 pm_agent(skill=xxx, topic=xxx) 工具。
-            """)
+            parts.append("\n## 执行模式\nfile_edit 改已有文件，file_write 新建文件。代码改后 verify_build 验证。")
             if let verifyCmd = ValidationEngine.suggestVerificationCommand(workspaceRoot: context.workspaceRoot) {
                 parts.append("验证命令：`\(verifyCmd)`")
             }
         case .workflow(let name):
-            parts.append("\n## 模式\n工作流模式：\(name)。这是初始流程，不是死流程；如果工具结果证明需要调整，先调整再继续，最终仍以完成用户目标为准。")
+            parts.append("\n## 工作流模式\n\(name)。工具结果证明需要调整时先调整，最终以完成用户目标为准。")
         }
 
         return parts.joined(separator: "\n")

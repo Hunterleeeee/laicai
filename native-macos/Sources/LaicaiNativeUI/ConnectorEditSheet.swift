@@ -29,6 +29,7 @@ struct ConnectorEditSheet: View {
     @State private var endpoint = ""
     @State private var modelName = ""
     @State private var apiKey = ""
+    @State private var role: ConnectorRole? = nil
     @State private var toolCallingPolicy: ConnectorToolCallingPolicy = .automatic
 
     init(
@@ -45,6 +46,7 @@ struct ConnectorEditSheet: View {
             _endpoint = State(initialValue: c.endpoint)
             _modelName = State(initialValue: c.modelName)
             _apiKey = State(initialValue: c.note)
+            _role = State(initialValue: c.role)
             _toolCallingPolicy = State(initialValue: c.toolCallingPolicy ?? .automatic)
         }
     }
@@ -78,6 +80,8 @@ struct ConnectorEditSheet: View {
                     Picker("类型", selection: $kind) {
                         HStack { Image(systemName: "globe"); Text("OpenAI 兼容") }
                             .tag("openai-compatible")
+                        HStack { Image(systemName: "brain.head.profile"); Text("Anthropic") }
+                            .tag("anthropic")
                         HStack { Image(systemName: "laptopcomputer"); Text("Ollama 本地") }
                             .tag("ollama")
                     }
@@ -91,7 +95,7 @@ struct ConnectorEditSheet: View {
                 Section {
                     TextField("端点", text: $endpoint)
                         .textFieldStyle(.plain)
-                        .help(kind == "ollama" ? "http://127.0.0.1:11434 或完整 /api/chat" : "https://api.openai.com/v1")
+                        .help(endpointHelpText)
 
                     if !endpoint.trimmingCharacters(in: .whitespaces).isEmpty && !isEndpointValid {
                         Text("端点地址无效，请检查协议、主机和端口（端口需在 1-65535）。")
@@ -119,6 +123,31 @@ struct ConnectorEditSheet: View {
                 }
 
                 Section {
+                    HStack(spacing: 8) {
+                        ForEach(ConnectorRole.allCases, id: \.self) { r in
+                            Button {
+                                role = role == r ? nil : r
+                            } label: {
+                                Label(r.title, systemImage: r.icon)
+                                    .font(AppFont.captionMedium)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(role == r ? Color.accentColor.opacity(0.15) : Color.clear)
+                                    .cornerRadius(6)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    Text(roleHint)
+                        .font(AppFont.caption)
+                        .foregroundStyle(TextGrade.muted)
+                } header: {
+                    Text("路由角色")
+                        .font(AppFont.captionMedium)
+                        .foregroundStyle(TextGrade.muted)
+                }
+
+                Section {
                     Picker("工具调用", selection: $toolCallingPolicy) {
                         ForEach(ConnectorToolCallingPolicy.allCases) { policy in
                             Text(policy.title).tag(policy)
@@ -141,6 +170,8 @@ struct ConnectorEditSheet: View {
             .onChange(of: kind) { newKind in
                 if newKind == "ollama" && endpoint.trimmingCharacters(in: .whitespaces).isEmpty {
                     endpoint = "http://127.0.0.1:11434"
+                } else if newKind == "anthropic" && (endpoint.isEmpty || endpoint.contains("openai") || endpoint.contains("11434")) {
+                    endpoint = "https://api.anthropic.com"
                 }
             }
 
@@ -181,6 +212,14 @@ struct ConnectorEditSheet: View {
         .frame(width: 440)
     }
 
+    private var endpointHelpText: String {
+        switch kind {
+        case "ollama": return "http://127.0.0.1:11434 或完整 /api/chat"
+        case "anthropic": return "https://api.anthropic.com 或自定义代理地址"
+        default: return "https://api.openai.com/v1"
+        }
+    }
+
     private var isAdding: Bool {
         if case .add = mode { return true }
         return false
@@ -190,6 +229,17 @@ struct ConnectorEditSheet: View {
         return !name.trimmingCharacters(in: .whitespaces).isEmpty
             && isEndpointValid
             && !modelName.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var roleHint: String {
+        if let role {
+            switch role {
+            case .fast: return "探索、聊天、搜索等需要快速响应的场景优先使用此连接器。"
+            case .code: return "代码生成、文件编辑、重构等编码任务优先使用此连接器。"
+            case .strong: return "验证、审查、复杂推理等需要高质量输出的场景优先使用此连接器。"
+            }
+        }
+        return "未指定角色时，路由会根据模型名称自动推断（可留空）。"
     }
 
     private func makeConnector() -> ConnectorProfile {
@@ -208,6 +258,7 @@ struct ConnectorEditSheet: View {
                 endpoint: endpointValue,
                 modelName: modelName.trimmingCharacters(in: .whitespaces),
                 note: apiKey,
+                role: role,
                 toolCallingPolicy: policy,
                 health: .attention,
                 lastCheckedAt: lastCheckedAt ?? .now
@@ -220,6 +271,7 @@ struct ConnectorEditSheet: View {
                 endpoint: endpointValue,
                 modelName: modelName.trimmingCharacters(in: .whitespaces),
                 note: apiKey,
+                role: role,
                 toolCallingPolicy: policy,
                 toolCallingCapability: existing.toolCallingCapability,
                 toolCallingCapabilitySource: existing.toolCallingCapabilitySource,

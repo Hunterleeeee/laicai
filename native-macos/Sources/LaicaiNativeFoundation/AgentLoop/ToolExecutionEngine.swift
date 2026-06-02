@@ -361,14 +361,25 @@ struct ToolExecutionEngine {
                 let stepText = rawStepText.count > stepTextLimit
                     ? String(rawStepText.prefix(stepTextLimit)) + "\n\n… 共 \(rawStepText.count) 字，完整内容已发送给模型"
                     : rawStepText
+
+                // Add diagnostic hint for failed tools
+                let finalText: String
+                if !toolResult.success {
+                    let errorDetail = toolResult.error ?? toolResult.output.prefix(200).description
+                    let hint = diagnosticHintForFailure(toolName: toolName, error: errorDetail)
+                    finalText = hint.isEmpty ? stepText : "\(stepText)\n\n\(hint)"
+                } else {
+                    finalText = stepText
+                }
+
                 let resultStep = TaskStep(
                     kind: .toolResult,
-                    text: stepText,
+                    text: finalText,
                     toolName: toolName,
                     toolParams: resultParams,
                     toolCallId: callId,
                     isCollapsible: true,
-                    isCollapsed: !shouldShowFullOutput,
+                    isCollapsed: toolResult.success ? !shouldShowFullOutput : false,  // Always show failed results expanded
                     isFailure: !toolResult.success
                 )
                 state.task.steps.append(resultStep)
@@ -400,7 +411,7 @@ struct ToolExecutionEngine {
                 }
             }
 
-            // Circuit breaker tracking
+            // Circuit breaker tracking with diagnostic info
             if !toolResult.success {
                 hadFailure = true
                 let target = AgentLoop.circuitBreakerTarget(for: callStep)
@@ -408,21 +419,24 @@ struct ToolExecutionEngine {
                 state.toolFailureCounts[failKey, default: 0] += 1
                 let failCount = state.toolFailureCounts[failKey] ?? 1
 
+                // Build diagnostic info: what failed, why, what to try instead
+                let errorDetail = toolResult.error ?? toolResult.output.prefix(200).description
+                let diagnosticHint = diagnosticHintForFailure(toolName: toolName, error: errorDetail)
+
                 // file.edit is especially prone to failure — after 1st failure, strongly hint file.write
                 if toolName == "file.edit" && failCount == 1 {
-                    state.messages.append(ChatMessage(role: "system", content: "编排层：file.edit 对 \(URL(fileURLWithPath: target).lastPathComponent) 匹配失败。下次对该文件直接使用 file_write 全量写入（先 file_read 获取当前内容，在内容中做修改，然后 file_write 写回完整内容）。不要再尝试 file_edit。"))
+                    state.messages.append(ChatMessage(role: "system", content: "编排层：file.edit 对 \(URL(fileURLWithPath: target).lastPathComponent) 匹配失败（原因：\(errorDetail)）。下次对该文件直接使用 file_write 全量写入（先 file_read 获取当前内容，在内容中做修改，然后 file_write 写回完整内容）。不要再尝试 file_edit。"))
                 } else if isDeterministicUnsupportedFileFailure(toolName: toolName, result: toolResult) {
                     let alternatives = AgentLoop.suggestAlternatives(for: toolName, target: target)
                     state.circuitBrokenTools.insert("\(toolName):\(target.prefix(60))")
                     state.messages.append(ChatMessage(
                         role: "system",
-                        content: "⚠️ \(toolName) 对 \(target) 返回确定性失败：\(toolResult.error ?? toolResult.output)。不要再用同一工具和同一参数重试。\n替代方案：\(alternatives)\n如果会话目标要求交付文件，必须改用可执行脚本/系统工具真实生成目标文件；不能只写方案或声称完成。"
+                        content: "⚠️ \(toolName) 对 \(target) 返回确定性失败：\(errorDetail)\n\(diagnosticHint)\n替代方案：\(alternatives)\n不要再用同一工具和同一参数重试。"
                     ))
                 } else if failCount >= state.maxRepeatedFailures {
                     state.circuitBrokenTools.insert("\(toolName):\(target.prefix(60))")
                     let alternatives = AgentLoop.suggestAlternatives(for: toolName, target: target)
-                    let circuitMsg = "⚠️ \(toolName) 对 \(target) 已失败 \(failCount) 次，禁止再用相同参数重试。\n替代方案：\(alternatives)"
-                    state.messages.append(ChatMessage(role: "system", content: circuitMsg))
+                    state.messages.append(ChatMessage(role: "system", content: "⚠️ \(toolName) 对 \(target) 已失败 \(failCount) 次。\n最近失败原因：\(errorDetail)\n\(diagnosticHint)\n替代方案：\(alternatives)\n禁止再用相同参数重试。"))
                 }
             } else {
                 let target = AgentLoop.circuitBreakerTarget(for: callStep)
@@ -796,5 +810,47 @@ struct ToolExecutionEngine {
         guard ["file.read", "file.extract", "document.transform"].contains(toolName) else { return false }
         let code = result.error ?? ""
         return code == "unsupported_binary_file" || code == "unsupported_file_type"
+    }
+
+    /// Generate actionable diagnostic hint based on error type.
+    private static func diagnosticHintForFailure(toolName: String, error: String) -> String {
+        let lower = error.lowercased()
+        // Network errors
+        if lower.contains("timeout") || lower.contains("超时") {
+            return "诊断：请求超时。可能是网络不稳定或服务端响应慢。"
+        }
+        if lower.contains("connection") || lower.contains("连接") || lower.contains("cannot find host") {
+            return "诊断：连接失败。请检查网络连接和服务端地址是否正确。"
+        }
+        if lower.contains("429") || lower.contains("rate limit") || lower.contains("限流") {
+            return "诊断：触发限流。请稍后重试或降低请求频率。"
+        }
+        if lower.contains("401") || lower.contains("403") || lower.contains("unauthorized") || lower.contains("forbidden") {
+            return "诊断：认证失败。请检查 API Key 是否正确且未过期。"
+        }
+        if lower.contains("404") || lower.contains("not found") {
+            return "诊断：资源不存在。请检查路径或端点是否正确。"
+        }
+        if lower.contains("500") || lower.contains("502") || lower.contains("503") || lower.contains("server error") {
+            return "诊断：服务端错误。可能是服务暂时不可用，请稍后重试。"
+        }
+        // File errors
+        if lower.contains("no such file") || lower.contains("文件不存在") || lower.contains("not found") {
+            return "诊断：文件不存在。请先用 file_read 确认路径，或用 file_write 创建新文件。"
+        }
+        if lower.contains("permission") || lower.contains("权限") {
+            return "诊断：权限不足。请检查文件权限或工作区访问权限。"
+        }
+        if lower.contains("encoding") || lower.contains("编码") || lower.contains("utf") {
+            return "诊断：编码问题。文件可能包含非文本内容。"
+        }
+        if lower.contains("match") || lower.contains("匹配") {
+            return "诊断：内容匹配失败。请先 file_read 获取最新内容，再用新内容重试。"
+        }
+        // Tool-specific
+        if lower.contains("not allowed") || lower.contains("blocked") || lower.contains("禁止") {
+            return "诊断：工具被阻止。请检查执行级别设置。"
+        }
+        return ""
     }
 }

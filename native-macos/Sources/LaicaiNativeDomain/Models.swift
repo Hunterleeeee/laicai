@@ -2141,6 +2141,39 @@ public enum ConnectorToolCallingCapabilityObservationSource: String, Codable, Se
     }
 }
 
+/// Routing role for a connector — determines which task phases it is best suited for.
+/// nil means "general" (can handle anything, used as fallback).
+public enum ConnectorRole: String, Codable, Sendable, CaseIterable {
+    case fast = "fast"      // Quick responses: explore, chat, search
+    case code = "code"      // Code generation: execute, edit, refactor
+    case strong = "strong"  // Complex reasoning: verify, review, plan
+
+    public var title: String {
+        switch self {
+        case .fast: return "快速"
+        case .code: return "代码"
+        case .strong: return "强力"
+        }
+    }
+
+    public var icon: String {
+        switch self {
+        case .fast: return "bolt"
+        case .code: return "chevron.left.forwardslash.chevron.right"
+        case .strong: return "brain"
+        }
+    }
+
+    /// Which task phases this role is best at.
+    public var preferredPhases: Set<TaskPhase> {
+        switch self {
+        case .fast: return [.explore, .summarize]
+        case .code: return [.execute]
+        case .strong: return [.verify]
+        }
+    }
+}
+
 public struct ConnectorProfile: Identifiable, Equatable, Codable, Sendable {
     public let id: UUID
     public var name: String
@@ -2148,10 +2181,12 @@ public struct ConnectorProfile: Identifiable, Equatable, Codable, Sendable {
     public var endpoint: String
     public var modelName: String
     public var note: String
+    public var role: ConnectorRole?
     public var toolCallingPolicy: ConnectorToolCallingPolicy?
     public var toolCallingCapability: ConnectorToolCallingCapability?
     public var toolCallingCapabilitySource: ConnectorToolCallingCapabilityObservationSource?
     public var toolCallingCapabilityLearnedAt: Date?
+    public var probedContextWindow: Int?
     public var health: ConnectorHealth
     public var lastCheckedAt: Date
 
@@ -2162,10 +2197,12 @@ public struct ConnectorProfile: Identifiable, Equatable, Codable, Sendable {
         endpoint: String,
         modelName: String,
         note: String,
+        role: ConnectorRole? = nil,
         toolCallingPolicy: ConnectorToolCallingPolicy? = nil,
         toolCallingCapability: ConnectorToolCallingCapability? = nil,
         toolCallingCapabilitySource: ConnectorToolCallingCapabilityObservationSource? = nil,
         toolCallingCapabilityLearnedAt: Date? = nil,
+        probedContextWindow: Int? = nil,
         health: ConnectorHealth,
         lastCheckedAt: Date = .now
     ) {
@@ -2175,10 +2212,12 @@ public struct ConnectorProfile: Identifiable, Equatable, Codable, Sendable {
         self.endpoint = endpoint
         self.modelName = modelName
         self.note = note
+        self.role = role
         self.toolCallingPolicy = toolCallingPolicy
         self.toolCallingCapability = toolCallingCapability
         self.toolCallingCapabilitySource = toolCallingCapabilitySource
         self.toolCallingCapabilityLearnedAt = toolCallingCapabilityLearnedAt
+        self.probedContextWindow = probedContextWindow
         self.health = health
         self.lastCheckedAt = lastCheckedAt
     }

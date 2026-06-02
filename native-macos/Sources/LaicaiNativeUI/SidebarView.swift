@@ -327,7 +327,7 @@ struct SidebarView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $showingNewProjectSheet) {
-            NewProjectSheet()
+            NewProjectSheet().environmentObject(store)
         }
         .alert("删除项目", isPresented: Binding(
             get: { deletingProjectID != nil },
@@ -649,10 +649,10 @@ private struct SidebarHistorySections {
         var groupedProjects: [UUID: [ThreadRecord]] = [:]
 
         for item in items {
-            if recent.count < 8 {
-                recent.append(item)
-            } else if let projectID = item.projectID {
+            if let projectID = item.projectID {
                 groupedProjects[projectID, default: []].append(item)
+            } else if recent.count < 8 {
+                recent.append(item)
             } else {
                 olderOrphans.append(item)
             }
@@ -1138,6 +1138,7 @@ struct NewProjectSheet: View {
         guard !rootPath.isEmpty else { return }
         let project = ProjectManager.shared.createProject(name: projectName, rootPath: rootPath)
         store.switchWorkspace(to: project.rootPath)
+        store.newThreadInProject(project.id)
     }
 
     private func pickFolder(completion: @escaping (String) -> Void) {

@@ -100,7 +100,8 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertEqual(result.health, .ready)
         XCTAssertNil(result.toolCallingCapability)
-        XCTAssertEqual(requestMethods, ["GET"])
+        // contextWindowProbe also makes a GET request for OpenAI-compatible
+        XCTAssertEqual(requestMethods, ["GET", "GET"])
     }
     func testLiveChatRuntimePreservesEmptyAssistantContentForOrchestratorRecovery() async throws {
         let session = makeStubbedSession(

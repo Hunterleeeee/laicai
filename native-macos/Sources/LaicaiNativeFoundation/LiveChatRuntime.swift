@@ -213,6 +213,154 @@ public struct OllamaChatRequest: Codable, Sendable, Equatable {
     public var keep_alive: String?
 }
 
+// MARK: - Anthropic Messages API Types
+
+/// Anthropic Messages API request body.
+/// Key differences from OpenAI: `system` is a top-level field (not a message),
+/// `max_tokens` is required, and tool definitions use a different schema.
+private struct AnthropicMessagesRequest: Encodable {
+    var model: String
+    var max_tokens: Int
+    var system: String?
+    var messages: [AnthropicMessage]
+    var stream: Bool
+    var tools: [AnthropicTool]?
+    var temperature: Double?
+
+    struct AnthropicMessage: Encodable {
+        var role: String
+        var content: AnyEncodable
+    }
+
+    struct AnthropicTool: Encodable {
+        var name: String
+        var description: String
+        var input_schema: AnyEncodable
+    }
+}
+
+/// Encodable wrapper for pre-serialized JSON data (tool_use input).
+private struct RawJSON: Encodable {
+    let data: Data
+
+    func encode(to encoder: Encoder) throws {
+        // Forward the raw JSON bytes directly to the encoder
+        let decoder = JSONDecoder()
+        let container = try decoder.decode(RawJSONContainer.self, from: data)
+        try container.encode(to: encoder)
+    }
+}
+
+/// Helper for forwarding raw JSON through Encodable.
+private enum RawJSONContainer: Codable {
+    case dict([String: RawJSONContainer])
+    case array([RawJSONContainer])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let d = try? container.decode([String: RawJSONContainer].self) { self = .dict(d) }
+        else if let a = try? container.decode([RawJSONContainer].self) { self = .array(a) }
+        else if let s = try? container.decode(String.self) { self = .string(s) }
+        else if let n = try? container.decode(Double.self) { self = .number(n) }
+        else if let b = try? container.decode(Bool.self) { self = .bool(b) }
+        else { self = .null }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .dict(let d): try container.encode(d)
+        case .array(let a): try container.encode(a)
+        case .string(let s): try container.encode(s)
+        case .number(let n): try container.encode(n)
+        case .bool(let b): try container.encode(b)
+        case .null: try container.encodeNil()
+        }
+    }
+}
+
+/// Anthropic content block types for encoding.
+private enum AnthropicContentBlock: Encodable {
+    case text(String)
+    case toolUse(id: String, name: String, inputJSON: String)
+    case toolResult(toolUseId: String, content: String)
+    case image(url: String)
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let text):
+            try container.encode("text", forKey: .type)
+            try container.encode(text, forKey: .text)
+        case .toolUse(let id, let name, let inputJSON):
+            try container.encode("tool_use", forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(name, forKey: .name)
+            let data = inputJSON.data(using: .utf8) ?? Data("{}".utf8)
+            try container.encode(RawJSON(data: data), forKey: .input)
+        case .toolResult(let toolUseId, let content):
+            try container.encode("tool_result", forKey: .type)
+            try container.encode(toolUseId, forKey: .tool_use_id)
+            try container.encode(content, forKey: .content)
+        case .image(let url):
+            try container.encode("image", forKey: .type)
+            var source = container.nestedContainer(keyedBy: SourceKeys.self, forKey: .source)
+            try source.encode("url", forKey: .sourceType)
+            try source.encode(url, forKey: .url)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type, text, id, name, input, tool_use_id, content, source
+    }
+
+    private enum SourceKeys: String, CodingKey {
+        case sourceType = "type", url
+    }
+}
+
+/// Anthropic streaming event types.
+private struct AnthropicStreamEvent: Decodable {
+    var type: String
+    var index: Int?
+    var delta: Delta?
+    var message: AnthropicMessageResponse?
+    var content_block: ContentBlock?
+    var usage: AnthropicUsage?
+
+    struct Delta: Decodable {
+        var type: String?
+        var text: String?
+        var thinking: String?
+        var partial_json: String?
+        var stop_reason: String?
+    }
+
+    struct ContentBlock: Decodable {
+        var type: String
+        var id: String?
+        var name: String?
+        var text: String?
+        var thinking: String?
+    }
+
+    struct AnthropicMessageResponse: Decodable {
+        var id: String?
+        var content: [ContentBlock]?
+        var usage: AnthropicUsage?
+        var stop_reason: String?
+    }
+
+    struct AnthropicUsage: Decodable {
+        var input_tokens: Int?
+        var output_tokens: Int?
+    }
+}
+
 private struct OllamaTagsResponse: Codable {
     struct Model: Codable {
         var name: String?
@@ -306,6 +454,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             imageAttachments: request.imageAttachments
         )
         let isOllamaNative = Self.isOllamaNativeURL(url)
+        let isAnthropic = Self.isAnthropicURL(url)
         let urlRequest = Self.buildURLRequest(
             url: url,
             body: Self.requestBody(
@@ -314,7 +463,8 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 stream: false,
                 tools: request.tools,
                 maxOutputTokens: request.maxOutputTokens,
-                isOllamaNative: isOllamaNative
+                isOllamaNative: isOllamaNative,
+                isAnthropic: isAnthropic
             ),
             apiKey: connector.note,
             isLocal: isOllamaNative
@@ -339,7 +489,39 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             let toolCalls: [FunctionCallResponse]
             let finishReason: String?
             let metrics: ResponseMetrics
-            if isOllamaNative,
+            if isAnthropic {
+                let decoded = try JSONDecoder().decode(AnthropicStreamEvent.AnthropicMessageResponse.self, from: data)
+                var contentText = ""
+                var thinkingText = ""
+                var parsedToolCalls: [FunctionCallResponse] = []
+                for block in decoded.content ?? [] {
+                    if block.type == "text", let t = block.text {
+                        contentText += t
+                    } else if block.type == "thinking", let t = block.thinking {
+                        thinkingText += t
+                    } else if block.type == "tool_use", let id = block.id, let name = block.name {
+                        // tool_use input is a JSON object in the response
+                        let argsJSON = "{}"
+                        parsedToolCalls.append(FunctionCallResponse(
+                            id: id, type: "function",
+                            function: FunctionCallDetail(name: name, arguments: argsJSON)
+                        ))
+                    }
+                }
+                reasoningContent = thinkingText.isEmpty ? nil : thinkingText
+                text = Self.finalAssistantText(fromVisible: contentText, reasoningContent: nil, fallbackForEmpty: false)
+                toolCalls = parsedToolCalls
+                finishReason = decoded.stop_reason
+                let inputTokens = decoded.usage?.input_tokens
+                let outputTokens = decoded.usage?.output_tokens
+                metrics = ResponseMetrics(
+                    thinkingDuration: 0,
+                    totalDuration: max(0.001, Date().timeIntervalSince(startedAt)),
+                    inputTokens: inputTokens,
+                    outputTokens: outputTokens,
+                    tokensPerSecond: 0
+                )
+            } else if isOllamaNative,
                let ollama = try? JSONDecoder().decode(OllamaChatChunk.self, from: data) {
                 reasoningContent = ollama.message?.thinking
                 text = Self.finalAssistantText(
@@ -418,6 +600,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             imageAttachments: request.imageAttachments
         )
         let isOllamaNative = Self.isOllamaNativeURL(url)
+        let isAnthropic = Self.isAnthropicURL(url)
         let urlRequest = Self.buildURLRequest(
             url: url,
             body: Self.requestBody(
@@ -426,7 +609,8 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 stream: true,
                 tools: request.tools,
                 maxOutputTokens: request.maxOutputTokens,
-                isOllamaNative: isOllamaNative
+                isOllamaNative: isOllamaNative,
+                isAnthropic: isAnthropic
             ),
             apiKey: connector.note,
             isLocal: isOllamaNative
@@ -469,9 +653,72 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         let chunkFlushThreshold = 240  // chars
         let chunkFlushInterval = 0.35 // seconds
 
+        // Anthropic: track tool_use block index for accumulation
+        var anthropicCurrentToolIndex: Int = 0
+
         do {
             for try await line in bytes.lines {
-                if isOllamaNative {
+                if isAnthropic {
+                    // Anthropic SSE: "event: <type>\ndata: <json>" format
+                    // We only care about data lines; event lines are informational
+                    guard line.hasPrefix("data: ") else { continue }
+                    let jsonStr = String(line.dropFirst(6))
+                    guard let data = jsonStr.data(using: .utf8) else { continue }
+                    guard let event = try? decoder.decode(AnthropicStreamEvent.self, from: data) else { continue }
+
+                    switch event.type {
+                    case "content_block_start":
+                        if event.content_block?.type == "tool_use" {
+                            let idx = event.index ?? anthropicCurrentToolIndex
+                            accumulatedToolCalls[idx] = AccumulatedToolCall(
+                                id: event.content_block?.id ?? "call_\(idx)",
+                                name: event.content_block?.name ?? "",
+                                arguments: ""
+                            )
+                            anthropicCurrentToolIndex = idx + 1
+                        }
+                    case "content_block_delta":
+                        if event.delta?.type == "text_delta", let text = event.delta?.text {
+                            rawText += text
+                            let nextVisible = rawText  // Anthropic doesn't use think tags
+                            if nextVisible.count > visibleText.count {
+                                let visibleDelta = String(nextVisible.dropFirst(visibleText.count))
+                                visibleText = nextVisible
+                                if firstVisibleAt == nil { firstVisibleAt = Date() }
+                                pendingDelta += visibleDelta
+                                let now = CFAbsoluteTimeGetCurrent()
+                                if pendingDelta.count >= chunkFlushThreshold || (now - lastChunkAt) >= chunkFlushInterval {
+                                    let batch = pendingDelta
+                                    pendingDelta = ""
+                                    lastChunkAt = now
+                                    await onChunk(batch)
+                                }
+                            }
+                        } else if event.delta?.type == "thinking_delta", let thinking = event.delta?.thinking {
+                            reasoningText += thinking
+                            reasoningCount += thinking.count
+                            if let onReasoningChunk { await onReasoningChunk(thinking) }
+                        } else if event.delta?.type == "input_json_delta", let partial = event.delta?.partial_json {
+                            // Accumulate tool call arguments
+                            let idx = (event.index ?? anthropicCurrentToolIndex) - 1
+                            if var acc = accumulatedToolCalls[idx] {
+                                acc.arguments += partial
+                                accumulatedToolCalls[idx] = acc
+                            }
+                        }
+                    case "message_delta":
+                        if let stopReason = event.delta?.stop_reason {
+                            finishReason = stopReason
+                        }
+                        if let u = event.usage {
+                            usage = TokenUsage(promptTokens: u.input_tokens, completionTokens: u.output_tokens, totalTokens: nil)
+                        }
+                    case "message_stop":
+                        break  // End of stream
+                    default:
+                        break
+                    }
+                } else if isOllamaNative {
                 // Ollama native NDJSON (no tool calling support in native format)
                     guard let data = line.data(using: .utf8) else { continue }
                     if let ollamaChunk = try? decoder.decode(OllamaChatChunk.self, from: data) {
@@ -625,6 +872,19 @@ public struct LiveChatRuntime: ChatRuntimeClient {
     ) async throws -> ConnectorProbeResult {
         let base = Self.serviceBaseEndpoint(from: Self.baseEndpoint(from: endpoint))
         let isOllama = Self.usesOllamaNativeProtocol(endpoint: endpoint, kind: kind)
+        let isAnthropic = Self.usesAnthropicProtocol(endpoint: endpoint, kind: kind)
+
+        // Anthropic: no model listing API; do a minimal messages request to verify key
+        if isAnthropic {
+            let health: ConnectorHealth = apiKey.isEmpty ? .attention : .ready
+            let ctx = await contextWindowProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
+            guard probeToolCalling, health == .ready else {
+                return ConnectorProbeResult(health: health, contextWindow: ctx)
+            }
+            let capability = try await toolCallingCapabilityProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
+            return ConnectorProbeResult(health: health, toolCallingCapability: capability, contextWindow: ctx)
+        }
+
         let urlString: String
         if isOllama {
             let ollamaBase = base.hasSuffix("/v1") ? String(base.dropLast(3)) : base
@@ -653,19 +913,21 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             guard (200...299).contains(statusCode) else {
                 return ConnectorProbeResult(health: .attention)
             }
+            // Probe context window in parallel (non-blocking, best-effort)
+            let ctxWindow = await contextWindowProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
             let health: ConnectorHealth
             if isOllama {
                 let requestedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !requestedModel.isEmpty else {
                     health = .ready
                     if !probeToolCalling {
-                        return ConnectorProbeResult(health: health)
+                        return ConnectorProbeResult(health: health, contextWindow: ctxWindow)
                     }
                     let capability = try await toolCallingCapabilityProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
-                    return ConnectorProbeResult(health: health, toolCallingCapability: capability)
+                    return ConnectorProbeResult(health: health, toolCallingCapability: capability, contextWindow: ctxWindow)
                 }
                 guard let tags = try? JSONDecoder().decode(OllamaTagsResponse.self, from: data) else {
-                    return ConnectorProbeResult(health: .attention)
+                    return ConnectorProbeResult(health: .attention, contextWindow: ctxWindow)
                 }
                 let exists = tags.models.contains {
                     $0.name == requestedModel || $0.model == requestedModel
@@ -676,10 +938,10 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 guard !requestedModel.isEmpty else {
                     health = .ready
                     if !probeToolCalling {
-                        return ConnectorProbeResult(health: health)
+                        return ConnectorProbeResult(health: health, contextWindow: ctxWindow)
                     }
                     let capability = try await toolCallingCapabilityProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
-                    return ConnectorProbeResult(health: health, toolCallingCapability: capability)
+                    return ConnectorProbeResult(health: health, toolCallingCapability: capability, contextWindow: ctxWindow)
                 }
                 if let models = try? JSONDecoder().decode(OpenAIModelsResponse.self, from: data), !models.data.isEmpty {
                     let exists = models.data.contains {
@@ -691,10 +953,10 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 }
             }
             guard probeToolCalling, health == .ready else {
-                return ConnectorProbeResult(health: health)
+                return ConnectorProbeResult(health: health, contextWindow: ctxWindow)
             }
             let capability = try await toolCallingCapabilityProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
-            return ConnectorProbeResult(health: health, toolCallingCapability: capability)
+            return ConnectorProbeResult(health: health, toolCallingCapability: capability, contextWindow: ctxWindow)
         } catch {
             return ConnectorProbeResult(health: .offline)
         }
@@ -716,6 +978,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         )
         let url = Self.buildURL(from: endpoint, kind: kind)
         let isOllamaNative = Self.isOllamaNativeURL(url)
+        let isAnthropic = Self.isAnthropicURL(url)
         let body: any Encodable
         if isOllamaNative {
             body = OllamaChatRequest(
@@ -726,6 +989,14 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 options: .init(num_predict: 1, num_ctx: Self.localContextWindow(for: connector)),
                 tools: Self.probeToolDefinitions,
                 keep_alive: "30s"
+            )
+        } else if isAnthropic {
+            body = Self.buildAnthropicRequest(
+                model: model,
+                messages: Self.probeMessages,
+                stream: false,
+                tools: Self.probeToolDefinitions,
+                maxTokens: 1
             )
         } else {
             body = ChatCompletionRequest(
@@ -765,6 +1036,91 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         }
     }
 
+    /// Probe the connector's context window by querying model info endpoints.
+    private func contextWindowProbe(
+        endpoint: String,
+        model: String,
+        apiKey: String,
+        kind: String
+    ) async -> Int? {
+        let base = Self.serviceBaseEndpoint(from: Self.baseEndpoint(from: endpoint))
+        let isOllama = Self.usesOllamaNativeProtocol(endpoint: endpoint, kind: kind)
+        let isAnthropic = Self.usesAnthropicProtocol(endpoint: endpoint, kind: kind)
+
+        if isOllama {
+            // Ollama: POST /api/show with model name returns details including context length
+            let ollamaBase = base.hasSuffix("/v1") ? String(base.dropLast(3)) : base
+            let cleanBase = ollamaBase.hasSuffix("/api") ? String(ollamaBase.dropLast(4)) : ollamaBase
+            let urlString = cleanBase + "/api/show"
+            guard let url = URL(string: urlString) else { return nil }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONEncoder().encode(["name": model])
+            request.timeoutInterval = 10
+            guard let (data, response) = try? await session.data(for: request),
+                  let statusCode = (response as? HTTPURLResponse)?.statusCode,
+                  (200...299).contains(statusCode),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let modelInfo = json["model_info"] as? [String: Any] else {
+                return nil
+            }
+            // Ollama reports context length as "general.context_length" key
+            for (key, value) in modelInfo {
+                if key.hasSuffix(".context_length"), let ctx = value as? Int {
+                    return ctx
+                }
+            }
+            // Fallback: check parameters for num_ctx
+            if let params = json["parameters"] as? String {
+                for line in params.split(separator: "\n") {
+                    let parts = line.split(separator: " ", maxSplits: 1)
+                    if parts.count == 2, parts[0] == "num_ctx", let ctx = Int(parts[1]) {
+                        return ctx
+                    }
+                }
+            }
+            return nil
+        }
+
+        if isAnthropic {
+            // Anthropic: no model info API; use known context windows
+            let m = model.lowercased()
+            if m.contains("claude-4") || m.contains("claude-3.7") { return 1_000_000 }
+            if m.contains("claude-3-5") || m.contains("claude-3.5") { return 200_000 }
+            if m.contains("claude-3") { return 200_000 }
+            return 200_000
+        }
+
+        // OpenAI-compatible: GET /models/{model_id} may include context_window
+        let apiBase = Self.openAICompatibleBase(from: base)
+        let urlString = apiBase + "/" + model
+        guard let url = URL(string: urlString) else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        request.timeoutInterval = 10
+        guard let (data, response) = try? await session.data(for: request),
+              let statusCode = (response as? HTTPURLResponse)?.statusCode,
+              (200...299).contains(statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        // Some providers return "context_window" or "max_context_length"
+        if let ctx = json["context_window"] as? Int { return ctx }
+        if let ctx = json["max_context_length"] as? Int { return ctx }
+        if let ctx = json["max_input_tokens"] as? Int { return ctx }
+        // Nested in "metadata" or "info"
+        if let meta = json["metadata"] as? [String: Any] {
+            if let ctx = meta["context_window"] as? Int { return ctx }
+            if let ctx = meta["max_context_length"] as? Int { return ctx }
+        }
+        return nil
+    }
+
     // MARK: - Helpers
 
     private struct AccumulatedToolCall {
@@ -792,6 +1148,15 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         }
 
         let path = normalizedPath(for: url)
+
+        // Anthropic Messages API: auto-append /v1/messages
+        if usesAnthropicProtocol(endpoint: cleaned, kind: kind) {
+            if path.isEmpty { return appendPath("v1/messages", to: cleaned) }
+            if path == "v1" || path.hasSuffix("/v1") { return appendPath("messages", to: cleaned) }
+            if path.hasSuffix("messages") { return cleaned }
+            // Custom path (e.g. /anthropic, /proxy): append /v1/messages
+            return appendPath("v1/messages", to: cleaned)
+        }
 
         // Ollama native: auto-append /api/chat. Explicit OpenAI-compatible
         // paths such as /v1 remain OpenAI-compatible even if an old profile was
@@ -837,6 +1202,12 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             let basePath = components.count > 2 ? "/" + components.dropLast(2).joined(separator: "/") : ""
             return rootEndpoint(from: url, path: basePath)
         }
+        if path.hasSuffix("messages") && !path.hasSuffix("chat/completions") {
+            // Anthropic: /v1/messages → strip to base
+            let components = path.split(separator: "/").map(String.init)
+            let basePath = components.count > 2 ? "/" + components.dropLast(2).joined(separator: "/") : ""
+            return rootEndpoint(from: url, path: basePath)
+        }
         return cleaned
     }
 
@@ -854,7 +1225,18 @@ public struct LiveChatRuntime: ChatRuntimeClient {
     }
 
     public static func normalizedConnectorKind(_ kind: String, endpoint: String) -> String {
-        usesOllamaNativeProtocol(endpoint: endpoint, kind: kind) ? "ollama" : "openai-compatible"
+        if usesAnthropicProtocol(endpoint: endpoint, kind: kind) { return "anthropic" }
+        return usesOllamaNativeProtocol(endpoint: endpoint, kind: kind) ? "ollama" : "openai-compatible"
+    }
+
+    /// Detect Anthropic Messages API endpoints.
+    public static func usesAnthropicProtocol(endpoint: String, kind: String) -> Bool {
+        let kindLower = normalizedKindValue(kind)
+        if kindLower == "anthropic" { return true }
+        let cleaned = baseEndpoint(from: endpoint)
+        guard let url = URL(string: cleaned) else { return false }
+        let host = url.host?.lowercased() ?? ""
+        return host.contains("anthropic")
     }
 
     public static func usesOllamaNativeProtocol(endpoint: String, kind: String) -> Bool {
@@ -865,6 +1247,9 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         let path = normalizedPath(for: url)
         let host = url.host?.lowercased() ?? ""
         let scheme = url.scheme?.lowercased() ?? ""
+
+        // Anthropic is never Ollama
+        if usesAnthropicProtocol(endpoint: cleaned, kind: kind) { return false }
 
         // Explicit paths beat the saved kind. This fixes profiles that were
         // accidentally saved as Ollama while pointing at /v1 OpenAI-compatible
@@ -1098,7 +1483,8 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         stream: Bool,
         tools: [ToolDefinition]?,
         maxOutputTokens: Int?,
-        isOllamaNative: Bool
+        isOllamaNative: Bool,
+        isAnthropic: Bool = false
     ) -> any Encodable {
         let outputCap = Self.outputTokenCap(for: connector, requested: maxOutputTokens)
         if isOllamaNative {
@@ -1112,12 +1498,97 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 keep_alive: "2m"
             )
         }
+        if isAnthropic {
+            return Self.buildAnthropicRequest(
+                model: connector.modelName,
+                messages: messages,
+                stream: stream,
+                tools: tools,
+                maxTokens: outputCap
+            )
+        }
         return ChatCompletionRequest(
             model: connector.modelName,
             messages: messages,
             max_tokens: outputCap,
             stream: stream,
             tools: tools
+        )
+    }
+
+    /// Build an Anthropic Messages API request from OpenAI-style messages.
+    /// Extracts system messages into the top-level `system` field and converts
+    /// tool definitions to Anthropic's `input_schema` format.
+    private static func buildAnthropicRequest(
+        model: String,
+        messages: [ChatMessage],
+        stream: Bool,
+        tools: [ToolDefinition]?,
+        maxTokens: Int
+    ) -> AnthropicMessagesRequest {
+        var systemParts: [String] = []
+        var anthropicMessages: [AnthropicMessagesRequest.AnthropicMessage] = []
+
+        for msg in messages {
+            if msg.role == "system" {
+                if let content = msg.effectiveContent {
+                    systemParts.append(content)
+                }
+            } else if msg.role == "assistant" {
+                // Anthropic assistant messages: text content or tool_use blocks
+                if let toolCalls = msg.toolCalls, !toolCalls.isEmpty {
+                    var blocks: [AnthropicContentBlock] = []
+                    if let content = msg.effectiveContent, !content.isEmpty {
+                        blocks.append(.text(content))
+                    }
+                    for tc in toolCalls {
+                        blocks.append(.toolUse(id: tc.id ?? "", name: tc.function.name, inputJSON: tc.function.arguments))
+                    }
+                    anthropicMessages.append(.init(role: "assistant", content: AnyEncodable(blocks)))
+                } else if let content = msg.effectiveContent {
+                    anthropicMessages.append(.init(role: "assistant", content: AnyEncodable(content)))
+                }
+            } else if msg.role == "tool" {
+                // Anthropic uses "user" role with tool_result content blocks
+                let resultContent = msg.effectiveContent ?? ""
+                let blocks: [AnthropicContentBlock] = [.toolResult(toolUseId: msg.toolCallId ?? "", content: resultContent)]
+                anthropicMessages.append(.init(role: "user", content: AnyEncodable(blocks)))
+            } else if msg.role == "user" {
+                if let contentParts = msg.contentParts, !contentParts.isEmpty {
+                    // Multimodal: convert to Anthropic content blocks
+                    var blocks: [AnthropicContentBlock] = []
+                    for part in contentParts {
+                        if part.type == "text", let text = part.text {
+                            blocks.append(.text(text))
+                        } else if part.type == "image_url", let imageURL = part.imageURL {
+                            blocks.append(.image(url: imageURL.url))
+                        }
+                    }
+                    anthropicMessages.append(.init(role: "user", content: AnyEncodable(blocks)))
+                } else if let content = msg.effectiveContent {
+                    anthropicMessages.append(.init(role: "user", content: AnyEncodable(content)))
+                }
+            }
+        }
+
+        // Convert tools to Anthropic format
+        let anthropicTools: [AnthropicMessagesRequest.AnthropicTool]? = tools?.map { tool in
+            AnthropicMessagesRequest.AnthropicTool(
+                name: tool.function.name,
+                description: tool.function.description,
+                input_schema: AnyEncodable(tool.function.parameters)
+            )
+        }
+
+        let systemText = systemParts.isEmpty ? nil : systemParts.joined(separator: "\n\n")
+
+        return AnthropicMessagesRequest(
+            model: model,
+            max_tokens: maxTokens,
+            system: systemText,
+            messages: anthropicMessages,
+            stream: stream,
+            tools: anthropicTools
         )
     }
 
@@ -1157,7 +1628,12 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !apiKey.isEmpty {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            if isAnthropicURL(url) {
+                request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+                request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            } else {
+                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            }
         }
         request.httpBody = try? JSONEncoder().encode(AnyEncodable(body))
         request.timeoutInterval = isLocal ? NetworkDefaults.localChat : NetworkDefaults.remoteChat
@@ -1166,6 +1642,10 @@ public struct LiveChatRuntime: ChatRuntimeClient {
 
     private static func isOllamaNativeURL(_ url: URL) -> Bool {
         url.path.hasSuffix("/api/chat")
+    }
+
+    private static func isAnthropicURL(_ url: URL) -> Bool {
+        url.path.hasSuffix("/messages") && !url.path.contains("/chat/completions")
     }
 
     private static func metrics(

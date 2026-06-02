@@ -243,19 +243,17 @@ extension AgentLoop {
 
         switch intent {
         case .chat:
+            // Chat: text output is sufficient
             return hasFinalOutput
         case .research:
+            // Research: text output + any evidence of research activity
             let hasSearch = task.steps.contains { $0.kind == .toolCall && $0.toolName == "web.search" }
             let hasFetch = task.steps.contains { $0.kind == .toolCall && $0.toolName == "web.fetch" }
-            let hasFetchedPage = task.executionLedger?.pages.isEmpty == false
-                || task.steps.contains { $0.kind == .toolResult && $0.toolName == "web.fetch" && !$0.isFailure }
-            return hasFinalOutput && hasSearch && hasFetch && hasFetchedPage && failedResults.isEmpty
+            return hasFinalOutput && (hasSearch || hasFetch || hasEvidence)
         case .task, .workflow:
             if isReadOnlyRun {
-                return hasFinalOutput && (!requiresEvidence || hasEvidence)
-            }
-            if hasFinalOutput && (!requiresEvidence || hasEvidence) && !expectsWriteOutput(message) && !expectsWikiOutput {
-                return true
+                // Read-only task: text output is sufficient
+                return hasFinalOutput
             }
             if hasVerificationFailure { return false }
             if expectsOfficeDocumentDelivery(message), hasSuccessfulDocumentWrite(in: task) {
@@ -263,9 +261,11 @@ extension AgentLoop {
             }
             if hadFailure && failedResults.count >= successfulResults.count { return false }
             if hasWrite {
+                // Write task: either final output or successful file changes
                 return hasFinalOutput || successfulResults.contains { isFileChangeTool($0.toolName ?? "") }
             }
-            return hasFinalOutput && hasEvidence && (!hadFailure || successfulResults.count >= 2)
+            // Default: text output + some evidence
+            return hasFinalOutput && (hasEvidence || !requiresEvidence)
         }
     }
 
@@ -1721,12 +1721,39 @@ extension AgentLoop {
         )
     }
 
+    // Cache for tool definitions keyed by (intent, phase)
+    private static var toolDefCache: [String: [ToolDefinition]] = [:]
+    private static var lastRegistryCount: Int = 0
+
     public static func toolDefinitions(for intent: UserIntent, phase: TaskPhase = .explore, registry: ToolRegistry? = nil) -> [ToolDefinition] {
-        let allDefs = (registry ?? .shared).toolDefinitions
+        let currentRegistry = registry ?? .shared
+        let cacheKey = "\(intent)-\(phase)"
+
+        // Invalidate cache if registry changed
+        let currentCount = currentRegistry.toolDefinitions.count
+        if currentCount != lastRegistryCount {
+            toolDefCache.removeAll()
+            lastRegistryCount = currentCount
+        }
+
+        // Return cached if available
+        if let cached = toolDefCache[cacheKey] {
+            return cached
+        }
+
+        let allDefs = currentRegistry.toolDefinitions
         let phaseDefs: [ToolDefinition]
         switch intent {
         case .chat:
-            phaseDefs = []
+            // Chat gets basic read-only tools so the agent can gather context
+            // when needed, without risking mutations.
+            let allowed: Set<String> = [
+                "file.read", "file.extract", "code.search", "workspace.index",
+                "web.search", "web.fetch"
+            ]
+            phaseDefs = allDefs.filter { def in
+                allowed.contains(ToolNameCodec.canonicalName(def.function.name))
+            }
         case .research:
             let allowed: Set<String> = [
                 "web.search", "web.fetch", "file.read", "file.extract", "document.transform",
@@ -1742,7 +1769,7 @@ extension AgentLoop {
                 return allowed.contains(canonical)
             }
         }
-        return phaseDefs.sorted { lhs, rhs in
+        let result = phaseDefs.sorted { lhs, rhs in
             let lhsPriority = toolPriority(lhs.function.name, intent: intent, phase: phase)
             let rhsPriority = toolPriority(rhs.function.name, intent: intent, phase: phase)
             if lhsPriority == rhsPriority {
@@ -1750,6 +1777,10 @@ extension AgentLoop {
             }
             return lhsPriority < rhsPriority
         }
+
+        // Cache the result
+        toolDefCache[cacheKey] = result
+        return result
     }
 
     private static func toolPriority(_ name: String, intent: UserIntent, phase: TaskPhase) -> Int {
@@ -1833,22 +1864,34 @@ extension AgentLoop {
 
     /// Infer current task phase from accumulated steps.
     nonisolated public static func inferPhase(from steps: [TaskStep]) -> TaskPhase {
-        // If there's been a file.write, we're past explore
+        // Explicit state machine for phase transitions
+        // Transitions: explore → execute → verify → summarize
+
+        // Check for final output after verify (summarize phase)
+        let hasVerifyCheck = steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("完成检查") }
+        let hasFinalOutput = steps.last?.kind == .textOutput && hasVerifyCheck
+        if hasFinalOutput { return .summarize }
+
+        // Check for verify indicators
+        let hasBuildVerify = steps.contains { $0.toolName == "verify.build" && $0.kind == .toolResult }
+        let hasCompletionCheck = steps.contains { $0.kind == .aiThinking && ($0.text.contains("完成检查") || $0.text.contains("验证")) }
+        if hasBuildVerify || hasCompletionCheck { return .verify }
+
+        // Check for write/mutation operations (execute phase)
         let hasWrite = steps.contains { step in
             isFileChangeTool(step.toolName ?? "") || isSuccessfulDocumentWrite(step)
         }
-        // If there's been a verify/complete check, we're in verify or summarize
-        let hasVerifyCheck = steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("完成检查") }
-        // If there's been a final text output after verify, we're summarizing
-        let hasFinalOutput = steps.last?.kind == .textOutput && hasVerifyCheck
+        let hasShellExec = steps.contains { $0.toolName == "shell.exec" && $0.kind == .toolResult && !$0.isFailure }
+        if hasWrite || hasShellExec { return .execute }
 
-        if hasFinalOutput { return .summarize }
-        if hasVerifyCheck { return .verify }
-        if hasWrite { return .verify }
-        // If we've read/searched enough, move to execute
+        // Check for sufficient exploration (execute phase)
         let readCount = steps.filter { $0.toolName == "file.read" && $0.kind == .toolResult && !$0.isFailure }.count
         let searchCount = steps.filter { $0.toolName == "code.search" && $0.kind == .toolCall }.count
-        if readCount + searchCount >= 3 { return .execute }
+        let fetchCount = steps.filter { $0.toolName == "web.fetch" && $0.kind == .toolResult && !$0.isFailure }.count
+        let explorationCount = readCount + searchCount + fetchCount
+        if explorationCount >= 3 { return .execute }
+
+        // Default: explore
         return .explore
     }
 

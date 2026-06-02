@@ -20,6 +20,15 @@ struct ContextBuilder {
         var injectedPatternHashes: [String]
     }
 
+    // MARK: - Token Budget
+
+    /// Estimate token count from text (CJK ~2.5 chars/token, English ~4 chars/token).
+    static func estimateTokens(_ text: String) -> Int {
+        let cjkCount = text.unicodeScalars.filter { $0.value >= 0x4E00 && $0.value <= 0x9FFF }.count
+        let nonCJK = text.count - cjkCount
+        return Int(Double(cjkCount) / 2.5) + Int(Double(nonCJK) / 4.0)
+    }
+
     // MARK: - Public Entry Point
 
     static func build(
@@ -27,27 +36,47 @@ struct ContextBuilder {
         config: AgentLoop.Config,
         toolRegistry: ToolRegistry
     ) -> Result {
+        // Token budget: base prompt + enrichment must fit within context window
+        // Reserve 60% for tool results and conversation, 40% for system prompt
+        let contextWindow = config.contextWindow
+        let maxPromptTokens = max(1500, Int(Double(contextWindow) * 0.25))
         var prompt = buildBasePrompt(state: &state, config: config)
+        var usedTokens = estimateTokens(prompt)
         var injectedPatternHashes: [String] = []
 
-        // Layer 2: Enrichment
-        enrichWithPersistentMemory(prompt: &prompt, state: state, config: config)
-        enrichWithMemoryEngine(prompt: &prompt, message: state.message)
-        enrichWithSkillGuidance(prompt: &prompt, state: &state, config: config)
-        enrichWithAdaptiveWorkflowContract(prompt: &prompt, state: state)
-        enrichWithFailurePatterns(prompt: &prompt, state: &state, config: config, injectedHashes: &injectedPatternHashes)
-        enrichWithCustomPrompt(prompt: &prompt, config: config)
-        enrichWithExecutionDiscipline(prompt: &prompt, state: state)
-        enrichWithToolHints(prompt: &prompt, state: state)
+        // Layer 2: Enrichment — priority order, skip low-priority when over budget
+        // Priority 1 (important): persistent memory, execution discipline, custom prompt
+        usedTokens += enrichWithPersistentMemory(prompt: &prompt, state: state, config: config)
+        usedTokens += enrichWithCustomPrompt(prompt: &prompt, config: config)
+        usedTokens += enrichWithExecutionDiscipline(prompt: &prompt, state: state)
 
-        // Token budget
+        // Priority 2 (useful): memory engine, failure patterns
+        if usedTokens < maxPromptTokens {
+            usedTokens += enrichWithMemoryEngine(prompt: &prompt, message: state.message)
+        }
+        if usedTokens < maxPromptTokens {
+            usedTokens += enrichWithFailurePatterns(prompt: &prompt, state: &state, config: config, injectedHashes: &injectedPatternHashes)
+        }
+
+        // Priority 3 (optional): skill guidance, workflow contract, tool hints
+        if usedTokens < maxPromptTokens {
+            usedTokens += enrichWithSkillGuidance(prompt: &prompt, state: &state, config: config)
+        }
+        if usedTokens < maxPromptTokens {
+            usedTokens += enrichWithAdaptiveWorkflowContract(prompt: &prompt, state: state)
+        }
+        if usedTokens < maxPromptTokens {
+            usedTokens += enrichWithToolHints(prompt: &prompt, state: state)
+        }
+
+        // Token budget (context trimming)
         let budget = TokenBudget.estimate(context: state.taskContext, userInput: state.message, mode: config.contextMode)
         if !budget.trimDetails.isEmpty {
             state.taskContext.memory.trimDetails = budget.trimDetails
             state.taskContext.memory.updatedAt = .now
         }
 
-        // Layer 3: Tool definitions + guardrails
+        // Layer 3: Tool definitions + guardrails (always included — critical)
         let initialPhase = state.priorSteps.isEmpty ? TaskPhase.explore : AgentLoop.inferPhase(from: state.priorSteps)
         var toolDefs = buildToolDefinitions(
             state: state,
@@ -75,34 +104,42 @@ struct ContextBuilder {
 
     // MARK: - Layer 2: Enrichment
 
-    private static func enrichWithPersistentMemory(prompt: inout String, state: PipelineState, config: AgentLoop.Config) {
-        guard !state.taskContext.workspaceRoot.isEmpty, let repo = AgentLoop.sharedRepository else { return }
+    @discardableResult
+    private static func enrichWithPersistentMemory(prompt: inout String, state: PipelineState, config: AgentLoop.Config) -> Int {
+        guard !state.taskContext.workspaceRoot.isEmpty, let repo = AgentLoop.sharedRepository else { return 0 }
         let memories = repo.loadMemories(workspace: state.taskContext.workspaceRoot, limit: 20)
-        guard !memories.isEmpty else { return }
+        guard !memories.isEmpty else { return 0 }
         let memoryBlock = memories.map { "- [\($0.category)] \($0.key): \($0.value)" }.joined(separator: "\n")
-        prompt += "\n\n## 项目记忆（跨会话持久化）\n\(memoryBlock)"
+        let injection = "\n\n## 项目记忆（跨会话持久化）\n\(memoryBlock)"
+        prompt += injection
+        return estimateTokens(injection)
     }
 
-    private static func enrichWithMemoryEngine(prompt: inout String, message: String) {
+    @discardableResult
+    private static func enrichWithMemoryEngine(prompt: inout String, message: String) -> Int {
         if let memoryContext = MemoryEngine.shared.buildMemoryContext(for: message, maxTokens: 1500) {
-            prompt += "\n\n\(memoryContext)"
+            let injection = "\n\n\(memoryContext)"
+            prompt += injection
+            return estimateTokens(injection)
         }
+        return 0
     }
 
-    private static func enrichWithSkillGuidance(prompt: inout String, state: inout PipelineState, config: AgentLoop.Config) {
-        guard state.intent != .chat else { return }
+    @discardableResult
+    private static func enrichWithSkillGuidance(prompt: inout String, state: inout PipelineState, config: AgentLoop.Config) -> Int {
+        guard state.intent != .chat else { return 0 }
         guard let learnedSkill = SkillEvolutionEngine.shared.bestSkill(
             intent: state.intentString,
             modelName: config.modelName,
             message: state.message
-        ) else { return }
+        ) else { return 0 }
 
         let toolSequence = learnedSkill.toolSequence.map { ToolNameCodec.canonicalName($0) }.joined(separator: " → ")
         let skillInjection = """
 
-## 已学技能提示
-此类会话目标曾成功使用策略「\(learnedSkill.strategy)」，推荐工具序列：\(toolSequence)
-（成功率 \(Int(learnedSkill.successRate * 100))%，Q值 \(String(format: "%.2f", learnedSkill.qValue))）
+## 已学技能提示（仅供参考）
+此类任务曾使用策略「\(learnedSkill.strategy)」，工具序列：\(toolSequence)（成功率 \(Int(learnedSkill.successRate * 100))%）
+请根据当前实际情况决定是否采用，不匹配时自行组合工具。
 """
         prompt += skillInjection
         state.task.context.metadata["learnedSkillID"] = "\(learnedSkill.id)"
@@ -111,38 +148,41 @@ struct ContextBuilder {
             kind: .aiThinking,
             text: "已加载学习技能：\(learnedSkill.name)（Q=\(String(format: "%.2f", learnedSkill.qValue))）",
             isCollapsible: true,
-            isCollapsed: true
+            isCollapsed: false
         )
         state.task.steps.append(skillStep)
+        return estimateTokens(skillInjection)
     }
 
-    private static func enrichWithAdaptiveWorkflowContract(prompt: inout String, state: PipelineState) {
-        guard state.intent != .chat else { return }
-        prompt += """
+    @discardableResult
+    private static func enrichWithAdaptiveWorkflowContract(prompt: inout String, state: PipelineState) -> Int {
+        guard state.intent != .chat else { return 0 }
+        let injection = """
 
-## 自适应工作流契约
-- 你要为当前会话目标生成一个临时工作流，并在每次工具结果后更新它；工作流是执行假设，不是固定脚本。
-- Harness 会提供工具、证据、权限和失败提示；你负责判断下一步是否仍服务于用户目标。
-- 如果已有内置/本地 skill 能覆盖部分任务，可以借用；如果不匹配，自己组合工具完成。
-- 当本次形成了可复用流程，且不影响当前交付时，用 skill_manage(action="create" 或 "update") 沉淀为 skill。
-- 最终答案不要展示内部工作流，只报告交付物、验证结果和残余风险。
+## 自适应工作流
+- 为当前目标生成临时工作流，每次工具结果后重新评估，工作流是假设不是脚本。
+- 根据当前证据决定下一步：有足够证据就动手，证据不足就先探索，失败就换路径。
+- 最终答案只报告交付物、验证结果和残余风险。
 """
+        prompt += injection
+        return estimateTokens(injection)
     }
 
+    @discardableResult
     private static func enrichWithFailurePatterns(
         prompt: inout String,
         state: inout PipelineState,
         config: AgentLoop.Config,
         injectedHashes: inout [String]
-    ) {
-        guard state.intent != .chat else { return }
+    ) -> Int {
+        guard state.intent != .chat else { return 0 }
         let matchedPatterns = FailurePatternDB.shared.matches(
             intent: state.intentString,
             recentTools: [],
             message: state.message,
             modelName: config.modelName
         )
-        guard !matchedPatterns.isEmpty else { return }
+        guard !matchedPatterns.isEmpty else { return 0 }
 
         let topPattern = matchedPatterns.first!
         injectedHashes.append(topPattern.patternHash)
@@ -160,24 +200,35 @@ struct ContextBuilder {
             isCollapsed: true
         )
         state.task.steps.append(patternStep)
+        return estimateTokens(injection)
     }
 
-    private static func enrichWithCustomPrompt(prompt: inout String, config: AgentLoop.Config) {
+    @discardableResult
+    private static func enrichWithCustomPrompt(prompt: inout String, config: AgentLoop.Config) -> Int {
         if let customSystemPrompt = config.customSystemPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
            !customSystemPrompt.isEmpty {
-            prompt += "\n\n## 当前指定 会话\n\(customSystemPrompt)"
+            let injection = "\n\n## 用户自定义指令\n\(customSystemPrompt)"
+            prompt += injection
+            return estimateTokens(injection)
         }
+        return 0
     }
 
-    private static func enrichWithExecutionDiscipline(prompt: inout String, state: PipelineState) {
+    @discardableResult
+    private static func enrichWithExecutionDiscipline(prompt: inout String, state: PipelineState) -> Int {
+        // Only inject plan-specific discipline (the general discipline is in the base prompt)
         let hasPlan = state.taskContext.memory.userDecisions.contains(where: { $0.hasPrefix("执行计划：") })
         if hasPlan {
-            prompt += "\n\n## 执行纪律\n严格按照上面的执行计划推进。每轮只做计划中的下一步。若当前是继续/追问/修复已有会话，必须沿用检查点、最近失败和已读文件，从断点推进；不要把「继续」「为什么」「还有什么」「没反应」当成新的独立目标。最终回复必须说明已验证什么、未验证什么。"
+            let injection = "\n\n## 计划执行纪律\n严格按照执行计划推进，每轮只做下一步。继续/追问沿用断点，不重新开始。"
+            prompt += injection
+            return estimateTokens(injection)
         }
+        return 0
     }
 
-    private static func enrichWithToolHints(prompt: inout String, state: PipelineState) {
-        guard state.intent != .chat else { return }
+    @discardableResult
+    private static func enrichWithToolHints(prompt: inout String, state: PipelineState) -> Int {
+        guard state.intent != .chat else { return 0 }
         var toolHints: [String] = []
         let lowerMsg = state.message.lowercased()
         let isFileCreation = lowerMsg.contains("创建") || lowerMsg.contains("写入") || lowerMsg.contains("新建") || lowerMsg.contains("create") || lowerMsg.contains("write")
@@ -188,8 +239,11 @@ struct ContextBuilder {
             toolHints.append("修改文件：先 file_read 看完整内容，再 file_edit 精确修改，最后 verify_build 验证")
         }
         if !toolHints.isEmpty {
-            prompt += "\n\n## 工具使用提示\n" + toolHints.joined(separator: "\n")
+            let injection = "\n\n## 工具使用提示\n" + toolHints.joined(separator: "\n")
+            prompt += injection
+            return estimateTokens(injection)
         }
+        return 0
     }
 
     // MARK: - Layer 3: Tool Definitions & Guardrails
@@ -201,7 +255,7 @@ struct ContextBuilder {
         phase: TaskPhase,
         toolRegistry: ToolRegistry
     ) -> [ToolDefinition] {
-        guard config.supportsToolCalling, intent != .chat else { return [] }
+        guard config.supportsToolCalling else { return [] }
         let allDefs = AgentLoop.toolDefinitions(for: intent, phase: phase, registry: toolRegistry)
         return filterToolDefinitions(allDefs, allowedTools: config.allowedTools)
     }

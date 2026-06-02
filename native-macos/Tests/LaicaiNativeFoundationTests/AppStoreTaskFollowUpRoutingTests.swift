@@ -112,7 +112,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(store.state.threads.contains(where: { $0.id == task.id }))
         XCTAssertEqual(store.state.threads.count, 2)
         XCTAssertEqual(store.state.selectedThread?.steps.first?.text, "？")
-        XCTAssertNil(runtime.requests.last?.tools)
+        // Chat mode now provides read-only tools instead of nil
+        XCTAssertNotNil(runtime.requests.last?.tools)
     }
     func testExplicitContinuationRestoresRecentTaskEvenFromEmptySession() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)

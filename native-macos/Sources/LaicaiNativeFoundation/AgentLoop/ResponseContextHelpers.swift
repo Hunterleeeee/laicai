@@ -798,6 +798,50 @@ extension AgentLoop {
             : connector.modelName
     }
 
+    // MARK: - Unified Error Recovery
+
+    enum ErrorRecoveryAction {
+        case connectorFailover(to: ConnectorProfile)
+        case transientRetry(delaySeconds: Int)
+        case fatal
+    }
+
+    /// Unified error recovery: decides whether to failover, retry, or give up.
+    /// Consolidates the duplicated logic that was scattered across `run()`.
+    static func resolveErrorRecovery(
+        error: Error,
+        currentConnector: ConnectorProfile,
+        allConnectors: [ConnectorProfile],
+        didConnectorFailover: Bool,
+        transientRetryCount: Int,
+        maxTransientRetries: Int,
+        iteration: Int,
+        effectiveMaxIterations: Int
+    ) -> ErrorRecoveryAction {
+        let isTransient = isTransientError(error)
+
+        // 1. Transient + haven't failovered yet → try another connector
+        if isTransient, !didConnectorFailover,
+           let fallback = fallbackConnector(after: currentConnector, allConnectors: allConnectors) {
+            return .connectorFailover(to: fallback)
+        }
+
+        // 2. Transient + still have retries left → retry with backoff
+        if isTransient, transientRetryCount < maxTransientRetries, iteration < effectiveMaxIterations {
+            let delaySec = min(Int(pow(2.0, Double(transientRetryCount + 1))), 8)
+            return .transientRetry(delaySeconds: delaySec)
+        }
+
+        // 3. Non-transient or retries exhausted + haven't failovered → try another connector
+        if !didConnectorFailover,
+           let fallback = fallbackConnector(after: currentConnector, allConnectors: allConnectors) {
+            return .connectorFailover(to: fallback)
+        }
+
+        // 4. Nothing left to try
+        return .fatal
+    }
+
     /// Auto-checkpoint selected files before write operations.
     /// This creates a safety net the user can roll back to with `git reset HEAD~1`.
     /// Using commit instead of stash because stash hides all uncommitted changes,

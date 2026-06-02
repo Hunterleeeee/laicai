@@ -43,9 +43,22 @@ struct IterationEngine {
 
                 // Phase transition → compress old messages
                 if state.messages.count > 10 {
+                    let beforeCount = state.messages.count
                     state.messages = AgentLoop.compressMidTaskHistory(state.messages, maxMessages: 8)
+                    let compressedCount = beforeCount - state.messages.count
                     let transitionSummary = "阶段转换：\(oldPhase.title) → \(state.currentPhase.title)。已压缩前序会话。继续执行计划中的下一步。"
                     state.messages.append(ChatMessage(role: "system", content: transitionSummary))
+
+                    // Visible notification for user
+                    if compressedCount > 0 {
+                        let compressionStep = TaskStep(
+                            kind: .aiThinking,
+                            text: "已压缩前 \(compressedCount) 条消息以释放上下文空间（\(oldPhase.title) → \(state.currentPhase.title)）",
+                            isCollapsible: true,
+                            isCollapsed: false
+                        )
+                        state.task.steps.append(compressionStep)
+                    }
                 }
 
                 // Phase-based model routing
@@ -85,7 +98,18 @@ struct IterationEngine {
         let tokenLimit = config.contextWindow
         let messageThreshold = max(20, tokenLimit / 5000)
         if state.messages.count > messageThreshold {
+            let beforeCount = state.messages.count
             state.messages = AgentLoop.compressMidTaskHistory(state.messages, maxMessages: max(15, messageThreshold - 5))
+            let compressedCount = beforeCount - state.messages.count
+            if compressedCount > 0 {
+                let compressionStep = TaskStep(
+                    kind: .aiThinking,
+                    text: "上下文较长（\(beforeCount) 条消息），已压缩前 \(compressedCount) 条以释放空间",
+                    isCollapsible: true,
+                    isCollapsed: false
+                )
+                state.task.steps.append(compressionStep)
+            }
         }
 
         // Token-based compression
@@ -97,7 +121,18 @@ struct IterationEngine {
         }
         let safeLimit = Int(Double(tokenLimit) * 0.8)
         if estimatedTokens > safeLimit {
+            let beforeCount = state.messages.count
             state.messages = AgentLoop.compressMidTaskHistory(state.messages, maxMessages: max(10, messageThreshold / 2))
+            let compressedCount = beforeCount - state.messages.count
+            if compressedCount > 0 {
+                let tokenStep = TaskStep(
+                    kind: .aiThinking,
+                    text: "上下文 token 接近上限（约 \(estimatedTokens)/\(tokenLimit)），已压缩 \(compressedCount) 条消息",
+                    isCollapsible: true,
+                    isCollapsed: false
+                )
+                state.task.steps.append(tokenStep)
+            }
             if state.messages.reduce(0, { sum, msg in
                 let c = msg.content ?? ""
                 let cjk = c.unicodeScalars.filter { $0.value >= 0x4E00 && $0.value <= 0x9FFF }.count

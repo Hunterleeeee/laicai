@@ -391,6 +391,10 @@ private extension JSONEncoder {
 // MARK: - Model Router
 
 public struct ModelRouter {
+
+    // ── Public API ────────────────────────────────────────────────────────
+
+    /// Route by skill preference (fast/strong/code/default).
     public static func selectModel(
         for skill: SkillDefinition,
         connectors: [ConnectorProfile],
@@ -400,21 +404,24 @@ public struct ModelRouter {
         case .default:
             return connectors.first(where: { $0.id == activeConnectorID }) ?? connectors.first
         case .fast:
-            return connectors.first(where: { $0.kind.contains("ollama") || $0.modelName.contains("mini") || $0.modelName.contains("flash") })
+            return findByRole(.fast, in: connectors)
+                ?? findByNameHeuristic(.fast, in: connectors)
                 ?? connectors.first(where: { $0.id == activeConnectorID })
                 ?? connectors.first
         case .strong:
-            return connectors.first(where: { $0.modelName.contains("gpt-4") || $0.modelName.contains("claude") || $0.modelName.contains("opus") || $0.modelName.contains("max") })
+            return findByRole(.strong, in: connectors)
+                ?? findByNameHeuristic(.strong, in: connectors)
                 ?? connectors.first(where: { $0.id == activeConnectorID })
                 ?? connectors.first
         case .code:
-            return connectors.first(where: { $0.modelName.contains("code") || $0.modelName.contains("coder") || $0.modelName.contains("deepseek") })
+            return findByRole(.code, in: connectors)
+                ?? findByNameHeuristic(.code, in: connectors)
                 ?? connectors.first(where: { $0.id == activeConnectorID })
                 ?? connectors.first
         }
     }
 
-    /// Route model based on user intent: chat→fast, research→strong, task→code, workflow→default
+    /// Route by user intent: chat→fast, research→strong, task→code, workflow→default.
     public static func selectModel(
         forIntent intent: UserIntent,
         connectors: [ConnectorProfile],
@@ -422,44 +429,61 @@ public struct ModelRouter {
     ) -> ConnectorProfile? {
         let active = connectors.first(where: { $0.id == activeConnectorID }) ?? connectors.first
         guard connectors.count > 1 else { return active }
-        switch intent {
-        case .chat:
-            return connectors.first(where: { $0.modelName.contains("mini") || $0.modelName.contains("flash") }) ?? active
-        case .research:
-            return connectors.first(where: { $0.modelName.contains("gpt-4") || $0.modelName.contains("claude") || $0.modelName.contains("opus") }) ?? active
-        case .task:
-            return connectors.first(where: { $0.modelName.contains("code") || $0.modelName.contains("coder") || $0.modelName.contains("deepseek") }) ?? active
-        case .workflow:
-            return active
-        }
+        guard let role = roleForIntent(intent) else { return active }
+        return findByRole(role, in: connectors)
+            ?? findByNameHeuristic(role, in: connectors)
+            ?? active
     }
 
-    /// Route model based on task phase: explore→fast, execute→code, verify→strong, summarize→default
+    /// Route by task phase: explore→fast, execute→code, verify→strong, summarize→default.
     public static func selectModel(
         forPhase phase: TaskPhase,
         connectors: [ConnectorProfile],
         activeConnectorID: UUID?
     ) -> ConnectorProfile? {
         let active = connectors.first(where: { $0.id == activeConnectorID }) ?? connectors.first
-        // Only route if there are multiple connectors to choose from
         guard connectors.count > 1 else { return active }
+        guard let role = roleForPhase(phase) else { return active }
+        return findByRole(role, in: connectors)
+            ?? findByNameHeuristic(role, in: connectors)
+            ?? active
+    }
 
-        switch phase {
-        case .explore:
-            // Fast model for search/read operations
+    // ── Private helpers ───────────────────────────────────────────────────
+
+    /// Find a connector whose explicit `role` matches. Skips unhealthy connectors.
+    private static func findByRole(_ role: ConnectorRole, in connectors: [ConnectorProfile]) -> ConnectorProfile? {
+        connectors.first(where: { $0.role == role && $0.health != .offline })
+    }
+
+    /// Legacy fallback: guess role from model name / kind strings.
+    /// Used only when no connector has an explicit role set.
+    private static func findByNameHeuristic(_ role: ConnectorRole, in connectors: [ConnectorProfile]) -> ConnectorProfile? {
+        switch role {
+        case .fast:
             return connectors.first(where: { $0.kind.contains("ollama") || $0.modelName.contains("mini") || $0.modelName.contains("flash") })
-                ?? active
-        case .execute:
-            // Code model for file writes and shell execution
+        case .code:
             return connectors.first(where: { $0.modelName.contains("code") || $0.modelName.contains("coder") || $0.modelName.contains("deepseek") })
-                ?? active
-        case .verify:
-            // Strong model for verification and review
+        case .strong:
             return connectors.first(where: { $0.modelName.contains("gpt-4") || $0.modelName.contains("claude") || $0.modelName.contains("opus") || $0.modelName.contains("max") })
-                ?? active
-        case .summarize:
-            // Default model for summarization
-            return active
+        }
+    }
+
+    private static func roleForIntent(_ intent: UserIntent) -> ConnectorRole? {
+        switch intent {
+        case .chat: return .fast
+        case .research: return .strong
+        case .task: return .code
+        case .workflow: return nil
+        }
+    }
+
+    private static func roleForPhase(_ phase: TaskPhase) -> ConnectorRole? {
+        switch phase {
+        case .explore: return .fast
+        case .execute: return .code
+        case .verify: return .strong
+        case .summarize: return nil
         }
     }
 }

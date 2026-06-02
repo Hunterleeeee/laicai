@@ -36,6 +36,9 @@ extension AppStore {
                 }
                 self.state.connectors[idx].health = probe.health
                 self.state.connectors[idx].lastCheckedAt = .now
+                if let ctxWindow = probe.contextWindow, ctxWindow > 0 {
+                    self.state.connectors[idx].probedContextWindow = ctxWindow
+                }
                 let capabilityChanged = self.rememberToolCallingCapability(
                     probe.toolCallingCapability,
                     connectorID: id,

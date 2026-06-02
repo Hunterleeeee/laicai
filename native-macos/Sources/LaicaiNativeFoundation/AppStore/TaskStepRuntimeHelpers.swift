@@ -150,18 +150,9 @@ extension AppStore {
             state.threads[threadIndex].multiAgentPlan = plan
         }
         syncAgentSnapshot(at: threadIndex)
-        if let connectorID = completedTask.connectorID {
-            state.threads[threadIndex].connectorID = connectorID
-            if state.activeConnectorID != connectorID {
-                state.activeConnectorID = connectorID
-                if let connector = state.connectors.first(where: { $0.id == connectorID }) {
-                    state.settings.defaultConnectorName = connector.name
-                    notify("已自动切换到 \(AgentLoop.displayConnectorName(connector))", style: .info)
-                }
-                persistSettings()
-                persistConnectors()
-            }
-        }
+        // Phase-based routing may temporarily switch connectors during execution.
+        // Do NOT persist the task's connector back to the thread or global state —
+        // the thread keeps the connector the user originally selected.
         state.threads[threadIndex].updatedAt = completedTask.updatedAt
         Self.ensureCheckpointIfNeeded(&state.threads[threadIndex])
         Self.rebuildExecutionLedger(&state.threads[threadIndex])

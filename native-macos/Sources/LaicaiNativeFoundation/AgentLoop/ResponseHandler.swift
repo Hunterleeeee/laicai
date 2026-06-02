@@ -281,38 +281,9 @@ struct ResponseHandler {
                 }
             }
         }
+        // Completion is determined by meetsCompletionCriteria in TaskFinalizer.
+        // ResponseHandler only handles per-iteration decisions (empty response, tool compatibility).
         state.didComplete = !state.wasTruncated
-
-        // ── Completion quality gate ──
-        if state.didComplete && state.intent == .task && !state.isReadOnlyRun && state.iteration < state.effectiveMaxIterations - 1 {
-            let expectsWiki = AgentLoop.expectsWikiOutput(state.message)
-            let qualityIssues = AgentLoop.completionQualityIssues(
-                task: state.task,
-                message: state.message,
-                workspaceRoot: state.taskContext.workspaceRoot,
-                hasWritten: hasWritten,
-                expectsWiki: expectsWiki
-            )
-            if !qualityIssues.isEmpty && state.nudgeCount < state.maxNudges {
-                state.nudgeCount += 1
-                state.didComplete = false
-                state.messages.append(ChatMessage(role: "assistant", content: text))
-                let wikiInstruction = expectsWiki
-                    ? "\n\nWiki会话必须调用 wiki_build(mode=\"atomic\", save=true) 保存原子笔记，并在需要时调用 wiki_build(mode=\"moc\", save=true) 保存索引页。"
-                    : ""
-                state.messages.append(ChatMessage(role: "system", content: "⚠️ 完成质量检查未通过：\n" + qualityIssues.map { "- \($0)" }.joined(separator: "\n") + "\(wikiInstruction)\n\n请立即修复以上问题后再输出最终总结。"))
-                let gateStep = TaskStep(
-                    kind: .aiThinking,
-                    text: "完成质量门：\(qualityIssues.joined(separator: "；"))",
-                    isCollapsible: true,
-                    isCollapsed: true
-                )
-                state.task.steps.append(gateStep)
-                onStep(gateStep)
-                return .continueLoop
-            }
-        }
-
         return .breakLoop
     }
 

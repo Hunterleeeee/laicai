@@ -19,7 +19,12 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         )
 
         XCTAssertEqual(task.status, .completed)
-        XCTAssertNil(runtime.requests.first?.tools)
+        // Chat mode now includes read-only tools for context gathering
+        let toolNames = (runtime.requests.first?.tools ?? []).map { $0.function.name }
+        XCTAssertTrue(toolNames.contains("file_read"))
+        XCTAssertTrue(toolNames.contains("code_search"))
+        XCTAssertFalse(toolNames.contains("file_write"))
+        XCTAssertFalse(toolNames.contains("shell_exec"))
     }
     func testAgentLoopExecutesFallbackRecoveryTool() async throws {
         let workspace = try makeTemporaryWorkspace()
@@ -63,8 +68,10 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         )
 
         XCTAssertGreaterThanOrEqual(runtime.requests.count, 3)
-        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.contains("模型返回空内容，自动重试") })
-        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.contains("临时移除工具定义") })
+        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.contains("空内容") && $0.text.contains("重试") },
+                       "Expected a step about empty response retry, got: \(task.steps.filter { $0.kind == .aiThinking }.map(\.text))")
+        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.contains("移除工具") },
+                       "Expected a step about tool stripping, got: \(task.steps.filter { $0.kind == .aiThinking }.map(\.text))")
         XCTAssertFalse(task.steps.contains { $0.kind == .textOutput && $0.text.contains("模型没有返回可显示内容") })
     }
     func testUITaskRequiresScreenshotOrPageEvidence() {
@@ -118,7 +125,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             ]
         )
 
-        XCTAssertFalse(AgentLoop.meetsCompletionCriteria(
+        // Research now accepts search-only tasks (hasSearch || hasFetch || hasEvidence)
+        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(
             task: searchOnly,
             intent: .research,
             didComplete: true,
@@ -323,10 +331,10 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
-        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("执行计划") })
-        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("阶段总结") })
-        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("证据清单") })
-        XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("Plan / Execute / Verify / Summarize") == true)
+        // Prompt simplification: 核心原则 replaces Plan/Execute/Verify/Summarize
+        XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("核心原则") == true)
+        XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("执行模式") == true)
+        XCTAssertEqual(task.status, .completed)
     }
 
     func testCodexFullKernelUsesCodexFullPathInsteadOfLeanPlaceholder() async throws {
@@ -345,17 +353,15 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             runtime: runtime
         )
 
-        let task = try await loop.run(
+        _ = try await loop.run(
             message: "全量读取这个项目并找问题",
             intent: .task,
             connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
-        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("执行计划") })
-        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("阶段总结") })
-        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("证据清单") })
-        XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("Plan / Execute / Verify / Summarize") == true)
+        // Prompt simplification: 核心原则 replaces Plan/Execute/Verify/Summarize
+        XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("核心原则") == true)
         XCTAssertFalse(runtime.requests.first?.systemPrompt?.contains("[kernelMode=codexFull]") == true)
     }
     func testAgentLoopUsesCodexFullPath() async throws {
@@ -374,15 +380,15 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             runtime: runtime
         )
 
-        let task = try await loop.run(
+        _ = try await loop.run(
             message: "全量读取这个项目并找问题",
             intent: .task,
             connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
-        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("执行计划") })
-        XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("Plan / Execute / Verify / Summarize") == true)
+        // Prompt simplification: 核心原则 replaces Plan/Execute/Verify/Summarize
+        XCTAssertTrue(runtime.requests.first?.systemPrompt?.contains("核心原则") == true)
     }
 
     func testAgentLoopStopsAtMaxIterations() async throws {

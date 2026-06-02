@@ -62,6 +62,8 @@ public final class SQLiteRepository {
         exec("ALTER TABLE connectors ADD COLUMN tool_calling_capability TEXT;")
         exec("ALTER TABLE connectors ADD COLUMN tool_calling_capability_source TEXT;")
         exec("ALTER TABLE connectors ADD COLUMN tool_calling_capability_learned_at REAL;")
+        exec("ALTER TABLE connectors ADD COLUMN role TEXT;")
+        exec("ALTER TABLE connectors ADD COLUMN probed_context_window INTEGER;")
         exec("""
         CREATE TABLE IF NOT EXISTS tasks (
             id TEXT PRIMARY KEY,
@@ -461,7 +463,7 @@ extension SQLiteRepository: TaskRepository {
 
 extension SQLiteRepository: ConnectorRepository {
     public func loadConnectorCatalog() throws -> ConnectorCatalog? {
-        guard let stmt = prepare("SELECT id, name, kind, endpoint, model_name, api_key, health, last_checked, tool_calling_policy, tool_calling_capability, tool_calling_capability_source, tool_calling_capability_learned_at, is_active FROM connectors") else {
+        guard let stmt = prepare("SELECT id, name, kind, endpoint, model_name, api_key, health, last_checked, tool_calling_policy, tool_calling_capability, tool_calling_capability_source, tool_calling_capability_learned_at, is_active, role, probed_context_window FROM connectors") else {
             return nil
         }
         var connectors: [ConnectorProfile] = []
@@ -501,14 +503,28 @@ extension SQLiteRepository: ConnectorRepository {
                 toolCallingCapabilityLearnedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 11))
             }
             let isActive = sqlite3_column_int(stmt, 12) != 0
+            let role: ConnectorRole?
+            if sqlite3_column_type(stmt, 13) == SQLITE_NULL {
+                role = nil
+            } else {
+                role = ConnectorRole(rawValue: String(cString: sqlite3_column_text(stmt, 13)))
+            }
+            let probedContextWindow: Int?
+            if sqlite3_column_type(stmt, 14) == SQLITE_NULL {
+                probedContextWindow = nil
+            } else {
+                probedContextWindow = Int(sqlite3_column_int(stmt, 14))
+            }
             connectors.append(ConnectorProfile(
                 id: id, name: name, kind: kind, endpoint: endpoint,
                 modelName: modelName,
                 note: apiKey,
+                role: role,
                 toolCallingPolicy: toolCallingPolicy,
                 toolCallingCapability: toolCallingCapability,
                 toolCallingCapabilitySource: toolCallingCapabilitySource,
                 toolCallingCapabilityLearnedAt: toolCallingCapabilityLearnedAt,
+                probedContextWindow: probedContextWindow,
                 health: health,
                 lastCheckedAt: lastChecked
             ))
@@ -522,7 +538,7 @@ extension SQLiteRepository: ConnectorRepository {
         exec("BEGIN")
         exec("DELETE FROM connectors")
         for c in connectors {
-            guard let stmt = prepare("INSERT INTO connectors (id, name, kind, endpoint, model_name, api_key, health, last_checked, tool_calling_policy, tool_calling_capability, tool_calling_capability_source, tool_calling_capability_learned_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") else { continue }
+            guard let stmt = prepare("INSERT INTO connectors (id, name, kind, endpoint, model_name, api_key, health, last_checked, tool_calling_policy, tool_calling_capability, tool_calling_capability_source, tool_calling_capability_learned_at, is_active, role, probed_context_window) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") else { continue }
             bindText(stmt, index: 1, value: c.id.uuidString)
             bindText(stmt, index: 2, value: c.name)
             bindText(stmt, index: 3, value: c.kind)
@@ -549,6 +565,16 @@ extension SQLiteRepository: ConnectorRepository {
                 sqlite3_bind_null(stmt, 12)
             }
             sqlite3_bind_int(stmt, 13, (c.id == activeConnectorID) ? 1 : 0)
+            if let role = c.role {
+                bindText(stmt, index: 14, value: role.rawValue)
+            } else {
+                sqlite3_bind_null(stmt, 14)
+            }
+            if let ctxWindow = c.probedContextWindow {
+                sqlite3_bind_int(stmt, 15, Int32(ctxWindow))
+            } else {
+                sqlite3_bind_null(stmt, 15)
+            }
             _ = step(stmt)
         }
         exec("COMMIT")
