@@ -34,6 +34,7 @@ extension AgentLoop {
         // STAGE 0 — Setup
         // ════════════════════════════════════════
         var taskContext = prepareTaskContext(context, intent: intent, message: message)
+        seedContinuationMaterial(from: priorSteps, into: &taskContext)
         var task = AgentTask(
             id: taskID ?? UUID(),
             title: String(message.prefix(50)),

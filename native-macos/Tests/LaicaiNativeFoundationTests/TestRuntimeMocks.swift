@@ -81,6 +81,33 @@ final class CapturingToolsRuntime: ChatRuntimeClient {
     }
 }
 
+@MainActor
+final class WikiBuildWhenAvailableRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        let hasWikiBuild = request.tools?.contains {
+            ToolNameCodec.canonicalName($0.function.name) == "wiki.build"
+        } == true
+        if hasWikiBuild && requests.count == 1 {
+            return SendMessageResponse(
+                assistantText: "我会把已有输出沉淀到 Wiki。",
+                toolCalls: [
+                    FunctionCallResponse(
+                        id: "call_wiki_save",
+                        function: FunctionCallDetail(
+                            name: "wiki_build",
+                            arguments: #"{"topic":"Vibe Coding 安全检查清单","mode":"atomic","save":true,"sourceTitle":"已整理输出","sourceText":"根据上一轮已读取的文章整理出的 Vibe Coding 产品上线安全检查清单。"}"#
+                        )
+                    )
+                ]
+            )
+        }
+        return SendMessageResponse(assistantText: "已沉淀到 Wiki。")
+    }
+}
+
 /// Runtime that produces tool call evidence for tests requiring task completion.
 @MainActor
 final class EvidenceProducingRuntime: ChatRuntimeClient {

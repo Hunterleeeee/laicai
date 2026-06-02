@@ -397,6 +397,7 @@ private struct IntentSignals {
             || requestsFreshInformation
             || requestsLocalIO
             || requestsShellExecution
+            || requestsWikiPersistence
             || requestsMutation
             || rawRequestsWebResearch
             || requestsModelCurrentInfo
@@ -439,7 +440,7 @@ private struct IntentSignals {
 
     /// Information retrieval that needs web search but NOT file writes or shell commands
     var isResearch: Bool {
-        guard !requestsShellExecution, !requestsMutation else { return false }
+        guard !requestsShellExecution, !requestsMutation, !requestsWikiPersistence else { return false }
         return requestsExternalInfo || requestsMarketSurvey || requestsRecommendation || requestsFreshInfoOnly || rawRequestsWebResearch
     }
 
@@ -486,6 +487,7 @@ private struct IntentSignals {
             || requestsImageGeneration
             || requestsFreshInformation
             || requestsShellExecution
+            || requestsWikiPersistence
             || requestsMutation
             || requestsWebResearch
             || requestsModelCurrentInfo
@@ -497,6 +499,7 @@ private struct IntentSignals {
             || requestsFreshInformation
             || requestsLocalIO
             || requestsShellExecution
+            || requestsWikiPersistence
             || requestsMutation
             || requestsWebResearch
             || requestsModelCurrentInfo
@@ -631,6 +634,16 @@ private struct IntentSignals {
          "fix", "implement", "create", "add", "remove", "update", "refactor", "rewrite"].contains { input.contains($0) }
     }
 
+    private var requestsWikiPersistence: Bool {
+        let wikiTargets = ["wiki", "知识库", "obsidian", "vault", "笔记"]
+        let persistenceActions = [
+            "沉淀", "保存", "存到", "写到", "写进", "写入", "整理到", "整理成",
+            "生成", "生成到", "收进", "归档", "落地", "放到", "记录到"
+        ]
+        return wikiTargets.contains { input.localizedCaseInsensitiveContains($0) }
+            && persistenceActions.contains { input.localizedCaseInsensitiveContains($0) }
+    }
+
     private var requestedDeliverable: Bool {
         rawRequestedDeliverable && !capabilityOnly
     }
@@ -761,6 +774,7 @@ private struct IntentSignals {
 
     var executionConfidence: Double {
         if containsURL || requestsFreshInformation || requestsWebResearch || requestsModelCurrentInfo { return 0.88 }
+        if requestsWikiPersistence { return 0.86 }
         if requestsImageGeneration { return 0.84 }
         if requestsMutation || requestsShellExecution { return 0.84 }
         if requestsLocalIO { return 0.80 }
@@ -769,6 +783,7 @@ private struct IntentSignals {
 
     var executionReason: String {
         if containsURL { return "用户提供了网页链接，需要读取外部资料。" }
+        if requestsWikiPersistence { return "用户要求把当前材料沉淀到 Wiki/知识库，需要调用知识库写入能力。" }
         if requestsImageGeneration { return "用户要求生成视觉素材，需要调用图片生成能力。" }
         if requestsFreshInformation || requestsWebResearch || requestsModelCurrentInfo { return "用户需要联网或时效信息，需要调用搜索/网页工具。" }
         if requestsLocalIO { return "用户要求读取、搜索或理解本地工作区。" }
@@ -783,8 +798,9 @@ private struct IntentSignals {
         if requestsFreshInformation || requestsWebResearch || requestsModelCurrentInfo || containsURL { capabilities.append("联网检索") }
         if requestsLocalIO || requestsDiagnosis || requestsAdvice || requestsEvaluation || requestsSummary { capabilities.append("读取工作区") }
         if requestsShellExecution { capabilities.append("运行命令") }
+        if requestsWikiPersistence { capabilities.append("写入知识库") }
         if requestsMutation || (!explicitPlanOnly && (requestsDiagnosis || requestsAdvice)) { capabilities.append("提出文件修改") }
-        if requestedDeliverable { capabilities.append("整理交付") }
+        if requestedDeliverable || requestsWikiPersistence { capabilities.append("整理交付") }
         if !explicitPlanOnly, !capabilities.contains("形成可验证结果") { capabilities.append("形成可验证结果") }
         return capabilities.isEmpty ? ["规划", "执行", "总结"] : capabilities
     }

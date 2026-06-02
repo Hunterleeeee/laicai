@@ -4,6 +4,48 @@ import XCTest
 
 @MainActor
 final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
+    func testWikiPersistenceFollowUpContinuesSelectedWebThreadAndSavesWiki() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        let connector = makeConnector()
+        let original = Thread(
+            title: "https://mp.weixin.qq.com/s/JKfkg",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA 阅读并理解，整理"),
+                TaskStep(kind: .toolCall, text: "正在读取网页：https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA", toolName: "web.fetch", toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
+                TaskStep(kind: .toolResult, text: "已读取网页：mp.weixin.qq.com · 4188 字符", toolName: "web.fetch", toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
+                TaskStep(kind: .textOutput, text: "已基于微信文章整理出 Vibe Coding 产品上线安全检查清单，包含供应链、权限、代码审查、上线前验证等要点。")
+            ],
+            connectorID: connector.id,
+            updatedAt: .now.addingTimeInterval(-30),
+            goal: "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA 阅读并理解，整理"
+        )
+        let runtime = WikiBuildWhenAvailableRuntime()
+        let store = AppStore(
+            state: testState(
+                threads: [original],
+                selectedThreadID: original.id,
+                workspacePath: workspace.path,
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+
+        store.updateDraft("我觉得你的这个输出，需要沉淀到wiki")
+        store.sendDraft()
+        try await waitUntilIdle(store)
+
+        XCTAssertEqual(IntentRouter.plan("我觉得你的这个输出，需要沉淀到wiki").intent, .task)
+        XCTAssertEqual(store.state.selectedThreadID, original.id)
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .userInput }.last?.text, "我觉得你的这个输出，需要沉淀到wiki")
+        let requestedTools = runtime.requests.first?.tools?.map { ToolNameCodec.canonicalName($0.function.name) } ?? []
+        XCTAssertTrue(requestedTools.contains("wiki.build"))
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .toolCall && $0.toolName == "wiki.build" } == true)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .toolResult && $0.toolName == "wiki.build" && !$0.isFailure } == true)
+    }
+
     func testPreviewFollowUpFromNewPlaceholderRestoresRecentDeliverableTask() async throws {
         let connector = makeConnector()
         let original = Thread(

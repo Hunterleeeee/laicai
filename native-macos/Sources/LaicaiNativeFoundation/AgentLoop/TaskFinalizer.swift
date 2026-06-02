@@ -90,6 +90,7 @@ struct TaskFinalizer {
         storeExecutionTrace(state: state)
 
         // ── Persist task memory ──
+        state.task.context = state.taskContext
         TaskMemoryStore.save(state.taskContext.memory, workspaceRoot: config.workspaceRoot)
         TaskMemoryStore.appendHistory(memory: state.taskContext.memory, workspaceRoot: config.workspaceRoot, taskDescription: state.task.title)
 

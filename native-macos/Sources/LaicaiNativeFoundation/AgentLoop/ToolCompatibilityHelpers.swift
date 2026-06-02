@@ -172,10 +172,15 @@ extension AgentLoop {
 
     static func expectsWikiOutput(_ message: String) -> Bool {
         let lower = message.lowercased()
+        let wikiTargets = ["wiki", "知识库", "obsidian", "vault", "笔记"]
+        let persistenceActions = ["沉淀", "保存", "存到", "写到", "写进", "写入", "整理到", "整理成", "生成", "收进", "归档", "落地", "放到", "记录到"]
+        let targetsWiki = wikiTargets.contains { lower.contains($0) }
+        let persists = persistenceActions.contains { lower.contains($0) }
         return lower.contains("wiki")
             || lower.contains("知识库")
             || lower.contains("整理到")
             || lower.contains("整理成笔记")
+            || (targetsWiki && persists)
             || lower.contains("obsidian")
     }
 

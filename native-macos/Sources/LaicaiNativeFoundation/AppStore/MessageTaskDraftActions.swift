@@ -536,6 +536,7 @@ extension AppStore {
             return false
         }
         return isContinuationCommand(normalized)
+            || isWikiPersistenceFollowUp(normalized)
             || isExplicitRecentTaskFollowUp(normalized)
             || isContextualTaskReference(normalized)
             || isTaskStatusQuestion(normalized)
@@ -547,6 +548,7 @@ extension AppStore {
         guard !normalized.isEmpty else { return false }
         if isExplicitRecentTaskFollowUp(normalized)
             || isContinuationCommand(normalized)
+            || isWikiPersistenceFollowUp(normalized)
             || isContextualTaskReference(normalized)
             || isTaskStatusQuestion(normalized)
             || UserFrustrationDetector.shouldRecoverRecentTask(normalized) {
@@ -563,10 +565,12 @@ extension AppStore {
     static func isExplicitRecentTaskFollowUp(_ message: String) -> Bool {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }
+        if isWikiPersistenceFollowUp(normalized) { return true }
         let explicitMarkers = [
             "在哪", "到哪", "在哪里", "预览", "打开看看", "看一下产物", "看下产物",
             "文件在哪", "产物在哪", "继续这个", "接着这个", "继续当前", "接着当前",
             "刚才那个", "上个任务", "上一轮", "这个任务", "这个会话", "这个agent",
+            "沉淀到wiki", "保存到wiki", "写到wiki", "写进wiki", "生成wiki", "收进知识库",
             "没发完", "被截断", "没写完", "没说完"
         ]
         return explicitMarkers.contains { normalized.localizedCaseInsensitiveContains($0) }
@@ -575,6 +579,7 @@ extension AppStore {
     static func isContextualFollowUp(_ message: String, thread: Thread) -> Bool {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }
+        if isWikiPersistenceFollowUp(normalized) { return true }
         if taskHasTruncatedOutput(AgentTask(thread: thread)), isTruncationContinuation(normalized) {
             return true
         }

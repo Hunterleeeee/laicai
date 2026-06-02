@@ -2,9 +2,22 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
+    static func isWikiPersistenceFollowUp(_ message: String) -> Bool {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        let wikiTargets = ["wiki", "知识库", "obsidian", "vault", "笔记"]
+        let persistenceActions = [
+            "沉淀", "保存", "存到", "写到", "写进", "写入", "整理到", "整理成",
+            "生成", "生成到", "收进", "归档", "落地", "放到", "记录到"
+        ]
+        return wikiTargets.contains { normalized.contains($0) }
+            && persistenceActions.contains { normalized.contains($0) }
+    }
+
     static func isLightweightStatusQuery(_ message: String) -> Bool {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty, normalized.count <= 30 else { return false }
+        if isWikiPersistenceFollowUp(normalized) { return false }
         if ["?", "？", "??", "？？"].contains(normalized) { return true }
         let statusMarkers = [
             "怎么回事", "怎么了", "为啥", "为什么", "啥情况", "什么情况",
@@ -14,7 +27,7 @@ extension AppStore {
             "你是什么", "你能", "你会", "现在能", "现在有"
         ]
         if statusMarkers.contains(where: { normalized.contains($0) }) { return true }
-        let actionVerbs = ["改", "写", "建", "做", "执行", "运行", "搜", "查", "读", "整理", "保存", "翻译", "重写"]
+        let actionVerbs = ["改", "写", "建", "做", "执行", "运行", "搜", "查", "读", "整理", "保存", "沉淀", "翻译", "重写"]
         let hasAction = actionVerbs.contains(where: { normalized.contains($0) })
         let endsWithQuestion = normalized.hasSuffix("？") || normalized.hasSuffix("?") || normalized.hasSuffix("吗")
         return endsWithQuestion && !hasAction
@@ -62,13 +75,14 @@ extension AppStore {
     static func isLikelyTaskFollowUp(_ message: String) -> Bool {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }
+        if isWikiPersistenceFollowUp(normalized) { return true }
         if isStandaloneCapabilityOrConceptQuestion(normalized) { return false }
         if isStandaloneInfoQuestion(normalized) { return false }
         if normalized.count <= 12 {
             let shortTaskMarkers = [
                 "继续", "接着", "续跑", "重试", "重新跑", "跑一下", "再跑",
                 "修一下", "改一下", "优化下", "验证下", "检查下", "继续做",
-                "接着做", "按这个", "就这样"
+                "接着做", "按这个", "就这样", "沉淀", "存wiki"
             ]
             return shortTaskMarkers.contains { normalized.contains($0) }
         }
@@ -77,6 +91,7 @@ extension AppStore {
             "优化", "调整", "补充", "完善", "修复", "修改", "改进", "重构", "测试", "运行",
             "确认", "验证", "检查", "看看", "核对", "对比", "比较", "分析一下", "总结一下",
             "刚才", "之前", "上面的", "这样", "那样", "把它", "把这个", "把那个",
+            "沉淀", "保存到wiki", "写到wiki", "写进wiki", "生成wiki", "收进知识库", "整理到知识库",
             "在哪", "到哪", "在哪里", "预览", "打开看看", "看一下", "看下", "文件在哪", "产物在哪",
             "干活", "干不明白", "没做", "没干", "只回答"
         ]
@@ -90,6 +105,7 @@ extension AppStore {
     static func shouldRouteChatFollowUpIntoSelectedTask(message: String, task: AgentTask) -> Bool {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }
+        if isWikiPersistenceFollowUp(normalized) { return true }
         if taskHasTruncatedOutput(task), isTruncationContinuation(normalized) {
             return true
         }
@@ -111,7 +127,7 @@ extension AppStore {
             return true
         }
 
-        let taskActionMarkers = ["再读", "补读", "继续读", "总结", "列出", "修复", "修改", "优化", "跑一下", "测试一下", "重新跑", "重试", "按这个", "基于这个", "把它", "在哪", "到哪", "在哪里", "预览", "打开看看", "看一下", "看下", "文件在哪", "产物在哪", "干活", "干不明白", "没做", "没干", "只回答"]
+        let taskActionMarkers = ["再读", "补读", "继续读", "总结", "列出", "修复", "修改", "优化", "跑一下", "测试一下", "重新跑", "重试", "按这个", "基于这个", "把它", "沉淀", "保存到wiki", "写到wiki", "收进知识库", "在哪", "到哪", "在哪里", "预览", "打开看看", "看一下", "看下", "文件在哪", "产物在哪", "干活", "干不明白", "没做", "没干", "只回答"]
         if taskActionMarkers.contains(where: { normalized.contains($0) }) {
             return true
         }

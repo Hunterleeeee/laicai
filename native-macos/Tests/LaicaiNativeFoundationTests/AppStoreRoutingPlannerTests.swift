@@ -30,6 +30,13 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
     func testConcreteGenerationRequestBecomesTask() {
         XCTAssertEqual(IntentRouter.classify("帮我生成一个 README"), .task)
     }
+    func testWikiPersistenceRequestBecomesTask() {
+        let decision = IntentRouter.plan("我觉得你的这个输出，需要沉淀到wiki")
+
+        XCTAssertEqual(decision.intent, .task)
+        XCTAssertTrue(decision.expectedCapabilities.contains("写入知识库"))
+        XCTAssertTrue(decision.expectedCapabilities.contains("整理交付"))
+    }
     func testSemanticImageRequestsBecomeImageGenerationTasks() {
         let prompts = [
             "做一张雪碧介绍图",

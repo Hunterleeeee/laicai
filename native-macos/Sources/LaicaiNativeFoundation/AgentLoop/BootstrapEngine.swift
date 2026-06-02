@@ -472,6 +472,7 @@ struct BootstrapEngine {
             kind: .toolResult,
             text: displayText,
             toolName: toolName,
+            toolParams: AgentLoop.resultStepParams(toolName: toolName, arguments: toolParams, result: toolResult),
             toolCallId: callId,
             isCollapsible: true,
             isCollapsed: false,

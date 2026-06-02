@@ -49,6 +49,45 @@ extension AgentLoop {
         return taskContext
     }
 
+    func seedContinuationMaterial(from priorSteps: [TaskStep], into taskContext: inout TaskContext) {
+        guard !priorSteps.isEmpty else { return }
+
+        for step in priorSteps {
+            guard step.kind == .toolResult, !step.isFailure else { continue }
+            if ["file.read", "file.extract"].contains(step.toolName ?? ""),
+               let path = step.toolParams?["path"],
+               !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if !taskContext.memory.readFiles.contains(path) {
+                    taskContext.memory.readFiles.append(path)
+                }
+                continue
+            }
+            if step.toolName == "web.fetch",
+               let url = step.toolParams?["url"],
+               !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let cacheKey = "web:\(url)"
+                if taskContext.memory.fileContentCache[cacheKey] == nil,
+                   !step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    taskContext.memory.fileContentCache[cacheKey] = step.text
+                }
+            }
+        }
+
+        let recentOutputs = priorSteps
+            .filter { $0.kind == .textOutput }
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .suffix(3)
+        for (offset, output) in recentOutputs.enumerated() {
+            let summary = String(output.prefix(20_000))
+            let key = "__thread_output_\(offset + 1)"
+            taskContext.memory.fileContentCache[key] = summary
+            if !taskContext.memory.stageConclusions.contains(summary) {
+                taskContext.memory.stageConclusions.append(summary)
+            }
+        }
+    }
+
     func authorizeUserPathsAndNarrowWorkspace(message: String, intent: UserIntent, taskContext: inout TaskContext) {
         guard intent != .chat else { return }
 
