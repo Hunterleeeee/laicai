@@ -16,8 +16,8 @@ struct ChatDetailView: View {
     @State private var gaugeLastThread: UUID?
     @State private var localDraftMessage = ""
     @State private var predictedIntent: UserIntent = .chat
-    @State private var draftSyncTask: Task<Void, Never>?
     @State private var intentClassificationTask: Task<Void, Never>?
+    @State private var lastPublishedDraftMessage = ""
 
     private var intentModeLabel: (text: String, icon: String, color: Color) {
         switch predictedIntent {
@@ -40,11 +40,13 @@ struct ChatDetailView: View {
             syncLocalDraftFromStore(force: true)
         }
         .onDisappear {
-            draftSyncTask?.cancel()
             intentClassificationTask?.cancel()
         }
         .onChange(of: store.state.draftMessage) {
             syncLocalDraftFromStore(force: false)
+        }
+        .onChange(of: store.state.selectedThreadID) {
+            syncLocalDraftFromStore(force: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: .laicaiNewThread)) { _ in
             store.newThread()
@@ -703,7 +705,6 @@ struct ChatDetailView: View {
     private func updateLocalDraft(_ value: String) {
         guard localDraftMessage != value else { return }
         localDraftMessage = value
-        scheduleDraftSync(value)
         scheduleIntentClassification(value)
     }
 
@@ -713,34 +714,24 @@ struct ChatDetailView: View {
         if publishImmediately {
             syncDraftImmediately()
         } else {
-            scheduleDraftSync(value)
+            lastPublishedDraftMessage = value
         }
     }
 
     private func syncLocalDraftFromStore(force: Bool) {
         let storeDraft = store.state.draftMessage
+        defer { lastPublishedDraftMessage = storeDraft }
         guard force || localDraftMessage != storeDraft else { return }
-        draftSyncTask?.cancel()
+        guard force || storeDraft != lastPublishedDraftMessage else { return }
         localDraftMessage = storeDraft
         scheduleIntentClassification(storeDraft)
     }
 
-    private func scheduleDraftSync(_ value: String) {
-        draftSyncTask?.cancel()
-        draftSyncTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(260))
-            guard !Task.isCancelled else { return }
-            if store.state.draftMessage != value {
-                store.updateDraft(value)
-            }
-        }
-    }
-
     private func syncDraftImmediately() {
-        draftSyncTask?.cancel()
         if store.state.draftMessage != localDraftMessage {
             store.updateDraft(localDraftMessage)
         }
+        lastPublishedDraftMessage = localDraftMessage
     }
 
     private func scheduleIntentClassification(_ value: String) {
