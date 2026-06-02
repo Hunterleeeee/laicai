@@ -245,8 +245,8 @@ extension AgentLoop {
             if !names.contains("web.fetch") { names.append("web.fetch") }
         }
 
-        // Wiki task.
-        if lm.contains("wiki") || lm.contains("知识库") || lm.contains("笔记") {
+        // Wiki persistence task.
+        if expectsWikiOutput(message) {
             names.append("wiki.build")
         }
 

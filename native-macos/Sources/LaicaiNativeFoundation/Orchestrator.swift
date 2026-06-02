@@ -87,6 +87,16 @@ public struct IntentRouter {
             ))
         }
 
+        if signals.isPersonalDeviceHowToQuestion {
+            return PlannerDecision(
+                intent: .chat,
+                confidence: 0.82,
+                reason: "这是个人设备或系统设置咨询，先给操作建议，不默认搜索当前项目或执行本地命令。",
+                routeLabel: "会话 问答",
+                expectedCapabilities: ["解释", "操作建议", "风险提示"]
+            )
+        }
+
         if signals.requiresExecution {
             return applyRoutingDrift(PlannerDecision(
                 intent: .task,
@@ -509,16 +519,44 @@ private struct IntentSignals {
     }
 
     var shouldInspectBeforeActing: Bool {
-        return requestsLocalIO
-            || requestsDiagnosis
-            || requestsAdvice
-            || requestsEvaluation
-            || requestsSummary
-            || requestsPlanOnly
+        let contextualInspection = hasInspectableLocalContext
+            && (requestsDiagnosis || requestsAdvice || requestsEvaluation || requestsSummary || requestsPlanOnly || reportsInspectableProblem)
+        return requestsLocalIO || contextualInspection
     }
 
     var isExplicitPlanOnly: Bool {
         explicitPlanOnly
+    }
+
+    var isPersonalDeviceHowToQuestion: Bool {
+        guard isQuestion,
+              !containsURL,
+              !containsLocalPath,
+              !referencesOfficeDocument,
+              !codeOrProjectContext,
+              !requestsWikiPersistence,
+              !requestsImageGeneration,
+              !requestsWebResearch,
+              !requestsFreshInformation,
+              !requestsModelCurrentInfo,
+              !requestsPMDocument else {
+            return false
+        }
+        let deviceMarkers = [
+            "我的电脑", "电脑", "macos", "系统", "本机", "网络", "网卡", "虚拟网卡",
+            "vpn", "终端", "命令行", "浏览器", "键盘", "鼠标", "显示器"
+        ]
+        let howToMarkers = [
+            "怎么弄", "怎么设置", "如何设置", "怎么开", "如何开启", "怎么打开",
+            "怎么配置", "如何配置", "应该怎么", "怎么办", "怎么用"
+        ]
+        let explicitExecutionMarkers = [
+            "帮我运行", "帮我执行", "直接运行", "直接执行", "现在运行", "现在执行",
+            "帮我安装", "直接安装", "帮我创建", "直接创建", "跑一下"
+        ]
+        return deviceMarkers.contains { input.localizedCaseInsensitiveContains($0) }
+            && howToMarkers.contains { input.localizedCaseInsensitiveContains($0) }
+            && !explicitExecutionMarkers.contains { input.localizedCaseInsensitiveContains($0) }
     }
 
     private var containsURL: Bool {
@@ -727,6 +765,27 @@ private struct IntentSignals {
         return markers.contains { input.contains($0) }
     }
 
+    private var hasInspectableLocalContext: Bool {
+        if requestsLocalIO || codeOrProjectContext || containsLocalPath || referencesOfficeDocument {
+            return true
+        }
+        let appContextMarkers = [
+            "页面", "界面", "按钮", "输入", "输入框", "交互", "性能", "侧栏", "左边", "右边", "窗口",
+            "会话", "追问", "历史任务", "新会话", "上下文", "agent", "Agent",
+            "连接器", "工具调用", "工具", "来财", "app", "应用", "UI", "ui"
+        ]
+        return appContextMarkers.contains { input.contains($0) }
+    }
+
+    private var reportsInspectableProblem: Bool {
+        guard hasInspectableLocalContext else { return false }
+        let problemMarkers = [
+            "有问题", "不对", "丢失", "没反应", "没生效", "坏了", "异常",
+            "报错", "bug", "Bug", "卡", "慢", "卡顿", "不好用", "难用"
+        ]
+        return problemMarkers.contains { input.contains($0) }
+    }
+
     func workflowReason(for workflow: String) -> String {
         switch workflow {
         case "code-review":
@@ -796,10 +855,12 @@ private struct IntentSignals {
         var capabilities: [String] = []
         if requestsImageGeneration { capabilities.append("生成图片") }
         if requestsFreshInformation || requestsWebResearch || requestsModelCurrentInfo || containsURL { capabilities.append("联网检索") }
-        if requestsLocalIO || requestsDiagnosis || requestsAdvice || requestsEvaluation || requestsSummary { capabilities.append("读取工作区") }
+        let contextualInspection = hasInspectableLocalContext
+            && (requestsDiagnosis || requestsAdvice || requestsEvaluation || requestsSummary || requestsPlanOnly || reportsInspectableProblem)
+        if requestsLocalIO || contextualInspection { capabilities.append("读取工作区") }
         if requestsShellExecution { capabilities.append("运行命令") }
         if requestsWikiPersistence { capabilities.append("写入知识库") }
-        if requestsMutation || (!explicitPlanOnly && (requestsDiagnosis || requestsAdvice)) { capabilities.append("提出文件修改") }
+        if requestsMutation || (!explicitPlanOnly && hasInspectableLocalContext && (requestsDiagnosis || requestsAdvice || reportsInspectableProblem)) { capabilities.append("提出文件修改") }
         if requestedDeliverable || requestsWikiPersistence { capabilities.append("整理交付") }
         if !explicitPlanOnly, !capabilities.contains("形成可验证结果") { capabilities.append("形成可验证结果") }
         return capabilities.isEmpty ? ["规划", "执行", "总结"] : capabilities

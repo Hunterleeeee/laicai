@@ -36,6 +36,12 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(decision.intent, .task)
         XCTAssertTrue(decision.expectedCapabilities.contains("写入知识库"))
         XCTAssertTrue(decision.expectedCapabilities.contains("整理交付"))
+        XCTAssertTrue(AgentLoop.expectsWikiOutput("我觉得你的这个输出，需要沉淀到wiki"))
+    }
+    func testWikiConceptQuestionDoesNotTriggerWikiPersistence() {
+        XCTAssertFalse(AgentLoop.expectsWikiOutput("NotebookLM 和 Obsidian 知识库有什么区别？"))
+        XCTAssertFalse(AgentLoop.expectsWikiOutput("你了解 wiki 吗？"))
+        XCTAssertFalse(AgentLoop.expectsWikiOutput("介绍一下 vault 笔记系统"))
     }
     func testSemanticImageRequestsBecomeImageGenerationTasks() {
         let prompts = [
@@ -79,6 +85,13 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(IntentRouter.classify("这个skill都能干嘛呢"), .chat)
         XCTAssertEqual(IntentRouter.classify("数据不对"), .chat)
         XCTAssertEqual(IntentRouter.classify("我说让你干啊 我只要结果"), .chat)
+        XCTAssertEqual(IntentRouter.classify("我的电脑现在想开虚拟网卡，应该怎么弄"), .chat)
+        XCTAssertEqual(IntentRouter.classify("macOS 怎么设置虚拟网卡？"), .chat)
+    }
+    func testAppUsageComplaintsStayExecutable() {
+        XCTAssertEqual(IntentRouter.classify("输入框有问题，输入文字的时候怎么会丢失？"), .task)
+        XCTAssertEqual(IntentRouter.classify("现在输入啥的交互啥的特别卡"), .task)
+        XCTAssertEqual(IntentRouter.classify("追问这块的逻辑有问题"), .task)
     }
     func testExplicitToolRequestsBecomeTask() {
         XCTAssertEqual(IntentRouter.classify("请帮我联网搜索一下 Qwen3.6 相比 3.5 有哪些新能力？"), .task)
