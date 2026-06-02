@@ -97,7 +97,7 @@ extension AgentLoop {
         }
 
         // After file.edit success → pre-read nearby import/header files for verify context
-        if let lastEdit = recentSteps.last(where: { $0.toolName == "file.edit" && $0.kind == .toolResult && !$0.isFailure }),
+        if recentSteps.contains(where: { $0.toolName == "file.edit" && $0.kind == .toolResult && !$0.isFailure }),
            let path = recentSteps.last(where: { $0.toolName == "file.edit" && $0.kind == .toolCall })?.toolParams?["path"] {
             let ext = (path as NSString).pathExtension.lowercased()
             let headerExts: [String: String] = ["swift": "swift", "c": "h", "cpp": "h", "m": "h", "mm": "h"]
@@ -115,7 +115,6 @@ extension AgentLoop {
                     }
                 }
             }
-            _ = lastEdit // silence unused warning
         }
 
         return result

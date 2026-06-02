@@ -1362,39 +1362,4 @@ public struct PromptComposer {
         return parts.joined(separator: "\n")
     }
 
-    /// Legacy: Extract tool calls from text using [TOOL:xxx] format.
-    /// Kept for backward compat with WorkflowEngine. New code should use function calling.
-    @available(*, deprecated, message: "Use OpenAI function calling instead")
-    public static func extractToolCalls(from text: String) -> [(name: String, params: [String: String])] {
-        var results: [(name: String, params: [String: String])] = []
-        let pattern = "\\[TOOL:(\\S+?)(?:\\s+(.+?))?\\]"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return results }
-        let nsRange = NSRange(text.startIndex..., in: text)
-        for match in regex.matches(in: text, options: [], range: nsRange) {
-            guard let nameRange = Range(match.range(at: 1), in: text) else { continue }
-            let toolName = String(text[nameRange])
-            var params: [String: String] = [:]
-            if match.numberOfRanges > 2, let paramsRange = Range(match.range(at: 2), in: text) {
-                let paramsStr = String(text[paramsRange])
-                for pair in paramsStr.split(separator: " ") {
-                    let kv = pair.split(separator: "=", maxSplits: 1)
-                    if kv.count == 2 {
-                        params[String(kv[0])] = String(kv[1])
-                    }
-                }
-            }
-            results.append((name: toolName, params: params))
-        }
-        return results
-    }
-
-    /// Legacy: Strip [TOOL:xxx] markers from text.
-    @available(*, deprecated, message: "Use OpenAI function calling instead")
-    public static func stripToolCalls(from text: String) -> String {
-        let pattern = "\\[TOOL:\\S+?(?:\\s+[^\\]]+)?\\]\\s*"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return text }
-        let nsRange = NSRange(text.startIndex..., in: text)
-        let result = regex.stringByReplacingMatches(in: text, options: [], range: nsRange, withTemplate: "")
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 }

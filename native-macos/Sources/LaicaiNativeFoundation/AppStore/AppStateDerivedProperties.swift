@@ -151,35 +151,6 @@ extension AppState {
         }
     }
 
-    public var legacyFilteredThreadRecords: [ThreadRecord] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return threadRecords }
-        return threadRecords.filter { record in
-            record.title.localizedCaseInsensitiveContains(query)
-                || record.preview.localizedCaseInsensitiveContains(query)
-                || record.events.contains { event in
-                    event.text.localizedCaseInsensitiveContains(query)
-                }
-        }
-    }
-
-    public var legacyFilteredThreadRecordSummaries: [ThreadRecord] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return threadRecordSummaries }
-        let visible = visibleThreads.filter { thread in
-            thread.title.localizedCaseInsensitiveContains(query)
-                || thread.preview.localizedCaseInsensitiveContains(query)
-                || thread.steps.suffix(8).contains { step in
-                    step.text.localizedCaseInsensitiveContains(query)
-                }
-        }
-        return visible.map { ThreadRecord(thread: $0, includeEvents: false) }.sorted { lhs, rhs in
-            if lhs.isPinned != rhs.isPinned { return lhs.isPinned && !rhs.isPinned }
-            return lhs.updatedAt > rhs.updatedAt
-        }
-    }
-
-    public var threads_legacy: [ThreadRecord] { threadRecords }
     public var threadSummaries: [ThreadRecord] { threadRecordSummaries }
     public var filteredThreads: [ThreadRecord] { filteredThreadRecords }
     public var filteredThreadSummaries: [ThreadRecord] { filteredThreadRecordSummaries }
