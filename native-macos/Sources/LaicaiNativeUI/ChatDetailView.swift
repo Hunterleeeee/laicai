@@ -18,6 +18,7 @@ struct ChatDetailView: View {
     @State private var predictedIntent: UserIntent = .chat
     @State private var intentClassificationTask: Task<Void, Never>?
     @State private var lastPublishedDraftMessage = ""
+    @State private var lastLocalDraftEditAt = Date.distantPast
 
     private var intentModeLabel: (text: String, icon: String, color: Color) {
         switch predictedIntent {
@@ -447,20 +448,6 @@ struct ChatDetailView: View {
         .help("添加附件")
     }
 
-    private var draftTokenBudget: TokenBudget {
-        let mode = store.state.settings.contextMode
-        return TokenBudget.estimate(
-            context: selectedContext ?? TaskContext(workspaceRoot: store.state.settings.workspacePath),
-            userInput: draftBudgetInput,
-            mode: mode
-        )
-    }
-
-    private var draftBudgetInput: String {
-        guard !store.state.draftAttachments.isEmpty else { return localDraftMessage }
-        return localDraftMessage + "\n" + store.state.draftAttachments.joined(separator: "\n")
-    }
-
     private func composerChip(icon: String, text: String, tone: ComposerChipTone = .neutral) -> some View {
         HStack(spacing: AppSpace.xs) {
             Image(systemName: icon)
@@ -480,62 +467,6 @@ struct ChatDetailView: View {
             Capsule()
                 .strokeBorder(tone.border, lineWidth: 0.6)
         )
-    }
-
-    private func contextBudgetIcon(for label: String) -> String {
-        switch label {
-        case "当前输入": return "text.cursor"
-        case "项目资料", "项目上下文": return "folder"
-        case "任务记忆", "会话记忆": return "brain"
-        case "工具结果": return "wrench.and.screwdriver"
-        case "附件线索": return "paperclip"
-        default: return "slider.horizontal.3"
-        }
-    }
-
-    private var contextBudgetColor: Color {
-        if draftTokenBudget.usageRatio > 0.88 { return Semantic.warning }
-        if draftTokenBudget.usageRatio > 0.72 { return Brand.primary }
-        return TextGrade.muted
-    }
-
-    private var contextBudgetHint: some View {
-        HStack(spacing: AppSpace.sm) {
-            // Agent context: read files
-            if let agent = store.state.selectedThread {
-                let readFiles = agent.steps.filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }.count
-                if readFiles > 0 {
-                    HStack(spacing: 3) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 9))
-                        Text("\(readFiles)")
-                            .font(AppFont.tiny)
-                    }
-                    .foregroundStyle(TextGrade.secondary)
-                    .help("会话 已读取 \(readFiles) 个文件")
-                }
-
-                let hasMemory = agent.steps.contains { $0.kind == .toolResult && $0.toolName == "workspace.index" && !$0.isFailure }
-                if hasMemory {
-                    Image(systemName: "brain.head.profile")
-                        .font(.system(size: 9))
-                        .foregroundStyle(Brand.primary.opacity(0.72))
-                        .help("已建立项目索引")
-                }
-            }
-
-            // Token budget warning
-            if draftTokenBudget.usageRatio > 0.72 {
-                HStack(spacing: 3) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 9, weight: .medium))
-                    Text("\(Int(draftTokenBudget.usageRatio * 100))%")
-                        .font(AppFont.tiny)
-                }
-                .foregroundStyle(contextBudgetColor)
-                .help(draftTokenBudget.compressionSummary)
-            }
-        }
     }
 
     private var sendButton: some View {
@@ -698,12 +629,9 @@ struct ChatDetailView: View {
         return count > 0 ? "\(count) 项 · \(parent)" : parent
     }
 
-    private var selectedContext: TaskContext? {
-        store.state.selectedThread?.context
-    }
-
     private func updateLocalDraft(_ value: String) {
         guard localDraftMessage != value else { return }
+        lastLocalDraftEditAt = Date()
         localDraftMessage = value
         scheduleIntentClassification(value)
     }
@@ -723,6 +651,9 @@ struct ChatDetailView: View {
         defer { lastPublishedDraftMessage = storeDraft }
         guard force || localDraftMessage != storeDraft else { return }
         guard force || storeDraft != lastPublishedDraftMessage else { return }
+        let isActivelyEditing = composerFocused
+            && Date().timeIntervalSince(lastLocalDraftEditAt) < 1.2
+        guard force || !isActivelyEditing else { return }
         localDraftMessage = storeDraft
         scheduleIntentClassification(storeDraft)
     }

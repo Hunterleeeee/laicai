@@ -3,15 +3,7 @@ import LaicaiNativeDomain
 
 extension AppStore {
     static func isWikiPersistenceFollowUp(_ message: String) -> Bool {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !normalized.isEmpty else { return false }
-        let wikiTargets = ["wiki", "知识库", "obsidian", "vault", "笔记"]
-        let persistenceActions = [
-            "沉淀", "保存", "存到", "写到", "写进", "写入", "整理到", "整理成",
-            "生成", "生成到", "收进", "归档", "落地", "放到", "记录到"
-        ]
-        return wikiTargets.contains { normalized.contains($0) }
-            && persistenceActions.contains { normalized.contains($0) }
+        RoutingTextHeuristics.requestsWikiPersistence(message)
     }
 
     static func isLightweightStatusQuery(_ message: String) -> Bool {

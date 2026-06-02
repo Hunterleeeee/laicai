@@ -8,7 +8,7 @@ extension AppStore {
         customAgent: CustomAgentDefinition? = nil,
         matchedSkill: SkillMatchResult? = nil
     ) {
-        let requestedImageGeneration = Self.looksLikeImageGenerationRequest(message)
+        let requestedImageGeneration = RoutingTextHeuristics.requestsImageGeneration(message)
         let selectedConnector = customAgent?.preferredConnectorID.flatMap { id in
             state.connectors.first(where: { $0.id == id })
         } ?? (requestedImageGeneration ? Self.imageGenerationConnector(from: state.connectors, activeID: state.activeConnectorID) : nil)
@@ -423,26 +423,6 @@ extension AppStore {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
             || NSClassFromString("XCTestCase") != nil
             || NSClassFromString("XCTest.XCTestCase") != nil
-    }
-
-    private static func looksLikeImageGenerationRequest(_ message: String) -> Bool {
-        let text = message.lowercased()
-        let actionMarkers = [
-            "生成", "创建", "做一张", "做张", "做个", "画一张", "画张", "画个",
-            "设计", "出一张", "出张", "出个", "来一张", "来张", "来个", "制作",
-            "generate", "create", "draw", "design", "make"
-        ]
-        let imageMarkers = [
-            "图片", "图像", "图", "配图", "插图", "海报", "封面", "主图", "介绍图",
-            "宣传图", "商品图", "产品图", "详情图", "banner", "logo", "头像", "壁纸",
-            "poster", "image", "illustration", "cover", "thumbnail", "visual"
-        ]
-        let negativeContext = [
-            "代码图", "架构图", "流程图", "类图", "mermaid", "截图", "看图", "读图", "图片里"
-        ]
-        return actionMarkers.contains { text.contains($0) }
-            && imageMarkers.contains { text.contains($0) }
-            && !negativeContext.contains { text.contains($0) }
     }
 
     private static func imageGenerationConnector(from connectors: [ConnectorProfile], activeID: UUID?) -> ConnectorProfile? {

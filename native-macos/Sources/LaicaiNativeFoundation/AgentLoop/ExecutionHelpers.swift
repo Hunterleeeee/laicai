@@ -462,23 +462,7 @@ extension AgentLoop {
     }
 
     static func expectsImageGeneration(_ message: String) -> Bool {
-        let lower = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !lower.isEmpty else { return false }
-        let actionMarkers = [
-            "生成", "重新生成", "创建", "做一张", "做张", "做个", "画一张", "画张", "画个",
-            "设计", "出一张", "出张", "出个", "来一张", "来张", "来个", "制作",
-            "generate", "create", "draw", "design", "make"
-        ]
-        let imageMarkers = [
-            "图片", "图像", "图", "配图", "插图", "海报", "封面", "主图", "介绍图",
-            "宣传图", "商品图", "产品图", "详情图", "页面图", "生图", "banner", "logo", "头像", "壁纸",
-            "poster", "image", "illustration", "cover", "thumbnail", "visual"
-        ]
-        let hasAction = actionMarkers.contains { lower.localizedCaseInsensitiveContains($0) }
-        let hasImage = imageMarkers.contains { lower.localizedCaseInsensitiveContains($0) }
-        guard hasAction && hasImage else { return false }
-        let negativeContext = ["代码图", "架构图", "流程图", "类图", "mermaid", "截图", "看图", "读图", "图片里"]
-        return !negativeContext.contains { lower.localizedCaseInsensitiveContains($0) }
+        RoutingTextHeuristics.requestsImageGeneration(message)
     }
 
     static func hasSavedWiki(in task: AgentTask) -> Bool {

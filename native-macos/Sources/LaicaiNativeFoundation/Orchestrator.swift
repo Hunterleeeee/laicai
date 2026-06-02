@@ -30,12 +30,19 @@ public struct PlannerDecision: Equatable, Sendable {
 
 public struct IntentRouter {
     public static func classify(_ input: String) -> UserIntent {
-        plan(input).intent
+        plan(input, includeRoutingDrift: false).intent
     }
 
     public static func plan(_ input: String) -> PlannerDecision {
+        plan(input, includeRoutingDrift: true)
+    }
+
+    private static func plan(_ input: String, includeRoutingDrift: Bool) -> PlannerDecision {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let signals = IntentSignals(input: trimmed)
+        let routed: (PlannerDecision) -> PlannerDecision = { decision in
+            includeRoutingDrift ? applyRoutingDrift(decision) : decision
+        }
 
         if signals.isCreativePromptChat {
             return PlannerDecision(
@@ -58,7 +65,7 @@ public struct IntentRouter {
         }
 
         if let workflow = signals.workflow {
-            return applyRoutingDrift(PlannerDecision(
+            return routed(PlannerDecision(
                 intent: .workflow(workflow),
                 confidence: 0.86,
                 reason: signals.workflowReason(for: workflow),
@@ -68,7 +75,7 @@ public struct IntentRouter {
         }
 
         if signals.isResearch {
-            return applyRoutingDrift(PlannerDecision(
+            return routed(PlannerDecision(
                 intent: .task,
                 confidence: 0.85,
                 reason: signals.researchReason,
@@ -78,7 +85,7 @@ public struct IntentRouter {
         }
 
         if signals.requestsImageGeneration {
-            return applyRoutingDrift(PlannerDecision(
+            return routed(PlannerDecision(
                 intent: .task,
                 confidence: 0.84,
                 reason: "用户在要求生成视觉素材，应调用图片生成能力。",
@@ -98,7 +105,7 @@ public struct IntentRouter {
         }
 
         if signals.requiresExecution {
-            return applyRoutingDrift(PlannerDecision(
+            return routed(PlannerDecision(
                 intent: .task,
                 confidence: signals.executionConfidence,
                 reason: signals.executionReason,
@@ -108,7 +115,7 @@ public struct IntentRouter {
         }
 
         if signals.shouldInspectBeforeActing {
-            return applyRoutingDrift(PlannerDecision(
+            return routed(PlannerDecision(
                 intent: .task,
                 confidence: 0.80,
                 reason: "用户要求理解/诊断/评估实际对象。先读证据，再继续形成可执行结论或落地修改；只有用户明确说只分析/先别改时才停止在建议层。",
@@ -118,7 +125,7 @@ public struct IntentRouter {
         }
 
         if signals.isQuestion && !signals.requestsAction {
-            return applyRoutingDrift(PlannerDecision(
+            return routed(PlannerDecision(
                 intent: .chat,
                 confidence: 0.82,
                 reason: "这是能力、概念或判断类问题，不需要立即调用工具。",
@@ -128,7 +135,7 @@ public struct IntentRouter {
         }
 
         if signals.requestsAction {
-            return applyRoutingDrift(PlannerDecision(
+            return routed(PlannerDecision(
                 intent: .task,
                 confidence: 0.68,
                 reason: "用户希望产出具体结果，但没有匹配到专门工作流。",
@@ -673,13 +680,7 @@ private struct IntentSignals {
     }
 
     private var requestsWikiPersistence: Bool {
-        let wikiTargets = ["wiki", "知识库", "obsidian", "vault", "笔记"]
-        let persistenceActions = [
-            "沉淀", "保存", "存到", "写到", "写进", "写入", "整理到", "整理成",
-            "生成", "生成到", "收进", "归档", "落地", "放到", "记录到"
-        ]
-        return wikiTargets.contains { input.localizedCaseInsensitiveContains($0) }
-            && persistenceActions.contains { input.localizedCaseInsensitiveContains($0) }
+        RoutingTextHeuristics.requestsWikiPersistence(input)
     }
 
     private var requestedDeliverable: Bool {
@@ -692,21 +693,7 @@ private struct IntentSignals {
 
     var requestsImageGeneration: Bool {
         guard !capabilityOnly else { return false }
-        let actionMarkers = [
-            "生成", "创建", "做一张", "做张", "做个", "画一张", "画张", "画个",
-            "设计", "出一张", "出张", "出个", "来一张", "来张", "来个", "制作",
-            "generate", "create", "draw", "design", "make"
-        ]
-        let imageMarkers = [
-            "图片", "图像", "图", "配图", "插图", "海报", "封面", "主图", "介绍图",
-            "宣传图", "商品图", "产品图", "详情图", "banner", "logo", "头像", "壁纸",
-            "poster", "image", "illustration", "cover", "thumbnail", "visual"
-        ]
-        let hasAction = actionMarkers.contains { input.localizedCaseInsensitiveContains($0) }
-        let hasImage = imageMarkers.contains { input.localizedCaseInsensitiveContains($0) }
-        guard hasAction && hasImage else { return false }
-        let negativeContext = ["代码图", "架构图", "流程图", "类图", "mermaid", "截图", "看图", "读图", "图片里"]
-        return !negativeContext.contains { input.localizedCaseInsensitiveContains($0) }
+        return RoutingTextHeuristics.requestsImageGeneration(input)
     }
 
     private var requestsPMDocument: Bool {

@@ -58,13 +58,20 @@ struct ComposerTextView: NSViewRepresentable {
         guard let textView = wrapper.textView else { return }
         let previousPlaceholder = context.coordinator.placeholderString
         if textView.string != text {
-            let selected = textView.selectedRanges
-            textView.string = text
-            if !selected.isEmpty {
-                textView.selectedRanges = selected
+            let recentUserEdit = Date().timeIntervalSince(context.coordinator.lastUserEditAt) < 0.25
+            let looksLikeStaleEcho = recentUserEdit
+                && !text.isEmpty
+                && text.count < textView.string.count
+                && textView.window?.firstResponder === textView
+            if !looksLikeStaleEcho {
+                let selected = textView.selectedRanges
+                textView.string = text
+                if !selected.isEmpty {
+                    textView.selectedRanges = selected
+                }
+                context.coordinator.remeasure(force: true)
+                textView.needsDisplay = true
             }
-            context.coordinator.remeasure(force: true)
-            textView.needsDisplay = true
         }
         textView.onSend = onSend
         textView.onImagePaste = context.coordinator.handleImagePaste
@@ -115,9 +122,11 @@ struct ComposerTextView: NSViewRepresentable {
 
         private var lastMeasuredText: String = ""
         private var lastMeasuredWidth: CGFloat = 0
+        var lastUserEditAt = Date.distantPast
 
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? ComposerNSTextView else { return }
+            lastUserEditAt = Date()
             text.wrappedValue = tv.string
             remeasure(force: true)
             tv.needsDisplay = true
@@ -230,24 +239,9 @@ final class ComposerNSTextView: NSTextView {
         pasteAsImage(sender: sender)
     }
 
-    private static func pasteLog(_ msg: String) {
-        let line = "[\(Date())] \(msg)\n"
-        let logPath = "/tmp/laicai_paste_debug.log"
-        if let handle = FileHandle(forWritingAtPath: logPath) {
-            handle.seekToEndOfFile()
-            handle.write(line.data(using: .utf8)!)
-            handle.closeFile()
-        } else {
-            FileManager.default.createFile(atPath: logPath, contents: line.data(using: .utf8))
-        }
-    }
-
     private func pasteAsImage(sender: Any?) {
         let pb = NSPasteboard.general
         let types = pb.types ?? []
-        let typeNames = types.map { $0.rawValue }
-        Self.pasteLog("pasteboard types: \(typeNames)")
-        Self.pasteLog("onImagePaste is \(onImagePaste == nil ? "nil" : "set")")
 
         // Try to extract image from pasteboard
         if let pngData = Self.extractPNG(from: pb) {
