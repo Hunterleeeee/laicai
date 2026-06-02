@@ -242,20 +242,25 @@ final class ComposerNSTextView: NSTextView {
     private func pasteAsImage(sender: Any?) {
         let pb = NSPasteboard.general
         let types = pb.types ?? []
+        let hasImageType = Self.hasImageDataType(types)
+        let hasFileURL = types.contains(.fileURL)
+        let hasString = types.contains(.string)
+
+        if hasString && !hasImageType && !hasFileURL {
+            super.paste(sender)
+            return
+        }
 
         // Try to extract image from pasteboard
-        if let pngData = Self.extractPNG(from: pb) {
-            NSLog("[LaicaiPaste] extracted PNG: \(pngData.count) bytes")
+        if hasImageType, let pngData = Self.extractPNG(from: pb) {
             if let callback = onImagePaste {
                 callback(pngData, "image/png")
                 return
-            } else {
-                NSLog("[LaicaiPaste] WARNING: onImagePaste callback is nil!")
             }
         }
 
         // Image file URL
-        if types.contains(.fileURL),
+        if hasFileURL,
            let urlData = pb.data(forType: .fileURL),
            let url = URL(dataRepresentation: urlData, relativeTo: nil),
            let uti = try? url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier,
@@ -263,12 +268,10 @@ final class ComposerNSTextView: NSTextView {
            let data = try? Data(contentsOf: url) {
             let ext = url.pathExtension.lowercased()
             let mediaType = ext == "jpg" || ext == "jpeg" ? "image/jpeg" : "image/png"
-            NSLog("[LaicaiPaste] image file URL: \(url.lastPathComponent), \(data.count) bytes")
             onImagePaste?(data, mediaType)
             return
         }
 
-        NSLog("[LaicaiPaste] falling back to text paste")
         // Fall back to default text paste
         super.paste(sender)
     }
@@ -287,6 +290,19 @@ final class ComposerNSTextView: NSTextView {
            let rep = NSBitmapImageRep(data: tiffData),
            let png = rep.representation(using: .png, properties: [:]) { return png }
         return nil
+    }
+
+    private static func hasImageDataType(_ types: [NSPasteboard.PasteboardType]) -> Bool {
+        let imageTypes: Set<String> = [
+            NSPasteboard.PasteboardType.png.rawValue,
+            NSPasteboard.PasteboardType.tiff.rawValue,
+            "public.jpeg",
+            "public.jpg",
+            "public.heic",
+            "public.heif",
+            "org.webmproject.webp"
+        ]
+        return types.contains { imageTypes.contains($0.rawValue) || $0.rawValue == "public.image" }
     }
 
     // Support drag-and-drop of images

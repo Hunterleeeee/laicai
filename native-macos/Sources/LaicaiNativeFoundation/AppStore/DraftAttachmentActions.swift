@@ -5,7 +5,8 @@ extension AppStore {
     public func queueFollowUp(_ message: String) {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        state.pendingFollowUp = trimmed
+        let queued = Self.mergedPendingFollowUp(existing: state.pendingFollowUp, incoming: trimmed)
+        state.pendingFollowUp = queued
         guard let agentID = state.selectedAgentID,
               let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }) else { return }
         if state.threads[threadIndex].executionLedger == nil {
@@ -16,10 +17,24 @@ extension AppStore {
                 plan: state.threads[threadIndex].currentPlan
             )
         }
-        state.threads[threadIndex].executionLedger?.pendingFollowUp = trimmed
-        state.threads[threadIndex].executionLedger?.nextAction = "处理用户补充：\(trimmed)"
+        state.threads[threadIndex].executionLedger?.pendingFollowUp = queued
+        state.threads[threadIndex].executionLedger?.nextAction = "处理用户补充：\(queued)"
         state.threads[threadIndex].executionLedger?.transition(to: .executing, reason: "运行中收到追问，已排队")
         state.threads[threadIndex].updatedAt = .now
+    }
+
+    static func mergedPendingFollowUp(existing: String?, incoming: String) -> String {
+        let incoming = incoming.trimmingCharacters(in: .whitespacesAndNewlines)
+        let existing = existing?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !incoming.isEmpty else { return existing }
+        guard !existing.isEmpty else { return incoming }
+        guard existing != incoming else { return existing }
+        return """
+        \(existing)
+
+        追加补充：
+        \(incoming)
+        """
     }
 
     public func submitFollowUp() {

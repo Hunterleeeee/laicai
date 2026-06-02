@@ -30,64 +30,19 @@ public final class TaskOutcomeRecorder {
     }
 
     private func withDatabase<T>(_ fallback: T, _ body: (OpaquePointer) -> T) -> T {
-        queue.sync {
-            guard let db = openDatabase(readOnly: false) else { return fallback }
-            defer { sqlite3_close(db) }
-            return body(db)
-        }
+        SQLiteSupport.withDatabase(path: path, queue: queue, fallback: fallback, body)
     }
 
     private func withReadOnlyDatabase<T>(_ fallback: T, _ body: (OpaquePointer) -> T) -> T {
-        queue.sync {
-            guard let db = openDatabase(readOnly: true) else { return fallback }
-            defer { sqlite3_close(db) }
-            return body(db)
-        }
+        SQLiteSupport.withDatabase(path: path, queue: queue, readOnly: true, fallback: fallback, body)
     }
 
     private func withDatabaseAsync(_ body: @escaping (OpaquePointer) -> Void) {
-        let dbPath = path
-        queue.async {
-            guard let db = Self.openDatabase(at: dbPath, readOnly: false) else { return }
-            defer { sqlite3_close(db) }
-            body(db)
-        }
-    }
-
-    private func openDatabase(readOnly: Bool) -> OpaquePointer? {
-        Self.openDatabase(at: path, readOnly: readOnly)
-    }
-
-    private static func openDatabase(at path: String, readOnly: Bool) -> OpaquePointer? {
-        var db: OpaquePointer?
-        let flags = readOnly
-            ? (SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX)
-            : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX)
-        guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK, let opened = db else {
-            if let db { sqlite3_close(db) }
-            return nil
-        }
-        sqlite3_busy_timeout(opened, 5_000)
-        configure(opened, readOnly: readOnly)
-        return opened
-    }
-
-    private static func configure(_ db: OpaquePointer, readOnly: Bool) {
-        exec("PRAGMA busy_timeout = 5000;", on: db)
-        exec("PRAGMA temp_store = MEMORY;", on: db)
-        if !readOnly {
-            exec("PRAGMA journal_mode = WAL;", on: db)
-            exec("PRAGMA synchronous = NORMAL;", on: db)
-        }
-    }
-
-    @discardableResult
-    private static func exec(_ sql: String, on db: OpaquePointer) -> Bool {
-        sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK
+        SQLiteSupport.withDatabaseAsync(path: path, queue: queue, body)
     }
 
     private static func ensureTaskOutcomesTable(on db: OpaquePointer) {
-        exec("""
+        SQLiteSupport.exec("""
             CREATE TABLE IF NOT EXISTS task_outcomes (
                 id TEXT PRIMARY KEY,
                 intent TEXT NOT NULL,
@@ -107,18 +62,18 @@ public final class TaskOutcomeRecorder {
                 created_at REAL NOT NULL
             );
             """, on: db)
-        exec("CREATE INDEX IF NOT EXISTS idx_outcome_intent ON task_outcomes(intent);", on: db)
-        exec("CREATE INDEX IF NOT EXISTS idx_outcome_status ON task_outcomes(status);", on: db)
-        exec("CREATE INDEX IF NOT EXISTS idx_outcome_created ON task_outcomes(created_at);", on: db)
-        exec("CREATE INDEX IF NOT EXISTS idx_outcome_prompt ON task_outcomes(prompt_tag);", on: db)
-        exec("ALTER TABLE task_outcomes ADD COLUMN prompt_tag TEXT NOT NULL DEFAULT '';", on: db)
-        exec("ALTER TABLE task_outcomes ADD COLUMN user_rating INTEGER NOT NULL DEFAULT 0;", on: db)
-        exec("ALTER TABLE task_outcomes ADD COLUMN model_name TEXT NOT NULL DEFAULT '';", on: db)
-        exec("CREATE INDEX IF NOT EXISTS idx_outcome_model ON task_outcomes(model_name);", on: db)
+        SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_outcome_intent ON task_outcomes(intent);", on: db)
+        SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_outcome_status ON task_outcomes(status);", on: db)
+        SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_outcome_created ON task_outcomes(created_at);", on: db)
+        SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_outcome_prompt ON task_outcomes(prompt_tag);", on: db)
+        SQLiteSupport.exec("ALTER TABLE task_outcomes ADD COLUMN prompt_tag TEXT NOT NULL DEFAULT '';", on: db)
+        SQLiteSupport.exec("ALTER TABLE task_outcomes ADD COLUMN user_rating INTEGER NOT NULL DEFAULT 0;", on: db)
+        SQLiteSupport.exec("ALTER TABLE task_outcomes ADD COLUMN model_name TEXT NOT NULL DEFAULT '';", on: db)
+        SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_outcome_model ON task_outcomes(model_name);", on: db)
     }
 
     private static func ensureToolOutcomesTable(on db: OpaquePointer) {
-        exec("""
+        SQLiteSupport.exec("""
             CREATE TABLE IF NOT EXISTS tool_outcomes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_id TEXT NOT NULL,
@@ -130,12 +85,12 @@ public final class TaskOutcomeRecorder {
                 created_at REAL NOT NULL
             );
             """, on: db)
-        exec("CREATE INDEX IF NOT EXISTS idx_tool_name ON tool_outcomes(tool_name);", on: db)
-        exec("CREATE INDEX IF NOT EXISTS idx_tool_model ON tool_outcomes(model_name);", on: db)
+        SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_tool_name ON tool_outcomes(tool_name);", on: db)
+        SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_tool_model ON tool_outcomes(model_name);", on: db)
     }
 
     private static func ensureExecutionTracesTable(on db: OpaquePointer) {
-        exec("""
+        SQLiteSupport.exec("""
             CREATE TABLE IF NOT EXISTS execution_traces (
                 task_id TEXT PRIMARY KEY,
                 trace TEXT NOT NULL,
@@ -218,9 +173,9 @@ public final class TaskOutcomeRecorder {
             var rows: [OutcomeStatsRow] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
                 rows.append(OutcomeStatsRow(
-                    intent: Self.columnString(stmt, 0),
-                    routeLabel: Self.columnString(stmt, 1),
-                    executionMode: Self.columnString(stmt, 2),
+                    intent: SQLiteSupport.columnString(stmt, 0),
+                    routeLabel: SQLiteSupport.columnString(stmt, 1),
+                    executionMode: SQLiteSupport.columnString(stmt, 2),
                     total: Int(sqlite3_column_int(stmt, 3)),
                     completed: Int(sqlite3_column_int(stmt, 4)),
                     cancelled: Int(sqlite3_column_int(stmt, 5)),
@@ -257,7 +212,7 @@ public final class TaskOutcomeRecorder {
             var rows: [PromptTagStatsRow] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
                 rows.append(PromptTagStatsRow(
-                    tag: Self.columnString(stmt, 0),
+                    tag: SQLiteSupport.columnString(stmt, 0),
                     total: Int(sqlite3_column_int(stmt, 1)),
                     completed: Int(sqlite3_column_int(stmt, 2)),
                     cancelled: Int(sqlite3_column_int(stmt, 3)),
@@ -333,8 +288,8 @@ public final class TaskOutcomeRecorder {
             var rows: [ToolStatsRow] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
                 rows.append(ToolStatsRow(
-                    toolName: Self.columnString(stmt, 0),
-                    modelName: Self.columnString(stmt, 1),
+                    toolName: SQLiteSupport.columnString(stmt, 0),
+                    modelName: SQLiteSupport.columnString(stmt, 1),
                     total: Int(sqlite3_column_int(stmt, 2)),
                     successes: Int(sqlite3_column_int(stmt, 3)),
                     avgDuration: sqlite3_column_double(stmt, 4),
@@ -400,12 +355,12 @@ public final class TaskOutcomeRecorder {
             var rows: [OutcomeRow] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
                 rows.append(OutcomeRow(
-                    id: Self.columnString(stmt, 0),
-                    intent: Self.columnString(stmt, 1),
-                    routeLabel: Self.columnString(stmt, 2),
-                    executionMode: Self.columnString(stmt, 3),
+                    id: SQLiteSupport.columnString(stmt, 0),
+                    intent: SQLiteSupport.columnString(stmt, 1),
+                    routeLabel: SQLiteSupport.columnString(stmt, 2),
+                    executionMode: SQLiteSupport.columnString(stmt, 3),
                     iterations: Int(sqlite3_column_int(stmt, 4)),
-                    status: Self.columnString(stmt, 5),
+                    status: SQLiteSupport.columnString(stmt, 5),
                     hadFailure: sqlite3_column_int(stmt, 6) == 1,
                     wasCancelled: sqlite3_column_int(stmt, 7) == 1,
                     wasTruncated: sqlite3_column_int(stmt, 8) == 1,
@@ -420,10 +375,6 @@ public final class TaskOutcomeRecorder {
         }
     }
 
-    private static func columnString(_ stmt: OpaquePointer?, _ index: Int32) -> String {
-        guard let text = sqlite3_column_text(stmt, index) else { return "" }
-        return String(cString: text)
-    }
 }
 
 public struct OutcomeStatsRow: Sendable {

@@ -880,6 +880,7 @@ struct ProgressGlyph: View {
 }
 
 struct TextOutputCard: View {
+    @EnvironmentObject private var store: AppStore
     let text: String
     let metrics: ResponseMetrics?
     var isRunning: Bool = false
@@ -1068,9 +1069,11 @@ struct TextOutputCard: View {
     }
 
     @MainActor private func saveToWiki(_ content: String) {
-        let vault = UserDefaults.standard.string(forKey: "vaultPath") ?? ""
+        let vaultSetting = store.state.settings.vaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let workspace = store.state.settings.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let vault = vaultSetting.isEmpty ? workspace : vaultSetting
         guard !vault.isEmpty else {
-            ToastCenter.shared.error("请先在设置中配置 Vault 路径")
+            ToastCenter.shared.error("请先在设置中配置工作区或 Vault 路径")
             return
         }
         let dir = URL(fileURLWithPath: vault).appendingPathComponent("05 AI Outputs", isDirectory: true)
@@ -1081,7 +1084,7 @@ struct TextOutputCard: View {
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try content.write(to: fileURL, atomically: true, encoding: .utf8)
-            ToastCenter.shared.success("已保存到 Wiki")
+            ToastCenter.shared.success("已保存到 Wiki：\(fileName)")
         } catch {
             ToastCenter.shared.error("保存失败：\(error.localizedDescription)")
         }

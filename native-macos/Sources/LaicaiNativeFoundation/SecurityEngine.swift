@@ -4,16 +4,6 @@ import LaicaiNativeDomain
 import SQLite3
 #endif
 
-// MARK: - SQLite Helpers
-
-/// Safe text binding that copies the string immediately (SQLITE_TRANSIENT).
-/// Prevents use-after-free when Swift temporaries are freed before sqlite3_step.
-@discardableResult
-func sqlite3_bind_text_safe(_ stmt: OpaquePointer?, _ index: Int32, _ value: String) -> Int32 {
-    let SQLITE_TRANSIENT = unsafeBitCast(OpaquePointer(bitPattern: -1), to: sqlite3_destructor_type.self)
-    return sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT)
-}
-
 // MARK: - Audit Log
 
 public struct AuditEntry: Identifiable, Equatable, Codable, Sendable {

@@ -52,11 +52,6 @@ public final class FailurePatternDB {
         return queue.sync(execute: work)
     }
 
-    private static func columnText(_ stmt: OpaquePointer?, _ index: Int32) -> String {
-        guard let text = sqlite3_column_text(stmt, index) else { return "" }
-        return String(cString: text)
-    }
-
     private func migrate() {
         exec("""
         CREATE TABLE IF NOT EXISTS failure_patterns (
@@ -175,8 +170,8 @@ public final class FailurePatternDB {
                 if successCount > 0 && freq > 0 && Double(successCount) / Double(freq) > 0.6 {
                     continue
                 }
-                let pt = Self.columnText(stmt, 3)
-                let pk = Self.columnText(stmt, 4)
+                let pt = SQLiteSupport.columnString(stmt, 3)
+                let pk = SQLiteSupport.columnString(stmt, 4)
                 let tools = pt.isEmpty ? [] : pt.components(separatedBy: ",")
                 let keywords = pk.isEmpty ? [] : pk.components(separatedBy: ",")
                 let toolOverlap = !tools.isEmpty && tools.contains(where: { recentTools.contains($0) })
@@ -191,12 +186,12 @@ public final class FailurePatternDB {
                     if age > decayThreshold && freq < 4 { continue }
                     results.append(FailurePattern(
                         id: Int(sqlite3_column_int(stmt, 0)),
-                        patternHash: Self.columnText(stmt, 1),
-                        intent: Self.columnText(stmt, 2),
+                        patternHash: SQLiteSupport.columnString(stmt, 1),
+                        intent: SQLiteSupport.columnString(stmt, 2),
                         triggerTools: tools,
                         triggerKeywords: keywords,
-                        rootCause: Self.columnText(stmt, 5),
-                        preemptiveInstruction: Self.columnText(stmt, 6),
+                        rootCause: SQLiteSupport.columnString(stmt, 5),
+                        preemptiveInstruction: SQLiteSupport.columnString(stmt, 6),
                         frequency: freq,
                         successAfterFix: successCount > 0,
                         lastSeen: lastSeen
@@ -288,10 +283,10 @@ public final class FailurePatternDB {
             var results: [PatternSummary] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
                 results.append(PatternSummary(
-                    intent: Self.columnText(stmt, 0),
-                    triggerTools: Self.columnText(stmt, 1),
-                    rootCause: Self.columnText(stmt, 2),
-                    preemptiveInstruction: Self.columnText(stmt, 3),
+                    intent: SQLiteSupport.columnString(stmt, 0),
+                    triggerTools: SQLiteSupport.columnString(stmt, 1),
+                    rootCause: SQLiteSupport.columnString(stmt, 2),
+                    preemptiveInstruction: SQLiteSupport.columnString(stmt, 3),
                     frequency: Int(sqlite3_column_int(stmt, 4)),
                     successAfterFix: Int(sqlite3_column_int(stmt, 5))
                 ))

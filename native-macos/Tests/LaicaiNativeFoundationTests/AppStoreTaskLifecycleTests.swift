@@ -511,7 +511,10 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             XCTAssertEqual(store.state.threads.count, 1)
         }
 
-        XCTAssertEqual(store.state.selectedThread?.executionLedger?.pendingFollowUp, "继续，第 20 次")
+        let pending = store.state.selectedThread?.executionLedger?.pendingFollowUp ?? ""
+        XCTAssertTrue(pending.contains("继续，第 1 次"), pending)
+        XCTAssertTrue(pending.contains("继续，第 20 次"), pending)
+        XCTAssertEqual(pending.components(separatedBy: "追加补充：").count - 1, 19)
         XCTAssertEqual(store.state.selectedThread?.executionLedger?.state, .executing)
     }
 
