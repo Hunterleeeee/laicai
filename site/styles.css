@@ -1,14 +1,15 @@
 :root {
   color-scheme: light;
-  --ink: #101820;
-  --muted: #52616f;
-  --line: #d9e2e8;
-  --paper: #f7faf9;
+  --ink: #111827;
+  --muted: #52606d;
+  --line: #dfe7ec;
+  --paper: #f8fafc;
   --panel: #ffffff;
   --jade: #0d6f68;
   --blue: #174f73;
   --gold: #d5a43a;
   --aqua: #d8f1ef;
+  --shadow: rgba(17, 24, 39, 0.13);
 }
 
 * {
@@ -23,7 +24,8 @@ body {
   margin: 0;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--ink);
-  background: var(--paper);
+  background:
+    linear-gradient(180deg, #ffffff 0%, var(--paper) 62%, #ffffff 100%);
   overflow-x: hidden;
 }
 
@@ -40,8 +42,8 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 14px clamp(20px, 4vw, 56px);
-  background: rgba(247, 250, 249, 0.92);
+  padding: 12px clamp(20px, 4vw, 56px);
+  background: rgba(255, 255, 255, 0.88);
   border-bottom: 1px solid rgba(217, 226, 232, 0.8);
   backdrop-filter: blur(16px);
 }
@@ -60,7 +62,9 @@ footer {
 }
 
 .brand img {
-  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
 }
 
 nav {
@@ -76,16 +80,16 @@ footer a:hover {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 0.82fr) minmax(520px, 1.18fr);
-  align-items: center;
-  gap: clamp(32px, 5vw, 72px);
-  min-height: min(760px, calc(100vh - 68px));
-  padding: clamp(44px, 6vw, 72px) clamp(20px, 4vw, 56px) 34px;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 34px;
+  padding: clamp(40px, 6vw, 70px) clamp(20px, 4vw, 56px) 44px;
 }
 
 .hero-copy {
-  max-width: 680px;
+  max-width: 840px;
   min-width: 0;
+  text-align: center;
 }
 
 .hero > * {
@@ -101,6 +105,14 @@ footer a:hover {
   text-transform: uppercase;
 }
 
+.hero-mark {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 18px;
+  border-radius: 18px;
+  box-shadow: 0 18px 42px rgba(23, 79, 115, 0.18);
+}
+
 h1,
 h2,
 h3,
@@ -109,9 +121,9 @@ p {
 }
 
 h1 {
-  margin-bottom: 16px;
-  font-size: clamp(52px, 7vw, 88px);
-  line-height: 0.95;
+  margin-bottom: 18px;
+  font-size: clamp(50px, 8vw, 96px);
+  line-height: 0.92;
   letter-spacing: 0;
 }
 
@@ -128,15 +140,37 @@ h3 {
 }
 
 .lead {
+  max-width: 720px;
+  margin: 0 auto;
   color: #314553;
   font-size: clamp(18px, 2.1vw, 23px);
   line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.value-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.value-row span {
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--blue);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  font-weight: 720;
 }
 
 .actions {
+  justify-content: center;
   flex-wrap: wrap;
   gap: 12px;
-  margin: 30px 0 16px;
+  margin: 26px 0 14px;
 }
 
 .button {
@@ -173,7 +207,9 @@ footer a:focus-visible {
 }
 
 .note {
-  max-width: 560px;
+  max-width: 610px;
+  margin-right: auto;
+  margin-left: auto;
   color: var(--muted);
   font-size: 14px;
   line-height: 1.6;
@@ -184,10 +220,11 @@ footer a:focus-visible {
   width: 100%;
   max-width: 100%;
   min-width: 0;
+  max-width: 1040px;
   border: 1px solid rgba(23, 79, 115, 0.15);
   border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 24px 80px rgba(16, 24, 32, 0.14);
+  box-shadow: 0 28px 90px var(--shadow);
 }
 
 .window-chrome {
@@ -326,19 +363,22 @@ footer a:focus-visible {
 
 .section,
 .install {
-  padding: 72px clamp(20px, 4vw, 56px);
+  padding: 64px clamp(20px, 4vw, 56px);
   border-top: 1px solid var(--line);
 }
 
 .section-heading {
   max-width: 760px;
-  margin-bottom: 28px;
+  margin: 0 auto 28px;
+  text-align: center;
 }
 
 .feature-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
+  max-width: 1120px;
+  margin: 0 auto;
 }
 
 .feature-grid article {
@@ -360,6 +400,8 @@ footer a:focus-visible {
   grid-template-columns: minmax(0, 1fr) minmax(300px, 430px);
   gap: 30px;
   align-items: center;
+  max-width: 1120px;
+  margin: 0 auto;
   background: #ffffff;
 }
 
@@ -425,10 +467,26 @@ footer a {
   }
 
   .hero {
-    display: block;
+    display: grid;
+    justify-items: start;
     min-height: auto;
+    padding-right: 20px;
+    padding-left: 20px;
     padding-top: 36px;
     overflow: hidden;
+  }
+
+  .hero-copy {
+    width: 100%;
+    max-width: 350px;
+    text-align: left;
+  }
+
+  .hero-mark {
+    width: 54px;
+    height: 54px;
+    margin-bottom: 16px;
+    border-radius: 14px;
   }
 
   h1 {
@@ -437,11 +495,28 @@ footer a {
 
   .lead {
     font-size: 18px;
-    max-width: 22rem;
+    max-width: 100%;
+    margin-left: 0;
+    word-break: break-word;
   }
 
   .note {
-    max-width: 21rem;
+    max-width: 100%;
+    margin-left: 0;
+  }
+
+  .value-row,
+  .actions {
+    justify-content: flex-start;
+  }
+
+  .value-row {
+    gap: 7px;
+  }
+
+  .value-row span {
+    max-width: 100%;
+    font-size: 12px;
   }
 
   .app-preview {
@@ -451,6 +526,8 @@ footer a {
 
   .product-frame {
     margin-top: 32px;
+    width: 100%;
+    max-width: 100%;
   }
 
   .app-preview aside {
