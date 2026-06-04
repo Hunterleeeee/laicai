@@ -1,8 +1,25 @@
 # 来财 (Laicai)
 
+![Laicai logo](assets/laicai-logo.png)
+
+[![Swift](https://github.com/Hunterleeeee/laicai/actions/workflows/swift.yml/badge.svg)](https://github.com/Hunterleeeee/laicai/actions/workflows/swift.yml)
+[![Release](https://img.shields.io/github/v/release/Hunterleeeee/laicai?label=release)](https://github.com/Hunterleeeee/laicai/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Hunterleeeee/laicai?style=social)](https://github.com/Hunterleeeee/laicai/stargazers)
+
 macOS 原生 AI Agent，运行在本机，拥有完整工具链。
 
 来财以 MIT License 开源。当前版本适合本地开发、验证和自构建发布；公开发行前仍建议补充正式签名与 Apple notarization。
+
+## 下载
+
+- GitHub 仓库：<https://github.com/Hunterleeeee/laicai>
+- 最新版本：<https://github.com/Hunterleeeee/laicai/releases/latest>
+- 当前 DMG：<https://github.com/Hunterleeeee/laicai/releases/tag/v2026.6.4-1422>
+
+下载 DMG 后，把 `Laicai.app` 拖到 Applications 即可安装。当前包未经过 Apple notarization，首次打开可能需要在 macOS「隐私与安全性」里允许打开。
+
+如果这个项目对你有用，请在 GitHub 页面右上角点 **Star**，这会帮助更多人发现来财。
 
 ## 核心能力
 
