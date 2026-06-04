@@ -15,16 +15,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check build script syntax
-        run: bash -n native-macos/build.sh
+        run: |
+          bash -n native-macos/build.sh
+          bash -n native-macos/package-dmg.sh
       - name: Validate bundled skills
-        run: python3 scripts/validate_skills.py
+        run: python3 scripts/validate-skills.py
       - name: Check Swift file size budget
-        run: bash scripts/check_swift_file_sizes.sh
+        run: bash scripts/check-swift-file-sizes.sh
       - name: Check project hygiene
-        run: bash scripts/check_project_hygiene.sh
+        run: bash scripts/check-project-hygiene.sh
       - name: Swift lint debt report
         continue-on-error: true
-        run: bash scripts/lint_swift.sh
+        run: bash scripts/lint-swift.sh
       - name: Check formatting whitespace
         run: git diff --check
 
@@ -36,7 +38,7 @@ jobs:
       - name: Show Swift version
         run: swift --version
       - name: Check macOS toolchain
-        run: bash scripts/check_macos_toolchain.sh
+        run: bash scripts/check-macos-toolchain.sh
       - name: Build package
         working-directory: native-macos
         run: swift build

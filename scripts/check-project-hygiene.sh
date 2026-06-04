@@ -17,7 +17,7 @@ check_absent \
   "Hardcoded local harness paths are not allowed" \
   '/Users/lifenghe/Documents/troe_projects/harness' \
   README.md docs native-macos skills scripts .github \
-  --glob '!scripts/check_project_hygiene.sh' \
+  --glob '!scripts/check-project-hygiene.sh' \
   --glob '!native-macos/dist/**'
 
 check_absent \
@@ -25,7 +25,14 @@ check_absent \
   'git add -A' \
   native-macos/Sources native-macos/Tests docs README.md scripts .github \
   --glob '*.swift' --glob '*.md' --glob '*.sh' --glob '*.py' --glob '*.yml' \
-  --glob '!check_project_hygiene.sh'
+  --glob '!check-project-hygiene.sh'
+
+check_absent \
+  "Use kebab-case names for repository scripts and packaging commands" \
+  'check_macos_toolchain|check_project_hygiene|check_swift_file_sizes|lint_swift|validate_skills|package_dmg|native-macos-verification' \
+  README.md CONTRIBUTING.md docs scripts .github native-macos/Tests \
+  --glob '*.md' --glob '*.sh' --glob '*.py' --glob '*.yml' --glob '*.swift' \
+  --glob '!check-project-hygiene.sh'
 
 check_absent \
   "Bundled skills must use the canonical tools + steps schema" \

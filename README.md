@@ -20,7 +20,7 @@ macOS 原生 AI Agent，运行在本机，拥有完整工具链。
 - Swift 5.9 或更新版本
 
 ```bash
-bash scripts/check_macos_toolchain.sh
+bash scripts/check-macos-toolchain.sh
 ```
 
 ## 构建安装
@@ -43,12 +43,12 @@ LAICAI_ARCHS=arm64 bash native-macos/build.sh
 生成 DMG：
 
 ```bash
-bash native-macos/package_dmg.sh
+bash native-macos/package-dmg.sh
 # 或只构建当前架构，适合本机快速出包：
-LAICAI_ARCHS=arm64 bash native-macos/package_dmg.sh
+LAICAI_ARCHS=arm64 bash native-macos/package-dmg.sh
 ```
 
-`package_dmg.sh` 默认会先执行 `build.sh`，然后生成并校验：
+`package-dmg.sh` 默认会先执行 `build.sh`，然后生成并校验：
 
 ```text
 native-macos/dist/Laicai-<version>-<build>.dmg
@@ -57,7 +57,7 @@ native-macos/dist/Laicai-<version>-<build>.dmg
 如果已经有可用的 `native-macos/dist/Laicai.app` 和 `native-macos/dist/laicai`，可跳过重新构建：
 
 ```bash
-LAICAI_SKIP_BUILD=1 bash native-macos/package_dmg.sh
+LAICAI_SKIP_BUILD=1 bash native-macos/package-dmg.sh
 ```
 
 SwiftPM 入口：
@@ -71,8 +71,8 @@ swift run laicai --help
 ## 验证
 
 ```bash
-bash scripts/check_project_hygiene.sh
-bash scripts/check_swift_file_sizes.sh
+bash scripts/check-project-hygiene.sh
+bash scripts/check-swift-file-sizes.sh
 swift test --package-path native-macos
 ```
 
@@ -81,7 +81,7 @@ swift test --package-path native-macos
 风格检查脚本也保留在仓库中：
 
 ```bash
-bash scripts/lint_swift.sh
+bash scripts/lint-swift.sh
 ```
 
 当前 SwiftLint/format 仍有存量问题，适合作为后续代码精简和风格债清理入口。
@@ -99,6 +99,13 @@ skills/                  # 可扩展技能定义
 docs/                    # 架构文档
 assets/                  # 图标资源
 ```
+
+## 文档
+
+- `docs/architecture.md`：项目架构概览
+- `docs/verification.md`：本地验证、构建和 DMG 打包
+- `docs/skills.md`：内置 skill 结构和安全规则
+- `docs/branding.md`：品牌和图标说明
 
 ## 开源参与
 

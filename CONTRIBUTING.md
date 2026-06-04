@@ -7,30 +7,30 @@
 需要 macOS 14、Xcode 15 或更新版本，以及 Swift 5.9 或更新版本。
 
 ```bash
-bash scripts/check_macos_toolchain.sh
+bash scripts/check-macos-toolchain.sh
 swift test --package-path native-macos
 ```
 
 ## 常用命令
 
 ```bash
-bash scripts/check_project_hygiene.sh
-bash scripts/check_swift_file_sizes.sh
+bash scripts/check-project-hygiene.sh
+bash scripts/check-swift-file-sizes.sh
 swift test --package-path native-macos
 LAICAI_ARCHS=arm64 bash native-macos/build.sh
-LAICAI_ARCHS=arm64 bash native-macos/package_dmg.sh
+LAICAI_ARCHS=arm64 bash native-macos/package-dmg.sh
 ```
 
 `native-macos/dist/` 是本地构建产物目录，默认不提交到仓库。
 
-`bash scripts/lint_swift.sh` 可用于风格债清理；当前仓库仍有存量 lint 问题，不作为普通贡献的默认阻塞项。
+`bash scripts/lint-swift.sh` 可用于风格债清理；当前仓库仍有存量 lint 问题，不作为普通贡献的默认阻塞项。
 
 ## 提交前检查
 
 - 不提交 API Key、OAuth Token、Cookie、个人路径或运行时数据。
 - 保持变更聚焦，一次 PR 尽量解决一个问题。
 - 大改动请补充测试；修复交互问题时，尽量补充能覆盖状态流转的回归测试。
-- 提交时显式 stage 要提交的文件，例如：`git add -- README.md native-macos/package_dmg.sh`。
+- 提交时显式 stage 要提交的文件，例如：`git add -- README.md native-macos/package-dmg.sh`。
 
 ## 代码风格
 

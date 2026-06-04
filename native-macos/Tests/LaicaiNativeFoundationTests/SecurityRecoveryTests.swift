@@ -125,7 +125,7 @@ final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
     }
     func testGitStatusLinePathParsingHandlesRenamesAndUntrackedFiles() {
         XCTAssertEqual(GitTool.pathFromStatusLine(" M native-macos/build.sh"), "native-macos/build.sh")
-        XCTAssertEqual(GitTool.pathFromStatusLine("?? scripts/check_project_hygiene.sh"), "scripts/check_project_hygiene.sh")
+        XCTAssertEqual(GitTool.pathFromStatusLine("?? scripts/check-project-hygiene.sh"), "scripts/check-project-hygiene.sh")
         XCTAssertEqual(GitTool.pathFromStatusLine("R  old.swift -> new.swift"), "new.swift")
         XCTAssertNil(GitTool.pathFromStatusLine("  "))
     }

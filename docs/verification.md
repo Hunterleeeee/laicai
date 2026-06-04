@@ -26,21 +26,21 @@ Expected results:
 Run the preflight:
 
 ```sh
-bash scripts/check_macos_toolchain.sh
+bash scripts/check-macos-toolchain.sh
 ```
 
 ## Core Checks
 
 ```sh
-bash scripts/check_project_hygiene.sh
-bash scripts/check_swift_file_sizes.sh
+bash scripts/check-project-hygiene.sh
+bash scripts/check-swift-file-sizes.sh
 swift test --package-path native-macos
 ```
 
 The style lint entrypoint is also available:
 
 ```sh
-bash scripts/lint_swift.sh
+bash scripts/lint-swift.sh
 ```
 
 The current codebase still has existing SwiftLint/format debt, so use this as a cleanup aid rather than a required release gate.
@@ -67,7 +67,7 @@ native-macos/dist/INSTALL.txt
 Package and verify a local DMG:
 
 ```sh
-LAICAI_ARCHS=arm64 bash native-macos/package_dmg.sh
+LAICAI_ARCHS=arm64 bash native-macos/package-dmg.sh
 ```
 
 Expected output:
