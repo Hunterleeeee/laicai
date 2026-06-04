@@ -480,8 +480,8 @@ extension AgentLoop {
                 }
             }
 
-            // Inner while exited — if auto-round already fired and still not done, mark failure
-            if !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound >= 1 {
+            // Inner while exited — if all configured auto-rounds already fired and still not done, mark failure
+            if !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound >= state.maxAutoRounds {
                 state.hadFailure = true
                 state.didComplete = false
                 let maxIterStep = TaskStep(
@@ -495,8 +495,8 @@ extension AgentLoop {
                 onStep(maxIterStep)
             }
 
-            // Auto-continuation (max 1 round, with context compression)
-            if !state.didComplete && !state.hadFailure && !state.wasTruncated && !Task.isCancelled && state.autoRound < 1 && state.intent != .chat {
+            // Auto-continuation with context compression
+            if !state.didComplete && !state.hadFailure && !state.wasTruncated && !Task.isCancelled && state.autoRound < state.maxAutoRounds && state.intent != .chat {
                 state.autoRound += 1
                 state.iteration = 0
 
@@ -510,11 +510,11 @@ extension AgentLoop {
                 state.consecutiveEmptyResponses = 0
                 state.transientRetryCount = 0
                 state.didInjectWorkingSet = false
-                let roundStep = TaskStep(kind: .aiThinking, text: "自动继续处理中（第 1 轮）…", isCollapsible: true, isCollapsed: false)
+                let roundStep = TaskStep(kind: .aiThinking, text: "自动继续处理中（第 \(state.autoRound) 轮）…", isCollapsible: true, isCollapsed: false)
                 state.task.steps.append(roundStep)
                 onStep(roundStep)
             }
-        } while !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound > 0 && state.autoRound <= 1 && state.intent != .chat
+        } while !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound > 0 && state.autoRound <= state.maxAutoRounds && state.intent != .chat
 
         // Fallback wiki build (uses instance method). Run this even when the
         // model produced final text, because Wiki persistence requires a real

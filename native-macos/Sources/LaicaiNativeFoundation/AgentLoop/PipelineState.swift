@@ -239,10 +239,5 @@ struct PipelineState {
         self.usesOllamaChat = AgentLoop.usesOllamaChat(connector)
 
         self.effectiveMaxIterations = config.maxIterations
-        if let avgIter = TaskOutcomeRecorder.shared.avgIterations(intent: self.intentString) {
-            let learned = max(1, Int(ceil(avgIter * 1.5)))
-            // Minimum 4: empty-response handler needs maxConsecutiveEmpty(3) + 1 iterations
-            self.effectiveMaxIterations = min(config.maxIterations, max(4, learned))
-        }
     }
 }

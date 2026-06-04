@@ -262,7 +262,7 @@ extension AgentLoop {
             if expectsOfficeDocumentDelivery(message), hasSuccessfulDocumentWrite(in: task) {
                 return hasFinalOutput && hasSatisfiedDocumentDelivery(in: task, originalMessage: message)
             }
-            if hadFailure && failedResults.count >= successfulResults.count { return false }
+            if hadFailure && failedResults.count >= successfulResults.count && !hasRecoveryAfterLastFailure(task) { return false }
             if hasWrite {
                 // Write task: either final output or successful file changes
                 return hasFinalOutput || successfulResults.contains { isFileChangeTool($0.toolName ?? "") }

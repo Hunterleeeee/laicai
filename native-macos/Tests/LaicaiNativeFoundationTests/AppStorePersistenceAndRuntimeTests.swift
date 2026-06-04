@@ -68,6 +68,58 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(restored.toolCallingCapabilityLearnedAt, learnedAt)
         XCTAssertEqual(catalog.activeConnectorID, connector.id)
     }
+
+    func testLegacyJSONMigrationLoadsOldSessionsAndConnectors() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sessionID = UUID()
+        let turnID = UUID()
+        let connectorID = UUID()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let session = ChatSession(
+            id: sessionID,
+            title: "旧会话",
+            preview: "旧回答",
+            updatedAt: Date(timeIntervalSince1970: 1_714_552_000),
+            isPinned: true,
+            category: .engineering,
+            modelName: "old-model",
+            turns: [
+                ChatTurn(
+                    id: turnID,
+                    role: .user,
+                    text: "之前的问题",
+                    createdAt: Date(timeIntervalSince1970: 1_714_552_000)
+                )
+            ]
+        )
+        let connector = ConnectorProfile(
+            id: connectorID,
+            name: "旧连接器",
+            kind: "openai-compatible",
+            endpoint: "https://example.com/v1",
+            modelName: "old-model",
+            note: "key",
+            health: .ready,
+            lastCheckedAt: Date(timeIntervalSince1970: 1_714_552_000)
+        )
+        try encoder.encode([session]).write(to: directory.appendingPathComponent("sessions.json"), options: [.atomic])
+        try encoder.encode(ConnectorCatalog(connectors: [connector], activeConnectorID: connectorID)).write(to: directory.appendingPathComponent("connectors.json"), options: [.atomic])
+
+        let sessions = try XCTUnwrap(LegacyJSONMigration.loadSessions(from: directory))
+        let catalog = try XCTUnwrap(LegacyJSONMigration.loadConnectorCatalog(from: directory))
+
+        XCTAssertEqual(sessions.first?.id, sessionID)
+        XCTAssertEqual(sessions.first?.turns.first?.id, turnID)
+        XCTAssertEqual(sessions.first?.category, .engineering)
+        XCTAssertEqual(catalog.connectors.first?.id, connectorID)
+        XCTAssertEqual(catalog.activeConnectorID, connectorID)
+    }
+
     func testSQLiteRepositoryPersistsUnifiedThreadSnapshot() throws {
         let base = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

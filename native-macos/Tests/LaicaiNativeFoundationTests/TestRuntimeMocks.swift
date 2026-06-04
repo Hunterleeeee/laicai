@@ -233,6 +233,16 @@ final class PlainThenToolRuntime: ChatRuntimeClient {
 }
 
 @MainActor
+final class PlanningOnlyRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        return SendMessageResponse(assistantText: "我会先分析目标，然后继续处理。")
+    }
+}
+
+@MainActor
 final class CapturingContinuationRuntime: ChatRuntimeClient {
     var requests: [SendMessageRequest] = []
 

@@ -82,6 +82,11 @@ public extension AppState {
                 .filter { !$0.isEmptyPlaceholder }
             if !legacyThreads.isEmpty {
                 state.threads = legacyThreads
+            } else if let jsonSessions = LegacyJSONMigration.loadSessions(), !jsonSessions.isEmpty {
+                state.threads = jsonSessions.map(Thread.init(session:)).filter { !$0.isEmptyPlaceholder }
+                if !state.threads.isEmpty {
+                    try? environment.agentRepository.saveAgents(state.threads)
+                }
             }
         }
 
@@ -99,6 +104,11 @@ public extension AppState {
             if state.connectors != migrated.connectors {
                 try? environment.connectorRepository.saveConnectors(state.connectors, activeConnectorID: state.activeConnectorID)
             }
+        } else if let migrated = LegacyJSONMigration.loadConnectorCatalog(), !migrated.connectors.isEmpty {
+            state.connectors = migrated.connectors.map(normalizedBootstrapConnector)
+            state.activeConnectorID = migrated.activeConnectorID ?? migrated.connectors.first?.id
+            state.settings.defaultConnectorName = state.activeConnector?.name ?? migrated.connectors.first?.name ?? state.settings.defaultConnectorName
+            try? environment.connectorRepository.saveConnectors(state.connectors, activeConnectorID: state.activeConnectorID)
         }
 
         if state.workspaceName == "来采原生版" { state.workspaceName = "来财原生版" }

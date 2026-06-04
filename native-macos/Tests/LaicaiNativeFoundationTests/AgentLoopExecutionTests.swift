@@ -187,6 +187,28 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         ))
     }
 
+    func testRecoveredToolFailureDoesNotForceFinalFailureByCount() {
+        let task = AgentTask(
+            title: "读取 README",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "读取 README"),
+                TaskStep(kind: .toolResult, text: "路径错误", toolName: "file.read", isFailure: true),
+                TaskStep(kind: .toolResult, text: "README 内容", toolName: "file.read", isFailure: false),
+                TaskStep(kind: .textOutput, text: "已基于 README 完成。")
+            ],
+            context: TaskContext(workspaceRoot: "/tmp")
+        )
+
+        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(
+            task: task,
+            intent: .task,
+            didComplete: true,
+            hadFailure: true,
+            wasTruncated: false
+        ))
+    }
+
     func testAgentLoopIncludesToolsForTasks() async throws {
         let runtime = CapturingToolsRuntime()
         let loop = AgentLoop(
@@ -226,6 +248,34 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue((runtime.requests[1].messages ?? []).contains { ($0.content ?? "").contains("没有调用任何工具就给出了结论") })
         XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "workspace.index" })
     }
+
+    func testAgentLoopUsesConfiguredAutoContinuationRoundsBeforeFailing() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let runtime = PlanningOnlyRuntime()
+        let loop = AgentLoop(
+            config: .init(maxIterations: 1, maxTokensPerTurn: 1024, workspaceRoot: workspace.path),
+            runtime: runtime
+        )
+
+        let task = try await loop.run(
+            message: "处理这个会话目标",
+            intent: .task,
+            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+
+        let autoRoundTexts = task.steps.filter { $0.kind == .aiThinking && $0.text.contains("自动继续处理中") }.map(\.text)
+        XCTAssertEqual(autoRoundTexts, [
+            "自动继续处理中（第 1 轮）…",
+            "自动继续处理中（第 2 轮）…",
+            "自动继续处理中（第 3 轮）…"
+        ])
+        XCTAssertEqual(runtime.requests.count, 4)
+        XCTAssertEqual(task.status, .failed)
+        XCTAssertTrue(task.steps.contains { $0.kind == .error && $0.text.contains("已达到最大迭代次数") })
+    }
+
     func testInlineCommandJSONIsHiddenFromVisibleOutput() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
