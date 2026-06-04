@@ -9,11 +9,11 @@
 </p>
 
 <p align="center">
-[![Swift](https://github.com/Hunterleeeee/laicai/actions/workflows/swift.yml/badge.svg)](https://github.com/Hunterleeeee/laicai/actions/workflows/swift.yml)
-[![Release](https://img.shields.io/github/v/release/Hunterleeeee/laicai?label=release)](https://github.com/Hunterleeeee/laicai/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Website](https://img.shields.io/badge/website-laicai-0d6f68)](https://hunterleeeee.github.io/laicai/)
-[![GitHub stars](https://img.shields.io/github/stars/Hunterleeeee/laicai?style=social)](https://github.com/Hunterleeeee/laicai/stargazers)
+  <a href="https://github.com/Hunterleeeee/laicai/actions/workflows/swift.yml"><img alt="Swift" src="https://github.com/Hunterleeeee/laicai/actions/workflows/swift.yml/badge.svg"></a>
+  <a href="https://github.com/Hunterleeeee/laicai/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Hunterleeeee/laicai?label=release"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
+  <a href="https://hunterleeeee.github.io/laicai/"><img alt="Website" src="https://img.shields.io/badge/website-laicai-0d6f68"></a>
+  <a href="https://github.com/Hunterleeeee/laicai/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Hunterleeeee/laicai?style=social"></a>
 </p>
 
 来财以 MIT License 开源。当前版本适合本地开发、验证和自构建发布；公开发行前仍建议补充正式签名与 Apple notarization。
