@@ -51,7 +51,7 @@ LAICAI_ARCHS=arm64 bash native-macos/package-dmg.sh
 `package-dmg.sh` 默认会先执行 `build.sh`，然后生成并校验：
 
 ```text
-native-macos/dist/Laicai-<version>-<build>.dmg
+outputs/Laicai-<version>-<build>.dmg
 ```
 
 如果已经有可用的 `native-macos/dist/Laicai.app` 和 `native-macos/dist/laicai`，可跳过重新构建：
@@ -76,7 +76,7 @@ bash scripts/check-swift-file-sizes.sh
 swift test --package-path native-macos
 ```
 
-`native-macos/dist/` 是本地构建产物目录，默认不会提交到仓库。
+`native-macos/dist/` 是本地构建产物目录；`outputs/` 用来放最终 DMG。两者默认都不会把安装包提交到仓库。
 
 风格检查脚本也保留在仓库中：
 
@@ -98,6 +98,7 @@ native-macos/Sources/
 skills/                  # 可扩展技能定义
 docs/                    # 架构文档
 assets/                  # 图标资源
+outputs/                 # 本地打包输出
 ```
 
 ## 文档

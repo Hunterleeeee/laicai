@@ -73,7 +73,7 @@ LAICAI_ARCHS=arm64 bash native-macos/package-dmg.sh
 Expected output:
 
 ```text
-native-macos/dist/Laicai-<version>-<build>.dmg
+outputs/Laicai-<version>-<build>.dmg
 ```
 
 The local DMG is a development build and is not Apple notarized by default.

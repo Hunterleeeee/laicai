@@ -2,7 +2,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST="$SCRIPT_DIR/dist"
+OUTPUT_DIR="$REPO_ROOT/outputs"
 APP="$DIST/Laicai.app"
 CLI="$DIST/laicai"
 BUILD_SCRIPT="$SCRIPT_DIR/build.sh"
@@ -33,7 +35,7 @@ VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO
 BUILD_NUM="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")"
 SAFE_VERSION="$(printf '%s' "$VERSION" | tr -cs '[:alnum:]._' '-')"
 SAFE_BUILD="$(printf '%s' "$BUILD_NUM" | tr -cs '[:alnum:]._' '-')"
-DMG="$DIST/Laicai-${SAFE_VERSION}-${SAFE_BUILD}.dmg"
+DMG="$OUTPUT_DIR/Laicai-${SAFE_VERSION}-${SAFE_BUILD}.dmg"
 VOLUME_NAME="来财 $VERSION"
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/laicai-dmg.XXXXXX")"
 STAGE_ROOT="$STAGE/Laicai"
@@ -43,6 +45,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+mkdir -p "$OUTPUT_DIR"
 mkdir -p "$STAGE_ROOT"
 cp -R "$APP" "$STAGE_ROOT/Laicai.app"
 cp "$CLI" "$STAGE_ROOT/laicai"
