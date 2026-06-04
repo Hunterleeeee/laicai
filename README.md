@@ -2,6 +2,8 @@
 
 macOS 原生 AI Agent，运行在本机，拥有完整工具链。
 
+来财以 MIT License 开源。当前版本适合本地开发、验证和自构建发布；公开发行前仍建议补充正式签名与 Apple notarization。
+
 ## 核心能力
 
 - **多连接器**：OpenAI / Anthropic / DeepSeek / Ollama，一键切换
@@ -10,6 +12,16 @@ macOS 原生 AI Agent，运行在本机，拥有完整工具链。
 - **知识库**：Obsidian Vault 集成 + 持久化项目记忆
 - **技能 & 工作流**：可扩展的 skill/workflow 编排
 - **自我进化**：失败模式学习、提示词 A/B 测试、经验沉淀
+
+## 环境要求
+
+- macOS 14 或更新版本
+- Xcode 15 或更新版本
+- Swift 5.9 或更新版本
+
+```bash
+bash scripts/check_macos_toolchain.sh
+```
 
 ## 构建安装
 
@@ -28,6 +40,26 @@ bash native-macos/build.sh
 LAICAI_ARCHS=arm64 bash native-macos/build.sh
 ```
 
+生成 DMG：
+
+```bash
+bash native-macos/package_dmg.sh
+# 或只构建当前架构，适合本机快速出包：
+LAICAI_ARCHS=arm64 bash native-macos/package_dmg.sh
+```
+
+`package_dmg.sh` 默认会先执行 `build.sh`，然后生成并校验：
+
+```text
+native-macos/dist/Laicai-<version>-<build>.dmg
+```
+
+如果已经有可用的 `native-macos/dist/Laicai.app` 和 `native-macos/dist/laicai`，可跳过重新构建：
+
+```bash
+LAICAI_SKIP_BUILD=1 bash native-macos/package_dmg.sh
+```
+
 SwiftPM 入口：
 
 ```bash
@@ -35,6 +67,24 @@ cd native-macos
 swift run LaicaiNativeApp
 swift run laicai --help
 ```
+
+## 验证
+
+```bash
+bash scripts/check_project_hygiene.sh
+bash scripts/check_swift_file_sizes.sh
+swift test --package-path native-macos
+```
+
+`native-macos/dist/` 是本地构建产物目录，默认不会提交到仓库。
+
+风格检查脚本也保留在仓库中：
+
+```bash
+bash scripts/lint_swift.sh
+```
+
+当前 SwiftLint/format 仍有存量问题，适合作为后续代码精简和风格债清理入口。
 
 ## 项目结构
 
@@ -49,3 +99,9 @@ skills/                  # 可扩展技能定义
 docs/                    # 架构文档
 assets/                  # 图标资源
 ```
+
+## 开源参与
+
+- 许可证：MIT License，见 `LICENSE`。
+- 贡献方式：见 `CONTRIBUTING.md`。
+- 安全问题：见 `SECURITY.md`。
