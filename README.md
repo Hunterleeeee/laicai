@@ -5,6 +5,7 @@
 [![Swift](https://github.com/Hunterleeeee/laicai/actions/workflows/swift.yml/badge.svg)](https://github.com/Hunterleeeee/laicai/actions/workflows/swift.yml)
 [![Release](https://img.shields.io/github/v/release/Hunterleeeee/laicai?label=release)](https://github.com/Hunterleeeee/laicai/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Website](https://img.shields.io/badge/website-laicai-0d6f68)](https://hunterleeeee.github.io/laicai/)
 [![GitHub stars](https://img.shields.io/github/stars/Hunterleeeee/laicai?style=social)](https://github.com/Hunterleeeee/laicai/stargazers)
 
 macOS 原生 AI Agent，运行在本机，拥有完整工具链。
@@ -14,6 +15,7 @@ macOS 原生 AI Agent，运行在本机，拥有完整工具链。
 ## 下载
 
 - GitHub 仓库：<https://github.com/Hunterleeeee/laicai>
+- 产品官网：<https://hunterleeeee.github.io/laicai/>
 - 最新版本：<https://github.com/Hunterleeeee/laicai/releases/latest>
 - 当前 DMG：<https://github.com/Hunterleeeee/laicai/releases/tag/v2026.6.4-1422>
 
@@ -122,6 +124,7 @@ outputs/                 # 本地打包输出
 
 - `docs/architecture.md`：项目架构概览
 - `docs/verification.md`：本地验证、构建和 DMG 打包
+- `docs/launch.md`：开源发布、传播文案和 Star 入口
 - `docs/skills.md`：内置 skill 结构和安全规则
 - `docs/branding.md`：品牌和图标说明
 

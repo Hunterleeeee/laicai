@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="来财 Laicai 是运行在 macOS 本机的开源 AI Agent，支持多模型连接器、工具调用、工作流、Wiki 和项目记忆。">
+    <meta property="og:title" content="来财 Laicai">
+    <meta property="og:description" content="macOS 原生、本地优先的开源 AI Agent。">
+    <meta property="og:url" content="https://hunterleeeee.github.io/laicai/">
+    <meta property="og:image" content="https://hunterleeeee.github.io/laicai/assets/laicai-logo.png">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary_large_image">
+    <title>来财 Laicai</title>
+    <link rel="canonical" href="https://hunterleeeee.github.io/laicai/">
+    <link rel="icon" href="assets/laicai-logo.png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="来财首页">
+        <img src="assets/laicai-logo.png" alt="" width="40" height="40">
+        <span>来财</span>
+      </a>
+      <nav aria-label="主要导航">
+        <a href="#features">能力</a>
+        <a href="#install">安装</a>
+        <a href="https://github.com/Hunterleeeee/laicai">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Open-source macOS AI Agent</p>
+          <h1>来财 Laicai</h1>
+          <p class="lead">运行在本机的原生 AI 工作台，把模型连接器、工具调用、项目记忆、工作流和 Wiki 放在一个 macOS 应用里。</p>
+          <div class="actions">
+            <a class="button primary" href="https://github.com/Hunterleeeee/laicai/releases/latest">下载 DMG</a>
+            <a class="button secondary" href="https://github.com/Hunterleeeee/laicai">给项目 Star</a>
+          </div>
+          <p class="note">MIT License。当前公开包未 notarize，首次打开可能需要在 macOS 隐私与安全性中允许。</p>
+        </div>
+
+        <div class="product-frame" aria-label="来财产品界面预览">
+          <div class="window-chrome">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="app-preview">
+            <aside>
+              <div class="rail-title">Laicai</div>
+              <div class="thread active">项目审查</div>
+              <div class="thread">Wiki 草稿</div>
+              <div class="thread">图片生成</div>
+            </aside>
+            <section class="conversation">
+              <div class="topline">今天想做什么？</div>
+              <div class="message user">全面看一下当前项目的问题。<br>请直接修复并验证。</div>
+              <div class="message agent">
+                <strong>计划</strong>
+                <span>读取项目结构，检查最近变更，运行验证，再给出修复摘要。</span>
+              </div>
+              <div class="tool-row">
+                <span>code_search</span>
+                <span>swift_test</span>
+                <span>wiki_save</span>
+              </div>
+            </section>
+            <aside class="inspector">
+              <div class="panel-title">工具面板</div>
+              <div class="metric"><span>任务</span><strong>运行中</strong></div>
+              <div class="metric"><span>证据</span><strong>已收集</strong></div>
+              <div class="metric"><span>记忆</span><strong>可写入</strong></div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="section-heading">
+          <p class="eyebrow">What it does</p>
+          <h2>不是聊天壳，是能做事的本机工作台</h2>
+        </div>
+        <div class="feature-grid">
+          <article>
+            <h3>多模型连接器</h3>
+            <p>支持 OpenAI、Anthropic、DeepSeek、Ollama 等连接方式，一键切换模型配置。</p>
+          </article>
+          <article>
+            <h3>Agent Loop</h3>
+            <p>自动规划、调用工具、收集证据、验证结果，并在失败时尝试修复。</p>
+          </article>
+          <article>
+            <h3>工具与工作流</h3>
+            <p>文件读写、代码搜索、Shell、联网搜索、图片生成、skill 和 workflow 编排。</p>
+          </article>
+          <article>
+            <h3>本地知识库</h3>
+            <p>集成 Obsidian Vault、Wiki 保存和项目记忆，把上下文沉淀在本机。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="install" class="install">
+        <div>
+          <p class="eyebrow">Install</p>
+          <h2>下载 DMG，拖进 Applications</h2>
+          <p>Release 包不包含作者的个人配置、API key、聊天历史或 connector。用户数据会在每台机器首次运行后独立生成。</p>
+        </div>
+        <div class="install-card">
+          <code>Laicai-2026.6.4-1422.dmg</code>
+          <a class="button primary" href="https://github.com/Hunterleeeee/laicai/releases/latest">打开下载页</a>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>Laicai is open source under the MIT License.</span>
+      <a href="https://github.com/Hunterleeeee/laicai/stargazers">Star on GitHub</a>
+    </footer>
+  </body>
+</html>
