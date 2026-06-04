@@ -68,7 +68,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             title: "前段时间比较火的酒馆 是什么东西",
             preview: "",
             status: .queued,
-            steps: [],
+            steps: []
         )
         let real = Thread(
             title: "真实会话",
@@ -101,7 +101,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             title: "真实会话",
             preview: "你好",
             status: .completed,
-            steps: [TaskStep(kind: .userInput, text: "你好")],
+            steps: [TaskStep(kind: .userInput, text: "你好")]
         )
         let state = testState(threads: [placeholder, real], selectedSessionID: placeholder.id)
 
@@ -249,7 +249,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             title: "README 任务",
             steps: [
                 TaskStep(kind: .userInput, text: "帮我生成 README")
-            ],
+            ]
         )
 
         XCTAssertEqual(
