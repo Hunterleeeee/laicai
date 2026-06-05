@@ -1,12 +1,10 @@
-# 来财 (Laicai)
+# 来财 Laicai
 
 <p align="center">
-  <img src="assets/laicai-logo.png" alt="Laicai logo" width="96">
+  <img src="assets/laicai-logo.png" alt="Laicai logo" width="118">
 </p>
 
-<p align="center">
-  <strong>macOS 原生 AI Agent，运行在本机，拥有完整工具链。</strong>
-</p>
+<h3 align="center">macOS 原生 AI Agent，运行在本机，拥有完整工具链。</h3>
 
 <p align="center">
   <a href="https://github.com/Hunterleeeee/laicai/actions/workflows/swift.yml"><img alt="Swift" src="https://github.com/Hunterleeeee/laicai/actions/workflows/swift.yml/badge.svg"></a>
@@ -16,70 +14,89 @@
   <a href="https://github.com/Hunterleeeee/laicai/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Hunterleeeee/laicai?style=social"></a>
 </p>
 
-来财以 MIT License 开源。当前版本适合本地开发、验证和自构建发布；公开发行前仍建议补充正式签名与 Apple notarization。
+<p align="center">
+  <a href="https://github.com/Hunterleeeee/laicai/releases/latest"><strong>下载 DMG</strong></a>
+  ·
+  <a href="https://hunterleeeee.github.io/laicai/">产品官网</a>
+  ·
+  <a href="https://github.com/Hunterleeeee/laicai/stargazers">给项目 Star</a>
+</p>
 
-## 下载
+来财是一个本地优先的 macOS AI 工作台。它把模型连接器、工具调用、项目记忆、工作流和 Wiki 放在一个原生应用里，让 AI 不只是聊天，而是能读项目、跑工具、做验证、沉淀知识。
 
-- GitHub 仓库：<https://github.com/Hunterleeeee/laicai>
-- 产品官网：<https://hunterleeeee.github.io/laicai/>
-- 最新版本：<https://github.com/Hunterleeeee/laicai/releases/latest>
-- 当前 DMG：<https://github.com/Hunterleeeee/laicai/releases/tag/v2026.6.4-1422>
+> 当前公开版本适合本地开发、验证和自构建发布。DMG 暂未 Apple notarize，首次打开可能需要在 macOS「隐私与安全性」里允许。
 
-下载 DMG 后，把 `Laicai.app` 拖到 Applications 即可安装。当前包未经过 Apple notarization，首次打开可能需要在 macOS「隐私与安全性」里允许打开。
+<p align="center">
+  <img src="assets/readme-preview.svg" alt="Laicai product preview">
+</p>
 
-如果这个项目对你有用，请在 GitHub 页面右上角点 **Star**，这会帮助更多人发现来财。
+## 一眼看懂
+
+| 你想做什么 | 来财怎么帮你 |
+| --- | --- |
+| 审查一个项目 | 读取项目结构、搜索代码、检查 diff、输出问题和修复建议 |
+| 执行一个任务 | 自动规划、调用工具、验证结果，并在失败时继续修复 |
+| 沉淀知识 | 把结果保存到 Wiki / Obsidian Vault / 项目记忆 |
+| 切换模型 | 支持 OpenAI、Anthropic、DeepSeek、Ollama 等连接器 |
+| 做重复流程 | 用 skill 和 workflow 编排常用任务 |
 
 ## 核心能力
 
-- **多连接器**：OpenAI / Anthropic / DeepSeek / Ollama，一键切换
-- **Agent Loop**：自动规划 → 工具调用 → 验证 → 修复循环
-- **工具系统**：文件读写、代码搜索、Shell 执行、联网搜索、Wiki 构建、图片生成
-- **知识库**：Obsidian Vault 集成 + 持久化项目记忆
-- **技能 & 工作流**：可扩展的 skill/workflow 编排
-- **自我进化**：失败模式学习、提示词 A/B 测试、经验沉淀
+| 能力 | 说明 |
+| --- | --- |
+| 多连接器 | OpenAI / Anthropic / DeepSeek / Ollama，一键切换 |
+| Agent Loop | 自动规划 -> 工具调用 -> 验证 -> 修复循环 |
+| 工具系统 | 文件读写、代码搜索、Shell、联网搜索、Wiki、图片生成 |
+| 本地记忆 | 持久化项目记忆，支持 Obsidian Vault 集成 |
+| 工作流 | 内置 skill/workflow，可扩展、可复用 |
+| 自我进化 | 记录失败模式、提示词实验和经验沉淀 |
 
-## 环境要求
+## 下载和安装
+
+1. 打开 [最新 Release](https://github.com/Hunterleeeee/laicai/releases/latest)。
+2. 下载 `Laicai-<version>-<build>.dmg`。
+3. 把 `Laicai.app` 拖到 Applications。
+4. 第一次启动后，添加或选择你的模型连接器。
+
+Release 包不包含作者的个人配置、API key、聊天历史或 connector。用户数据会在每台机器首次运行后独立生成，默认目录是：
+
+```text
+~/Library/Application Support/Laicai
+```
+
+## 从源码运行
+
+环境要求：
 
 - macOS 14 或更新版本
 - Xcode 15 或更新版本
 - Swift 5.9 或更新版本
 
+检查本机工具链：
+
 ```bash
 bash scripts/check-macos-toolchain.sh
 ```
 
-## 构建安装
+构建应用和 CLI：
 
 ```bash
 bash native-macos/build.sh
-# 产出:
-#   native-macos/dist/Laicai.app
-#   native-macos/dist/laicai
-#   native-macos/dist/install_laicai.command
-```
-
-`build.sh` 会从脚本位置推导仓库根目录，默认构建 macOS 14 universal binary（arm64 + x86_64）。
-如需只构建当前架构，可设置：
-
-```bash
-LAICAI_ARCHS=arm64 bash native-macos/build.sh
 ```
 
 生成 DMG：
 
 ```bash
 bash native-macos/package-dmg.sh
-# 或只构建当前架构，适合本机快速出包：
+```
+
+只构建当前架构，适合本机快速出包：
+
+```bash
 LAICAI_ARCHS=arm64 bash native-macos/package-dmg.sh
 ```
 
-`package-dmg.sh` 默认会先执行 `build.sh`，然后生成并校验：
-
-```text
-outputs/Laicai-<version>-<build>.dmg
-```
-
-如果已经有可用的 `native-macos/dist/Laicai.app` 和 `native-macos/dist/laicai`，可跳过重新构建：
+跳过重新构建，直接用现有 app/CLI 打包：
 
 ```bash
 LAICAI_SKIP_BUILD=1 bash native-macos/package-dmg.sh
@@ -93,15 +110,21 @@ swift run LaicaiNativeApp
 swift run laicai --help
 ```
 
+本地输出位置：
+
+```text
+native-macos/dist/             # app / CLI 构建产物
+outputs/Laicai-*.dmg           # 最终 DMG
+```
+
 ## 验证
 
 ```bash
 bash scripts/check-project-hygiene.sh
 bash scripts/check-swift-file-sizes.sh
+python3 scripts/validate-skills.py
 swift test --package-path native-macos
 ```
-
-`native-macos/dist/` 是本地构建产物目录；`outputs/` 用来放最终 DMG。两者默认都不会把安装包提交到仓库。
 
 风格检查脚本也保留在仓库中：
 
@@ -113,29 +136,32 @@ bash scripts/lint-swift.sh
 
 ## 项目结构
 
-```
+```text
 native-macos/Sources/
-  LaicaiNativeApp/       # 应用入口
-  LaicaiNativeDomain/    # 数据模型
-  LaicaiNativeFoundation/# Agent、工具、连接器、记忆
-  LaicaiNativeUI/        # SwiftUI 界面
-  LaicaiNativeCLI/       # CLI 工具
-skills/                  # 可扩展技能定义
-docs/                    # 架构文档
-assets/                  # 图标资源
-outputs/                 # 本地打包输出
+  LaicaiNativeApp/        # 应用入口
+  LaicaiNativeDomain/     # 数据模型
+  LaicaiNativeFoundation/ # Agent、工具、连接器、记忆
+  LaicaiNativeUI/         # SwiftUI 界面
+  LaicaiNativeCLI/        # CLI 工具
+skills/                   # 可扩展技能定义
+docs/                     # 架构、验证、发布和 skill 文档
+assets/                   # 图标资源
+site/                     # GitHub Pages 产品页
+outputs/                  # 本地打包输出
 ```
 
 ## 文档
 
-- `docs/architecture.md`：项目架构概览
-- `docs/verification.md`：本地验证、构建和 DMG 打包
-- `docs/launch.md`：开源发布、传播文案和 Star 入口
-- `docs/skills.md`：内置 skill 结构和安全规则
-- `docs/branding.md`：品牌和图标说明
+- [项目架构](docs/architecture.md)
+- [验证和打包](docs/verification.md)
+- [开源发布与传播](docs/launch.md)
+- [Skill 结构](docs/skills.md)
+- [品牌与图标](docs/branding.md)
 
 ## 开源参与
 
-- 许可证：MIT License，见 `LICENSE`。
-- 贡献方式：见 `CONTRIBUTING.md`。
-- 安全问题：见 `SECURITY.md`。
+来财以 MIT License 开源。欢迎 fork、提 issue、提 PR，也欢迎给项目一个 Star，让更多人看到这个本地优先的 macOS AI Agent。
+
+- 许可证：[MIT](LICENSE)
+- 贡献方式：[CONTRIBUTING.md](CONTRIBUTING.md)
+- 安全问题：[SECURITY.md](SECURITY.md)
