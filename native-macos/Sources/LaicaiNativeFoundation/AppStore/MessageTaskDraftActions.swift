@@ -116,7 +116,15 @@ extension AppStore {
         if customAgent == nil,
            MultiAgentOrchestrator.shouldUseMultiAgent(message: message, intent: intent),
            let plan = MultiAgentOrchestrator.createPlan(for: message, intent: intent, connectors: state.connectors, activeConnectorID: state.activeConnectorID) {
-            executeMultiAgent(message: message, context: context, connector: connector, plan: plan, intent: intent, decision: decision, projectID: newThreadProjectID, reuseThreadID: selectedPlaceholderID)
+            createMultiAgentPlanDraft(
+                message: message,
+                context: context,
+                connector: connector,
+                plan: plan,
+                decision: decision,
+                projectID: newThreadProjectID,
+                reuseThreadID: selectedPlaceholderID
+            )
             return
         }
 
@@ -295,9 +303,10 @@ extension AppStore {
         persistThreads()
 
         let capturedImages = state.draftImages
-        state.isGenerating = true
-        state.generationStartedAt = Date()
-        state.liveActivity = isChatIntent ? "思考中…" : "会话 正在分析…"
+        markGenerationStarted(
+            for: targetTaskID,
+            activity: isChatIntent ? "思考中…" : "会话 正在分析…"
+        )
         state.draftMessage = ""
         state.draftAttachments = []
         state.draftImages = []
@@ -358,27 +367,24 @@ extension AppStore {
                     summaryCache: state.threads.first(where: { $0.id == targetTaskID })?.summaryCache,
                     imageAttachments: capturedImages,
                     onStep: { [weak self] step in
-                        guard let self else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
                         self.appendTaskStep(step, to: targetTaskID)
                     },
                     onStreamDelta: { [weak self] delta in
-                        guard let self else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
                         self.appendStreamDelta(delta, to: targetTaskID)
                     },
                     onReasoningDelta: { [weak self] delta in
-                        guard let self else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
                         self.appendThinkingDelta(delta, to: targetTaskID)
                     },
                     onCheckInterrupt: { [weak self] in
                         guard let self else { return nil }
-                        guard let followUp = self.state.pendingFollowUp, !followUp.isEmpty else { return nil }
-                        self.state.pendingFollowUp = nil
-                        self.state.draftMessage = ""
-                        return followUp
+                        return self.consumePendingFollowUp(for: targetTaskID)
                     }
                 )
 
-                guard !Task.isCancelled else { return }
+                guard self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
 
                 self.flushThinkingBuffer(for: targetTaskID)
                 self.flushStreamBuffer(for: targetTaskID)
@@ -393,7 +399,7 @@ extension AppStore {
 
                 self.handlePostRunSelfImprovement(completedTask: completedTask, targetTaskID: targetTaskID)
             } catch {
-                guard !Task.isCancelled else { return }
+                guard self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
                 self.flushThinkingBuffer(for: targetTaskID)
                 self.flushStreamBuffer(for: targetTaskID)
                 if let threadIndex = self.state.threads.firstIndex(where: { $0.id == targetTaskID }) {
@@ -445,7 +451,7 @@ extension AppStore {
     func shouldContinueCurrentSelectedThread(message: String, intent: UserIntent) -> Bool {
         guard let selectedID = state.selectedThreadID,
               let thread = state.threads.first(where: { $0.id == selectedID }) else { return false }
-        if thread.status == .running && generationTasks[selectedID] != nil { return false }
+        if thread.status == .running && isThreadGenerating(selectedID) { return false }
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !thread.steps.isEmpty else {
             return !Self.canRecoverRecentThread(for: trimmed, intent: intent)

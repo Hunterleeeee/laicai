@@ -2,32 +2,38 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
-    func updateLiveActivity(from step: TaskStep) {
+    func updateLiveActivity(from step: TaskStep, for threadID: UUID) {
+        let activity: String?
         switch step.kind {
         case .aiThinking:
-            state.liveActivity = "正在思考…"
+            activity = "正在思考…"
         case .toolCall:
             if let name = step.toolName {
-                state.liveActivity = "正在\(Self.friendlyActivityName(name, params: step.toolParams))"
+                activity = "正在\(Self.friendlyActivityName(name, params: step.toolParams))"
             } else {
-                state.liveActivity = "正在调用工具…"
+                activity = "正在调用工具…"
             }
         case .toolResult:
             if step.isFailure {
-                state.liveActivity = "工具执行失败，正在处理…"
+                activity = "工具执行失败，正在处理…"
+            } else {
+                activity = nil
             }
         case .textOutput:
-            state.liveActivity = "正在生成回复…"
+            activity = "正在生成回复…"
         case .reviewRequest:
-            state.liveActivity = "等待审查确认"
+            activity = "等待审查确认"
         case .error:
             if step.recoverable {
-                state.liveActivity = "遇到错误，尝试恢复…"
+                activity = "遇到错误，尝试恢复…"
             } else {
-                state.liveActivity = ""
+                activity = ""
             }
         case .userInput, .reviewResult:
-            break
+            activity = nil
+        }
+        if let activity {
+            setLiveActivity(activity, for: threadID)
         }
     }
 

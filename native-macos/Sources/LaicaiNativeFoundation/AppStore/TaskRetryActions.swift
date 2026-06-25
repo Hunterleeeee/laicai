@@ -3,7 +3,7 @@ import LaicaiNativeDomain
 
 extension AppStore {
     public func retryLastMessage() {
-        guard !state.isGenerating else { return }
+        guard !selectedThreadIsGenerating else { return }
 
         if let thread = state.selectedThread, thread.isExecution {
             guard thread.status != .running else { return }
@@ -32,8 +32,8 @@ extension AppStore {
     }
 
     public func continueThread(id: UUID) {
-        guard !state.isGenerating else {
-            notify("正在运行中，先等当前执行结束或发送补充指令。", style: .info)
+        guard !isThreadGenerating(id) else {
+            notify("这个对话正在运行中，可以发送补充指令或等待完成。", style: .info)
             return
         }
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == id }) else { return }
@@ -66,6 +66,7 @@ extension AppStore {
     public func clearSelectedThread() {
         guard let threadID = state.selectedThreadID,
               let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }) else { return }
+        cancelGenerationTask(for: threadID)
         state.threads[threadIndex].steps = []
         state.threads[threadIndex].status = .queued
         state.threads[threadIndex].executionState = .idle

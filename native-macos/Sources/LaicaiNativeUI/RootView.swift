@@ -223,7 +223,7 @@ private struct AppTopBar: View {
             HStack(spacing: AppSpace.sm) {
                 Text(subtitle)
                     .font(AppFont.tiny)
-                    .foregroundStyle(store.state.isGenerating ? Semantic.toolRunning : TextGrade.muted)
+                    .foregroundStyle(store.hasRunningGenerationTasks ? Semantic.toolRunning : TextGrade.muted)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if let project = selectedThreadProjectName {
@@ -240,11 +240,11 @@ private struct AppTopBar: View {
 
     private var actionButtons: some View {
         HStack(spacing: AppSpace.xs) {
-            ToolbarButton(icon: "plus.message", tooltip: "新任务") {
-                store.newThread()
+            ToolbarButton(icon: "hammer", tooltip: "新任务") {
+                startNewTask()
             }
 
-            ToolbarButton(icon: "bubble.left.and.bubble.right", tooltip: "新会话") {
+            ToolbarButton(icon: "plus.message", tooltip: "新会话") {
                 store.newThread()
             }
 
@@ -263,6 +263,15 @@ private struct AppTopBar: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
+    private func startNewTask() {
+        if let projectID = projectManager.activeProjectID {
+            store.newThreadInProject(projectID)
+        } else {
+            store.newThread()
+        }
+        store.updateDraft("请直接处理这个目标：")
+    }
+
     private var currentTitle: String {
         guard let thread = store.state.selectedThread else { return "工作台" }
         let title = TextHelper.compactTitle(thread.title)
@@ -270,9 +279,12 @@ private struct AppTopBar: View {
     }
 
     private var subtitle: String {
-        if store.state.isGenerating {
+        if store.selectedThreadIsGenerating {
             let live = store.state.liveActivity.trimmingCharacters(in: .whitespacesAndNewlines)
             return live.isEmpty ? "正在运行" : live
+        }
+        if store.hasRunningGenerationTasks {
+            return "后台会话运行中"
         }
         guard let thread = store.state.selectedThread else { return "选择会话，或直接输入一个目标" }
         return "\(thread.executionState.title) · \(RelativeTimeFormatter.string(for: thread.updatedAt))"
@@ -287,7 +299,7 @@ private struct AppTopBar: View {
     }
 
     private func threadTint(_ thread: Thread) -> Color {
-        if store.state.isGenerating && thread.id == store.state.selectedThreadID { return Semantic.toolRunning }
+        if store.isThreadGenerating(thread.id) { return Semantic.toolRunning }
         switch thread.executionState {
         case .running, .planning: return Semantic.toolRunning
         case .waitingForApproval: return Semantic.warning
@@ -333,7 +345,7 @@ struct StatusBarView: View {
             HStack(spacing: AppSpace.md) {
                 Spacer()
 
-                if store.state.isGenerating {
+                if store.hasRunningGenerationTasks {
                     HStack(spacing: AppSpace.xs) {
                         ProgressView()
                             .scaleEffect(0.55)

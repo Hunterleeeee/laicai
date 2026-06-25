@@ -37,6 +37,25 @@ final class MultiAgentContractTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(reviewer?.dependsOn, tester.map { [$0.id] })
     }
 
+    func testAutomaticMultiAgentRequiresExplicitCollaborationOrPipeline() {
+        XCTAssertFalse(MultiAgentOrchestrator.shouldUseMultiAgent(
+            message: "优化一下这个项目",
+            intent: .task
+        ))
+        XCTAssertFalse(MultiAgentOrchestrator.shouldUseMultiAgent(
+            message: "看看这个界面哪里不好用",
+            intent: .task
+        ))
+        XCTAssertTrue(MultiAgentOrchestrator.shouldUseMultiAgent(
+            message: "优化项目性能，修改代码，运行测试并审查结果",
+            intent: .task
+        ))
+        XCTAssertTrue(MultiAgentOrchestrator.shouldUseMultiAgent(
+            message: "让多个 Agent 分工协同处理这个问题",
+            intent: .task
+        ))
+    }
+
     func testAllRolesUseCodexFullPath() {
         // codexFull is now the only kernel path — no per-role kernel mode selection
         XCTAssertTrue(true)

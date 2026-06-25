@@ -46,6 +46,31 @@ extension AppStore {
             || normalized.localizedCaseInsensitiveContains("continue")
     }
 
+    static func isReadOnlyInvestigationFollowUp(_ message: String) -> Bool {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        let explicitReadOnlyMarkers = [
+            "继续看", "接着看", "看看", "看下", "看一下", "分析", "诊断", "评估",
+            "建议", "方案", "思路", "看法", "哪里", "为什么",
+            "先别改", "不要改", "别改", "不用改", "只分析", "只给建议", "不要执行", "先不执行"
+        ]
+        guard explicitReadOnlyMarkers.contains(where: { normalized.contains($0) }) else { return false }
+        return !isExplicitExecutionFollowUp(normalized)
+    }
+
+    static func isExplicitExecutionFollowUp(_ message: String) -> Bool {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        if isWikiPersistenceFollowUp(normalized) { return true }
+        let executionMarkers = [
+            "继续执行", "继续做", "继续任务", "继续会话", "继续 agent", "续跑", "重试", "重新跑", "再跑",
+            "直接改", "帮我改", "修复", "修改", "改一下", "写入", "保存", "实现", "落地",
+            "运行", "执行命令", "跑测试", "测试一下", "验证一下", "构建", "编译", "部署",
+            "创建文件", "生成文件", "写到", "写进", "应用到"
+        ]
+        return executionMarkers.contains { normalized.contains($0) }
+    }
+
     static func isContextualTaskReference(_ message: String) -> Bool {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }

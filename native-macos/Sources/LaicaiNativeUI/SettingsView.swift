@@ -2,6 +2,29 @@ import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
 
+private var appVersionLabel: String {
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+    return "v\(version) · build \(build)"
+}
+
+private var geminiBridgeDescription: String {
+    let domains = GeminiOAuthBridgeManager.domains.joined(separator: "、")
+    let socksAddress = "\(GeminiOAuthBridgeManager.socksHost):\(GeminiOAuthBridgeManager.socksPort)"
+    return "用于 Gemini 与 Antigravity 不吃系统代理时，临时把 \(domains) " +
+        "转发到 Veee SOCKS \(socksAddress)。"
+}
+
+private var geminiBridgePrivacyNote: String {
+    "启动会弹出 macOS 管理员授权，授权后桥在后台运行；失败会自动回滚 hosts。" +
+        "来财不会读取、保存或代理你的 Mac 密码。"
+}
+
+private var feishuWebSocketHint: String {
+    "飞书使用 WebSocket 长连接，无需公网 IP。请在飞书开放平台 > 事件与回调 > " +
+        "回调配置中选择「使用长连接接收事件」。"
+}
+
 public struct SettingsView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -182,8 +205,8 @@ private struct GeneralSettingsTab: View {
                             set: { store.selectConnector(id: $0) }
                         )) {
                             Text("无").tag(UUID())
-                            ForEach(store.state.connectors) { c in
-                                Text(c.name).tag(c.id)
+                            ForEach(store.state.connectors) { connector in
+                                Text(connector.name).tag(connector.id)
                             }
                         }
                         .labelsHidden()
@@ -216,7 +239,7 @@ private struct GeneralSettingsTab: View {
                 Text("macOS 本机 AI 编排助手")
                     .font(.system(size: 11))
                     .foregroundStyle(TextGrade.muted)
-                Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") · build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0")")
+                Text(appVersionLabel)
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(TextGrade.ghost)
             }
@@ -599,12 +622,12 @@ private struct ToolsSettingsTab: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: AppSpace.xs) {
-                    Text("用于 Gemini 与 Antigravity 不吃系统代理时，临时把 \(GeminiOAuthBridgeManager.domains.joined(separator: "、")) 转发到 Veee SOCKS \(GeminiOAuthBridgeManager.socksHost):\(GeminiOAuthBridgeManager.socksPort)。")
+                    Text(geminiBridgeDescription)
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text("启动会弹出 macOS 管理员授权，授权后桥在后台运行；失败会自动回滚 hosts。来财不会读取、保存或代理你的 Mac 密码。")
+                    Text(geminiBridgePrivacyNote)
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -894,19 +917,19 @@ private struct ChannelEditSheet: View {
 
     init(channel: ChannelConfig?) {
         self.channel = channel
-        if let ch = channel {
-            _selectedType = State(initialValue: ch.type)
-            _name = State(initialValue: ch.name)
-            _appID = State(initialValue: ch.config["app_id"] ?? "")
-            _appSecret = State(initialValue: ch.config["app_secret"] ?? "")
-            _verificationToken = State(initialValue: ch.config["verification_token"] ?? "")
-            _encryptKey = State(initialValue: ch.config["encrypt_key"] ?? "")
-            _botToken = State(initialValue: ch.config["bot_token"] ?? "")
-            _corpID = State(initialValue: ch.config["corp_id"] ?? "")
-            _corpSecret = State(initialValue: ch.config["corp_secret"] ?? "")
-            _agentID = State(initialValue: ch.config["agent_id"] ?? "")
-            _webhookURL = State(initialValue: ch.config["webhook_url"] ?? "")
-            _allowedSenders = State(initialValue: ch.allowedSenders.joined(separator: ", "))
+        if let channel {
+            _selectedType = State(initialValue: channel.type)
+            _name = State(initialValue: channel.name)
+            _appID = State(initialValue: channel.config["app_id"] ?? "")
+            _appSecret = State(initialValue: channel.config["app_secret"] ?? "")
+            _verificationToken = State(initialValue: channel.config["verification_token"] ?? "")
+            _encryptKey = State(initialValue: channel.config["encrypt_key"] ?? "")
+            _botToken = State(initialValue: channel.config["bot_token"] ?? "")
+            _corpID = State(initialValue: channel.config["corp_id"] ?? "")
+            _corpSecret = State(initialValue: channel.config["corp_secret"] ?? "")
+            _agentID = State(initialValue: channel.config["agent_id"] ?? "")
+            _webhookURL = State(initialValue: channel.config["webhook_url"] ?? "")
+            _allowedSenders = State(initialValue: channel.allowedSenders.joined(separator: ", "))
         }
     }
 
@@ -977,7 +1000,7 @@ private struct ChannelEditSheet: View {
                     case .feishu:
                         configField("App ID", text: $appID, placeholder: "cli_xxxxx")
                         configField("App Secret", text: $appSecret, placeholder: "飞书开放平台 App Secret", isSecure: true)
-                        Text("飞书使用 WebSocket 长连接，无需公网 IP。请在飞书开放平台 > 事件与回调 > 回调配置中选择「使用长连接接收事件」。")
+                        Text(feishuWebSocketHint)
                             .font(AppFont.tiny)
                             .foregroundStyle(TextGrade.ghost)
 

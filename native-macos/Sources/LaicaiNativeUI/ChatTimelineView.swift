@@ -30,7 +30,7 @@ struct ToolbarButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { h in withAnimation(AppAnimation.micro) { isHovered = h } }
+        .onHover { isHovering in withAnimation(AppAnimation.micro) { isHovered = isHovering } }
         .help(tooltip)
     }
 }
@@ -84,12 +84,15 @@ struct ThreadTimelineView: View {
                                 if plan.isEditable {
                                     MultiAgentPlanEditorView(
                                         plan: Binding(
-                                            get: { plan },
+                                            get: {
+                                                store.state.threads.first(where: { $0.id == thread.id })?.multiAgentPlan ?? plan
+                                            },
                                             set: { newPlan in
                                                 store.updateMultiAgentPlan(newPlan, for: thread.id)
                                             }
                                         ),
                                         connectors: store.state.connectors,
+                                        activeConnectorID: store.state.activeConnectorID,
                                         workspaceRoot: store.state.settings.workspacePath,
                                         onExecute: {
                                             store.executeEditedPlan(threadID: thread.id)
@@ -153,7 +156,7 @@ struct ThreadTimelineView: View {
                         }
                     }
 
-                    if store.state.isGenerating {
+                    if store.isThreadGenerating(thread.id) {
                         TypingIndicator()
                     }
 
@@ -173,7 +176,7 @@ struct ThreadTimelineView: View {
                 scrollToBottom(proxy)
             }
             .onChange(of: thread.steps.count) { _ in scheduleScrollToBottom(proxy) }
-            .onChange(of: store.state.isGenerating) { isGen in
+            .onChange(of: store.isThreadGenerating(thread.id)) { isGen in
                 if isGen { userScrolledAway = false; scheduleScrollToBottom(proxy) }
             }
             .onChange(of: thread.status) { newStatus in
@@ -420,7 +423,7 @@ private struct ThreadSummaryCard: View {
                         .font(AppFont.headline)
                         .foregroundStyle(TextGrade.primary)
                         .lineLimit(2)
-                    Text("会话 · \(thread.resolvedAgentState.title) · \(thread.events.count) 条记录 · \(RelativeTimeFormatter.string(for: thread.updatedAt))")
+                    Text(threadSubtitle)
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.muted)
                 }
@@ -451,6 +454,11 @@ private struct ThreadSummaryCard: View {
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                 .strokeBorder(SurfaceGrade.divider, lineWidth: 0.75)
         )
+    }
+
+    private var threadSubtitle: String {
+        let updatedAt = RelativeTimeFormatter.string(for: thread.updatedAt)
+        return "会话 · \(thread.resolvedAgentState.title) · \(thread.events.count) 条记录 · \(updatedAt)"
     }
 
     private var agentIcon: String {
@@ -705,6 +713,14 @@ struct MultiAgentFlowView: View {
         let hasArtifact = !(handoff?.artifact.isEmpty ?? true)
         let isDone = agent.status == .completed
         let isActive = agent.status == .running
+        let completedColors = [
+            flowColor(for: .completed).opacity(0.5),
+            flowColor(for: .completed).opacity(0.2)
+        ]
+        let idleColors = [
+            TextGrade.ghost.opacity(0.3),
+            TextGrade.ghost.opacity(0.15)
+        ]
 
         return VStack(spacing: AppSpace.xs) {
             ZStack {
@@ -712,8 +728,8 @@ struct MultiAgentFlowView: View {
                 RoundedRectangle(cornerRadius: 1)
                     .fill(
                         isDone
-                        ? LinearGradient(colors: [flowColor(for: .completed).opacity(0.5), flowColor(for: .completed).opacity(0.2)], startPoint: .leading, endPoint: .trailing)
-                        : LinearGradient(colors: [TextGrade.ghost.opacity(0.3), TextGrade.ghost.opacity(0.15)], startPoint: .leading, endPoint: .trailing)
+                        ? LinearGradient(colors: completedColors, startPoint: .leading, endPoint: .trailing)
+                        : LinearGradient(colors: idleColors, startPoint: .leading, endPoint: .trailing)
                     )
                     .frame(width: 32, height: 2)
 
@@ -895,22 +911,22 @@ private func phaseGroups(for steps: [TaskStep]) -> [StepPhaseGroup] {
         currentNonTool = []
     }
 
-    var i = 0
-    while i < steps.count {
-        let step = steps[i]
+    var stepIndex = 0
+    while stepIndex < steps.count {
+        let step = steps[stepIndex]
         if step.kind == .toolCall || step.kind == .toolResult {
             flushNonTool()
             var toolSteps: [TaskStep] = []
-            while i < steps.count && (steps[i].kind == .toolCall || steps[i].kind == .toolResult) {
-                toolSteps.append(steps[i])
-                i += 1
+            while stepIndex < steps.count && (steps[stepIndex].kind == .toolCall || steps[stepIndex].kind == .toolResult) {
+                toolSteps.append(steps[stepIndex])
+                stepIndex += 1
             }
             let anchor = toolSteps[0].id.uuidString
             let phase = AgentLoop.inferPhase(from: toolSteps)
             groups.append(StepPhaseGroup(id: "tool-\(anchor)", phase: phase, steps: toolSteps))
         } else {
             currentNonTool.append(step)
-            i += 1
+            stepIndex += 1
         }
     }
     flushNonTool()
@@ -999,174 +1015,32 @@ private struct TaskStepStats {
     let memoryPills: [String]
 
     init(thread: Thread, visibleSteps: [TaskStep]) {
-        let steps = visibleSteps
-        var completedSteps = 0
-        var failureCount = 0
-        var recoveryCount = 0
-        var recoverySuccessCount = 0
-        var readCount = 0
-        var pendingReviewIDs: [UUID] = []
-        var phaseCounts: [TaskPhase: Int] = [:]
-        var phaseToolSets: [TaskPhase: Set<String>] = [:]
+        let accumulator = TaskStepStatsAccumulator(steps: visibleSteps)
 
-        var readFiles: [String] = []
-        var seenReadFiles: Set<String> = []
-        var hasWorkspaceIndex = false
-        var failedToolCounts: [String: Int] = [:]
-        var searches: [String] = []
-        var seenSearches: Set<String> = []
-
-        var hasFileChange = false
-        var hasVerifyCheck = false
-        var successfulReadCount = 0
-        var searchCount = 0
-
-        func addPhase(_ phase: TaskPhase, toolName: String? = nil) {
-            phaseCounts[phase, default: 0] += 1
-            guard let toolName, !toolName.isEmpty else { return }
-            phaseToolSets[phase, default: []].insert(ToolNameCodec.canonicalName(toolName))
-        }
-
-        for step in steps {
-            let toolName = step.toolName.map(ToolNameCodec.canonicalName)
-
-            if step.kind != .userInput {
-                completedSteps += 1
-            }
-            if step.isFailure || step.kind == .error {
-                failureCount += 1
-            }
-
-            let isRecovery = (step.toolCallId ?? "").hasPrefix("call_recovery_") || step.text.hasPrefix("自动恢复")
-            if isRecovery {
-                recoveryCount += 1
-                if !step.isFailure && step.kind == .toolResult {
-                    recoverySuccessCount += 1
-                }
-            }
-
-            if step.kind == .reviewRequest && step.approved == nil {
-                pendingReviewIDs.append(step.id)
-            }
-
-            if let toolName {
-                if ["workspace.index", "file.read", "code.search", "git"].contains(toolName),
-                   step.kind == .toolCall || step.kind == .toolResult {
-                    addPhase(.explore, toolName: toolName)
-                }
-
-                if step.kind == .toolCall,
-                   ["file.write", "file.edit", "diff.apply", "shell.exec"].contains(toolName) {
-                    addPhase(.execute, toolName: toolName)
-                }
-
-                if step.kind == .toolCall, toolName == "verify.build" {
-                    addPhase(.verify, toolName: toolName)
-                }
-
-                if step.kind == .toolCall,
-                   toolName == "shell.exec",
-                   step.toolParams?["command"]?.contains("test") == true {
-                    addPhase(.verify, toolName: toolName)
-                }
-
-                if ["file.write", "file.edit", "diff.apply"].contains(toolName)
-                    || Self.isSuccessfulDocumentTransform(step, canonicalToolName: toolName) {
-                    hasFileChange = true
-                }
-
-                if step.kind == .toolResult, toolName == "file.read", !step.isFailure {
-                    readCount += 1
-                    successfulReadCount += 1
-                    if let path = step.toolParams?["path"] {
-                        Self.appendUnique(path, to: &readFiles, seen: &seenReadFiles)
-                    }
-                }
-
-                if step.kind == .toolResult, toolName == "workspace.index", !step.isFailure {
-                    hasWorkspaceIndex = true
-                }
-
-                if step.kind == .toolResult, step.isFailure {
-                    failedToolCounts[toolName, default: 0] += 1
-                }
-
-                if step.kind == .toolCall, toolName == "code.search" {
-                    searchCount += 1
-                    if let query = step.toolParams?["query"] {
-                        Self.appendUnique(query, to: &searches, seen: &seenSearches)
-                    }
-                }
-            }
-
-            if step.kind == .reviewRequest {
-                addPhase(.execute)
-            }
-            if step.kind == .aiThinking, step.text.hasPrefix("完成检查") {
-                hasVerifyCheck = true
-                addPhase(.verify)
-            }
-            if step.kind == .textOutput || (step.kind == .aiThinking && step.text.hasPrefix("阶段总结")) {
-                addPhase(.summarize)
-            }
-        }
-
-        let currentPhase: TaskPhase
-        if steps.last?.kind == .textOutput && hasVerifyCheck {
-            currentPhase = .summarize
-        } else if hasVerifyCheck || hasFileChange {
-            currentPhase = .verify
-        } else if successfulReadCount + searchCount >= 3 {
-            currentPhase = .execute
-        } else {
-            currentPhase = .explore
-        }
-
-        var memoryPills: [String] = []
-        if let first = readFiles.first {
-            let extra = readFiles.count > 1 ? " +\(readFiles.count - 1)" : ""
-            memoryPills.append("已读 \(Self.shortPath(first))\(extra)")
-        }
-        if hasWorkspaceIndex {
-            memoryPills.append("已有索引")
-        }
-        if let firstFailure = failedToolCounts
-            .map({ "\($0.key) ×\($0.value)" })
-            .sorted()
-            .first {
-            memoryPills.append("失败 \(firstFailure)")
-        }
-        if let firstSearch = searches.first {
-            memoryPills.append("搜过 \(String(firstSearch.prefix(18)))")
-        }
-        if recoveryCount > 0 {
-            memoryPills.append("自动恢复 ×\(recoveryCount)")
-        }
-
-        self.completedSteps = completedSteps
-        self.failureCount = failureCount
-        self.recoveryCount = recoveryCount
-        self.recoverySuccessCount = recoverySuccessCount
-        self.readCount = readCount
-        self.pendingReviewIDs = pendingReviewIDs
-        self.currentPhase = currentPhase
-        self.phaseCounts = phaseCounts
-        self.phaseTools = phaseToolSets.mapValues { $0.sorted() }
-        self.memoryPills = memoryPills
+        self.completedSteps = accumulator.completedSteps
+        self.failureCount = accumulator.failureCount
+        self.recoveryCount = accumulator.recoveryCount
+        self.recoverySuccessCount = accumulator.recoverySuccessCount
+        self.readCount = accumulator.readCount
+        self.pendingReviewIDs = accumulator.pendingReviewIDs
+        self.currentPhase = accumulator.currentPhase
+        self.phaseCounts = accumulator.phaseCounts
+        self.phaseTools = accumulator.phaseToolSets.mapValues { $0.sorted() }
+        self.memoryPills = accumulator.memoryPills
     }
 
     func tools(for phase: TaskPhase) -> [String] {
         phaseTools[phase] ?? []
     }
 
-    private static func appendUnique(_ value: String, to values: inout [String], seen: inout Set<String>) {
+    fileprivate static func appendUnique(_ value: String, to values: inout [String], seen: inout Set<String>) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !seen.contains(trimmed) else { return }
         seen.insert(trimmed)
         values.append(trimmed)
     }
 
-    private static func isSuccessfulDocumentTransform(_ step: TaskStep, canonicalToolName: String) -> Bool {
+    fileprivate static func isSuccessfulDocumentTransform(_ step: TaskStep, canonicalToolName: String) -> Bool {
         guard step.kind == .toolResult,
               canonicalToolName == "document.transform",
               !step.isFailure else { return false }
@@ -1181,10 +1055,202 @@ private struct TaskStepStats {
         return path?.isEmpty == false
     }
 
-    private static func shortPath(_ path: String) -> String {
+    fileprivate static func shortPath(_ path: String) -> String {
         let parts = path.split(separator: "/")
         if parts.count <= 2 { return path }
         return parts.suffix(2).joined(separator: "/")
+    }
+}
+
+private struct TaskStepStatsAccumulator {
+    private static let exploreTools = ["workspace.index", "file.read", "code.search", "git"]
+    private static let executionTools = ["file.write", "file.edit", "diff.apply", "shell.exec"]
+    private static let fileMutationTools = ["file.write", "file.edit", "diff.apply"]
+
+    var completedSteps = 0
+    var failureCount = 0
+    var recoveryCount = 0
+    var recoverySuccessCount = 0
+    var readCount = 0
+    var pendingReviewIDs: [UUID] = []
+    var phaseCounts: [TaskPhase: Int] = [:]
+    var phaseToolSets: [TaskPhase: Set<String>] = [:]
+
+    private var readFiles: [String] = []
+    private var seenReadFiles: Set<String> = []
+    private var hasWorkspaceIndex = false
+    private var failedToolCounts: [String: Int] = [:]
+    private var searches: [String] = []
+    private var seenSearches: Set<String> = []
+    private var hasFileChange = false
+    private var hasVerifyCheck = false
+    private var successfulReadCount = 0
+    private var searchCount = 0
+    private let lastStepKind: TaskStepKind?
+
+    init(steps: [TaskStep]) {
+        lastStepKind = steps.last?.kind
+        for step in steps {
+            record(step)
+        }
+    }
+
+    var currentPhase: TaskPhase {
+        if lastStepKind == .textOutput && hasVerifyCheck {
+            return .summarize
+        }
+        if hasVerifyCheck || hasFileChange {
+            return .verify
+        }
+        if successfulReadCount + searchCount >= 3 {
+            return .execute
+        }
+        return .explore
+    }
+
+    var memoryPills: [String] {
+        var pills: [String] = []
+        appendReadFilePill(to: &pills)
+        if hasWorkspaceIndex {
+            pills.append("已有索引")
+        }
+        if let firstFailure = firstFailureSummary {
+            pills.append("失败 \(firstFailure)")
+        }
+        if let firstSearch = searches.first {
+            pills.append("搜过 \(String(firstSearch.prefix(18)))")
+        }
+        if recoveryCount > 0 {
+            pills.append("自动恢复 ×\(recoveryCount)")
+        }
+        return pills
+    }
+
+    private mutating func record(_ step: TaskStep) {
+        recordCommonCounts(step)
+        if let toolName = step.toolName.map(ToolNameCodec.canonicalName) {
+            recordToolStep(step, toolName: toolName)
+        }
+        recordNonToolPhase(step)
+    }
+
+    private mutating func recordCommonCounts(_ step: TaskStep) {
+        if step.kind != .userInput {
+            completedSteps += 1
+        }
+        if step.isFailure || step.kind == .error {
+            failureCount += 1
+        }
+        if isRecovery(step) {
+            recoveryCount += 1
+            if !step.isFailure && step.kind == .toolResult {
+                recoverySuccessCount += 1
+            }
+        }
+        if step.kind == .reviewRequest && step.approved == nil {
+            pendingReviewIDs.append(step.id)
+        }
+    }
+
+    private mutating func recordToolStep(_ step: TaskStep, toolName: String) {
+        recordToolPhase(step, toolName: toolName)
+        recordFileChange(step, toolName: toolName)
+        recordReadEvidence(step, toolName: toolName)
+        recordFailures(step, toolName: toolName)
+        recordSearch(step, toolName: toolName)
+    }
+
+    private mutating func recordToolPhase(_ step: TaskStep, toolName: String) {
+        if Self.exploreTools.contains(toolName), step.kind == .toolCall || step.kind == .toolResult {
+            addPhase(.explore, toolName: toolName)
+        }
+        if step.kind == .toolCall, Self.executionTools.contains(toolName) {
+            addPhase(.execute, toolName: toolName)
+        }
+        if step.kind == .toolCall, toolName == "verify.build" {
+            addPhase(.verify, toolName: toolName)
+        }
+        if isShellTestCommand(step, toolName: toolName) {
+            addPhase(.verify, toolName: toolName)
+        }
+    }
+
+    private mutating func recordFileChange(_ step: TaskStep, toolName: String) {
+        if Self.fileMutationTools.contains(toolName)
+            || TaskStepStats.isSuccessfulDocumentTransform(step, canonicalToolName: toolName) {
+            hasFileChange = true
+        }
+    }
+
+    private mutating func recordReadEvidence(_ step: TaskStep, toolName: String) {
+        if step.kind == .toolResult, toolName == "file.read", !step.isFailure {
+            readCount += 1
+            successfulReadCount += 1
+            if let path = step.toolParams?["path"] {
+                TaskStepStats.appendUnique(path, to: &readFiles, seen: &seenReadFiles)
+            }
+        }
+        if step.kind == .toolResult, toolName == "workspace.index", !step.isFailure {
+            hasWorkspaceIndex = true
+        }
+    }
+
+    private mutating func recordFailures(_ step: TaskStep, toolName: String) {
+        if step.kind == .toolResult, step.isFailure {
+            failedToolCounts[toolName, default: 0] += 1
+        }
+    }
+
+    private mutating func recordSearch(_ step: TaskStep, toolName: String) {
+        if step.kind == .toolCall, toolName == "code.search" {
+            searchCount += 1
+            if let query = step.toolParams?["query"] {
+                TaskStepStats.appendUnique(query, to: &searches, seen: &seenSearches)
+            }
+        }
+    }
+
+    private mutating func recordNonToolPhase(_ step: TaskStep) {
+        if step.kind == .reviewRequest {
+            addPhase(.execute)
+        }
+        if step.kind == .aiThinking, step.text.hasPrefix("完成检查") {
+            hasVerifyCheck = true
+            addPhase(.verify)
+        }
+        if step.kind == .textOutput || (step.kind == .aiThinking && step.text.hasPrefix("阶段总结")) {
+            addPhase(.summarize)
+        }
+    }
+
+    private mutating func addPhase(_ phase: TaskPhase, toolName: String? = nil) {
+        phaseCounts[phase, default: 0] += 1
+        guard let toolName, !toolName.isEmpty else { return }
+        phaseToolSets[phase, default: []].insert(ToolNameCodec.canonicalName(toolName))
+    }
+
+    private func appendReadFilePill(to pills: inout [String]) {
+        if let first = readFiles.first {
+            let extra = readFiles.count > 1 ? " +\(readFiles.count - 1)" : ""
+            pills.append("已读 \(TaskStepStats.shortPath(first))\(extra)")
+        }
+    }
+
+    private var firstFailureSummary: String? {
+        failedToolCounts
+            .map { "\($0.key) ×\($0.value)" }
+            .sorted()
+            .first
+    }
+
+    private func isRecovery(_ step: TaskStep) -> Bool {
+        (step.toolCallId ?? "").hasPrefix("call_recovery_") || step.text.hasPrefix("自动恢复")
+    }
+
+    private func isShellTestCommand(_ step: TaskStep, toolName: String) -> Bool {
+        step.kind == .toolCall
+            && toolName == "shell.exec"
+            && step.toolParams?["command"]?.contains("test") == true
     }
 }
 
@@ -1464,7 +1530,7 @@ private struct TypingIndicator: View {
 
     private var elapsed: Int {
         guard let start = store.state.generationStartedAt else { return 0 }
-        let _ = tick  // subscribe to tick so label updates every second
+        _ = tick  // subscribe to tick so label updates every second
         return max(0, Int(Date().timeIntervalSince(start)))
     }
 
@@ -1511,9 +1577,9 @@ private struct TypingIndicator: View {
     }
 
     private var elapsedLabel: String {
-        let e = elapsed
-        if e < 60 { return "\(e)s" }
-        return "\(e / 60)m\(e % 60)s"
+        let elapsedSeconds = elapsed
+        if elapsedSeconds < 60 { return "\(elapsedSeconds)s" }
+        return "\(elapsedSeconds / 60)m\(elapsedSeconds % 60)s"
     }
 
     private func startTimers() {

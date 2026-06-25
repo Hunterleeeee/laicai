@@ -349,23 +349,22 @@ public final class UsageTracker {
     }
 
     /// Quick lookup: total tokens + cost for a single thread
-    public func threadUsage(threadID: String) -> (inputTokens: Int, outputTokens: Int, requestCount: Int, estimatedCost: Double) {
-        guard !threadID.isEmpty else { return (0, 0, 0, 0) }
+    public func threadUsage(threadID: String) -> UsageTotals {
+        guard !threadID.isEmpty else { return UsageTotals() }
         if let cached = cachedThreadUsage(threadID: threadID) {
             return cached
         }
-        let usage = withReadOnlyDatabase((0, 0, 0, 0)) { db in
+        let usage = withReadOnlyDatabase(UsageTotals()) { db in
             let sql = "SELECT SUM(input_tokens), SUM(output_tokens), COUNT(*) FROM usage_records WHERE thread_id = ?;"
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return (0, 0, 0, 0) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return UsageTotals() }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text_safe(stmt, 1, threadID)
-            guard sqlite3_step(stmt) == SQLITE_ROW else { return (0, 0, 0, 0) }
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return UsageTotals() }
             let input = Int(sqlite3_column_int64(stmt, 0))
             let output = Int(sqlite3_column_int64(stmt, 1))
             let count = Int(sqlite3_column_int(stmt, 2))
-            let cost = (Double(input) * 3.0 / 1_000_000.0) + (Double(output) * 15.0 / 1_000_000.0)
-            return (input, output, count, cost)
+            return UsageTotals(inputTokens: input, outputTokens: output, requestCount: count)
         }
         cacheThreadUsage(usage, for: threadID)
         return usage
@@ -374,11 +373,11 @@ public final class UsageTracker {
     // MARK: - Helpers
 
     private struct CachedThreadUsage {
-        let value: (inputTokens: Int, outputTokens: Int, requestCount: Int, estimatedCost: Double)
+        let value: UsageTotals
         let storedAt: Date
     }
 
-    private func cachedThreadUsage(threadID: String) -> (inputTokens: Int, outputTokens: Int, requestCount: Int, estimatedCost: Double)? {
+    private func cachedThreadUsage(threadID: String) -> UsageTotals? {
         cacheLock.lock()
         defer { cacheLock.unlock() }
         guard let cached = threadUsageCache[threadID] else { return nil }
@@ -390,7 +389,7 @@ public final class UsageTracker {
     }
 
     private func cacheThreadUsage(
-        _ value: (inputTokens: Int, outputTokens: Int, requestCount: Int, estimatedCost: Double),
+        _ value: UsageTotals,
         for threadID: String
     ) {
         cacheLock.lock()
@@ -406,9 +405,9 @@ public final class UsageTracker {
     }
 
     private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return f
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
     }()
 
     private static func dateKey(from date: Date) -> String {
@@ -535,23 +534,23 @@ public enum ModelPricing {
     }
 
     public static func lookup(_ model: String) -> Price {
-        let m = model.lowercased()
+        let normalizedModel = model.lowercased()
         // GPT-5 / GPT-4.1
-        if m.contains("gpt-5") || m.contains("gpt5") { return Price(inputPerMillion: 10.0, outputPerMillion: 30.0) }
-        if m.contains("gpt-4.1") { return Price(inputPerMillion: 2.0, outputPerMillion: 8.0) }
-        if m.contains("gpt-4o") { return Price(inputPerMillion: 2.5, outputPerMillion: 10.0) }
-        if m.contains("o3") || m.contains("o4") { return Price(inputPerMillion: 10.0, outputPerMillion: 40.0) }
-        if m.contains("o1") { return Price(inputPerMillion: 15.0, outputPerMillion: 60.0) }
+        if normalizedModel.contains("gpt-5") || normalizedModel.contains("gpt5") { return Price(inputPerMillion: 10.0, outputPerMillion: 30.0) }
+        if normalizedModel.contains("gpt-4.1") { return Price(inputPerMillion: 2.0, outputPerMillion: 8.0) }
+        if normalizedModel.contains("gpt-4o") { return Price(inputPerMillion: 2.5, outputPerMillion: 10.0) }
+        if normalizedModel.contains("o3") || normalizedModel.contains("o4") { return Price(inputPerMillion: 10.0, outputPerMillion: 40.0) }
+        if normalizedModel.contains("o1") { return Price(inputPerMillion: 15.0, outputPerMillion: 60.0) }
         // Claude
-        if m.contains("claude-4") || m.contains("claude-3.7") { return Price(inputPerMillion: 3.0, outputPerMillion: 15.0) }
-        if m.contains("claude-3.5") { return Price(inputPerMillion: 3.0, outputPerMillion: 15.0) }
-        if m.contains("claude") { return Price(inputPerMillion: 3.0, outputPerMillion: 15.0) }
+        if normalizedModel.contains("claude-4") || normalizedModel.contains("claude-3.7") { return Price(inputPerMillion: 3.0, outputPerMillion: 15.0) }
+        if normalizedModel.contains("claude-3.5") { return Price(inputPerMillion: 3.0, outputPerMillion: 15.0) }
+        if normalizedModel.contains("claude") { return Price(inputPerMillion: 3.0, outputPerMillion: 15.0) }
         // DeepSeek
-        if m.contains("deepseek") { return Price(inputPerMillion: 0.27, outputPerMillion: 1.10) }
+        if normalizedModel.contains("deepseek") { return Price(inputPerMillion: 0.27, outputPerMillion: 1.10) }
         // Gemini
-        if m.contains("gemini") { return Price(inputPerMillion: 1.25, outputPerMillion: 5.0) }
+        if normalizedModel.contains("gemini") { return Price(inputPerMillion: 1.25, outputPerMillion: 5.0) }
         // Local models — free
-        if m.contains("llama") || m.contains("qwen") || m.contains("mistral") || m.contains("phi") {
+        if normalizedModel.contains("llama") || normalizedModel.contains("qwen") || normalizedModel.contains("mistral") || normalizedModel.contains("phi") {
             return Price(inputPerMillion: 0, outputPerMillion: 0)
         }
         // Default frontier pricing

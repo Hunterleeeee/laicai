@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import LaicaiNativeDomain
 
 // MARK: - Verify Build Tool (auto build/test)
@@ -604,21 +605,19 @@ public struct ShellTool: LaicaiTool {
         return await Task.detached(priority: .utility) {
             let stdoutHandle = stdout.fileHandleForReading
             let stderrHandle = stderr.fileHandleForReading
-            async let outDataAsync: Data? = try? stdoutHandle.readToEnd()
-            async let errDataAsync: Data? = try? stderrHandle.readToEnd()
 
-            let deadline = Date().addingTimeInterval(timeout)
-            while process.isRunning && Date() < deadline {
-                usleep(50_000)
-            }
-            if process.isRunning {
+            let didTimeout = await Self.waitForExit(process, timeoutSeconds: timeout)
+            if didTimeout {
                 process.terminate()
+                if await Self.waitForExit(process, timeoutSeconds: 2) {
+                    Darwin.kill(process.processIdentifier, SIGKILL)
+                    _ = await Self.waitForExit(process, timeoutSeconds: 1)
+                }
             }
-            process.waitUntilExit()
 
             let exitCode = process.terminationStatus
-            let outData = await outDataAsync ?? Data()
-            let errData = await errDataAsync ?? Data()
+            let outData = stdoutHandle.readDataToEndOfFile()
+            let errData = stderrHandle.readDataToEndOfFile()
             let output = String(data: outData, encoding: .utf8) ?? ""
             let errorOutput = String(data: errData, encoding: .utf8) ?? ""
 
@@ -634,11 +633,51 @@ public struct ShellTool: LaicaiTool {
                 )
             }
 
-            if Date() >= deadline && exitCode != 0 {
+            if didTimeout {
                 return ToolResult(output: "命令执行超时（\(Int(timeout))秒）：\(command)", success: false, error: "timeout")
             }
             return Self.makeShellResult(exitCode: exitCode, stdout: output, stderr: errorOutput)
         }.value
+    }
+
+    private static func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) async -> Bool {
+        if !process.isRunning { return false }
+        return await withCheckedContinuation { continuation in
+            let finished = Locked(false)
+            process.terminationHandler = { _ in
+                let shouldResume = finished.withValue { value in
+                    guard !value else { return false }
+                    value = true
+                    return true
+                }
+                if shouldResume {
+                    continuation.resume(returning: false)
+                }
+            }
+            if !process.isRunning {
+                let shouldResume = finished.withValue { value in
+                    guard !value else { return false }
+                    value = true
+                    return true
+                }
+                if shouldResume {
+                    continuation.resume(returning: false)
+                }
+                return
+            }
+            Task {
+                let nanoseconds = UInt64(max(0, timeoutSeconds) * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: nanoseconds)
+                let shouldResume = finished.withValue { value in
+                    guard !value else { return false }
+                    value = true
+                    return true
+                }
+                if shouldResume {
+                    continuation.resume(returning: true)
+                }
+            }
+        }
     }
 
     static let retryablePatterns = ["command not found", "No such file or directory", "not found in PATH"]

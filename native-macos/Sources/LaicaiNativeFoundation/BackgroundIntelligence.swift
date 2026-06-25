@@ -25,7 +25,7 @@ public final class MenuBarAgent: NSObject, ObservableObject {
         let menu = NSMenu()
         menu.addItem(makeItem("打开来财", action: #selector(activateApp)))
         menu.addItem(.separator())
-        menu.addItem(makeItem("新建对话", action: #selector(newThread), key: "n"))
+        menu.addItem(makeItem("新建会话", action: #selector(newThread), key: "n"))
         menu.addItem(makeItem("继续最近会话", action: #selector(continueLastTask), key: "r"))
         menu.addItem(.separator())
         let toggleItem = makeItem(isActive ? "暂停后台智能" : "恢复后台智能", action: #selector(toggleActive))
@@ -167,7 +167,7 @@ public final class NotificationManager {
     private init() {}
     
     public func requestPermission() {
-        guard !Self.isRunningTests else { return }
+        guard Self.canUseUserNotifications else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
@@ -178,7 +178,7 @@ public final class NotificationManager {
         identifier: String = UUID().uuidString,
         threadID: String? = nil
     ) {
-        guard !Self.isRunningTests else { return }
+        guard Self.canUseUserNotifications else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         if let subtitle {
@@ -197,6 +197,13 @@ public final class NotificationManager {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
             || NSClassFromString("XCTestCase") != nil
             || NSClassFromString("XCTest.XCTestCase") != nil
+    }
+
+    private static var canUseUserNotifications: Bool {
+        guard !isRunningTests else { return false }
+        // `swift run` launches from a build directory rather than a real .app
+        // bundle; UserNotifications raises an Objective-C exception there.
+        return Bundle.main.bundleURL.pathExtension == "app"
     }
     
     public func notifyBackgroundTaskCompleted(taskTitle: String, threadID: String) {

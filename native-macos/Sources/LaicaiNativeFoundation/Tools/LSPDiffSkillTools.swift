@@ -80,7 +80,18 @@ public struct LSPTool: LaicaiTool {
                 // Use swift-ide-test as a simpler alternative for definition lookup
                 let symbolResult = Self.extractSymbolAtLocation(file: file, line: line, column: column)
                 if !symbolResult.isEmpty {
-                    let grepResult = Self.runShell("cd \(Self.shellEscape(root)) && rg -n 'func \\b\(symbolResult)\\b|class \\b\(symbolResult)\\b|struct \\b\(symbolResult)\\b|protocol \\b\(symbolResult)\\b|enum \\b\(symbolResult)\\b' --max-count 5 --glob '*.swift' 2>/dev/null", cwd: root)
+                    let swiftPatterns = [
+                        "func \\b\(symbolResult)\\b",
+                        "class \\b\(symbolResult)\\b",
+                        "struct \\b\(symbolResult)\\b",
+                        "protocol \\b\(symbolResult)\\b",
+                        "enum \\b\(symbolResult)\\b"
+                    ].joined(separator: "|")
+                    let grepCommand = """
+                    cd \(Self.shellEscape(root)) && rg -n '\(swiftPatterns)' \
+                    --max-count 5 --glob '*.swift' 2>/dev/null
+                    """
+                    let grepResult = Self.runShell(grepCommand, cwd: root)
                     if !grepResult.isEmpty {
                         return ToolResult(output: "符号 '\(symbolResult)' 的定义位置：\n\(grepResult)", data: ["symbol": symbolResult])
                     }
@@ -95,7 +106,11 @@ public struct LSPTool: LaicaiTool {
         }
 
         let defPatterns = "func \\b\(symbolAtPos)\\b|class \\b\(symbolAtPos)\\b|struct \\b\(symbolAtPos)\\b|def \\b\(symbolAtPos)\\b|interface \\b\(symbolAtPos)\\b|type \\b\(symbolAtPos)\\b"
-        let result = Self.runShell("cd \(Self.shellEscape(root)) && rg -n '\(defPatterns)' --max-count 10 --max-filesize 1M --glob '!**/.git/**' --glob '!**/node_modules/**' 2>/dev/null", cwd: root)
+        let definitionCommand = """
+        cd \(Self.shellEscape(root)) && rg -n '\(defPatterns)' \
+        --max-count 10 --max-filesize 1M --glob '!**/.git/**' --glob '!**/node_modules/**' 2>/dev/null
+        """
+        let result = Self.runShell(definitionCommand, cwd: root)
 
         return result.isEmpty
             ? ToolResult(output: "未找到 '\(symbolAtPos)' 的定义", data: ["symbol": symbolAtPos])
@@ -108,7 +123,12 @@ public struct LSPTool: LaicaiTool {
             return ToolResult(output: "无法识别位置 \(file):\(line):\(column) 的符号", success: false, error: "no_symbol")
         }
 
-        let result = Self.runShell("cd \(Self.shellEscape(root)) && rg -n '\\b\(symbol)\\b' --max-count 30 --max-filesize 1M --glob '!**/.git/**' --glob '!**/node_modules/**' --glob '!**/.build/**' 2>/dev/null", cwd: root)
+        let referenceCommand = """
+        cd \(Self.shellEscape(root)) && rg -n '\\b\(symbol)\\b' \
+        --max-count 30 --max-filesize 1M --glob '!**/.git/**' \
+        --glob '!**/node_modules/**' --glob '!**/.build/**' 2>/dev/null
+        """
+        let result = Self.runShell(referenceCommand, cwd: root)
 
         return result.isEmpty
             ? ToolResult(output: "未找到 '\(symbol)' 的引用", data: ["symbol": symbol])
@@ -121,7 +141,12 @@ public struct LSPTool: LaicaiTool {
         }
 
         let patterns = "func \\b\(query)|class \\b\(query)|struct \\b\(query)|protocol \\b\(query)|enum \\b\(query)|def \\b\(query)|interface \\b\(query)|type \\b\(query)|export.*\\b\(query)"
-        let result = Self.runShell("cd \(Self.shellEscape(root)) && rg -n '\(patterns)' --max-count 30 --max-filesize 1M --glob '!**/.git/**' --glob '!**/node_modules/**' --glob '!**/.build/**' 2>/dev/null", cwd: root)
+        let searchCommand = """
+        cd \(Self.shellEscape(root)) && rg -n '\(patterns)' \
+        --max-count 30 --max-filesize 1M --glob '!**/.git/**' \
+        --glob '!**/node_modules/**' --glob '!**/.build/**' 2>/dev/null
+        """
+        let result = Self.runShell(searchCommand, cwd: root)
 
         return result.isEmpty
             ? ToolResult(output: "未找到符号 '\(query)'", data: ["query": query])
@@ -266,27 +291,30 @@ public struct DiffApplyTool: LaicaiTool {
             return DiffResult(error: "正则编译失败")
         }
 
-        var i = 0
-        while i < diffLines.count {
-            let line = diffLines[i]
-            let ns = line as NSString
-            if let match = hunkRegex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) {
-                let startLine = Int(ns.substring(with: match.range(at: 1))) ?? 1
+        var diffIndex = 0
+        while diffIndex < diffLines.count {
+            let line = diffLines[diffIndex]
+            let nsLine = line as NSString
+            if let match = hunkRegex.firstMatch(in: line, range: NSRange(location: 0, length: nsLine.length)) {
+                let startLine = Int(nsLine.substring(with: match.range(at: 1))) ?? 1
                 var lineIndex = startLine - 1 + offset
-                i += 1
+                diffIndex += 1
 
-                while i < diffLines.count {
-                    let dl = diffLines[i]
-                    if dl.hasPrefix("@@") || dl.hasPrefix("diff ") || dl.hasPrefix("---") || dl.hasPrefix("+++") { break }
-                    if dl.hasPrefix("-") {
+                while diffIndex < diffLines.count {
+                    let diffLine = diffLines[diffIndex]
+                    if diffLine.hasPrefix("@@")
+                        || diffLine.hasPrefix("diff ")
+                        || diffLine.hasPrefix("---")
+                        || diffLine.hasPrefix("+++") { break }
+                    if diffLine.hasPrefix("-") {
                         // Remove line
                         if lineIndex >= 0 && lineIndex < lines.count {
                             lines.remove(at: lineIndex)
                             offset -= 1
                         }
-                    } else if dl.hasPrefix("+") {
+                    } else if diffLine.hasPrefix("+") {
                         // Add line
-                        let newLine = String(dl.dropFirst())
+                        let newLine = String(diffLine.dropFirst())
                         if lineIndex >= lines.count {
                             lines.append(newLine)
                         } else {
@@ -298,10 +326,10 @@ public struct DiffApplyTool: LaicaiTool {
                         // Context line — advance
                         lineIndex += 1
                     }
-                    i += 1
+                    diffIndex += 1
                 }
             } else {
-                i += 1
+                diffIndex += 1
             }
         }
 
@@ -321,13 +349,22 @@ public struct SkillManageTool: LaicaiTool {
             description: description,
             parameters: FunctionParameters(
                 properties: [
-                    "action": FunctionProperty(type: "string", description: "操作类型：create / update / delete / list", enumValues: ["create", "update", "delete", "list"]),
+                    "action": FunctionProperty(
+                        type: "string",
+                        description: "操作类型：create / update / delete / list",
+                        enumValues: ["create", "update", "delete", "list"]
+                    ),
                     "name": FunctionProperty(type: "string", description: "技能名称（create/update/delete 必填）"),
                     "description": FunctionProperty(type: "string", description: "技能描述（create/update 时使用）"),
                     "tools": FunctionProperty(type: "string", description: "逗号分隔的工具列表，如 file.read,code.search,file.write"),
                     "instructions": FunctionProperty(type: "string", description: "详细的执行步骤说明（SKILL.md 内容）"),
                     "trigger": FunctionProperty(type: "string", description: "自动触发的关键词模式（可选）"),
-                    "category": FunctionProperty(type: "string", description: "技能分类，可用中文或英文：通用/general、知识/knowledge、营销/marketing、产品/product、内容/content、设计/design、数据/data、商业/business、分析/analysis、编辑/editing、执行/execution、研究/research、流程/workflow、元技能/meta")
+                    "category": FunctionProperty(
+                        type: "string",
+                        description: """
+                        技能分类，可用中文或英文：通用/general、知识/knowledge、营销/marketing、产品/product、内容/content、设计/design、数据/data、商业/business、分析/analysis、编辑/editing、执行/execution、研究/research、流程/workflow、元技能/meta
+                        """
+                    )
                 ],
                 required: ["action"]
             )
@@ -478,8 +515,8 @@ public struct SkillManageTool: LaicaiTool {
         var allSkills = SkillRegistry.loadBuiltinSkills()
         let workspaceRoot = Self.workspaceRoot(fromSkillDir: skillDir)
         let localSkills = SkillRegistry.loadLocalSkills(workspaceRoot: workspaceRoot)
-        for s in localSkills where !allSkills.contains(where: { $0.name == s.name }) {
-            allSkills.append(s)
+        for skill in localSkills where !allSkills.contains(where: { $0.name == skill.name }) {
+            allSkills.append(skill)
         }
         let builtinCount = allSkills.filter { $0.isBuiltin }.count
         let customSkills = allSkills.filter { !$0.isBuiltin }
@@ -499,13 +536,13 @@ public struct SkillManageTool: LaicaiTool {
             "content": "内容", "design": "设计", "data": "数据",
             "business": "商业", "knowledge": "知识", "meta": "元技能"
         ]
-        for cat in categoryOrder {
-            guard let names = categoryGroups[cat], !names.isEmpty else { continue }
-            lines.append("\n【\(categoryNames[cat] ?? cat)】\(names.joined(separator: "、"))")
+        for category in categoryOrder {
+            guard let names = categoryGroups[category], !names.isEmpty else { continue }
+            lines.append("\n【\(categoryNames[category] ?? category)】\(names.joined(separator: "、"))")
         }
         // Any remaining categories
-        for (cat, names) in categoryGroups where !categoryOrder.contains(cat) {
-            lines.append("\n【\(cat)】\(names.joined(separator: "、"))")
+        for (category, names) in categoryGroups where !categoryOrder.contains(category) {
+            lines.append("\n【\(category)】\(names.joined(separator: "、"))")
         }
 
         if !customSkills.isEmpty {
@@ -518,8 +555,10 @@ public struct SkillManageTool: LaicaiTool {
         let learned = SkillEvolutionEngine.shared.allSkills(limit: 5)
         if !learned.isEmpty {
             lines.append("\n已学习技能（Q值排序，前5）：")
-            for s in learned {
-                lines.append("- \(s.name) (Q=\(String(format: "%.2f", s.qValue)), 用\(s.usageCount)次, 成功率\(String(format: "%.0f%%", s.successRate * 100)))")
+            for skill in learned {
+                let quality = String(format: "%.2f", skill.qValue)
+                let successRate = String(format: "%.0f%%", skill.successRate * 100)
+                lines.append("- \(skill.name) (Q=\(quality), 用\(skill.usageCount)次, 成功率\(successRate))")
             }
         }
 

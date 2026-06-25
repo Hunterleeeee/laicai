@@ -66,6 +66,7 @@ struct ToolExecutionEngine {
                     toolName: toolName,
                     apiToolName: apiToolName,
                     argumentsJSON: argumentsJSON,
+                    taskID: state.config.taskID,
                     taskContext: state.taskContext,
                     circuitBrokenTools: state.circuitBrokenTools,
                     config: config,
@@ -103,6 +104,7 @@ struct ToolExecutionEngine {
         toolName: String,
         apiToolName: String,
         argumentsJSON: String,
+        taskID: UUID,
         taskContext: TaskContext,
         circuitBrokenTools: Set<String>,
         config: AgentLoop.Config,
@@ -174,6 +176,7 @@ struct ToolExecutionEngine {
                         let result = await AgentLoop.executeShellStreamingViaNotification(
                             argumentsJSON: argumentsJSON,
                             context: taskContext,
+                            threadID: taskID,
                             resultStepID: streamStepID,
                             callID: callID,
                             command: callStep.toolParams?["command"] ?? ""

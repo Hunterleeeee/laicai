@@ -56,6 +56,7 @@ public struct PlanTemplate: Identifiable {
 struct MultiAgentPlanEditorView: View {
     @Binding var plan: MultiAgentPlan
     let connectors: [ConnectorProfile]
+    let activeConnectorID: UUID?
     let workspaceRoot: String
     let onExecute: () -> Void
     let onCancel: () -> Void
@@ -71,7 +72,7 @@ struct MultiAgentPlanEditorView: View {
                 Image(systemName: "person.3.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Brand.primary)
-                Text("编排计划")
+                Text(plan.status == .queued ? "确认编排计划" : "编排计划")
                     .font(AppFont.headline)
                     .foregroundStyle(TextGrade.primary)
 
@@ -83,8 +84,10 @@ struct MultiAgentPlanEditorView: View {
                             ForEach(agentRegistry.agents) { agent in
                                 Button {
                                     withAnimation(AppAnimation.quick) {
-                                        plan.addAgent(agent.makeNode(), after: plan.agents.last?.id)
-                                        plan.rebuildLinearDependencies()
+                                        updatePlan { updated in
+                                            updated.addAgent(agent.makeNode(), after: updated.agents.last?.id)
+                                            updated.rebuildLinearDependencies()
+                                        }
                                     }
                                 } label: {
                                     Label(agent.name, systemImage: agent.role.icon)
@@ -93,22 +96,24 @@ struct MultiAgentPlanEditorView: View {
                         }
                     }
                     Section("内置角色") {
-                    ForEach(AgentRole.allCases) { role in
-                        Button {
-                            withAnimation(AppAnimation.quick) {
-                                let conn = ModelRouter.selectModel(
-                                    forRole: role,
-                                    connectors: connectors,
-                                    activeConnectorID: connectors.first?.id
-                                )
-                                let node = AgentNode(role: role, connectorID: conn?.id)
-                                plan.addAgent(node, after: plan.agents.last?.id)
-                                plan.rebuildLinearDependencies()
+                        ForEach(AgentRole.allCases) { role in
+                            Button {
+                                withAnimation(AppAnimation.quick) {
+                                    let conn = ModelRouter.selectModel(
+                                        forRole: role,
+                                        connectors: connectors,
+                                        activeConnectorID: activeConnectorID
+                                    )
+                                    let node = AgentNode(role: role, connectorID: conn?.id)
+                                    updatePlan { updated in
+                                        updated.addAgent(node, after: updated.agents.last?.id)
+                                        updated.rebuildLinearDependencies()
+                                    }
+                                }
+                            } label: {
+                                Label("添加\(role.title)", systemImage: role.icon)
                             }
-                        } label: {
-                            Label("添加\(role.title)", systemImage: role.icon)
                         }
-                    }
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -174,13 +179,12 @@ struct MultiAgentPlanEditorView: View {
                 Spacer()
 
                 Button {
-                    plan.isEditable = false
                     onExecute()
                 } label: {
                     HStack(spacing: AppSpace.xs) {
                         Image(systemName: "play.fill")
                             .font(.system(size: 11))
-                        Text("开始执行")
+                        Text("确认并执行")
                             .font(AppFont.bodyMedium)
                     }
                     .foregroundStyle(.white)
@@ -372,7 +376,9 @@ struct MultiAgentPlanEditorView: View {
                 if plan.agents.count > 2 {
                     Button {
                         withAnimation(AppAnimation.spring) {
-                            plan.removeAgent(agent.id)
+                            updatePlan { updated in
+                                updated.removeAgent(agent.id)
+                            }
                         }
                     } label: {
                         Image(systemName: "xmark")
@@ -395,9 +401,16 @@ struct MultiAgentPlanEditorView: View {
                 let alreadyUsed = plan.agents.contains(where: { $0.role == role })
                 Button {
                     withAnimation(AppAnimation.spring) {
-                        let node = AgentNode(role: role)
-                        plan.addAgent(node, after: plan.agents.last?.id)
-                        plan.rebuildLinearDependencies()
+                        let conn = ModelRouter.selectModel(
+                            forRole: role,
+                            connectors: connectors,
+                            activeConnectorID: activeConnectorID
+                        )
+                        let node = AgentNode(role: role, connectorID: conn?.id)
+                        updatePlan { updated in
+                            updated.addAgent(node, after: updated.agents.last?.id)
+                            updated.rebuildLinearDependencies()
+                        }
                     }
                 } label: {
                     HStack {
@@ -440,7 +453,10 @@ struct MultiAgentPlanEditorView: View {
                     Menu {
                         ForEach(connectors) { conn in
                             Button {
-                                plan.agents[index].connectorID = conn.id
+                                updatePlan { updated in
+                                    guard updated.agents.indices.contains(index) else { return }
+                                    updated.agents[index].connectorID = conn.id
+                                }
                             } label: {
                                 HStack {
                                     Text(conn.name)
@@ -474,13 +490,19 @@ struct MultiAgentPlanEditorView: View {
 
     // MARK: - Helpers
 
+    private func updatePlan(_ transform: (inout MultiAgentPlan) -> Void) {
+        var updated = plan
+        transform(&updated)
+        plan = updated
+    }
+
     private func applyTemplate(_ template: PlanTemplate) {
         var agents: [AgentNode] = []
         for role in template.roles {
             let conn = ModelRouter.selectModel(
                 forRole: role,
                 connectors: connectors,
-                activeConnectorID: connectors.first?.id
+                activeConnectorID: activeConnectorID
             )
             agents.append(AgentNode(role: role, connectorID: conn?.id))
         }

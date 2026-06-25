@@ -101,7 +101,7 @@ struct WikiPanel: View {
             RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.9), lineWidth: 0.7)
         )
-        .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.y)
+        .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
     }
 
     private func wikiStat(icon: String, value: String, label: String, tint: Color) -> some View {

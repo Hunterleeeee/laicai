@@ -14,11 +14,11 @@ public protocol MessagingChannel: AnyObject, Sendable {
 }
 
 public enum ChannelType: String, Codable, Sendable, CaseIterable {
-    case telegram = "telegram"
-    case feishu = "feishu"
-    case wecom = "wecom"
-    case slack = "slack"
-    case webhook = "webhook"
+    case telegram
+    case feishu
+    case wecom
+    case slack
+    case webhook
 
     public var displayName: String {
         switch self {
@@ -125,8 +125,12 @@ public final class MessagingGateway: ObservableObject {
 
     public func start(workspaceRoot: String, port: Int = 18789) {
         let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseDirectory = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first?.path ?? NSTemporaryDirectory()
         let dir = root.isEmpty
-            ? ((FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory()) as NSString).appendingPathComponent("Laicai")
+            ? (baseDirectory as NSString).appendingPathComponent("Laicai")
             : (root as NSString).appendingPathComponent(".laicai")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         persistPath = (dir as NSString).appendingPathComponent("messaging_channels.json")
@@ -624,8 +628,8 @@ public final class FeishuChannel: MessagingChannel, Sendable {
     }
 
     private func handleControlFrame(_ frame: FeishuFrame) {
-        let type_ = frame.headerValue(for: "type")
-        if type_ == "pong" {
+        let frameType = frame.headerValue(for: "type")
+        if frameType == "pong" {
             // May contain updated client config in payload
             if !frame.payload.isEmpty,
                let json = try? JSONSerialization.jsonObject(with: frame.payload) as? [String: Any],
@@ -639,7 +643,7 @@ public final class FeishuChannel: MessagingChannel, Sendable {
         let sum = Int(frame.headerValue(for: "sum") ?? "1") ?? 1
         let seq = Int(frame.headerValue(for: "seq") ?? "0") ?? 0
         let msgID = frame.headerValue(for: "message_id") ?? UUID().uuidString
-        let type_ = frame.headerValue(for: "type") ?? ""
+        let frameType = frame.headerValue(for: "type") ?? ""
 
         var payload = frame.payload
 
@@ -655,8 +659,8 @@ public final class FeishuChannel: MessagingChannel, Sendable {
                       cached.parts.count == sum else { return nil }
 
                 var assembled = Data()
-                for i in 0..<sum {
-                    if let part = cached.parts[i] {
+                for fragmentIndex in 0..<sum {
+                    if let part = cached.parts[fragmentIndex] {
                         assembled.append(part)
                     }
                 }
@@ -672,7 +676,7 @@ public final class FeishuChannel: MessagingChannel, Sendable {
         sendAck(frame: frame)
 
         // Parse event
-        if type_ == "event" {
+        if frameType == "event" {
             handleEvent(payload, eventID: msgID)
         }
     }
@@ -880,8 +884,8 @@ private struct FeishuFrame {
             case (3, 2): // header: length-delimited
                 guard let (headerData, newOff) = readLDel(bytes, offset: offset) else { break }
                 offset = newOff
-                let h = decodeHeader(headerData)
-                frame.headers.append(h)
+                let header = decodeHeader(headerData)
+                frame.headers.append(header)
             case (4, 2): // payload: length-delimited
                 guard let (payloadData, newOff) = readLDel(bytes, offset: offset) else { break }
                 frame.payload = Data(payloadData)
@@ -917,7 +921,9 @@ private struct FeishuFrame {
             offset = newOff
             let str = String(bytes: strBytes, encoding: .utf8) ?? ""
             if fieldNumber == 1 { key = str }
-            else if fieldNumber == 2 { value = str }
+            else if fieldNumber == 2 {
+                value = str
+            }
         }
         return (key, value)
     }
@@ -934,12 +940,12 @@ private struct FeishuFrame {
     private static func readVarint(_ bytes: [UInt8], offset: Int) -> (UInt64, Int)? {
         var result: UInt64 = 0
         var shift: UInt64 = 0
-        var i = offset
-        while i < bytes.count {
-            let b = UInt64(bytes[i])
-            result |= (b & 0x7F) << shift
-            i += 1
-            if b & 0x80 == 0 { return (result, i) }
+        var byteIndex = offset
+        while byteIndex < bytes.count {
+            let byte = UInt64(bytes[byteIndex])
+            result |= (byte & 0x7F) << shift
+            byteIndex += 1
+            if byte & 0x80 == 0 { return (result, byteIndex) }
             shift += 7
             if shift >= 64 { return nil }
         }
@@ -958,12 +964,12 @@ private struct FeishuFrame {
 
 private extension Data {
     mutating func appendVarint(_ value: UInt64) {
-        var v = value
-        while v > 0x7F {
-            append(UInt8(v & 0x7F) | 0x80)
-            v >>= 7
+        var remainingValue = value
+        while remainingValue > 0x7F {
+            append(UInt8(remainingValue & 0x7F) | 0x80)
+            remainingValue >>= 7
         }
-        append(UInt8(v))
+        append(UInt8(remainingValue))
     }
 
     mutating func appendVarintField(fieldNumber: Int, value: UInt64) {

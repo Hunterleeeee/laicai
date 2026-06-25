@@ -90,19 +90,19 @@ struct DiagnosticsPanel: View {
                 }
 
                 VStack(spacing: AppSpace.xxs) {
-                    ForEach(store.state.toolActivities.prefix(10)) { a in
+                    ForEach(store.state.toolActivities.prefix(10)) { activity in
                         HStack {
-                            Image(systemName: a.isFailure ? "xmark.circle" : "checkmark.circle")
+                            Image(systemName: activity.isFailure ? "xmark.circle" : "checkmark.circle")
                                 .font(.system(size: 8))
-                                .foregroundStyle(a.isFailure ? Semantic.error : Semantic.success)
-                            Text(a.name)
+                                .foregroundStyle(activity.isFailure ? Semantic.error : Semantic.success)
+                            Text(activity.name)
                                 .font(AppFont.codeSmall)
                                 .foregroundStyle(TextGrade.primary)
                                 .lineLimit(1)
                             Spacer()
-                            Text(a.isFailure ? "失败" : "成功")
+                            Text(activity.isFailure ? "失败" : "成功")
                                 .font(.system(size: 8, weight: .bold, design: .monospaced))
-                                .foregroundStyle(a.isFailure ? Semantic.error : Semantic.success)
+                                .foregroundStyle(activity.isFailure ? Semantic.error : Semantic.success)
                         }
                     }
                 }
@@ -120,14 +120,14 @@ struct DiagnosticsPanel: View {
 
     private var diagnosticsOverview: some View {
         workbenchHeroCard(
-            icon: store.state.isGenerating ? "waveform.path.ecg" : "checkmark.shield.fill",
+            icon: store.hasRunningGenerationTasks ? "waveform.path.ecg" : "checkmark.shield.fill",
             title: "诊断",
-            subtitle: store.state.isGenerating ? "正在处理当前会话" : "运行正常 · 最近 \(auditLog.recentEntries.count) 条记录",
-            tint: store.state.isGenerating ? Brand.teal : Semantic.success
+            subtitle: store.hasRunningGenerationTasks ? "后台会话运行中" : "运行正常 · 最近 \(auditLog.recentEntries.count) 条记录",
+            tint: store.hasRunningGenerationTasks ? Brand.teal : Semantic.success
         ) {
             VStack(spacing: AppSpace.sm) {
-                diagRow("状态", store.state.isGenerating ? "生成中" : "空闲",
-                        color: store.state.isGenerating ? Semantic.toolRunning : Semantic.success)
+                diagRow("状态", store.hasRunningGenerationTasks ? "生成中" : "空闲",
+                        color: store.hasRunningGenerationTasks ? Semantic.toolRunning : Semantic.success)
                 Divider().opacity(0.3)
                 diagRow("模型", store.state.activeConnector?.modelName ?? "未配置",
                         color: store.state.activeConnector != nil ? TextGrade.primary : Semantic.warning)
@@ -206,7 +206,7 @@ struct DiagnosticsPanel: View {
         let lines = [
             "来财诊断信息",
             "==============",
-            "状态: \(store.state.isGenerating ? "生成中" : "空闲")",
+            "状态: \(store.hasRunningGenerationTasks ? "生成中" : "空闲")",
             "模型: \(conn?.modelName ?? "未配置")",
             "端点: \(conn?.endpoint ?? "—")",
             "工作区: \(store.state.settings.workspacePath)",
@@ -265,13 +265,13 @@ private struct AuditEntryRow: View {
     }
 
     private var shortInput: String {
-        let t = entry.input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return "" }
+        let trimmedInput = entry.input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInput.isEmpty else { return "" }
         // For file paths, show just the filename
-        if t.contains("/") {
-            return URL(fileURLWithPath: t).lastPathComponent
+        if trimmedInput.contains("/") {
+            return URL(fileURLWithPath: trimmedInput).lastPathComponent
         }
-        return String(t.prefix(40))
+        return String(trimmedInput.prefix(40))
     }
 
     var body: some View {
@@ -448,10 +448,10 @@ struct SessionCostCard: View {
         var stats = AggregatedStats()
 
         for step in steps {
-            if let m = step.metrics {
-                stats.totalInput += m.inputTokens ?? 0
-                stats.totalOutput += m.outputTokens ?? 0
-                stats.totalDuration += m.totalDuration
+            if let metrics = step.metrics {
+                stats.totalInput += metrics.inputTokens ?? 0
+                stats.totalOutput += metrics.outputTokens ?? 0
+                stats.totalDuration += metrics.totalDuration
                 stats.requestCount += 1
             }
         }
@@ -561,23 +561,23 @@ struct OutcomeStatsPanel: View {
 
     @ViewBuilder
     private var diagnosisCard: some View {
-        if let d = diagnosis {
-            let color: Color = d.severity == .critical ? Semantic.error : Semantic.warning
+        if let diagnosis {
+            let color: Color = diagnosis.severity == .critical ? Semantic.error : Semantic.warning
             VStack(alignment: .leading, spacing: AppSpace.sm) {
                 HStack(spacing: AppSpace.sm) {
                     Circle().fill(color).frame(width: 8, height: 8)
-                    Text(d.severity == .critical ? "需要自我改进" : "可优化")
+                    Text(diagnosis.severity == .critical ? "需要自我改进" : "可优化")
                         .font(AppFont.captionMedium)
                         .foregroundStyle(color)
                     Spacer()
-                    Text(d.category.rawValue)
+                    Text(diagnosis.category.rawValue)
                         .font(AppFont.tiny)
                         .foregroundStyle(TextGrade.ghost)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Capsule().fill(color.opacity(0.12)))
                 }
-                Text(d.description)
+                Text(diagnosis.description)
                     .font(AppFont.caption)
                     .foregroundStyle(TextGrade.secondary)
                     .lineLimit(3)
@@ -632,14 +632,14 @@ struct OutcomeStatsPanel: View {
             }
             // Visual bar
             GeometryReader { geo in
-                let w = geo.size.width
-                let completedW = w * CGFloat(row.completionRate)
-                let cancelledW = w * CGFloat(row.cancellationRate)
+                let width = geo.size.width
+                let completedWidth = width * CGFloat(row.completionRate)
+                let cancelledWidth = width * CGFloat(row.cancellationRate)
                 ZStack(alignment: .leading) {
                     Capsule().fill(SurfaceGrade.sunken).frame(height: 6)
                     HStack(spacing: 0) {
-                        Capsule().fill(Semantic.success).frame(width: max(0, completedW), height: 6)
-                        Capsule().fill(Semantic.error.opacity(0.7)).frame(width: max(0, cancelledW), height: 6)
+                        Capsule().fill(Semantic.success).frame(width: max(0, completedWidth), height: 6)
+                        Capsule().fill(Semantic.error.opacity(0.7)).frame(width: max(0, cancelledWidth), height: 6)
                     }
                 }
             }
@@ -714,24 +714,24 @@ struct OutcomeStatsPanel: View {
         if !patterns.isEmpty {
             sectionHeader("失败模式", icon: "exclamationmark.triangle.fill")
             VStack(spacing: AppSpace.xs) {
-                ForEach(Array(patterns.enumerated()), id: \.offset) { _, p in
+                ForEach(Array(patterns.enumerated()), id: \.offset) { _, pattern in
                     HStack(spacing: AppSpace.sm) {
-                        Text("\(p.frequency)x")
+                        Text("\(pattern.frequency)x")
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundStyle(p.successAfterFix > 0 ? Semantic.success : Semantic.error)
+                            .foregroundStyle(pattern.successAfterFix > 0 ? Semantic.success : Semantic.error)
                             .frame(width: 28, alignment: .trailing)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(p.rootCause)
+                            Text(pattern.rootCause)
                                 .font(AppFont.tiny)
                                 .foregroundStyle(TextGrade.secondary)
                                 .lineLimit(1)
-                            Text("\(p.intent) · \(p.triggerTools)")
+                            Text("\(pattern.intent) · \(pattern.triggerTools)")
                                 .font(.system(size: 9))
                                 .foregroundStyle(TextGrade.ghost)
                                 .lineLimit(1)
                         }
                         Spacer()
-                        if p.successAfterFix > 0 {
+                        if pattern.successAfterFix > 0 {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 10))
                                 .foregroundStyle(Semantic.success)

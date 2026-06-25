@@ -12,41 +12,41 @@ struct WelcomeView: View {
 
     private let samplePrompts: [SamplePrompt] = [
         SamplePrompt(
-            icon: "magnifyingglass",
+            icon: "stethoscope",
             tint: Brand.primary,
-            text: "审查最近的 git 变更",
-            sub: "扫描 diff 并给出改进建议"
+            text: "全面检查当前项目",
+            sub: "找出最影响体验的问题"
         ),
         SamplePrompt(
-            icon: "hammer",
+            icon: "wrench.adjustable",
             tint: Semantic.warning,
-            text: "重构错误处理逻辑",
-            sub: "分析代码结构，提出重构方案"
+            text: "直接修一个问题",
+            sub: "定位、修改并验证"
         ),
         SamplePrompt(
             icon: "doc.text",
             tint: Brand.teal,
-            text: "给核心模块写文档",
-            sub: "提取类型签名，输出 Markdown"
+            text: "整理本次改动说明",
+            sub: "输出可读的交付记录"
         ),
         SamplePrompt(
-            icon: "photo",
+            icon: "book.closed",
             tint: Brand.purple,
-            text: "生成一张产品介绍图",
-            sub: "海报、封面或介绍图"
+            text: "沉淀到 Wiki",
+            sub: "把结论写入知识库"
         )
     ]
 
     private let composerHeight: CGFloat = 132
 
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            let isCompact = h < 720
-            let isNarrow = w < 620
-            let contentWidth: CGFloat = isNarrow ? w - 32 : min(760, w * 0.82)
-            let topPad: CGFloat = isCompact ? 30 : max(44, h * 0.08)
+        GeometryReader { geometry in
+            let viewportWidth = geometry.size.width
+            let viewportHeight = geometry.size.height
+            let isCompact = viewportHeight < 720
+            let isNarrow = viewportWidth < 620
+            let contentWidth: CGFloat = isNarrow ? viewportWidth - 32 : min(760, viewportWidth * 0.82)
+            let topPad: CGFloat = isCompact ? 30 : max(44, viewportHeight * 0.08)
 
             ZStack {
                 ambientBackground
@@ -59,6 +59,7 @@ struct WelcomeView: View {
                             connectPrompt
                         } else {
                             VStack(alignment: .leading, spacing: AppSpace.lg) {
+                                contextStrip(narrow: isNarrow)
                                 quickActionRow(narrow: isNarrow)
                                 Divider().background(SurfaceGrade.hairline)
                                 samplePromptsGrid(narrow: isNarrow)
@@ -110,8 +111,8 @@ struct WelcomeView: View {
 
     private var heroSubtitle: String {
         store.state.activeConnector == nil
-            ? "连接一个模型后，就可以启动 会话、读取项目和运行工具。"
-            : "从常用起点开始，或者直接在下方输入一个明确目标。"
+            ? "先连接一个模型，然后就可以读取项目、运行工具和完成任务。"
+            : "先选一个入口，或者直接在下方输入目标。"
     }
 
     private func heroSection(compact: Bool) -> some View {
@@ -176,18 +177,19 @@ struct WelcomeView: View {
 
         return LazyVGrid(columns: columns, spacing: AppSpace.sm) {
             PrimaryActionTile(
-                icon: "plus.message",
-                title: "启动新任务",
-                subtitle: "给它一个目标",
-                tint: Brand.primary
+                icon: "hammer",
+                title: "执行一个目标",
+                subtitle: "读项目、跑工具、做验证",
+                tint: Brand.primary,
+                prominence: .primary
             ) {
-                store.newThread()
+                startTask()
             }
 
             PrimaryActionTile(
                 icon: "bubble.left.and.bubble.right",
-                title: "启动新会话",
-                subtitle: "随意聊聊",
+                title: "问一个问题",
+                subtitle: "不动文件，先聊清楚",
                 tint: Brand.teal
             ) {
                 store.newThread()
@@ -197,7 +199,7 @@ struct WelcomeView: View {
                 PrimaryActionTile(
                     icon: "arrow.turn.down.right",
                     title: "继续 · \(TextHelper.compactTitle(lastTask.title))",
-                    subtitle: "接着上次的处理",
+                    subtitle: "接着上次上下文",
                     tint: Brand.teal
                 ) {
                     store.selectThread(id: lastTask.id)
@@ -205,14 +207,42 @@ struct WelcomeView: View {
             } else {
                 PrimaryActionTile(
                     icon: "folder.badge.gearshape",
-                    title: projectManager.activeProject?.name ?? "审视当前项目",
-                    subtitle: "看看还有哪些待办",
+                    title: projectManager.activeProject?.name ?? "检查当前项目",
+                    subtitle: "先找最值得修的点",
                     tint: Brand.purple
                 ) {
-                    store.updateDraft("全面看一下当前项目还有哪些问题，并直接修复")
+                    startTask(draft: "全面看一下当前项目还有哪些问题，按影响排序，并直接修复最重要的一项")
                 }
             }
         }
+    }
+
+    private func contextStrip(narrow: Bool) -> some View {
+        let projectLabel = projectManager.activeProject?.name ?? "未选择项目"
+        let modelLabel = store.state.activeConnector?.modelName.isEmpty == false
+            ? (store.state.activeConnector?.modelName ?? "已连接模型")
+            : (store.state.activeConnector?.name ?? "已连接模型")
+
+        return HStack(spacing: AppSpace.sm) {
+            ContextPill(icon: "cpu", text: modelLabel, tint: Brand.teal)
+            ContextPill(
+                icon: "folder",
+                text: projectLabel,
+                tint: projectManager.activeProject == nil ? TextGrade.muted : Brand.primary
+            )
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, narrow ? 0 : AppSpace.xs)
+    }
+
+    private func startTask(draft: String = "请直接处理这个目标：") {
+        if let projectID = projectManager.activeProjectID {
+            store.newThreadInProject(projectID)
+        } else {
+            store.newThread()
+        }
+        store.updateDraft(draft)
     }
 
     private var recentTask: Thread? {
@@ -275,6 +305,7 @@ struct PrimaryActionTile: View {
     let title: String
     let subtitle: String
     let tint: Color
+    var prominence: PrimaryActionProminence = .normal
     let action: () -> Void
     @State private var isHovered = false
 
@@ -283,21 +314,21 @@ struct PrimaryActionTile: View {
             HStack(spacing: AppSpace.md) {
                 ZStack {
                     RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                        .fill(tint.opacity(isHovered ? 0.18 : 0.12))
+                        .fill(iconBackground)
                         .frame(width: 34, height: 34)
                     Image(systemName: icon)
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(tint)
+                        .foregroundStyle(iconForeground)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(TextGrade.primary)
+                        .foregroundStyle(titleColor)
                         .lineLimit(1)
                     Text(subtitle)
                         .font(.system(size: 11))
-                        .foregroundStyle(TextGrade.muted)
+                        .foregroundStyle(subtitleColor)
                         .lineLimit(1)
                 }
 
@@ -305,26 +336,97 @@ struct PrimaryActionTile: View {
 
                 Image(systemName: "arrow.right")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(isHovered ? tint : TextGrade.ghost.opacity(0.6))
+                    .foregroundStyle(arrowColor)
                     .offset(x: isHovered ? 2 : 0)
             }
             .padding(.horizontal, AppSpace.md)
             .padding(.vertical, AppSpace.md)
-            .background(SurfaceGrade.card.opacity(0.86))
+            .background(tileBackground)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                     .strokeBorder(
-                        isHovered ? tint.opacity(0.35) : SurfaceGrade.hairline,
+                        borderColor,
                         lineWidth: isHovered ? 1 : 0.7
                     )
             )
-            .shadow(color: Color.black.opacity(0.035), radius: 3, y: 1)
+            .shadow(
+                color: shadowColor,
+                radius: prominence == .primary ? 10 : 3,
+                y: prominence == .primary ? 4 : 1
+            )
         }
         .buttonStyle(.plain)
         .onHover { hovering in
             withAnimation(AppAnimation.quick) { isHovered = hovering }
         }
+    }
+
+    private var tileBackground: Color {
+        prominence == .primary ? (isHovered ? Brand.primaryHover : tint) : SurfaceGrade.card.opacity(0.86)
+    }
+
+    private var iconBackground: Color {
+        prominence == .primary
+            ? Color.white.opacity(isHovered ? 0.24 : 0.18)
+            : tint.opacity(isHovered ? 0.18 : 0.12)
+    }
+
+    private var iconForeground: Color {
+        prominence == .primary ? .white : tint
+    }
+
+    private var titleColor: Color {
+        prominence == .primary ? .white : TextGrade.primary
+    }
+
+    private var subtitleColor: Color {
+        prominence == .primary ? Color.white.opacity(0.82) : TextGrade.muted
+    }
+
+    private var arrowColor: Color {
+        prominence == .primary
+            ? Color.white.opacity(isHovered ? 1 : 0.78)
+            : (isHovered ? tint : TextGrade.ghost.opacity(0.6))
+    }
+
+    private var borderColor: Color {
+        prominence == .primary
+            ? Color.white.opacity(isHovered ? 0.34 : 0.16)
+            : (isHovered ? tint.opacity(0.35) : SurfaceGrade.hairline)
+    }
+
+    private var shadowColor: Color {
+        prominence == .primary ? tint.opacity(0.22) : Color.black.opacity(0.035)
+    }
+}
+
+enum PrimaryActionProminence {
+    case normal
+    case primary
+}
+
+// MARK: - Context Pill
+
+private struct ContextPill: View {
+    let icon: String
+    let text: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: AppSpace.xs) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+            Text(text)
+                .font(AppFont.captionMedium)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, AppSpace.sm + 2)
+        .frame(height: 24)
+        .background(Capsule().fill(tint.opacity(0.10)))
+        .overlay(Capsule().strokeBorder(tint.opacity(0.18), lineWidth: 0.6))
     }
 }
 
@@ -372,8 +474,8 @@ struct SamplePromptCard: View {
             )
         }
         .buttonStyle(.plain)
-        .onHover { h in
-            withAnimation(AppAnimation.quick) { isHovered = h }
+        .onHover { isHovering in
+            withAnimation(AppAnimation.quick) { isHovered = isHovering }
         }
     }
 }

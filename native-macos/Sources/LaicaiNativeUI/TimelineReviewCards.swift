@@ -188,57 +188,92 @@ struct ReviewCard: View {
     static func simpleDiff(old: String, new: String) -> String {
         let oldLines = old.components(separatedBy: "\n")
         let newLines = new.components(separatedBy: "\n")
-        var result: [String] = []
+        return SimpleLineDiff(oldLines: oldLines, newLines: newLines).render()
+    }
+}
 
-        var idx = 0
-        while idx < max(oldLines.count, newLines.count) {
-            let inOld = idx < oldLines.count
-            let inNew = idx < newLines.count
+private enum DiffLineOperation {
+    case unchanged(String)
+    case removed(String)
+    case added(String)
 
-            if inOld && inNew && oldLines[idx] == newLines[idx] {
-                result.append("  \(oldLines[idx])")
-                idx += 1
+    var rendered: String {
+        switch self {
+        case .unchanged(let line): return "  \(line)"
+        case .removed(let line): return "- \(line)"
+        case .added(let line): return "+ \(line)"
+        }
+    }
+}
+
+private struct SimpleLineDiff {
+    let oldLines: [String]
+    let newLines: [String]
+
+    func render() -> String {
+        operations().map(\.rendered).joined(separator: "\n")
+    }
+
+    private func operations() -> [DiffLineOperation] {
+        let table = lcsTable()
+        var oldIndex = 0
+        var newIndex = 0
+        var diffLines: [DiffLineOperation] = []
+
+        while oldIndex < oldLines.count || newIndex < newLines.count {
+            if canKeep(oldIndex: oldIndex, newIndex: newIndex) {
+                diffLines.append(.unchanged(oldLines[oldIndex]))
+                oldIndex += 1
+                newIndex += 1
+            } else if shouldAdd(oldIndex: oldIndex, newIndex: newIndex, table: table) {
+                diffLines.append(.added(newLines[newIndex]))
+                newIndex += 1
             } else {
-                let hunkStart = max(0, idx - 3)
-                if hunkStart > 0 && hunkStart < idx {
-                    let oldStart = hunkStart + 1
-                    let newStart = hunkStart + 1
-                    result.append("@@ -\(oldStart),\(idx - hunkStart + 1) +\(newStart),\(idx - hunkStart + 1) @@")
-                }
-
-                while idx < oldLines.count && (idx >= newLines.count || oldLines[idx] != newLines[min(idx, newLines.count - 1)]) {
-                    if idx < newLines.count && oldLines[idx] == newLines[idx] { break }
-                    result.append("- \(oldLines[idx])")
-                    idx += 1
-                    if idx >= oldLines.count { break }
-                }
-                let addedIdx = idx
-                while addedIdx < newLines.count && (addedIdx >= oldLines.count || oldLines[min(addedIdx, oldLines.count - 1)] != newLines[addedIdx]) {
-                    if addedIdx < oldLines.count && oldLines[addedIdx] == newLines[addedIdx] { break }
-                    result.append("+ \(newLines[addedIdx])")
-                    idx = addedIdx + 1
-                    break
-                }
-                if idx < newLines.count {
-                    for j in idx..<newLines.count {
-                        if j < oldLines.count && oldLines[j] == newLines[j] { break }
-                        result.append("+ \(newLines[j])")
-                    }
-                }
-                idx = max(idx, min(oldLines.count, newLines.count))
-                while idx < oldLines.count && idx < newLines.count && oldLines[idx] == newLines[idx] {
-                    idx += 1
-                }
+                diffLines.append(.removed(oldLines[oldIndex]))
+                oldIndex += 1
             }
         }
 
-        if result.isEmpty && (!old.isEmpty || !new.isEmpty) {
-            result = []
-            for line in oldLines { result.append("- \(line)") }
-            for line in newLines { result.append("+ \(line)") }
+        return diffLines
+    }
+
+    private func lcsTable() -> [[Int]] {
+        var table = Array(
+            repeating: Array(repeating: 0, count: newLines.count + 1),
+            count: oldLines.count + 1
+        )
+        guard !oldLines.isEmpty, !newLines.isEmpty else { return table }
+
+        for oldIndex in stride(from: oldLines.count - 1, through: 0, by: -1) {
+            for newIndex in stride(from: newLines.count - 1, through: 0, by: -1) {
+                table[oldIndex][newIndex] = lcsScore(
+                    oldIndex: oldIndex,
+                    newIndex: newIndex,
+                    table: table
+                )
+            }
         }
 
-        return result.joined(separator: "\n")
+        return table
+    }
+
+    private func lcsScore(oldIndex: Int, newIndex: Int, table: [[Int]]) -> Int {
+        if oldLines[oldIndex] == newLines[newIndex] {
+            return table[oldIndex + 1][newIndex + 1] + 1
+        }
+        return max(table[oldIndex + 1][newIndex], table[oldIndex][newIndex + 1])
+    }
+
+    private func canKeep(oldIndex: Int, newIndex: Int) -> Bool {
+        oldIndex < oldLines.count
+            && newIndex < newLines.count
+            && oldLines[oldIndex] == newLines[newIndex]
+    }
+
+    private func shouldAdd(oldIndex: Int, newIndex: Int, table: [[Int]]) -> Bool {
+        guard newIndex < newLines.count else { return false }
+        if oldIndex >= oldLines.count { return true }
+        return table[oldIndex][newIndex + 1] >= table[oldIndex + 1][newIndex]
     }
 }
 
@@ -350,8 +385,14 @@ struct HunkCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
-                .strokeBorder(hunk.approved == true ? Semantic.success.opacity(0.3) : hunk.approved == false ? Semantic.error.opacity(0.3) : SurfaceGrade.divider, lineWidth: 0.7)
+                .strokeBorder(hunkBorderColor, lineWidth: 0.7)
         )
+    }
+
+    private var hunkBorderColor: Color {
+        if hunk.approved == true { return Semantic.success.opacity(0.3) }
+        if hunk.approved == false { return Semantic.error.opacity(0.3) }
+        return SurfaceGrade.divider
     }
 
     private struct HunkLine {
@@ -514,15 +555,17 @@ struct DiffPreviewCard: View {
     private var indexedDiffLines: [(line: NumberedDiffLine, pairedContent: String?)] {
         let lines = diffLines
         var result: [(line: NumberedDiffLine, pairedContent: String?)] = []
-        var i = 0
-        while i < lines.count {
-            if lines[i].type == .removed && i + 1 < lines.count && lines[i + 1].type == .added {
-                result.append((line: lines[i], pairedContent: lines[i + 1].content))
-                result.append((line: lines[i + 1], pairedContent: lines[i].content))
-                i += 2
+        var lineIndex = 0
+        while lineIndex < lines.count {
+            if lines[lineIndex].type == .removed,
+               lineIndex + 1 < lines.count,
+               lines[lineIndex + 1].type == .added {
+                result.append((line: lines[lineIndex], pairedContent: lines[lineIndex + 1].content))
+                result.append((line: lines[lineIndex + 1], pairedContent: lines[lineIndex].content))
+                lineIndex += 2
             } else {
-                result.append((line: lines[i], pairedContent: nil))
-                i += 1
+                result.append((line: lines[lineIndex], pairedContent: nil))
+                lineIndex += 1
             }
         }
         return result
@@ -559,27 +602,25 @@ struct DiffPreviewCard: View {
         var tokens: [String] = []
         var current = ""
         var inWhitespace = false
-        for ch in text {
-            let isWS = ch == " " || ch == "\t"
-            if isWS != inWhitespace && !current.isEmpty {
+        for character in text {
+            let isWhitespace = character == " " || character == "\t"
+            if isWhitespace != inWhitespace && !current.isEmpty {
                 tokens.append(current)
                 current = ""
             }
-            inWhitespace = isWS
-            current.append(ch)
+            inWhitespace = isWhitespace
+            current.append(character)
         }
         if !current.isEmpty { tokens.append(current) }
         return tokens
     }
 
     /// Returns indices in `from` that differ from `to`
-    private func wordDiffIndices(from: [String], to: [String]) -> Set<Int> {
+    private func wordDiffIndices(from: [String], to target: [String]) -> Set<Int> {
         var changed = Set<Int>()
-        let toSet = Set(to)
-        for (i, word) in from.enumerated() {
-            if !toSet.contains(word) {
-                changed.insert(i)
-            }
+        let targetSet = Set(target)
+        for (tokenIndex, word) in from.enumerated() where !targetSet.contains(word) {
+            changed.insert(tokenIndex)
         }
         // If everything is different, don't highlight (avoids full-line highlight)
         if changed.count == from.count && from.count > 2 { return [] }
@@ -623,11 +664,11 @@ struct DiffPreviewCard: View {
         var inString = false
         var stringStart = result.startIndex
         for idx in result.characters.indices {
-            let ch = result.characters[idx]
-            if ch == "\"" {
+            let character = result.characters[idx]
+            if character == "\"" {
                 if inString {
-                    let nextIdx = result.characters.index(after: idx)
-                    result[stringStart..<nextIdx].foregroundColor = .init(red: 0.8, green: 0.5, blue: 0.2) // orange for strings
+                    let nextIndex = result.characters.index(after: idx)
+                    result[stringStart..<nextIndex].foregroundColor = .init(red: 0.8, green: 0.5, blue: 0.2)
                     inString = false
                 } else {
                     stringStart = idx
@@ -647,15 +688,34 @@ struct DiffPreviewCard: View {
     private static func syntaxKeywords(for ext: String) -> [String] {
         switch ext {
         case "swift":
-            return ["func", "var", "let", "if", "else", "guard", "return", "import", "struct", "class", "enum", "case", "self", "private", "public", "static", "override", "init", "for", "while", "in", "try", "catch", "throw", "async", "await", "some", "nil", "true", "false"]
+            return [
+                "func", "var", "let", "if", "else", "guard", "return", "import", "struct", "class", "enum",
+                "case", "self", "private", "public", "static", "override", "init", "for", "while", "in",
+                "try", "catch", "throw", "async", "await", "some", "nil", "true", "false"
+            ]
         case "py":
-            return ["def", "class", "if", "else", "elif", "return", "import", "from", "for", "while", "in", "try", "except", "with", "as", "self", "None", "True", "False", "async", "await", "raise", "yield"]
+            return [
+                "def", "class", "if", "else", "elif", "return", "import", "from", "for", "while", "in",
+                "try", "except", "with", "as", "self", "None", "True", "False", "async", "await",
+                "raise", "yield"
+            ]
         case "js", "ts", "jsx", "tsx":
-            return ["function", "const", "let", "var", "if", "else", "return", "import", "export", "class", "new", "this", "for", "while", "try", "catch", "throw", "async", "await", "null", "undefined", "true", "false", "from"]
+            return [
+                "function", "const", "let", "var", "if", "else", "return", "import", "export", "class",
+                "new", "this", "for", "while", "try", "catch", "throw", "async", "await", "null",
+                "undefined", "true", "false", "from"
+            ]
         case "rs":
-            return ["fn", "let", "mut", "if", "else", "return", "use", "struct", "enum", "impl", "pub", "self", "for", "while", "in", "match", "Some", "None", "Ok", "Err", "async", "await", "true", "false"]
+            return [
+                "fn", "let", "mut", "if", "else", "return", "use", "struct", "enum", "impl", "pub",
+                "self", "for", "while", "in", "match", "Some", "None", "Ok", "Err", "async", "await",
+                "true", "false"
+            ]
         case "go":
-            return ["func", "var", "if", "else", "return", "import", "struct", "type", "for", "range", "package", "defer", "go", "chan", "select", "nil", "true", "false"]
+            return [
+                "func", "var", "if", "else", "return", "import", "struct", "type", "for", "range",
+                "package", "defer", "go", "chan", "select", "nil", "true", "false"
+            ]
         default:
             return []
         }
@@ -741,78 +801,81 @@ struct DiffPreviewCard: View {
     // MARK: - Stats
 
     private var diffStats: (added: Int, removed: Int) {
-        var a = 0, r = 0
+        var added = 0
+        var removed = 0
         for line in diffLines {
-            if line.type == .added { a += 1 }
-            if line.type == .removed { r += 1 }
+            if line.type == .added { added += 1 }
+            if line.type == .removed { removed += 1 }
         }
-        return (a, r)
+        return (added, removed)
     }
 
     // MARK: - Diff Computation
 
     private func computeNumberedDiff() -> [NumberedDiffLine] {
-        let o = oldContent.components(separatedBy: "\n")
-        let n = newContent.components(separatedBy: "\n")
+        let oldLines = oldContent.components(separatedBy: "\n")
+        let newLines = newContent.components(separatedBy: "\n")
         var result: [NumberedDiffLine] = []
-        var oldIdx = 1, newIdx = 1
+        var oldIndex = 1
+        var newIndex = 1
 
-        for i in 0..<min(o.count, n.count) {
-            if o[i] == n[i] {
-                result.append(NumberedDiffLine(type: .context, content: o[i], oldNum: oldIdx, newNum: newIdx))
-                oldIdx += 1; newIdx += 1
+        for lineIndex in 0..<min(oldLines.count, newLines.count) {
+            if oldLines[lineIndex] == newLines[lineIndex] {
+                result.append(NumberedDiffLine(type: .context, content: oldLines[lineIndex], oldNum: oldIndex, newNum: newIndex))
+                oldIndex += 1
+                newIndex += 1
             } else {
-                result.append(NumberedDiffLine(type: .removed, content: o[i], oldNum: oldIdx, newNum: nil))
-                oldIdx += 1
-                result.append(NumberedDiffLine(type: .added, content: n[i], oldNum: nil, newNum: newIdx))
-                newIdx += 1
+                result.append(NumberedDiffLine(type: .removed, content: oldLines[lineIndex], oldNum: oldIndex, newNum: nil))
+                oldIndex += 1
+                result.append(NumberedDiffLine(type: .added, content: newLines[lineIndex], oldNum: nil, newNum: newIndex))
+                newIndex += 1
             }
         }
-        for i in min(o.count, n.count)..<o.count {
-            result.append(NumberedDiffLine(type: .removed, content: o[i], oldNum: oldIdx, newNum: nil))
-            oldIdx += 1
+        for lineIndex in min(oldLines.count, newLines.count)..<oldLines.count {
+            result.append(NumberedDiffLine(type: .removed, content: oldLines[lineIndex], oldNum: oldIndex, newNum: nil))
+            oldIndex += 1
         }
-        for i in min(o.count, n.count)..<n.count {
-            result.append(NumberedDiffLine(type: .added, content: n[i], oldNum: nil, newNum: newIdx))
-            newIdx += 1
+        for lineIndex in min(oldLines.count, newLines.count)..<newLines.count {
+            result.append(NumberedDiffLine(type: .added, content: newLines[lineIndex], oldNum: nil, newNum: newIndex))
+            newIndex += 1
         }
         return result
     }
 
     private var sideBySidePairs: [SideBySideLine] {
         var pairs: [SideBySideLine] = []
-        var i = 0
+        var lineIndex = 0
         let lines = diffLines
-        while i < lines.count {
-            let line = lines[i]
+        while lineIndex < lines.count {
+            let line = lines[lineIndex]
             if line.type == .context {
                 pairs.append(SideBySideLine(
                     oldNum: line.oldNum, oldText: line.content, oldType: .context,
                     newNum: line.newNum, newText: line.content, newType: .context
                 ))
-                i += 1
+                lineIndex += 1
             } else if line.type == .removed {
                 // Check if next line is added (paired change)
-                if i + 1 < lines.count && lines[i + 1].type == .added {
-                    let next = lines[i + 1]
+                if lineIndex + 1 < lines.count && lines[lineIndex + 1].type == .added {
+                    let next = lines[lineIndex + 1]
                     pairs.append(SideBySideLine(
                         oldNum: line.oldNum, oldText: line.content, oldType: .removed,
                         newNum: next.newNum, newText: next.content, newType: .added
                     ))
-                    i += 2
+                    lineIndex += 2
                 } else {
                     pairs.append(SideBySideLine(
                         oldNum: line.oldNum, oldText: line.content, oldType: .removed,
                         newNum: nil, newText: nil, newType: .context
                     ))
-                    i += 1
+                    lineIndex += 1
                 }
             } else {
                 pairs.append(SideBySideLine(
                     oldNum: nil, oldText: nil, oldType: .context,
                     newNum: line.newNum, newText: line.content, newType: .added
                 ))
-                i += 1
+                lineIndex += 1
             }
         }
         return pairs

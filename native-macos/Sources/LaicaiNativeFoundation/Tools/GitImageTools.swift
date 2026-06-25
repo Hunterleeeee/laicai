@@ -17,8 +17,14 @@ public struct GitTool: LaicaiTool {
             description: description,
             parameters: FunctionParameters(
                 properties: [
-                    "subcommand": FunctionProperty(type: "string", description: "git 子命令（diff, status, log, add, commit, commit-auto, checkout, branch-create, pr-desc 等）"),
-                    "args": FunctionProperty(type: "string", description: "子命令参数。commit 时传 -m \"message\"；commit-auto 留空自动生成信息；branch-create 传分支名；pr-desc 自动生成 PR 描述")
+                    "subcommand": FunctionProperty(
+                        type: "string",
+                        description: "git 子命令（diff, status, log, add, commit, commit-auto, checkout, branch-create, pr-desc 等）"
+                    ),
+                    "args": FunctionProperty(
+                        type: "string",
+                        description: "子命令参数。commit 时传 -m \"message\"；commit-auto 留空自动生成信息；branch-create 传分支名；pr-desc 自动生成 PR 描述"
+                    )
                 ],
                 required: ["subcommand"]
             )
@@ -217,11 +223,35 @@ public struct GitTool: LaicaiTool {
         var otherFiles: [String] = []
         for file in changedFiles {
             let lower = file.lowercased()
-            if lower.contains("/test") || lower.contains("/tests/") || lower.hasSuffix("test.swift") || lower.hasSuffix(".test.ts") || lower.hasSuffix(".spec.ts") || lower.hasSuffix("_test.go") || lower.hasSuffix("_test.py") {
+            let isTestFile = lower.contains("/test")
+                || lower.contains("/tests/")
+                || lower.hasSuffix("test.swift")
+                || lower.hasSuffix(".test.ts")
+                || lower.hasSuffix(".spec.ts")
+                || lower.hasSuffix("_test.go")
+                || lower.hasSuffix("_test.py")
+            let isSourceFile = lower.hasSuffix(".swift")
+                || lower.hasSuffix(".py")
+                || lower.hasSuffix(".ts")
+                || lower.hasSuffix(".js")
+                || lower.hasSuffix(".go")
+                || lower.hasSuffix(".rs")
+            let isConfigFile = lower.hasSuffix(".json")
+                || lower.hasSuffix(".toml")
+                || lower.hasSuffix(".yaml")
+                || lower.hasSuffix(".yml")
+                || lower.hasSuffix(".xml")
+                || (lower.hasSuffix(".swift") && lower.contains("package"))
+                || lower.contains("package.")
+                || lower.contains("tsconfig")
+                || lower.contains(".env")
+                || lower.contains("dockerfile")
+                || lower.contains("makefile")
+            if isTestFile {
                 testFiles.append(file)
-            } else if lower.hasSuffix(".swift") || lower.hasSuffix(".py") || lower.hasSuffix(".ts") || lower.hasSuffix(".js") || lower.hasSuffix(".go") || lower.hasSuffix(".rs") {
+            } else if isSourceFile {
                 sourceFiles.append(file)
-            } else if lower.hasSuffix(".json") || lower.hasSuffix(".toml") || lower.hasSuffix(".yaml") || lower.hasSuffix(".yml") || lower.hasSuffix(".xml") || lower.hasSuffix(".swift") && lower.contains("package") || lower.contains("package.") || lower.contains("tsconfig") || lower.contains(".env") || lower.contains("dockerfile") || lower.contains("makefile") {
+            } else if isConfigFile {
                 configFiles.append(file)
             } else {
                 otherFiles.append(file)
@@ -248,17 +278,17 @@ public struct GitTool: LaicaiTool {
 
         if !sourceFiles.isEmpty {
             description += "### 源文件变更（\(sourceFiles.count)）\n"
-            for f in sourceFiles.prefix(20) { description += "- `\(f)`\n" }
+            for file in sourceFiles.prefix(20) { description += "- `\(file)`\n" }
             description += "\n"
         }
         if !testFiles.isEmpty {
             description += "### 测试文件变更（\(testFiles.count)）\n"
-            for f in testFiles.prefix(10) { description += "- `\(f)`\n" }
+            for file in testFiles.prefix(10) { description += "- `\(file)`\n" }
             description += "\n"
         }
         if !configFiles.isEmpty {
             description += "### 配置文件变更（\(configFiles.count)）\n"
-            for f in configFiles.prefix(10) { description += "- `\(f)`\n" }
+            for file in configFiles.prefix(10) { description += "- `\(file)`\n" }
             description += "\n"
         }
 
@@ -269,10 +299,19 @@ public struct GitTool: LaicaiTool {
         }
 
         description += "### 提交记录\n\(commits)\n"
+        let commitCount = commits.components(separatedBy: "\n").filter { !$0.isEmpty }.count
 
         return ToolResult(
             output: description,
-            data: ["branch": currentBranch, "base": base, "commitCount": "\(commits.components(separatedBy: "\n").filter { !$0.isEmpty }.count)", "sourceFileCount": "\(sourceFiles.count)", "testFileCount": "\(testFiles.count)", "configFileCount": "\(configFiles.count)", "hasBreakingChanges": "\(breakingChangeHints.isEmpty ? "false" : "true")"],
+            data: [
+                "branch": currentBranch,
+                "base": base,
+                "commitCount": "\(commitCount)",
+                "sourceFileCount": "\(sourceFiles.count)",
+                "testFileCount": "\(testFiles.count)",
+                "configFileCount": "\(configFiles.count)",
+                "hasBreakingChanges": "\(breakingChangeHints.isEmpty ? "false" : "true")"
+            ],
             success: true
         )
     }
@@ -392,7 +431,7 @@ public struct ComfyUITool: LaicaiTool {
         }
 
         do {
-            let imagePath = try await generateImage(
+            let comfyRequest = ComfyImageGenerationRequest(
                 serverURL: serverURL,
                 modelName: modelName,
                 prompt: params.prompt,
@@ -403,6 +442,7 @@ public struct ComfyUITool: LaicaiTool {
                 seed: params.seed ?? -1,
                 outputDir: context.workspaceRoot
             )
+            let imagePath = try await generateImage(comfyRequest)
 
             await AuditLog.shared.record(
                 tool: name,
@@ -440,15 +480,28 @@ public struct ComfyUITool: LaicaiTool {
     private struct ImagesAPIRequest: Encodable {
         var model: String
         var prompt: String
-        var n: Int
+        var count: Int
         var size: String
-        var response_format: String
+        var responseFormat: String
+
+        enum CodingKeys: String, CodingKey {
+            case model
+            case prompt
+            case count = "n"
+            case size
+            case responseFormat = "response_format"
+        }
     }
 
     private struct ImagesAPIResponse: Decodable {
         struct Item: Decodable {
-            var b64_json: String?
+            var base64JSON: String?
             var url: String?
+
+            enum CodingKeys: String, CodingKey {
+                case base64JSON = "b64_json"
+                case url
+            }
         }
         var data: [Item]
     }
@@ -516,9 +569,14 @@ public struct ComfyUITool: LaicaiTool {
         if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
-        let escapedModel = modelName.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        let escapedPrompt = prompt.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        request.httpBody = "{\"model\":\"\(escapedModel)\",\"prompt\":\"\(escapedPrompt)\",\"n\":1,\"size\":\"\(size)\",\"response_format\":\"b64_json\"}".data(using: .utf8)
+        let body = ImagesAPIRequest(
+            model: modelName,
+            prompt: prompt,
+            count: 1,
+            size: size,
+            responseFormat: "b64_json"
+        )
+        request.httpBody = try JSONEncoder().encode(body)
         request.timeoutInterval = NetworkDefaults.imageRequest
 
         let (data, response): (Data, URLResponse)
@@ -553,7 +611,7 @@ public struct ComfyUITool: LaicaiTool {
         }
 
         let imageData: Data
-        if let b64 = first.b64_json, let decodedData = Data(base64Encoded: b64) {
+        if let base64JSON = first.base64JSON, let decodedData = Data(base64Encoded: base64JSON) {
             imageData = decodedData
         } else if let urlString = first.url, let url = URL(string: urlString) {
             let (downloaded, downloadResponse) = try await session.data(from: url)
@@ -624,7 +682,12 @@ public struct ComfyUITool: LaicaiTool {
             throw NSError(
                 domain: "ImagesAPI",
                 code: result.statusCode,
-                userInfo: [NSLocalizedDescriptionKey: Self.serverMessage(from: String(data: result.data, encoding: .utf8) ?? "", fallback: "图片服务返回 HTTP \(result.statusCode)")]
+                userInfo: [
+                    NSLocalizedDescriptionKey: Self.serverMessage(
+                        from: String(data: result.data, encoding: .utf8) ?? "",
+                        fallback: "图片服务返回 HTTP \(result.statusCode)"
+                    )
+                ]
             )
         }
         return result.data
@@ -635,7 +698,14 @@ public struct ComfyUITool: LaicaiTool {
         return FileManager.default.isExecutableFile(atPath: "/usr/bin/curl")
     }
 
-    private static func runCurlImagesRequest(url: URL, apiKey: String, body: Data) async throws -> (data: Data, statusCode: Int, stderr: String, exitCode: Int32) {
+    private struct CurlImagesResponse {
+        let data: Data
+        let statusCode: Int
+        let stderr: String
+        let exitCode: Int32
+    }
+
+    private static func runCurlImagesRequest(url: URL, apiKey: String, body: Data) async throws -> CurlImagesResponse {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("laicai-image-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
@@ -680,7 +750,12 @@ public struct ComfyUITool: LaicaiTool {
         let codeText = String(data: outputData, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let responseData = (try? Data(contentsOf: responseURL)) ?? Data()
-        return (responseData, Int(codeText) ?? 0, stderr, process.terminationStatus)
+        return CurlImagesResponse(
+            data: responseData,
+            statusCode: Int(codeText) ?? 0,
+            stderr: stderr,
+            exitCode: process.terminationStatus
+        )
     }
 
     private static func curlConfig(url: URL, apiKey: String, bodyPath: String, responsePath: String) -> String {
@@ -800,17 +875,28 @@ public struct ComfyUITool: LaicaiTool {
         ].contains(nsError.code)
     }
 
-    private func generateImage(
-        serverURL: String,
-        modelName: String,
-        prompt: String,
-        negativePrompt: String,
-        width: Int,
-        height: Int,
-        steps: Int,
-        seed: Int,
-        outputDir: String
-    ) async throws -> String {
+    private struct ComfyImageGenerationRequest {
+        let serverURL: String
+        let modelName: String
+        let prompt: String
+        let negativePrompt: String
+        let width: Int
+        let height: Int
+        let steps: Int
+        let seed: Int
+        let outputDir: String
+    }
+
+    private func generateImage(_ request: ComfyImageGenerationRequest) async throws -> String {
+        let serverURL = request.serverURL
+        let modelName = request.modelName
+        let prompt = request.prompt
+        let negativePrompt = request.negativePrompt
+        let width = request.width
+        let height = request.height
+        let steps = request.steps
+        let seed = request.seed
+        let outputDir = request.outputDir
         let clientId = "laicai-\(UUID().uuidString.prefix(8))"
 
         // Build a basic text-to-image workflow

@@ -227,6 +227,50 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .userInput }.last?.text, "为什么会有两个窗口呢")
     }
 
+    func testReadOnlyContinuationDoesNotEscalateToWriteOrShellTools() async throws {
+        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let thread = Thread(
+            title: "全量体验",
+            status: .completed,
+            steps: [
+                TaskStep(kind: .userInput, text: "全量体验，我感觉不好用 你看看"),
+                TaskStep(kind: .toolCall, text: "读取 RootView", toolName: "file.read"),
+                TaskStep(kind: .toolResult, text: "已读取", toolName: "file.read"),
+                TaskStep(kind: .textOutput, text: "初步看完入口体验")
+            ],
+            connectorID: connector.id,
+            context: TaskContext(workspaceRoot: LaicaiNativeFoundationTestCase.safeTestWorkspacePath),
+            updatedAt: .now,
+            goal: "全量体验，我感觉不好用 你看看"
+        )
+        let runtime = CapturingToolsRuntime()
+        let store = AppStore(
+            state: testState(
+                threads: [thread],
+                selectedThreadID: thread.id,
+                workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath,
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+
+        store.updateDraft("继续看，我觉得编排层有问题")
+        store.sendDraft()
+        try await waitUntilIdle(store)
+
+        let tools = runtime.requests.last?.tools?.map { ToolNameCodec.canonicalName($0.function.name) } ?? []
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(store.state.modeLabel, "会话 分析")
+        XCTAssertEqual(store.state.selectedThread?.taskProtocol?.riskPolicy, .inspect)
+        XCTAssertTrue(tools.contains("file.read"), tools.joined(separator: ","))
+        XCTAssertTrue(tools.contains("code.search"), tools.joined(separator: ","))
+        XCTAssertFalse(tools.contains("file.write"), tools.joined(separator: ","))
+        XCTAssertFalse(tools.contains("file.edit"), tools.joined(separator: ","))
+        XCTAssertFalse(tools.contains("diff.apply"), tools.joined(separator: ","))
+        XCTAssertFalse(tools.contains("shell.exec"), tools.joined(separator: ","))
+    }
+
     func testContinueAgentActionResumesPausedTaskDirectly() async throws {
         let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(

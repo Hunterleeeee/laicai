@@ -10,11 +10,12 @@ import SQLite3
 /// Prevents use-after-free when Swift temporaries are freed before sqlite3_step.
 @discardableResult
 func sqlite3_bind_text_safe(_ stmt: OpaquePointer?, _ index: Int32, _ value: String) -> Int32 {
-    let SQLITE_TRANSIENT = unsafeBitCast(OpaquePointer(bitPattern: -1), to: sqlite3_destructor_type.self)
-    return sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT)
+    sqlite3_bind_text(stmt, index, value, -1, SQLiteSupport.transientDestructor)
 }
 
 enum SQLiteSupport {
+    static let transientDestructor = unsafeBitCast(OpaquePointer(bitPattern: -1), to: sqlite3_destructor_type.self)
+
     static func withDatabase<T>(
         path: String,
         queue: DispatchQueue,

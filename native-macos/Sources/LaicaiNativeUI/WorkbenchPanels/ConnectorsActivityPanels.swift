@@ -151,7 +151,7 @@ struct ConnectorsPanel: View {
             RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.9), lineWidth: 0.7)
         )
-        .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.y)
+        .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
     }
 
     private func emptyHint(icon: String, title: String, hint: String) -> some View {
@@ -241,7 +241,7 @@ struct ConnectorRow: View {
                     lineWidth: 0.7
                 )
         )
-        .shadow(color: conn.id == store.state.activeConnectorID ? AppShadow.sm.color : .clear, radius: AppShadow.sm.radius, y: AppShadow.sm.y)
+        .shadow(color: conn.id == store.state.activeConnectorID ? AppShadow.sm.color : .clear, radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
     }
 }
 
@@ -403,7 +403,7 @@ struct ActivityPanel: View {
                         ToastCenter.shared.success("已复制当前会话")
                     }
                 }
-                if store.state.isGenerating {
+                if store.hasRunningGenerationTasks {
                     InspectorCommandTile(icon: "stop.fill", title: "停止", tint: Semantic.error, isEnabled: true) {
                         store.stopGenerating()
                     }
@@ -576,17 +576,17 @@ struct ActivityPanel: View {
     }
 
     private var canRetry: Bool {
-        guard !store.state.isGenerating, let thread = store.state.selectedThread else { return false }
+        guard let thread = store.state.selectedThread, !store.isThreadGenerating(thread.id) else { return false }
         return thread.steps.contains { $0.kind == .userInput }
     }
 
     private var canContinue: Bool {
-        guard !store.state.isGenerating, let thread = store.state.selectedThread, thread.canContinue else { return false }
+        guard let thread = store.state.selectedThread, !store.isThreadGenerating(thread.id), thread.canContinue else { return false }
         return thread.status != .running
     }
 
     private func statusTint(for thread: Thread) -> Color {
-        if store.state.isGenerating && thread.id == store.state.selectedThreadID { return Semantic.toolRunning }
+        if store.isThreadGenerating(thread.id) { return Semantic.toolRunning }
         switch thread.executionState {
         case .running, .planning: return Semantic.toolRunning
         case .waitingForApproval: return Semantic.warning
@@ -600,20 +600,20 @@ struct ActivityPanel: View {
     }
 
     private func pulseIcon(for thread: Thread) -> String {
-        if store.state.isGenerating && thread.id == store.state.selectedThreadID { return "waveform.path.ecg" }
+        if store.isThreadGenerating(thread.id) { return "waveform.path.ecg" }
         if thread.isExecution { return thread.status.icon }
         return thread.steps.isEmpty ? "text.bubble" : "bubble.left.and.bubble.right"
     }
 
     private func sourceTitle(for thread: Thread) -> String {
-        if store.state.isGenerating && thread.id == store.state.selectedThreadID { return "正在处理" }
+        if store.isThreadGenerating(thread.id) { return "正在处理" }
         return "线程"
     }
 
     private func statusBadge(for thread: Thread) -> some View {
         let tint = statusTint(for: thread)
         let label: String = {
-            if store.state.isGenerating && thread.id == store.state.selectedThreadID { return "运行中" }
+            if store.isThreadGenerating(thread.id) { return "运行中" }
             return thread.executionState.title
         }()
         return Text(label)
@@ -642,10 +642,10 @@ struct ActivityPanel: View {
 
     private func pulseSummary(for thread: Thread) -> String {
         let live = store.state.liveActivity.trimmingCharacters(in: .whitespacesAndNewlines)
-        if store.state.isGenerating && !live.isEmpty {
+        if store.isThreadGenerating(thread.id) && !live.isEmpty {
             return live
         }
-        if let followUp = store.state.pendingFollowUp?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if let followUp = thread.executionLedger?.pendingFollowUp?.trimmingCharacters(in: .whitespacesAndNewlines),
            !followUp.isEmpty {
             return "已收到补充：\(followUp)"
         }
@@ -725,7 +725,7 @@ struct ActivityPanel: View {
         if thread.isExecution {
             facts[1] = .init(icon: "doc.text", title: "文件", value: "\(thread.context.relevantFiles.count)", tint: Brand.teal)
         }
-        if let start = store.state.generationStartedAt, store.state.isGenerating, thread.id == store.state.selectedThreadID {
+        if let start = store.state.generationStartedAt, store.isThreadGenerating(thread.id) {
             facts[3] = .init(icon: "timer", title: "用时", value: formatElapsed(Date().timeIntervalSince(start)), tint: Semantic.toolRunning)
         }
         return facts
@@ -969,7 +969,7 @@ private struct InspectorBlock<Content: View>: View {
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.7)
         )
-        .shadow(color: AppShadow.sm.color.opacity(0.75), radius: AppShadow.sm.radius, y: AppShadow.sm.y)
+        .shadow(color: AppShadow.sm.color.opacity(0.75), radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
     }
 }
 

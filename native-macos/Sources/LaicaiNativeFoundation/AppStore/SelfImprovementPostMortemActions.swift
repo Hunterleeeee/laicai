@@ -67,9 +67,8 @@ extension AppStore {
         let loop = AgentLoop(config: loopConfig, runtime: environment.runtimeClient)
         agentLoops[targetID] = loop
 
-        state.isGenerating = true
-        state.generationStartedAt = Date()
         let targetTaskID = targetID
+        markGenerationStarted(for: targetTaskID, activity: "正在执行自我改进复盘…")
 
         generationTasks[targetTaskID] = Task { [weak self] in
             guard let self else { return }
@@ -82,14 +81,15 @@ extension AppStore {
                     context: context,
                     priorSteps: [],
                     onStep: { @MainActor [weak self] (step: TaskStep) in
-                        guard let self else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
                         self.appendTaskStep(step, to: targetTaskID)
                     },
                     onStreamDelta: { @Sendable @MainActor [weak self] (delta: String) in
-                        guard let self else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
                         self.appendStreamDelta(delta, to: targetTaskID)
                     }
                 )
+                guard self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
                 self.mergeCompletedTask(completedTask, into: targetTaskID)
                 self.persistThreadsNow()
 
@@ -109,7 +109,7 @@ extension AppStore {
                     SelfImprovementEngine.shared.onImprovementFailure()
                 }
             } catch {
-                guard !Task.isCancelled else { return }
+                guard self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
                 if let ti = self.state.threads.firstIndex(where: { $0.id == targetTaskID }) {
                     self.state.threads[ti].steps.append(
                         TaskStep(kind: .error, text: "自动修复失败：\(error.localizedDescription)", isFailure: true, recoverable: false)

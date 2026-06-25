@@ -12,12 +12,14 @@ public struct SandboxConfig: Codable, Sendable {
     public var memoryLimitMB: Int
 
     public enum SandboxMode: String, Codable, Sendable, CaseIterable {
+        case auto = "auto"
         case none = "none"
         case macSandbox = "macos"
         case docker = "docker"
 
         public var title: String {
             switch self {
+            case .auto: return "自动（优先 Docker）"
             case .none: return "无隔离"
             case .macSandbox: return "macOS 沙箱"
             case .docker: return "Docker 容器"
@@ -63,6 +65,14 @@ public struct SandboxExecutor: Sendable {
         config: SandboxConfig
     ) async throws -> (output: String, error: String, exitCode: Int32) {
         switch config.mode {
+        case .auto:
+            if isDockerAvailable() {
+                return try await executeDocker(command: command, workspaceRoot: workspaceRoot, config: config)
+            }
+            let result = try await executeNative(command: command, workspaceRoot: workspaceRoot, timeout: config.timeoutSeconds)
+            let warning = "沙箱自动模式警告：Docker 不可用，已回退到原生执行（无隔离）。"
+            let error = result.1.isEmpty ? warning : warning + "\n" + result.1
+            return (result.0, error, result.2)
         case .none:
             return try await executeNative(command: command, workspaceRoot: workspaceRoot, timeout: config.timeoutSeconds)
         case .macSandbox:
@@ -149,6 +159,10 @@ public struct SandboxExecutor: Sendable {
     // MARK: - macOS sandbox-exec
 
     private static func executeMacSandbox(command: String, workspaceRoot: String, config: SandboxConfig) async throws -> (String, String, Int32) {
+        let runtimeRoot = NSTemporaryDirectory().appending("laicai_sandbox_runtime_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(atPath: runtimeRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: runtimeRoot) }
+
         // Build sandbox profile
         var profile = """
         (version 1)
@@ -159,17 +173,19 @@ public struct SandboxExecutor: Sendable {
         (allow file-read* (subpath "/bin"))
         (allow file-read* (subpath "/sbin"))
         (allow file-read* (subpath "/opt/homebrew"))
-        (allow file-read* (subpath "/private/tmp"))
         (allow file-read* (subpath "/dev"))
         (allow file-write* (subpath "/dev/null"))
-        (allow file-write* (subpath "/private/tmp"))
+        (allow file-read* (subpath "\(runtimeRoot)"))
+        (allow file-write* (subpath "\(runtimeRoot)"))
         (allow sysctl-read)
         (allow mach-lookup)
         """
 
         if !workspaceRoot.isEmpty {
             profile += "\n(allow file-read* (subpath \"\(workspaceRoot)\"))"
-            profile += "\n(allow file-write* (subpath \"\(workspaceRoot)\"))"
+            if config.mountWorkspace {
+                profile += "\n(allow file-write* (subpath \"\(workspaceRoot)\"))"
+            }
         }
 
         if config.networkEnabled {

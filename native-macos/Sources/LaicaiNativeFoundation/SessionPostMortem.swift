@@ -74,10 +74,13 @@ public final class SessionPostMortem: Sendable {
             guard !findings.isEmpty else { return "未发现已知失败模式" }
             let grouped = Dictionary(grouping: findings, by: \.severity)
             var parts: [String] = []
-            if let c = grouped[.critical] { parts.append("🔴 致命 ×\(c.count)") }
-            if let w = grouped[.warning] { parts.append("🟡 警告 ×\(w.count)") }
-            if let i = grouped[.info] { parts.append("🔵 提示 ×\(i.count)") }
-            return parts.joined(separator: "  ") + "\n" + findings.map { "- [\($0.severity.rawValue)] \($0.pattern.rawValue): \($0.description)" }.joined(separator: "\n")
+            if let criticalFindings = grouped[.critical] { parts.append("🔴 致命 ×\(criticalFindings.count)") }
+            if let warningFindings = grouped[.warning] { parts.append("🟡 警告 ×\(warningFindings.count)") }
+            if let infoFindings = grouped[.info] { parts.append("🔵 提示 ×\(infoFindings.count)") }
+            let findingLines = findings
+                .map { "- [\($0.severity.rawValue)] \($0.pattern.rawValue): \($0.description)" }
+                .joined(separator: "\n")
+            return parts.joined(separator: "  ") + "\n" + findingLines
         }
     }
 
@@ -115,7 +118,7 @@ public final class SessionPostMortem: Sendable {
     /// P1: file.write produced empty files (diffNew is empty or addedLines=0 with non-empty content param)
     private func detectEmptyFileWrites(steps: [TaskStep]) -> [Finding] {
         var findings: [Finding] = []
-        for (i, step) in steps.enumerated() {
+        for (stepIndex, step) in steps.enumerated() {
             guard step.kind == .reviewRequest,
                   Self.isFileChangeTool(step.toolName) else { continue }
 
@@ -130,7 +133,7 @@ public final class SessionPostMortem: Sendable {
                     pattern: .emptyFileWrite,
                     severity: .critical,
                     description: "file.write content参数有\(contentParam.count)字符内容，但diffNew为空 → 文件写空。路径: \(step.diffFilePath ?? "?")",
-                    evidence: [EvidenceItem(stepIndex: i, stepKind: step.kind.rawValue, toolName: step.toolName, snippet: String(step.text.prefix(200)))],
+                    evidence: [Self.evidence(step: step, index: stepIndex)],
                     suggestedFix: FixSuggestion(
                         sourceFiles: ["ToolEngine.swift:793"],
                         codeContext: "WriteFileTool.execute() 的 patch vs full-write 分支选择逻辑",
@@ -141,13 +144,15 @@ public final class SessionPostMortem: Sendable {
 
             // Pattern: addedLines=0 but file was supposed to be created
             if addedLines == "0" && !contentParam.isEmpty && step.approved == true {
-                let alreadyCounted = findings.contains { $0.pattern == .emptyFileWrite && $0.evidence.first?.stepIndex == i }
+                let alreadyCounted = findings.contains {
+                    $0.pattern == .emptyFileWrite && $0.evidence.first?.stepIndex == stepIndex
+                }
                 if !alreadyCounted {
                     findings.append(Finding(
                         pattern: .emptyFileWrite,
                         severity: .warning,
                         description: "写入声称成功但 addedLines=0。路径: \(step.diffFilePath ?? "?")",
-                        evidence: [EvidenceItem(stepIndex: i, stepKind: step.kind.rawValue, toolName: step.toolName, snippet: String(step.text.prefix(200)))],
+                        evidence: [Self.evidence(step: step, index: stepIndex)],
                         suggestedFix: FixSuggestion(
                             sourceFiles: ["AgentLoop.swift:1543"],
                             codeContext: "AgentLoop 自动写入后的验证逻辑",
@@ -165,7 +170,7 @@ public final class SessionPostMortem: Sendable {
         var findings: [Finding] = []
         let vaultRoot = context.vaultRoot ?? ""
 
-        for (i, step) in steps.enumerated() {
+        for (stepIndex, step) in steps.enumerated() {
             guard step.isFailure,
                   step.text.contains("security_denied"),
                   let toolName = step.toolName,
@@ -180,7 +185,7 @@ public final class SessionPostMortem: Sendable {
                     pattern: .securityDeniedVault,
                     severity: .critical,
                     description: "写入 Vault/知识库路径被 security_denied 拦截。路径: \(targetPath)",
-                    evidence: [EvidenceItem(stepIndex: i, stepKind: step.kind.rawValue, toolName: toolName, snippet: String(step.text.prefix(200)))],
+                    evidence: [Self.evidence(step: step, index: stepIndex, toolName: toolName)],
                     suggestedFix: FixSuggestion(
                         sourceFiles: ["AgentLoop.swift:147", "SecurityEngine.swift:244"],
                         codeContext: "Vault 路径未注册到 WorkspaceSandbox.allowedPaths",
@@ -200,7 +205,7 @@ public final class SessionPostMortem: Sendable {
             return []
         }
 
-        for (i, step) in steps.enumerated() {
+        for (stepIndex, step) in steps.enumerated() {
             guard step.kind == .toolResult,
                   ["shell.exec", "verify.build", "shell_exec"].contains(step.toolName ?? "") else { continue }
 
@@ -210,7 +215,7 @@ public final class SessionPostMortem: Sendable {
                     pattern: .shellEncodingGarble,
                     severity: .warning,
                     description: "Shell 输出包含乱码（中文字符变 ???）。工具: \(step.toolName ?? "")",
-                    evidence: [EvidenceItem(stepIndex: i, stepKind: step.kind.rawValue, toolName: step.toolName, snippet: String(step.text.prefix(200)))],
+                    evidence: [Self.evidence(step: step, index: stepIndex)],
                     suggestedFix: FixSuggestion(
                         sourceFiles: ["ToolEngine.swift:1044"],
                         codeContext: "ShellTool 的 Process 环境变量缺少 LANG/LC_ALL",
@@ -230,12 +235,10 @@ public final class SessionPostMortem: Sendable {
         // Find sequences: userInput("还是空的") → textOutput("已完成/已写入")
         // without any successful file.write tool calls in between
         var userComplaintIndices: [Int] = []
-        for (i, step) in steps.enumerated() {
-            if step.kind == .userInput {
-                let lower = step.text.lowercased()
-                if lower.contains("空的") || lower.contains("还是空") || lower.contains("没内容") || lower.contains("幻觉") {
-                    userComplaintIndices.append(i)
-                }
+        for (stepIndex, step) in steps.enumerated() where step.kind == .userInput {
+            let lower = step.text.lowercased()
+            if lower.contains("空的") || lower.contains("还是空") || lower.contains("没内容") || lower.contains("幻觉") {
+                userComplaintIndices.append(stepIndex)
             }
         }
 
@@ -243,18 +246,18 @@ public final class SessionPostMortem: Sendable {
 
         // Check if model claims success after complaints without actual successful writes
         var evidenceItems: [EvidenceItem] = []
-        for ci in userComplaintIndices {
+        for complaintIndex in userComplaintIndices {
             // Look at next few steps after complaint
-            let searchEnd = min(ci + 5, steps.count)
-            for j in (ci+1)..<searchEnd {
-                let step = steps[j]
+            let searchEnd = min(complaintIndex + 5, steps.count)
+            for responseIndex in (complaintIndex + 1)..<searchEnd {
+                let step = steps[responseIndex]
                 if step.kind == .textOutput && (step.text.contains("已完成") || step.text.contains("已成功") || step.text.contains("已写入")) {
                     // Check if there was an actual tool call between complaint and this response
-                    let hasToolCall = ((ci+1)..<j).contains { idx in
+                    let hasToolCall = ((complaintIndex + 1)..<responseIndex).contains { idx in
                         steps[idx].kind == .toolCall && Self.isFileChangeTool(steps[idx].toolName)
                     }
                     if !hasToolCall {
-                        evidenceItems.append(EvidenceItem(stepIndex: j, stepKind: step.kind.rawValue, toolName: nil, snippet: String(step.text.prefix(200))))
+                        evidenceItems.append(Self.evidence(step: step, index: responseIndex, toolName: nil))
                     }
                 }
             }
@@ -276,10 +279,10 @@ public final class SessionPostMortem: Sendable {
         return findings
     }
 
-    /// P5: file.edit attempted on empty file
+        /// P5: file.edit attempted on empty file
     private func detectEditOnEmptyFile(steps: [TaskStep]) -> [Finding] {
         var findings: [Finding] = []
-        for (i, step) in steps.enumerated() {
+        for (stepIndex, step) in steps.enumerated() {
             guard step.kind == .toolResult,
                   step.toolName == "file.edit",
                   step.isFailure,
@@ -291,7 +294,7 @@ public final class SessionPostMortem: Sendable {
                 pattern: .editOnEmptyFile,
                 severity: .warning,
                 description: "file.edit 在空文件上执行失败。模型应改用 file.write。",
-                evidence: [EvidenceItem(stepIndex: i, stepKind: step.kind.rawValue, toolName: step.toolName, snippet: String(step.text.prefix(200)))],
+                evidence: [Self.evidence(step: step, index: stepIndex)],
                 suggestedFix: FixSuggestion(
                     sourceFiles: ["ToolEngine.swift:334"],
                     codeContext: "FileEditTool.executeSingle 在空文件上全部编辑失败时的错误消息",
@@ -307,10 +310,10 @@ public final class SessionPostMortem: Sendable {
         var findings: [Finding] = []
         var toolCallHistory: [(index: Int, name: String, pathParam: String)] = []
 
-        for (i, step) in steps.enumerated() {
+        for (stepIndex, step) in steps.enumerated() {
             guard step.kind == .toolCall, let name = step.toolName else { continue }
             let pathParam = step.toolParams?["path"] ?? step.toolParams?["command"]?.prefix(60).description ?? ""
-            toolCallHistory.append((i, name, pathParam))
+            toolCallHistory.append((stepIndex, name, pathParam))
         }
 
         // Sliding window: detect 3+ identical (name, pathParam) in a window of 8 calls
@@ -343,14 +346,14 @@ public final class SessionPostMortem: Sendable {
     /// P7: Model response parse failure
     private func detectModelParseFailure(steps: [TaskStep]) -> [Finding] {
         var findings: [Finding] = []
-        for (i, step) in steps.enumerated() {
+        for (stepIndex, step) in steps.enumerated() {
             guard step.kind == .error,
                   step.text.contains("cannot parse") || step.text.contains("解析失败") else { continue }
             findings.append(Finding(
                 pattern: .modelParseFailure,
                 severity: .info,
                 description: "模型返回了无法解析的响应: \(String(step.text.prefix(100)))",
-                evidence: [EvidenceItem(stepIndex: i, stepKind: step.kind.rawValue, toolName: nil, snippet: String(step.text.prefix(200)))],
+                evidence: [Self.evidence(step: step, index: stepIndex, toolName: nil)],
                 suggestedFix: FixSuggestion(
                     sourceFiles: ["AgentLoop.swift:1138"],
                     codeContext: "SSE 响应解析",
@@ -388,10 +391,10 @@ public final class SessionPostMortem: Sendable {
         ## 发现的致命问题
         """
 
-        for (i, finding) in critical.enumerated() {
+        for (findingIndex, finding) in critical.enumerated() {
             prompt += """
 
-            ### 问题 \(i + 1): \(finding.pattern.rawValue)
+            ### 问题 \(findingIndex + 1): \(finding.pattern.rawValue)
             **描述**: \(finding.description)
             **建议修复文件**: \(finding.suggestedFix.sourceFiles.joined(separator: ", "))
             **代码上下文**: \(finding.suggestedFix.codeContext)
@@ -399,8 +402,9 @@ public final class SessionPostMortem: Sendable {
 
             **证据**:
             """
-            for ev in finding.evidence.prefix(3) {
-                prompt += "\n  - Step[\(ev.stepIndex)] \(ev.stepKind) \(ev.toolName ?? ""): \(ev.snippet)"
+            for evidenceItem in finding.evidence.prefix(3) {
+                prompt += "\n  - Step[\(evidenceItem.stepIndex)] \(evidenceItem.stepKind) "
+                prompt += "\(evidenceItem.toolName ?? ""): \(evidenceItem.snippet)"
             }
         }
 
@@ -408,11 +412,20 @@ public final class SessionPostMortem: Sendable {
         let warnings = report.findings.filter { $0.severity == .warning }
         if !warnings.isEmpty {
             prompt += "\n\n## 次要问题（警告级）\n"
-            for w in warnings {
-                prompt += "- [\(w.pattern.rawValue)] \(w.description)\n"
+            for warningFinding in warnings {
+                prompt += "- [\(warningFinding.pattern.rawValue)] \(warningFinding.description)\n"
             }
         }
 
         return prompt
+    }
+
+    private static func evidence(step: TaskStep, index: Int, toolName: String? = nil) -> EvidenceItem {
+        EvidenceItem(
+            stepIndex: index,
+            stepKind: step.kind.rawValue,
+            toolName: toolName ?? step.toolName,
+            snippet: String(step.text.prefix(200))
+        )
     }
 }

@@ -136,6 +136,32 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(decision.expectedCapabilities.contains("提出文件修改"))
         XCTAssertTrue(decision.expectedCapabilities.contains("形成可验证结果"))
     }
+    func testOptimizationAdviceDoesNotBecomeMutationByDefault() {
+        XCTAssertEqual(IntentRouter.plan("给我优化建议").intent, .chat)
+
+        let projectAdvice = IntentRouter.plan("当前项目有什么优化建议")
+        XCTAssertEqual(projectAdvice.intent, .task)
+        XCTAssertEqual(projectAdvice.routeLabel, "会话 分析")
+        XCTAssertTrue(projectAdvice.expectedCapabilities.contains("读取工作区"))
+        XCTAssertFalse(projectAdvice.expectedCapabilities.contains("提出文件修改"))
+        XCTAssertFalse(projectAdvice.expectedCapabilities.contains("形成可验证结果"))
+    }
+    func testOptimizationAnalysisWithExplicitNoEditStaysReadOnly() {
+        let decision = IntentRouter.plan("只分析一下这个项目怎么优化，先别改")
+
+        XCTAssertEqual(decision.intent, .task)
+        XCTAssertEqual(decision.routeLabel, "会话 分析")
+        XCTAssertTrue(decision.expectedCapabilities.contains("读取工作区"))
+        XCTAssertFalse(decision.expectedCapabilities.contains("提出文件修改"))
+    }
+    func testInterfaceComplaintWithNoEditStaysReadOnly() {
+        let decision = IntentRouter.plan("看看这个界面哪里不好用，先别改")
+
+        XCTAssertEqual(decision.intent, .task)
+        XCTAssertEqual(decision.routeLabel, "会话 分析")
+        XCTAssertTrue(decision.expectedCapabilities.contains("读取工作区"))
+        XCTAssertFalse(decision.expectedCapabilities.contains("提出文件修改"))
+    }
     func testExplicitPlanOnlyKeepsAnalysisRouteWithoutMutationCapability() {
         let decision = IntentRouter.plan("只分析一下这个项目，先别改")
 

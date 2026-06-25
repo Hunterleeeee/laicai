@@ -40,7 +40,7 @@ extension AppStore {
             state.threads[index].title = String(taskTitle.prefix(32))
             state.threads[index].status = .running
             state.threads[index].steps = initialSteps
-            state.threads[index].connectorID = state.activeConnectorID
+            state.threads[index].connectorID = connector.id
             state.threads[index].workflowName = workflow.name
             state.threads[index].context = context
             state.threads[index].projectID = projectID
@@ -56,7 +56,7 @@ extension AppStore {
                 title: String(taskTitle.prefix(32)),
                 status: .running,
                 steps: initialSteps,
-                connectorID: state.activeConnectorID,
+                connectorID: connector.id,
                 workflowName: workflow.name,
                 context: context,
                 projectID: projectID,
@@ -70,9 +70,7 @@ extension AppStore {
         }
         state.selectThread(id: threadID)
         state.modeLabel = "会话 工作流"
-        state.isGenerating = true
-        state.generationStartedAt = Date()
-        state.liveActivity = "会话 正在执行工作流…"
+        markGenerationStarted(for: threadID, activity: "会话 正在执行工作流…")
         state.draftMessage = ""
         state.draftAttachments = []
         state.draftImages = []
@@ -92,13 +90,13 @@ extension AppStore {
                 runtime: self.environment.runtimeClient,
                 userParams: userParams,
                 onStepProgress: { [weak self] progress in
-                    guard let self else { return }
+                    guard let self, self.shouldAcceptGenerationCallback(for: wfThreadID) else { return }
                     self.handleWorkflowStepProgress(progress, threadID: threadID, runID: run.id)
                 },
                 onStreamDelta: { _ in }
             )
 
-            guard !Task.isCancelled else { return }
+            guard self.shouldAcceptGenerationCallback(for: wfThreadID) else { return }
 
             if let threadIndex = self.state.threads.firstIndex(where: { $0.id == threadID }) {
                 let hasError = steps.contains { $0.isFailure }
@@ -119,10 +117,11 @@ extension AppStore {
     }
 
     func handleWorkflowStepProgress(_ progress: StepExecutor.StepProgress, threadID: UUID, runID: UUID) {
+        guard shouldAcceptGenerationCallback(for: threadID) else { return }
         if let idx = state.threads.firstIndex(where: { $0.id == threadID }) {
             state.threads[idx].steps.append(progress.taskStep)
             state.threads[idx].updatedAt = .now
-            updateLiveActivity(from: progress.taskStep)
+            updateLiveActivity(from: progress.taskStep, for: threadID)
         }
         if let runIdx = state.workflowRuns.firstIndex(where: { $0.id == runID }) {
             state.workflowRuns[runIdx].statusLine = "步骤 \(progress.stepIndex + 1)/\(progress.totalSteps)：\(progress.stepName)"

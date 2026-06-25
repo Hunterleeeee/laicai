@@ -169,6 +169,247 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         store.stopGenerating()
     }
 
+    func testAutomaticMultiAgentRouteCreatesEditablePlanBeforeRunning() {
+        let connector = makeConnector(modelName: "gpt-5.5")
+        let runtime = CapturingToolsRuntime()
+        let store = AppStore(
+            state: testState(
+                workspacePath: "/tmp/laicai-project",
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+        let decision = PlannerDecision(
+            intent: .task,
+            confidence: 0.9,
+            reason: "测试自动多会话",
+            routeLabel: "会话 执行",
+            expectedCapabilities: ["读取工作区", "提出文件修改"]
+        )
+
+        store.sendTaskDraft(
+            message: "优化项目性能，修改代码，运行测试并审查结果",
+            decision: decision
+        )
+
+        let thread = store.state.selectedThread
+        XCTAssertEqual(thread?.status, .waitingReview)
+        XCTAssertEqual(thread?.executionState, .waitingForApproval)
+        XCTAssertEqual(thread?.multiAgentPlan?.status, .queued)
+        XCTAssertEqual(thread?.multiAgentPlan?.isEditable, true)
+        XCTAssertEqual(store.state.isGenerating, false)
+        XCTAssertTrue(runtime.requests.isEmpty)
+    }
+
+    func testExecuteEditedPlanStartsQueuedPlanAfterUIFlipsEditableOff() {
+        let connector = makeConnector(modelName: "gpt-5.5")
+        let plan = MultiAgentPlan(
+            title: "规划 → 编码",
+            agents: [
+                AgentNode(role: .planner, connectorID: connector.id),
+                AgentNode(role: .coder, connectorID: connector.id)
+            ],
+            status: .queued,
+            isEditable: false
+        )
+        let thread = Thread(
+            title: "优化项目 UI",
+            status: .waitingReview,
+            steps: [TaskStep(kind: .userInput, text: "优化项目 UI 并运行验证")],
+            connectorID: connector.id,
+            context: TaskContext(workspaceRoot: "/tmp/laicai-project"),
+            multiAgentPlan: plan,
+            executionState: .waitingForApproval,
+            goal: "优化项目 UI 并运行验证"
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [thread],
+                selectedThreadID: thread.id,
+                workspacePath: "/tmp/laicai-project",
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: CapturingToolsRuntime())
+        )
+
+        store.executeEditedPlan(threadID: thread.id)
+
+        XCTAssertEqual(store.state.selectedThread?.status, .running)
+        XCTAssertEqual(store.state.selectedThread?.multiAgentPlan?.isEditable, false)
+        XCTAssertEqual(store.state.isGenerating, true)
+        store.stopGenerating()
+    }
+
+    func testExecuteEditedPlanUsesThreadConnectorInsteadOfCurrentActiveConnector() async throws {
+        let planConnector = makeConnector(name: "Plan Connector", modelName: "plan-model")
+        let activeConnector = makeConnector(name: "Active Connector", modelName: "active-model")
+        let plan = MultiAgentPlan(
+            title: "规划 → 编码",
+            agents: [
+                AgentNode(role: .planner),
+                AgentNode(role: .coder)
+            ],
+            status: .queued,
+            isEditable: false
+        )
+        let thread = Thread(
+            title: "优化项目 UI",
+            status: .waitingReview,
+            steps: [TaskStep(kind: .userInput, text: "优化项目 UI 并运行验证")],
+            connectorID: planConnector.id,
+            context: TaskContext(workspaceRoot: "/tmp/laicai-project"),
+            multiAgentPlan: plan,
+            executionState: .waitingForApproval,
+            goal: "优化项目 UI 并运行验证"
+        )
+        let runtime = CapturingToolsRuntime()
+        let store = AppStore(
+            state: testState(
+                threads: [thread],
+                selectedThreadID: thread.id,
+                workspacePath: "/tmp/laicai-project",
+                connectors: [planConnector, activeConnector],
+                activeConnectorID: activeConnector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+
+        store.executeEditedPlan(threadID: thread.id)
+        try await waitUntilIdle(store)
+
+        let requestedModels = runtime.requests.compactMap { $0.connector?.modelName }
+        XCTAssertFalse(requestedModels.isEmpty)
+        XCTAssertTrue(requestedModels.allSatisfy { $0 == "plan-model" }, requestedModels.joined(separator: ","))
+        XCTAssertEqual(store.state.selectedThread?.connectorID, planConnector.id)
+    }
+
+    func testExecuteEditedPlanWithoutConnectorDoesNotCreateStuckRunningThread() {
+        let plan = MultiAgentPlan(
+            title: "规划 → 编码",
+            agents: [
+                AgentNode(role: .planner),
+                AgentNode(role: .coder)
+            ],
+            status: .queued,
+            isEditable: false
+        )
+        let thread = Thread(
+            title: "优化项目 UI",
+            status: .waitingReview,
+            steps: [TaskStep(kind: .userInput, text: "优化项目 UI 并运行验证")],
+            context: TaskContext(workspaceRoot: "/tmp/laicai-project"),
+            multiAgentPlan: plan,
+            executionState: .waitingForApproval,
+            goal: "优化项目 UI 并运行验证"
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [thread],
+                selectedThreadID: thread.id,
+                workspacePath: "/tmp/laicai-project",
+                connectors: [],
+                activeConnectorID: nil
+            ),
+            environment: makeTestEnvironment(runtime: CapturingToolsRuntime())
+        )
+
+        store.executeEditedPlan(threadID: thread.id)
+
+        XCTAssertEqual(store.state.selectedThread?.status, .waitingReview)
+        XCTAssertEqual(store.state.selectedThread?.executionState, .waitingForApproval)
+        XCTAssertEqual(store.state.selectedThread?.multiAgentPlan?.status, .queued)
+        XCTAssertEqual(store.state.isGenerating, false)
+        XCTAssertEqual(store.state.notice?.style, .error)
+    }
+
+    func testDraftContinueOnQueuedMultiAgentPlanExecutesPlanInsteadOfBypassingEditor() {
+        let connector = makeConnector(modelName: "gpt-5.5")
+        let plan = MultiAgentPlan(
+            title: "规划 → 编码",
+            agents: [
+                AgentNode(role: .planner, connectorID: connector.id),
+                AgentNode(role: .coder, connectorID: connector.id)
+            ],
+            status: .queued,
+            isEditable: true
+        )
+        let thread = Thread(
+            title: "优化项目 UI",
+            status: .waitingReview,
+            steps: [TaskStep(kind: .userInput, text: "优化项目 UI 并运行验证")],
+            connectorID: connector.id,
+            context: TaskContext(workspaceRoot: "/tmp/laicai-project"),
+            multiAgentPlan: plan,
+            executionState: .waitingForApproval,
+            goal: "优化项目 UI 并运行验证"
+        )
+        let runtime = BlockingMessageRuntime()
+        let store = AppStore(
+            state: testState(
+                threads: [thread],
+                selectedThreadID: thread.id,
+                workspacePath: "/tmp/laicai-project",
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+
+        store.updateDraft("继续")
+        store.sendDraft()
+
+        XCTAssertEqual(store.state.selectedThreadID, thread.id)
+        XCTAssertEqual(store.state.selectedThread?.status, .running)
+        XCTAssertEqual(store.state.selectedThread?.multiAgentPlan?.status, .running)
+        XCTAssertEqual(store.state.selectedThread?.multiAgentPlan?.isEditable, false)
+        XCTAssertEqual(store.state.draftMessage, "")
+        XCTAssertTrue(store.isThreadGenerating(thread.id))
+        store.stopGenerating()
+        runtime.cancelAll()
+    }
+
+    func testExecuteEditablePlanWithoutConnectorKeepsEditorOpen() {
+        let plan = MultiAgentPlan(
+            title: "规划 → 编码",
+            agents: [
+                AgentNode(role: .planner),
+                AgentNode(role: .coder)
+            ],
+            status: .queued,
+            isEditable: true
+        )
+        let thread = Thread(
+            title: "优化项目 UI",
+            status: .waitingReview,
+            steps: [TaskStep(kind: .userInput, text: "优化项目 UI 并运行验证")],
+            context: TaskContext(workspaceRoot: "/tmp/laicai-project"),
+            multiAgentPlan: plan,
+            executionState: .waitingForApproval,
+            goal: "优化项目 UI 并运行验证"
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [thread],
+                selectedThreadID: thread.id,
+                workspacePath: "/tmp/laicai-project",
+                connectors: [],
+                activeConnectorID: nil
+            ),
+            environment: makeTestEnvironment(runtime: CapturingToolsRuntime())
+        )
+
+        store.executeEditedPlan(threadID: thread.id)
+
+        XCTAssertEqual(store.state.selectedThread?.status, .waitingReview)
+        XCTAssertEqual(store.state.selectedThread?.executionState, .waitingForApproval)
+        XCTAssertEqual(store.state.selectedThread?.multiAgentPlan?.status, .queued)
+        XCTAssertEqual(store.state.selectedThread?.multiAgentPlan?.isEditable, true)
+        XCTAssertEqual(store.state.isGenerating, false)
+        XCTAssertEqual(store.state.notice?.style, .error)
+    }
+
     func testNewAgentClearsSearchAndDraftState() {
         let store = AppStore(state: testState())
         store.updateSearchText("旧搜索")
@@ -216,6 +457,345 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         store.clearPendingFollowUp()
         XCTAssertNil(store.state.pendingFollowUp)
         XCTAssertEqual(store.state.draftMessage, "")
+    }
+
+    func testStopGeneratingCancelsRunningTaskEvenAfterSelectingAnotherThread() async throws {
+        let connector = makeConnector()
+        let runtime = BlockingMessageRuntime()
+        let store = AppStore(
+            state: testState(
+                workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath,
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+
+        store.updateDraft("帮我生成一个 README")
+        store.sendDraft()
+        for _ in 0..<50 where runtime.requests.isEmpty {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let runningID = try XCTUnwrap(store.state.selectedThreadID)
+        XCTAssertEqual(store.state.selectedThread?.status, .running)
+
+        let other = Thread(title: "别的会话", status: .queued, steps: [])
+        store.state.threads.insert(other, at: 0)
+        store.selectThread(id: other.id)
+
+        XCTAssertTrue(store.state.isGenerating)
+        XCTAssertTrue(store.hasRunningGenerationTasks)
+        XCTAssertFalse(store.selectedThreadIsGenerating)
+        XCTAssertEqual(store.state.liveActivity, "后台会话运行中…")
+
+        let runningStart = try XCTUnwrap(store.generationStartTimes[runningID])
+        store.appendTaskStep(
+            TaskStep(
+                kind: .toolCall,
+                text: "读取 README",
+                toolName: "file.read",
+                toolParams: ["path": "README.md"]
+            ),
+            to: runningID
+        )
+        XCTAssertEqual(store.state.liveActivity, "后台会话运行中…")
+
+        store.selectThread(id: runningID)
+        XCTAssertTrue(store.selectedThreadIsGenerating)
+        XCTAssertEqual(store.state.liveActivity, "正在读取 README.md…")
+        XCTAssertEqual(store.state.generationStartedAt, runningStart)
+
+        store.selectThread(id: other.id)
+        XCTAssertFalse(store.selectedThreadIsGenerating)
+        XCTAssertEqual(store.state.liveActivity, "后台会话运行中…")
+
+        store.stopGenerating()
+        runtime.cancelAll()
+
+        let runningThread = try XCTUnwrap(store.state.threads.first(where: { $0.id == runningID }))
+        XCTAssertFalse(store.state.isGenerating)
+        XCTAssertEqual(store.state.selectedThreadID, other.id)
+        XCTAssertEqual(runningThread.status, .cancelled)
+        XCTAssertTrue(runningThread.steps.contains { $0.kind == .error && $0.text == "已中断" })
+    }
+
+    func testStopGeneratingFlushesPendingStreamBufferBeforeCancelling() throws {
+        let thread = Thread(
+            title: "流式输出",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "写一段回答")],
+            executionState: .running
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [thread],
+                selectedThreadID: thread.id
+            )
+        )
+        store.markGenerationStarted(for: thread.id, activity: "正在生成回复…")
+        store.generationTasks[thread.id] = Task {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        store.streamBuffers[thread.id] = "已经流出的半段回复"
+
+        store.stopGenerating()
+
+        let updated = try XCTUnwrap(store.state.threads.first(where: { $0.id == thread.id }))
+        XCTAssertTrue(updated.steps.contains { $0.kind == .textOutput && $0.text.contains("已经流出的半段回复") })
+        XCTAssertTrue(updated.steps.contains { $0.kind == .textOutput && $0.text.contains("已中断") })
+        XCTAssertEqual(updated.status, .cancelled)
+        XCTAssertFalse(store.hasRunningGenerationTasks)
+        XCTAssertFalse(store.state.isGenerating)
+    }
+
+    func testDeletingRunningThreadCancelsBackgroundGenerationAndIgnoresLateResponse() async throws {
+        let connector = makeConnector()
+        let runtime = BlockingMessageRuntime()
+        let store = AppStore(
+            state: testState(
+                workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath,
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+
+        store.updateDraft("帮我检查项目状态")
+        store.sendDraft()
+        let runningID = try await waitForBlockingRequest(runtime, store: store)
+
+        store.deleteThread(id: runningID)
+        runtime.resumeAll(SendMessageResponse(assistantText: "迟到的回复"))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertNil(store.state.threads.first(where: { $0.id == runningID }))
+        XCTAssertFalse(store.hasRunningGenerationTasks)
+        XCTAssertFalse(store.state.isGenerating)
+    }
+
+    func testClearingRunningThreadCancelsBackgroundGenerationAndIgnoresLateResponse() async throws {
+        let connector = makeConnector()
+        let runtime = BlockingMessageRuntime()
+        let store = AppStore(
+            state: testState(
+                workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath,
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+
+        store.updateDraft("帮我继续分析编排层")
+        store.sendDraft()
+        let runningID = try await waitForBlockingRequest(runtime, store: store)
+
+        store.clearThreadEvents(id: runningID)
+        runtime.resumeAll(SendMessageResponse(assistantText: "迟到的回复"))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let thread = try XCTUnwrap(store.state.threads.first(where: { $0.id == runningID }))
+        XCTAssertTrue(thread.steps.isEmpty)
+        XCTAssertEqual(thread.status, .queued)
+        XCTAssertEqual(thread.executionState, .idle)
+        XCTAssertFalse(store.hasRunningGenerationTasks)
+        XCTAssertFalse(store.state.isGenerating)
+    }
+
+    func testArchivingRunningThreadCancelsBackgroundGenerationAndIgnoresLateResponse() async throws {
+        let connector = makeConnector()
+        let runtime = BlockingMessageRuntime()
+        let store = AppStore(
+            state: testState(
+                workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath,
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ),
+            environment: makeTestEnvironment(runtime: runtime)
+        )
+
+        store.updateDraft("帮我跑一个长任务")
+        store.sendDraft()
+        let runningID = try await waitForBlockingRequest(runtime, store: store)
+
+        store.archiveThread(id: runningID)
+        runtime.resumeAll(SendMessageResponse(assistantText: "迟到的回复"))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let thread = try XCTUnwrap(store.state.threads.first(where: { $0.id == runningID }))
+        XCTAssertTrue(thread.isArchived)
+        XCTAssertEqual(thread.status, .cancelled)
+        XCTAssertEqual(thread.executionState, .archived)
+        XCTAssertNil(store.state.selectedThreadID)
+        XCTAssertFalse(thread.steps.contains { $0.text.contains("迟到的回复") })
+        XCTAssertFalse(store.hasRunningGenerationTasks)
+        XCTAssertFalse(store.state.isGenerating)
+    }
+
+    func testPendingFollowUpIsConsumedByItsTargetThreadOnly() throws {
+        let followUp = "只补充给第一个运行线程"
+        var firstLedger = AgentExecutionLedger(
+            originalRequest: "处理第一个任务",
+            goal: "处理第一个任务",
+            state: .executing,
+            plan: ["读取上下文"]
+        )
+        firstLedger.pendingFollowUp = followUp
+        let first = Thread(
+            title: "第一个运行线程",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "处理第一个任务")],
+            executionState: .running,
+            executionLedger: firstLedger
+        )
+        let second = Thread(
+            title: "第二个运行线程",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "处理第二个任务")],
+            executionState: .running,
+            executionLedger: AgentExecutionLedger(
+                originalRequest: "处理第二个任务",
+                goal: "处理第二个任务",
+                state: .executing,
+                plan: ["读取上下文"]
+            )
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [first, second],
+                selectedThreadID: first.id
+            )
+        )
+        store.state.pendingFollowUp = followUp
+
+        store.appendPendingFollowUp(to: second.id)
+
+        XCTAssertFalse(store.state.threads.first(where: { $0.id == second.id })?.steps.contains { $0.text == followUp } ?? true)
+        XCTAssertEqual(store.state.pendingFollowUp, followUp)
+        XCTAssertEqual(store.state.threads.first(where: { $0.id == first.id })?.executionLedger?.pendingFollowUp, followUp)
+
+        store.appendPendingFollowUp(to: first.id)
+
+        let updatedFirst = try XCTUnwrap(store.state.threads.first(where: { $0.id == first.id }))
+        XCTAssertTrue(updatedFirst.steps.contains { $0.kind == .userInput && $0.text == followUp })
+        XCTAssertNil(updatedFirst.executionLedger?.pendingFollowUp)
+        XCTAssertNil(store.state.pendingFollowUp)
+    }
+
+    func testLegacySelectionEntrypointsSyncPendingFollowUpForSelectedThread() {
+        var firstLedger = AgentExecutionLedger(
+            originalRequest: "处理第一个任务",
+            goal: "处理第一个任务",
+            state: .executing,
+            plan: ["读取上下文"]
+        )
+        firstLedger.pendingFollowUp = "第一个线程的补充"
+        let first = Thread(
+            title: "第一个线程",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "处理第一个任务")],
+            executionState: .running,
+            executionLedger: firstLedger
+        )
+        let second = Thread(
+            title: "第二个线程",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "处理第二个任务")],
+            executionState: .running,
+            executionLedger: AgentExecutionLedger(
+                originalRequest: "处理第二个任务",
+                goal: "处理第二个任务",
+                state: .executing,
+                plan: ["读取上下文"]
+            )
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [first, second],
+                selectedThreadID: first.id
+            )
+        )
+        store.state.pendingFollowUp = "第一个线程的补充"
+
+        store.selectExecutingAgent(id: second.id)
+
+        XCTAssertEqual(store.state.selectedThreadID, second.id)
+        XCTAssertNil(store.state.pendingFollowUp)
+
+        store.selectThread(ThreadRecord(thread: first, includeEvents: false))
+
+        XCTAssertEqual(store.state.selectedThreadID, first.id)
+        XCTAssertEqual(store.state.pendingFollowUp, "第一个线程的补充")
+    }
+
+    func testDeletingSelectedThreadClearsPendingFollowUpWhenNextThreadHasNone() {
+        var firstLedger = AgentExecutionLedger(
+            originalRequest: "处理第一个任务",
+            goal: "处理第一个任务",
+            state: .executing,
+            plan: ["读取上下文"]
+        )
+        firstLedger.pendingFollowUp = "即将删除线程的补充"
+        let first = Thread(
+            title: "第一个线程",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "处理第一个任务")],
+            executionState: .running,
+            executionLedger: firstLedger
+        )
+        let second = Thread(
+            title: "第二个线程",
+            status: .completed,
+            steps: [TaskStep(kind: .userInput, text: "处理第二个任务")]
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [first, second],
+                selectedThreadID: first.id
+            )
+        )
+        store.state.pendingFollowUp = "即将删除线程的补充"
+
+        store.deleteThread(id: first.id)
+
+        XCTAssertEqual(store.state.selectedThreadID, second.id)
+        XCTAssertNil(store.state.pendingFollowUp)
+    }
+
+    func testShellStreamNotificationUsesExplicitThreadID() throws {
+        let first = Thread(
+            title: "第一个运行线程",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "处理第一个任务")],
+            executionState: .running
+        )
+        let second = Thread(
+            title: "第二个运行线程",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "处理第二个任务")],
+            executionState: .running
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [first, second],
+                selectedThreadID: first.id
+            )
+        )
+        let stepID = UUID()
+
+        store.handleShellStreamNotification([
+            "threadID": second.id,
+            "stepID": stepID,
+            "callID": "call_shell",
+            "command": "echo second",
+            "text": "second\n",
+            "isFinal": true,
+            "isFailure": false
+        ])
+
+        let updatedFirst = try XCTUnwrap(store.state.threads.first(where: { $0.id == first.id }))
+        let updatedSecond = try XCTUnwrap(store.state.threads.first(where: { $0.id == second.id }))
+        XCTAssertFalse(updatedFirst.steps.contains { $0.id == stepID })
+        XCTAssertTrue(updatedSecond.steps.contains { $0.id == stepID && $0.text == "second\n" })
     }
 
     func testAutoResumeInterruptedTaskAddsSingleRecoverableHint() {
@@ -341,5 +921,16 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         XCTAssertNotEqual(store.state.selectedThreadID, runningProjectThread.id)
         XCTAssertEqual(store.state.selectedThread?.projectID, projectID)
         store.stopGenerating()
+    }
+
+    private func waitForBlockingRequest(_ runtime: BlockingMessageRuntime, store: AppStore) async throws -> UUID {
+        for _ in 0..<50 {
+            if !runtime.requests.isEmpty, let selectedID = store.state.selectedThreadID {
+                return selectedID
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail("Blocking runtime did not receive a request in time")
+        return try XCTUnwrap(store.state.selectedThreadID)
     }
 }

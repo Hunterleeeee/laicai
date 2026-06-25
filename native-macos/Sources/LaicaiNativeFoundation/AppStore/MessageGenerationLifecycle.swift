@@ -2,8 +2,34 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
+    private func trimmedPendingFollowUp(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func pendingFollowUp(for targetTaskID: UUID) -> String? {
+        if let thread = state.threads.first(where: { $0.id == targetTaskID }),
+           let pending = trimmedPendingFollowUp(thread.executionLedger?.pendingFollowUp) {
+            return pending
+        }
+        guard targetTaskID == state.selectedThreadID else { return nil }
+        return trimmedPendingFollowUp(state.pendingFollowUp)
+    }
+
+    func consumePendingFollowUp(for targetTaskID: UUID) -> String? {
+        guard let followUp = pendingFollowUp(for: targetTaskID) else { return nil }
+        if let threadIndex = state.threads.firstIndex(where: { $0.id == targetTaskID }) {
+            state.threads[threadIndex].executionLedger?.pendingFollowUp = nil
+        }
+        if targetTaskID == state.selectedThreadID {
+            state.pendingFollowUp = nil
+            state.draftMessage = ""
+        }
+        return followUp
+    }
+
     func appendPendingFollowUp(to targetTaskID: UUID) {
-        guard let followUp = state.pendingFollowUp, !followUp.isEmpty else { return }
+        guard let followUp = consumePendingFollowUp(for: targetTaskID) else { return }
         if let threadIndex = state.threads.firstIndex(where: { $0.id == targetTaskID }) {
             let step = TaskStep(kind: .userInput, text: followUp, isCollapsible: false, isCollapsed: false)
             state.threads[threadIndex].steps.append(step)
@@ -13,7 +39,10 @@ extension AppStore {
             state.threads[threadIndex].updatedAt = .now
             persistThreadsNow()
         }
-        state.pendingFollowUp = nil
+    }
+
+    func shouldAcceptGenerationCallback(for targetTaskID: UUID) -> Bool {
+        generationTasks[targetTaskID] != nil && !Task.isCancelled
     }
 
     func finishGenerationTask(_ targetTaskID: UUID) {
@@ -21,10 +50,16 @@ extension AppStore {
         agentLoops.removeValue(forKey: targetTaskID)
         streamBuffers.removeValue(forKey: targetTaskID)
         streamLastFlushAt.removeValue(forKey: targetTaskID)
+        thinkingBuffers.removeValue(forKey: targetTaskID)
+        thinkingLastFlushAt.removeValue(forKey: targetTaskID)
+        generationStartTimes.removeValue(forKey: targetTaskID)
+        liveActivitiesByThread.removeValue(forKey: targetTaskID)
         if generationTasks.isEmpty {
             state.isGenerating = false
             state.generationStartedAt = nil
             state.liveActivity = ""
+        } else {
+            syncGeneratingStateForSelectedThread()
         }
     }
 }

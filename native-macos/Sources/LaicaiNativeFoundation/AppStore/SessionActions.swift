@@ -2,6 +2,44 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
+    public var hasRunningGenerationTasks: Bool {
+        !generationTasks.isEmpty
+    }
+
+    public var selectedThreadIsGenerating: Bool {
+        guard let threadID = state.selectedThreadID else { return false }
+        return isThreadGenerating(threadID)
+    }
+
+    public func isThreadGenerating(_ threadID: UUID) -> Bool {
+        if generationTasks[threadID] != nil { return true }
+        guard generationTasks.isEmpty,
+              state.isGenerating,
+              state.selectedThreadID == threadID,
+              let thread = state.threads.first(where: { $0.id == threadID }) else {
+            return false
+        }
+        return thread.status == .running || thread.executionState == .running
+    }
+
+    func markGenerationStarted(for threadID: UUID, activity: String) {
+        let now = Date()
+        generationStartTimes[threadID] = now
+        liveActivitiesByThread[threadID] = activity
+        state.isGenerating = true
+        state.generationStartedAt = now
+        state.liveActivity = activity
+    }
+
+    func setLiveActivity(_ activity: String, for threadID: UUID) {
+        if activity.isEmpty {
+            liveActivitiesByThread.removeValue(forKey: threadID)
+        } else {
+            liveActivitiesByThread[threadID] = activity
+        }
+        syncGeneratingStateForSelectedThread()
+    }
+
     public var filteredAgents: [AgentRecord] {
         state.agents
     }
@@ -52,6 +90,7 @@ extension AppStore {
             ProjectManager.shared.activeProjectID = nil
         }
         state.modeLabel = "会话"
+        syncPendingFollowUpForSelectedThread()
         syncGeneratingStateForSelectedThread()
     }
 
@@ -73,17 +112,35 @@ extension AppStore {
     }
 
     func syncGeneratingStateForSelectedThread() {
-        if let tid = state.selectedThreadID, generationTasks[tid] != nil {
-            if !state.isGenerating {
-                state.isGenerating = true
-                state.generationStartedAt = state.generationStartedAt ?? Date()
-                state.liveActivity = "正在生成…"
-            }
-        } else if state.isGenerating {
+        let hasRunningTasks = !generationTasks.isEmpty
+        guard hasRunningTasks else {
             state.isGenerating = false
             state.generationStartedAt = nil
             state.liveActivity = ""
+            return
         }
+
+        let selectedIsRunning = selectedThreadIsGenerating
+        state.isGenerating = true
+        if selectedIsRunning, let selectedID = state.selectedThreadID {
+            state.generationStartedAt = generationStartTimes[selectedID] ?? state.generationStartedAt ?? Date()
+            state.liveActivity = liveActivitiesByThread[selectedID] ?? "正在生成…"
+        } else {
+            let runningStarts = generationTasks.keys.compactMap { generationStartTimes[$0] }
+            state.generationStartedAt = runningStarts.min() ?? state.generationStartedAt ?? Date()
+            state.liveActivity = "后台会话运行中…"
+        }
+    }
+
+    func syncPendingFollowUpForSelectedThread() {
+        guard let threadID = state.selectedThreadID,
+              let thread = state.threads.first(where: { $0.id == threadID }) else {
+            state.pendingFollowUp = nil
+            return
+        }
+        let pending = thread.executionLedger?.pendingFollowUp?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        state.pendingFollowUp = pending?.isEmpty == false ? pending : nil
     }
 
     public func updateExecutionMode(_ mode: ExecutionMode) {
@@ -92,6 +149,7 @@ extension AppStore {
     }
 
     public func deleteThread(id: UUID) {
+        cancelGenerationTask(for: id)
         state.threads.removeAll(where: { $0.id == id })
         if state.selectedThreadID == id {
             state.selectThread(id: nil)
@@ -127,8 +185,20 @@ extension AppStore {
 
     public func clearThreadEvents(id: UUID) {
         guard let index = state.threads.firstIndex(where: { $0.id == id }) else { return }
+        let wasGenerating = cancelGenerationTask(for: id)
         state.threads[index].steps = []
         state.threads[index].preview = ""
+        if wasGenerating {
+            state.threads[index].status = .queued
+            state.threads[index].executionState = .idle
+            state.threads[index].goal = nil
+            state.threads[index].currentPlan = []
+            state.threads[index].artifacts = []
+            state.threads[index].taskProtocol = nil
+            state.threads[index].executionLedger = nil
+            state.threads[index].multiAgentPlan = nil
+        }
+        state.threads[index].updatedAt = .now
         persistThreads()
     }
 

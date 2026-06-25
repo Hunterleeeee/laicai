@@ -4,6 +4,20 @@ import SQLite3
 #endif
 import LaicaiNativeDomain
 
+public struct PersistentMemoryRow: Sendable, Identifiable {
+    public let id: String
+    public let category: String
+    public let key: String
+    public let value: String
+
+    public init(id: String, category: String, key: String, value: String) {
+        self.id = id
+        self.category = category
+        self.key = key
+        self.value = value
+    }
+}
+
 public final class SQLiteRepository {
     private var db: OpaquePointer?
     private let queue = DispatchQueue(label: "laicai.sqlite", qos: .utility)
@@ -11,6 +25,12 @@ public final class SQLiteRepository {
     /// H3: Track last-saved timestamps to enable incremental saves
     private var lastSavedTimestamps: [UUID: TimeInterval] = [:]
     private var lastSavedPayloads: [UUID: String] = [:]
+
+    private struct DirtyThreadRecord {
+        let thread: LaicaiThread
+        let timestamp: TimeInterval
+        let json: String
+    }
 
     public init(path: String? = nil) {
         let base = path ?? (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory())
@@ -128,18 +148,28 @@ public final class SQLiteRepository {
         _ = step(stmt)
     }
 
-    public func loadMemories(workspace: String, category: String? = nil, limit: Int = 50) -> [(id: String, category: String, key: String, value: String)] {
+    public func loadMemories(workspace: String, category: String? = nil, limit: Int = 50) -> [PersistentMemoryRow] {
         let boundedLimit = max(1, min(limit, 500))
         let sql: String
         if let category {
-            sql = "SELECT id, category, key, value FROM persistent_memory WHERE workspace = ? AND category = ? ORDER BY updated_at DESC LIMIT ?"
+            sql = """
+            SELECT id, category, key, value
+            FROM persistent_memory
+            WHERE workspace = ? AND category = ?
+            ORDER BY updated_at DESC LIMIT ?
+            """
             guard let stmt = prepare(sql) else { return [] }
             bindText(stmt, index: 1, value: workspace)
             bindText(stmt, index: 2, value: category)
             sqlite3_bind_int(stmt, 3, Int32(boundedLimit))
             return readMemoryRows(from: stmt)
         } else {
-            sql = "SELECT id, category, key, value FROM persistent_memory WHERE workspace = ? ORDER BY updated_at DESC LIMIT ?"
+            sql = """
+            SELECT id, category, key, value
+            FROM persistent_memory
+            WHERE workspace = ?
+            ORDER BY updated_at DESC LIMIT ?
+            """
             guard let stmt = prepare(sql) else { return [] }
             bindText(stmt, index: 1, value: workspace)
             sqlite3_bind_int(stmt, 2, Int32(boundedLimit))
@@ -147,14 +177,14 @@ public final class SQLiteRepository {
         }
     }
 
-    private func readMemoryRows(from stmt: OpaquePointer?) -> [(id: String, category: String, key: String, value: String)] {
-        var results: [(String, String, String, String)] = []
+    private func readMemoryRows(from stmt: OpaquePointer?) -> [PersistentMemoryRow] {
+        var results: [PersistentMemoryRow] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let id = String(cString: sqlite3_column_text(stmt, 0))
-            let cat = String(cString: sqlite3_column_text(stmt, 1))
+            let category = String(cString: sqlite3_column_text(stmt, 1))
             let key = String(cString: sqlite3_column_text(stmt, 2))
             let value = String(cString: sqlite3_column_text(stmt, 3))
-            results.append((id, cat, key, value))
+            results.append(PersistentMemoryRow(id: id, category: category, key: key, value: value))
         }
         sqlite3_finalize(stmt)
         return results
@@ -179,7 +209,7 @@ public final class SQLiteRepository {
     }
 
     private func bindText(_ stmt: OpaquePointer, index: Int, value: String) {
-        sqlite3_bind_text(stmt, Int32(index), value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text_safe(stmt, Int32(index), value)
     }
 
     private func step(_ stmt: OpaquePointer) -> Bool {
@@ -246,13 +276,13 @@ extension SQLiteRepository: ThreadRepository {
         let currentIDs = Set(threads.map { $0.id })
 
         // H3: Incremental save — write threads whose timestamp or payload changed
-        var dirtyThreads: [(thread: LaicaiThread, timestamp: TimeInterval, json: String)] = []
+        var dirtyThreads: [DirtyThreadRecord] = []
         for thread in threads {
-            let ts = thread.updatedAt.timeIntervalSince1970
+            let timestamp = thread.updatedAt.timeIntervalSince1970
             let data = (try? encoder.encode(thread)) ?? Data()
             let json = String(data: data, encoding: .utf8) ?? "{}"
-            if lastSavedTimestamps[thread.id] != ts || lastSavedPayloads[thread.id] != json {
-                dirtyThreads.append((thread, ts, json))
+            if lastSavedTimestamps[thread.id] != timestamp || lastSavedPayloads[thread.id] != json {
+                dirtyThreads.append(DirtyThreadRecord(thread: thread, timestamp: timestamp, json: json))
             }
         }
 
@@ -316,7 +346,12 @@ extension SQLiteRepository: AgentRepository {
 
 extension SQLiteRepository: SessionRepository {
     public func loadSessions() throws -> [ChatSession]? {
-        guard let stmt = prepare("SELECT id, title, preview, updated_at, is_pinned, category, model_name, unread_count, turns_json FROM sessions ORDER BY updated_at DESC") else {
+        guard let stmt = prepare("""
+            SELECT id, title, preview, updated_at, is_pinned, category, model_name,
+                   unread_count, turns_json
+            FROM sessions
+            ORDER BY updated_at DESC
+        """) else {
             return nil
         }
         var sessions: [ChatSession] = []
@@ -346,17 +381,23 @@ extension SQLiteRepository: SessionRepository {
     public func saveSessions(_ sessions: [ChatSession]) throws {
         exec("BEGIN")
         exec("DELETE FROM sessions")
-        for s in sessions {
-            guard let stmt = prepare("INSERT INTO sessions (id, title, preview, updated_at, is_pinned, category, model_name, unread_count, turns_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)") else { continue }
-            bindText(stmt, index: 1, value: s.id.uuidString)
-            bindText(stmt, index: 2, value: s.title)
-            bindText(stmt, index: 3, value: s.preview)
-            sqlite3_bind_double(stmt, 4, s.updatedAt.timeIntervalSince1970)
-            sqlite3_bind_int(stmt, 5, s.isPinned ? 1 : 0)
-            bindText(stmt, index: 6, value: s.category.rawValue)
-            bindText(stmt, index: 7, value: s.modelName)
-            sqlite3_bind_int(stmt, 8, Int32(s.unreadCount))
-            let turnsData = (try? JSONEncoder().encode(s.turns)) ?? Data()
+        for session in sessions {
+            guard let stmt = prepare("""
+                INSERT INTO sessions (
+                    id, title, preview, updated_at, is_pinned, category, model_name,
+                    unread_count, turns_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """) else { continue }
+            bindText(stmt, index: 1, value: session.id.uuidString)
+            bindText(stmt, index: 2, value: session.title)
+            bindText(stmt, index: 3, value: session.preview)
+            sqlite3_bind_double(stmt, 4, session.updatedAt.timeIntervalSince1970)
+            sqlite3_bind_int(stmt, 5, session.isPinned ? 1 : 0)
+            bindText(stmt, index: 6, value: session.category.rawValue)
+            bindText(stmt, index: 7, value: session.modelName)
+            sqlite3_bind_int(stmt, 8, Int32(session.unreadCount))
+            let turnsData = (try? JSONEncoder().encode(session.turns)) ?? Data()
             bindText(stmt, index: 9, value: String(data: turnsData, encoding: .utf8) ?? "[]")
             _ = step(stmt)
         }
@@ -366,7 +407,12 @@ extension SQLiteRepository: SessionRepository {
 
 extension SQLiteRepository: TaskRepository {
     public func loadTasks() throws -> [AgentTask]? {
-        guard let stmt = prepare("SELECT id, title, status, steps_json, context_json, created_at, updated_at, connector_id, workflow_name FROM tasks ORDER BY updated_at DESC") else {
+        guard let stmt = prepare("""
+            SELECT id, title, status, steps_json, context_json, created_at,
+                   updated_at, connector_id, workflow_name
+            FROM tasks
+            ORDER BY updated_at DESC
+        """) else {
             return nil
         }
         var tasks: [AgentTask] = []
@@ -396,14 +442,20 @@ extension SQLiteRepository: TaskRepository {
     public func saveTasks(_ tasks: [AgentTask]) throws {
         exec("BEGIN")
         exec("DELETE FROM tasks")
-        for t in tasks {
-            try appendTask(t)
+        for task in tasks {
+            try appendTask(task)
         }
         exec("COMMIT")
     }
 
     public func appendTask(_ task: AgentTask) throws {
-        guard let stmt = prepare("INSERT INTO tasks (id, title, status, steps_json, context_json, created_at, updated_at, connector_id, workflow_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)") else { return }
+        guard let stmt = prepare("""
+            INSERT INTO tasks (
+                id, title, status, steps_json, context_json, created_at,
+                updated_at, connector_id, workflow_name
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """) else { return }
         bindText(stmt, index: 1, value: task.id.uuidString)
         bindText(stmt, index: 2, value: task.title)
         bindText(stmt, index: 3, value: task.status.rawValue)
@@ -413,13 +465,13 @@ extension SQLiteRepository: TaskRepository {
         bindText(stmt, index: 5, value: String(data: contextData, encoding: .utf8) ?? "{}")
         sqlite3_bind_double(stmt, 6, task.createdAt.timeIntervalSince1970)
         sqlite3_bind_double(stmt, 7, task.updatedAt.timeIntervalSince1970)
-        if let cid = task.connectorID {
-            bindText(stmt, index: 8, value: cid.uuidString)
+        if let connectorID = task.connectorID {
+            bindText(stmt, index: 8, value: connectorID.uuidString)
         } else {
             sqlite3_bind_null(stmt, 8)
         }
-        if let wn = task.workflowName {
-            bindText(stmt, index: 9, value: wn)
+        if let workflowName = task.workflowName {
+            bindText(stmt, index: 9, value: workflowName)
         } else {
             sqlite3_bind_null(stmt, 9)
         }
@@ -432,7 +484,12 @@ extension SQLiteRepository: TaskRepository {
         mutate(&tasks[idx])
         // Update single row
         let task = tasks[idx]
-        guard let stmt = prepare("UPDATE tasks SET title=?, status=?, steps_json=?, context_json=?, updated_at=?, connector_id=?, workflow_name=? WHERE id=?") else { return }
+        guard let stmt = prepare("""
+            UPDATE tasks
+            SET title=?, status=?, steps_json=?, context_json=?, updated_at=?,
+                connector_id=?, workflow_name=?
+            WHERE id=?
+        """) else { return }
         bindText(stmt, index: 1, value: task.title)
         bindText(stmt, index: 2, value: task.status.rawValue)
         let stepsData = (try? JSONEncoder().encode(task.steps)) ?? Data()
@@ -440,13 +497,13 @@ extension SQLiteRepository: TaskRepository {
         let contextData = (try? JSONEncoder().encode(task.context)) ?? Data()
         bindText(stmt, index: 4, value: String(data: contextData, encoding: .utf8) ?? "{}")
         sqlite3_bind_double(stmt, 5, task.updatedAt.timeIntervalSince1970)
-        if let cid = task.connectorID {
-            bindText(stmt, index: 6, value: cid.uuidString)
+        if let connectorID = task.connectorID {
+            bindText(stmt, index: 6, value: connectorID.uuidString)
         } else {
             sqlite3_bind_null(stmt, 6)
         }
-        if let wn = task.workflowName {
-            bindText(stmt, index: 7, value: wn)
+        if let workflowName = task.workflowName {
+            bindText(stmt, index: 7, value: workflowName)
         } else {
             sqlite3_bind_null(stmt, 7)
         }
@@ -463,7 +520,13 @@ extension SQLiteRepository: TaskRepository {
 
 extension SQLiteRepository: ConnectorRepository {
     public func loadConnectorCatalog() throws -> ConnectorCatalog? {
-        guard let stmt = prepare("SELECT id, name, kind, endpoint, model_name, api_key, health, last_checked, tool_calling_policy, tool_calling_capability, tool_calling_capability_source, tool_calling_capability_learned_at, is_active, role, probed_context_window FROM connectors") else {
+        guard let stmt = prepare("""
+            SELECT id, name, kind, endpoint, model_name, api_key, health, last_checked,
+                   tool_calling_policy, tool_calling_capability,
+                   tool_calling_capability_source, tool_calling_capability_learned_at,
+                   is_active, role, probed_context_window
+            FROM connectors
+        """) else {
             return nil
         }
         var connectors: [ConnectorProfile] = []
@@ -537,41 +600,49 @@ extension SQLiteRepository: ConnectorRepository {
     public func saveConnectors(_ connectors: [ConnectorProfile], activeConnectorID: UUID?) throws {
         exec("BEGIN")
         exec("DELETE FROM connectors")
-        for c in connectors {
-            guard let stmt = prepare("INSERT INTO connectors (id, name, kind, endpoint, model_name, api_key, health, last_checked, tool_calling_policy, tool_calling_capability, tool_calling_capability_source, tool_calling_capability_learned_at, is_active, role, probed_context_window) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)") else { continue }
-            bindText(stmt, index: 1, value: c.id.uuidString)
-            bindText(stmt, index: 2, value: c.name)
-            bindText(stmt, index: 3, value: c.kind)
-            bindText(stmt, index: 4, value: c.endpoint)
-            bindText(stmt, index: 5, value: c.modelName)
-            bindText(stmt, index: 6, value: c.note)
-            let healthInt: Int32 = c.health == .ready ? 2 : c.health == .attention ? 1 : 0
+        for connector in connectors {
+            guard let stmt = prepare("""
+                INSERT INTO connectors (
+                    id, name, kind, endpoint, model_name, api_key, health, last_checked,
+                    tool_calling_policy, tool_calling_capability,
+                    tool_calling_capability_source, tool_calling_capability_learned_at,
+                    is_active, role, probed_context_window
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """) else { continue }
+            bindText(stmt, index: 1, value: connector.id.uuidString)
+            bindText(stmt, index: 2, value: connector.name)
+            bindText(stmt, index: 3, value: connector.kind)
+            bindText(stmt, index: 4, value: connector.endpoint)
+            bindText(stmt, index: 5, value: connector.modelName)
+            bindText(stmt, index: 6, value: connector.note)
+            let healthInt: Int32 = connector.health == .ready ? 2 : connector.health == .attention ? 1 : 0
             sqlite3_bind_int(stmt, 7, healthInt)
-            sqlite3_bind_double(stmt, 8, c.lastCheckedAt.timeIntervalSince1970)
-            bindText(stmt, index: 9, value: (c.toolCallingPolicy ?? .automatic).rawValue)
-            if let capability = c.toolCallingCapability {
+            sqlite3_bind_double(stmt, 8, connector.lastCheckedAt.timeIntervalSince1970)
+            bindText(stmt, index: 9, value: (connector.toolCallingPolicy ?? .automatic).rawValue)
+            if let capability = connector.toolCallingCapability {
                 bindText(stmt, index: 10, value: capability.rawValue)
             } else {
                 sqlite3_bind_null(stmt, 10)
             }
-            if let source = c.toolCallingCapabilitySource {
+            if let source = connector.toolCallingCapabilitySource {
                 bindText(stmt, index: 11, value: source.rawValue)
             } else {
                 sqlite3_bind_null(stmt, 11)
             }
-            if let learnedAt = c.toolCallingCapabilityLearnedAt {
+            if let learnedAt = connector.toolCallingCapabilityLearnedAt {
                 sqlite3_bind_double(stmt, 12, learnedAt.timeIntervalSince1970)
             } else {
                 sqlite3_bind_null(stmt, 12)
             }
-            sqlite3_bind_int(stmt, 13, (c.id == activeConnectorID) ? 1 : 0)
-            if let role = c.role {
+            sqlite3_bind_int(stmt, 13, (connector.id == activeConnectorID) ? 1 : 0)
+            if let role = connector.role {
                 bindText(stmt, index: 14, value: role.rawValue)
             } else {
                 sqlite3_bind_null(stmt, 14)
             }
-            if let ctxWindow = c.probedContextWindow {
-                sqlite3_bind_int(stmt, 15, Int32(ctxWindow))
+            if let contextWindow = connector.probedContextWindow {
+                sqlite3_bind_int(stmt, 15, Int32(contextWindow))
             } else {
                 sqlite3_bind_null(stmt, 15)
             }

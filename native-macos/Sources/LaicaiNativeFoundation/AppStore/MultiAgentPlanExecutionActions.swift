@@ -2,15 +2,30 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
+    private func connectorForPlanExecution(thread: Thread) -> ConnectorProfile? {
+        if let connectorID = thread.connectorID,
+           let connector = state.connectors.first(where: { $0.id == connectorID }) {
+            return connector
+        }
+        return state.activeConnector
+    }
+
     /// Execute a user-edited multi-agent plan (triggered from the plan editor UI).
     public func executeEditedPlan(threadID: UUID) {
         guard let idx = state.threads.firstIndex(where: { $0.id == threadID }),
               var plan = state.threads[idx].multiAgentPlan,
-              plan.isEditable else { return }
+              plan.isEditable || plan.status == .queued else { return }
+
+        let threadBeforeStart = state.threads[idx]
+        guard let connector = connectorForPlanExecution(thread: threadBeforeStart) else {
+            notify("请先选择一个连接器，再执行编排计划。", style: .error)
+            return
+        }
 
         plan.isEditable = false
         plan.status = .running
         state.threads[idx].multiAgentPlan = plan
+        state.threads[idx].connectorID = connector.id
         Self.markAgentRunning(
             &state.threads[idx],
             goal: state.threads[idx].goal ?? state.threads[idx].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[idx].title,
@@ -21,11 +36,8 @@ extension AppStore {
         let thread = state.threads[idx]
         let message = thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title
 
-        guard let connector = state.activeConnector else { return }
-
-        state.isGenerating = true
-        state.generationStartedAt = Date()
         let epThreadID = thread.id
+        markGenerationStarted(for: epThreadID, activity: "正在执行编排计划…")
         generationTasks[epThreadID] = Task { [weak self] in
             guard let self else { return }
             let orchestrator = MultiAgentOrchestrator(
@@ -45,21 +57,24 @@ extension AppStore {
                     context: thread.context,
                     plan: plan,
                     onStep: { [weak self] step in
-                        self?.appendTaskStep(step, to: epThreadID)
+                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID) else { return }
+                        self.appendTaskStep(step, to: epThreadID)
                     },
                     onStreamDelta: { [weak self] delta in
-                        self?.appendStreamDelta(delta, to: epThreadID)
+                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID) else { return }
+                        self.appendStreamDelta(delta, to: epThreadID)
                     },
                     onPlanUpdate: { [weak self] updatedPlan in
-                        self?.updateMultiAgentPlan(updatedPlan, for: epThreadID)
+                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID) else { return }
+                        self.updateMultiAgentPlan(updatedPlan, for: epThreadID)
                     }
                 )
-                guard !Task.isCancelled else { return }
+                guard self.shouldAcceptGenerationCallback(for: epThreadID) else { return }
                 self.flushStreamBuffer(for: epThreadID)
                 self.mergeCompletedTask(completedTask, into: epThreadID)
                 self.persistThreadsNow()
             } catch {
-                guard !Task.isCancelled else { return }
+                guard self.shouldAcceptGenerationCallback(for: epThreadID) else { return }
                 self.flushStreamBuffer(for: epThreadID)
                 if let idx = self.state.threads.firstIndex(where: { $0.id == epThreadID }) {
                     self.state.threads[idx].steps.append(
@@ -81,6 +96,12 @@ extension AppStore {
               var plan = state.threads[idx].multiAgentPlan,
               plan.status == .failed else { return }
 
+        let threadBeforeStart = state.threads[idx]
+        guard let connector = connectorForPlanExecution(thread: threadBeforeStart) else {
+            notify("请先选择一个连接器，再恢复编排计划。", style: .error)
+            return
+        }
+
         for i in plan.agents.indices where plan.agents[i].status == .failed {
             plan.agents[i].status = .queued
             plan.agents[i].errorMessage = nil
@@ -90,6 +111,7 @@ extension AppStore {
         plan.status = .running
         plan.isEditable = false
         state.threads[idx].multiAgentPlan = plan
+        state.threads[idx].connectorID = connector.id
         Self.markAgentRunning(
             &state.threads[idx],
             goal: state.threads[idx].goal ?? state.threads[idx].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[idx].title,
@@ -100,11 +122,8 @@ extension AppStore {
         let thread = state.threads[idx]
         let message = thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title
 
-        guard let connector = state.activeConnector else { return }
-
-        state.isGenerating = true
-        state.generationStartedAt = Date()
         let rpThreadID = thread.id
+        markGenerationStarted(for: rpThreadID, activity: "正在恢复编排计划…")
         generationTasks[rpThreadID] = Task { [weak self] in
             guard let self else { return }
             let orchestrator = MultiAgentOrchestrator(
@@ -124,21 +143,24 @@ extension AppStore {
                     context: thread.context,
                     plan: plan,
                     onStep: { [weak self] step in
-                        self?.appendTaskStep(step, to: rpThreadID)
+                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID) else { return }
+                        self.appendTaskStep(step, to: rpThreadID)
                     },
                     onStreamDelta: { [weak self] delta in
-                        self?.appendStreamDelta(delta, to: rpThreadID)
+                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID) else { return }
+                        self.appendStreamDelta(delta, to: rpThreadID)
                     },
                     onPlanUpdate: { [weak self] updatedPlan in
-                        self?.updateMultiAgentPlan(updatedPlan, for: rpThreadID)
+                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID) else { return }
+                        self.updateMultiAgentPlan(updatedPlan, for: rpThreadID)
                     }
                 )
-                guard !Task.isCancelled else { return }
+                guard self.shouldAcceptGenerationCallback(for: rpThreadID) else { return }
                 self.flushStreamBuffer(for: rpThreadID)
                 self.mergeCompletedTask(completedTask, into: rpThreadID)
                 self.persistThreadsNow()
             } catch {
-                guard !Task.isCancelled else { return }
+                guard self.shouldAcceptGenerationCallback(for: rpThreadID) else { return }
                 self.flushStreamBuffer(for: rpThreadID)
                 if let idx = self.state.threads.firstIndex(where: { $0.id == rpThreadID }) {
                     self.state.threads[idx].steps.append(

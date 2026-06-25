@@ -16,6 +16,8 @@ public final class AppStore: ObservableObject {
     var thinkingLastFlushAt: [UUID: Date] = [:]
     var chatStreamBuffers: [UUID: String] = [:]
     var chatStreamLastFlushAt: [UUID: Date] = [:]
+    var generationStartTimes: [UUID: Date] = [:]
+    var liveActivitiesByThread: [UUID: String] = [:]
     var healthChecksInFlight: Set<UUID> = []
     private var _cachedThreadSummaries: [ThreadRecord]?
     private var _cachedSummaryGen: UInt64 = 0

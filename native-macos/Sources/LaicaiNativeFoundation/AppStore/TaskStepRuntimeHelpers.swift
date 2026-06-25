@@ -31,13 +31,14 @@ extension AppStore {
         }
 
         if shouldCollapseDuplicateStep(step, in: steps) { return }
-        if !state.isGenerating, steps.contains(where: { $0.kind == step.kind && $0.text == step.text }) { return }
+        if generationTasks[taskID] == nil, steps.contains(where: { $0.kind == step.kind && $0.text == step.text }) { return }
 
         state.threads[threadIndex].steps.append(step)
         if step.kind == .reviewRequest {
             syncAgentSnapshot(at: threadIndex)
         }
         Self.updateExecutionLedger(&state.threads[threadIndex], with: step)
+        updateLiveActivity(from: step, for: taskID)
         state.threads[threadIndex].updatedAt = Date()
         persistThreads()
 
@@ -93,7 +94,7 @@ extension AppStore {
         thinkingBuffers[taskID] = ""
         thinkingLastFlushAt[taskID] = Date()
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
-        state.liveActivity = "正在思考…"
+        setLiveActivity("正在思考…", for: taskID)
         if let idx = state.threads[threadIndex].steps.lastIndex(where: { $0.kind == .aiThinking && $0.toolCallId == Self.thinkingStreamID }) {
             state.threads[threadIndex].steps[idx].reasoningContent = (state.threads[threadIndex].steps[idx].reasoningContent ?? "") + pending
         } else {
@@ -113,7 +114,7 @@ extension AppStore {
         streamBuffers[taskID] = ""
         streamLastFlushAt[taskID] = Date()
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
-        state.liveActivity = "正在生成回复…"
+        setLiveActivity("正在生成回复…", for: taskID)
         if let streamIndex = state.threads[threadIndex].steps.lastIndex(where: { $0.kind == .textOutput && $0.toolCallId == Self.streamingOutputID }) {
             state.threads[threadIndex].steps[streamIndex].text += pending
         } else {
@@ -136,11 +137,11 @@ extension AppStore {
             }
             if !alreadyExists {
                 state.threads[threadIndex].steps.append(step)
-                updateLiveActivity(from: step)
+                updateLiveActivity(from: step, for: taskID)
             }
         }
         state.threads[threadIndex].status = completedTask.status
-        state.liveActivity = ""
+        setLiveActivity("", for: taskID)
         state.threads[threadIndex].context = completedTask.context
         state.threads[threadIndex].taskProtocol = completedTask.taskProtocol ?? state.threads[threadIndex].taskProtocol
         state.threads[threadIndex].executionLedger = completedTask.executionLedger ?? state.threads[threadIndex].executionLedger

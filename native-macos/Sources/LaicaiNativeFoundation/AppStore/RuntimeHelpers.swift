@@ -26,18 +26,37 @@ extension AppStore {
             retryAction: isFinal && isFailure ? "根据终端输出修复后重试" : nil
         )
 
-        if let threadIndex = state.threads.firstIndex(where: { $0.status == .running }) {
-            if let existingIndex = state.threads[threadIndex].steps.firstIndex(where: { $0.id == stepID }) {
-                state.threads[threadIndex].steps[existingIndex] = step
-            } else {
-                state.threads[threadIndex].steps.append(step)
-            }
-            updateLiveActivity(from: step)
-            state.threads[threadIndex].updatedAt = Date()
-            if isFinal {
-                persistThreads()
-            }
+        guard let threadIndex = shellStreamTargetThreadIndex(info: info, stepID: stepID) else {
+            return
         }
+        if let existingIndex = state.threads[threadIndex].steps.firstIndex(where: { $0.id == stepID }) {
+            state.threads[threadIndex].steps[existingIndex] = step
+        } else {
+            state.threads[threadIndex].steps.append(step)
+        }
+        updateLiveActivity(from: step, for: state.threads[threadIndex].id)
+        state.threads[threadIndex].updatedAt = Date()
+        if isFinal {
+            persistThreads()
+        }
+    }
+
+    private func shellStreamTargetThreadIndex(info: [AnyHashable: Any], stepID: UUID) -> Int? {
+        if let threadID = info["threadID"] as? UUID,
+           let index = state.threads.firstIndex(where: { $0.id == threadID }) {
+            return index
+        }
+        if let threadIDString = info["threadID"] as? String,
+           let threadID = UUID(uuidString: threadIDString),
+           let index = state.threads.firstIndex(where: { $0.id == threadID }) {
+            return index
+        }
+        if let index = state.threads.firstIndex(where: { thread in
+            thread.steps.contains { $0.id == stepID }
+        }) {
+            return index
+        }
+        return state.threads.firstIndex(where: { $0.status == .running })
     }
 
     func composedDraftMessage() -> String {
@@ -142,8 +161,8 @@ extension AppStore {
     }
 
     func reconcileSelectedRunningTaskIfIdle() {
-        guard !state.isGenerating,
-              let taskID = state.selectedThreadID,
+        guard let taskID = state.selectedThreadID,
+              !isThreadGenerating(taskID),
               let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }),
               state.threads[threadIndex].status == .running else { return }
 

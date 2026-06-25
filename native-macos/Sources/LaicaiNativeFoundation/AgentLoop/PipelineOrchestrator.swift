@@ -8,8 +8,8 @@ import LaicaiNativeDomain
 //   3. Verify  — Post-tool analysis (IterationEngine.analyzeToolResults)
 //   4. Output  — TaskFinalizer
 //
-// This replaces the 2500+ line monolithic run() method with a structured pipeline.
-// The old run() delegates here; both paths produce identical AgentTask results.
+// This is the single implementation behind AgentLoop.run().
+// Keep public entry-point compatibility in AgentLoop.swift and evolve the pipeline here.
 
 @MainActor
 extension AgentLoop {

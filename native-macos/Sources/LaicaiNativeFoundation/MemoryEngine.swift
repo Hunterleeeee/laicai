@@ -149,16 +149,16 @@ public final class MemoryEngine: ObservableObject {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, entry.id.uuidString, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(stmt, 2, entry.kind.rawValue, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(stmt, 3, entry.content, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text_safe(stmt, 1, entry.id.uuidString)
+        sqlite3_bind_text_safe(stmt, 2, entry.kind.rawValue)
+        sqlite3_bind_text_safe(stmt, 3, entry.content)
         if let summary = entry.summary {
-            sqlite3_bind_text(stmt, 4, summary, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text_safe(stmt, 4, summary)
         } else {
             sqlite3_bind_null(stmt, 4)
         }
-        sqlite3_bind_text(stmt, 5, entry.source, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(stmt, 6, entry.tags.joined(separator: ","), -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text_safe(stmt, 5, entry.source)
+        sqlite3_bind_text_safe(stmt, 6, entry.tags.joined(separator: ","))
         sqlite3_bind_double(stmt, 7, entry.score)
         sqlite3_bind_double(stmt, 8, entry.createdAt.timeIntervalSinceReferenceDate)
         sqlite3_bind_double(stmt, 9, entry.accessedAt.timeIntervalSinceReferenceDate)
@@ -195,7 +195,7 @@ public final class MemoryEngine: ObservableObject {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, ftsQuery, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text_safe(stmt, 1, ftsQuery)
         sqlite3_bind_int(stmt, 2, Int32(limit))
 
         var results: [MemoryEntry] = []
@@ -230,7 +230,7 @@ public final class MemoryEngine: ObservableObject {
 
         let pattern = "%\(keyword)%"
         for i: Int32 in 1...3 {
-            sqlite3_bind_text(stmt, i, pattern, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            sqlite3_bind_text_safe(stmt, i, pattern)
         }
         sqlite3_bind_int(stmt, 4, Int32(limit))
 

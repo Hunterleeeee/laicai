@@ -27,7 +27,7 @@ extension AppStore {
             title: "自我改进：\(diagnosis.category.rawValue)",
             status: .running,
             steps: [userStep, planStep],
-            connectorID: state.activeConnectorID,
+            connectorID: connector.id,
             context: context,
             executionState: .running,
             goal: message,
@@ -41,8 +41,7 @@ extension AppStore {
         state.selectThread(id: thread.id)
         persistThreads()
 
-        state.isGenerating = true
-        state.generationStartedAt = Date()
+        markGenerationStarted(for: thread.id, activity: "正在执行自我改进…")
         var loopConfig = AgentLoop.Config(
             maxIterations: 20,
             maxTokensPerTurn: 16384,
@@ -68,15 +67,15 @@ extension AppStore {
                     context: context,
                     priorSteps: thread.steps,
                     onStep: { @MainActor [weak self] (step: TaskStep) in
-                        guard let self else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetID) else { return }
                         self.appendTaskStep(step, to: targetID)
                     },
                     onStreamDelta: { @Sendable @MainActor [weak self] (delta: String) in
-                        guard let self else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetID) else { return }
                         self.appendStreamDelta(delta, to: targetID)
                     }
                 )
-                guard !Task.isCancelled else { return }
+                guard self.shouldAcceptGenerationCallback(for: targetID) else { return }
 
                 self.flushStreamBuffer(for: targetID)
                 self.mergeCompletedTask(completedTask, into: targetID)
@@ -99,7 +98,7 @@ extension AppStore {
                     SelfImprovementEngine.shared.onImprovementFailure()
                 }
             } catch {
-                guard !Task.isCancelled else { return }
+                guard self.shouldAcceptGenerationCallback(for: targetID) else { return }
                 self.flushStreamBuffer(for: targetID)
                 if let threadIndex = self.state.threads.firstIndex(where: { $0.id == targetID }) {
                     self.state.threads[threadIndex].steps.append(

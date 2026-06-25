@@ -25,6 +25,37 @@ public final class MultiAgentOrchestrator: ObservableObject {
     private let runtime: any ChatRuntimeClient
     private let toolRegistry: ToolRegistry
 
+    private struct AgentRunCallbacks {
+        let onStep: @MainActor (TaskStep) -> Void
+        let onStreamDelta: @Sendable @MainActor (String) -> Void
+        let onPlanUpdate: @MainActor (MultiAgentPlan) -> Void
+    }
+
+    private struct AgentExecutionContext {
+        let message: String
+        let intent: UserIntent
+        let connector: ConnectorProfile
+        let allConnectors: [ConnectorProfile]
+        let callbacks: AgentRunCallbacks
+    }
+
+    private struct AgentExecutionSnapshot {
+        let message: String
+        let intent: UserIntent
+        let connector: ConnectorProfile
+        let allConnectors: [ConnectorProfile]
+        let plan: MultiAgentPlan
+        let context: TaskContext
+        let artifacts: [UUID: String]
+    }
+
+    private struct AgentExecutionResult {
+        let agentID: UUID
+        let output: String?
+        let status: TaskStatus
+        let steps: [TaskStep]
+    }
+
     public init(
         config: Config,
         runtime: any ChatRuntimeClient,
@@ -69,8 +100,8 @@ public final class MultiAgentOrchestrator: ObservableObject {
             applyCodingDependencies(to: &agents)
             handoffs = handoffsForDependencies(agents)
         } else {
-            for i in 1..<agents.count {
-                agents[i].dependsOn = [agents[i - 1].id]
+            for index in 1..<agents.count {
+                agents[index].dependsOn = [agents[index - 1].id]
             }
             handoffs = handoffsForDependencies(agents)
         }
@@ -90,18 +121,18 @@ public final class MultiAgentOrchestrator: ObservableObject {
         let coderID = agents.first(where: { $0.role == .coder })?.id
         let testerID = agents.first(where: { $0.role == .tester })?.id
 
-        for i in agents.indices {
-            switch agents[i].role {
+        for index in agents.indices {
+            switch agents[index].role {
             case .planner:
-                agents[i].dependsOn = []
+                agents[index].dependsOn = []
             case .researcher:
-                agents[i].dependsOn = plannerID.map { [$0] } ?? []
+                agents[index].dependsOn = plannerID.map { [$0] } ?? []
             case .coder:
-                agents[i].dependsOn = [plannerID, researcherID].compactMap { $0 }
+                agents[index].dependsOn = [plannerID, researcherID].compactMap { $0 }
             case .tester:
-                agents[i].dependsOn = coderID.map { [$0] } ?? []
+                agents[index].dependsOn = coderID.map { [$0] } ?? []
             case .reviewer:
-                agents[i].dependsOn = testerID.map { [$0] } ?? (coderID.map { [$0] } ?? [])
+                agents[index].dependsOn = testerID.map { [$0] } ?? (coderID.map { [$0] } ?? [])
             }
         }
     }
@@ -145,7 +176,10 @@ public final class MultiAgentOrchestrator: ObservableObject {
         if (message.contains("审查") || message.contains("review")) && (message.contains("修复") || message.contains("fix") || message.contains("改")) {
             return [.researcher, .coder, .reviewer]
         }
-        if (message.contains("实现") || message.contains("写") || message.contains("开发") || message.contains("创建") || message.contains("编辑") || message.contains("维护")) && (message.contains("测试") || message.contains("test")) {
+        let implementationRequest = message.contains("实现") || message.contains("写")
+            || message.contains("开发") || message.contains("创建")
+            || message.contains("编辑") || message.contains("维护")
+        if implementationRequest && (message.contains("测试") || message.contains("test")) {
             return [.coder, .tester]
         }
         if (message.contains("搜索") || message.contains("调研") || message.contains("research")) && (message.contains("实现") || message.contains("写") || message.contains("改")) {
@@ -185,19 +219,73 @@ public final class MultiAgentOrchestrator: ObservableObject {
     }
 
     private static func dominantRole(for text: String) -> AgentRole? {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if t.contains("规划") || t.contains("分析") || t.contains("拆解") { return .planner }
-        if t.contains("搜索") || t.contains("调研") || t.contains("查找") || t.contains("了解") { return .researcher }
-        if t.contains("写") || t.contains("实现") || t.contains("修改") || t.contains("编辑") || t.contains("创建") || t.contains("新建") || t.contains("维护") || t.contains("修复") || t.contains("开发") || t.contains("重构") { return .coder }
-        if t.contains("测试") || t.contains("验证") || t.contains("运行") { return .tester }
-        if t.contains("审查") || t.contains("检查") || t.contains("review") { return .reviewer }
+        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedText.contains("规划") || normalizedText.contains("分析") || normalizedText.contains("拆解") { return .planner }
+        if normalizedText.contains("搜索") || normalizedText.contains("调研")
+            || normalizedText.contains("查找") || normalizedText.contains("了解") {
+            return .researcher
+        }
+        let writesCode = normalizedText.contains("写") || normalizedText.contains("实现")
+            || normalizedText.contains("修改") || normalizedText.contains("编辑")
+            || normalizedText.contains("创建") || normalizedText.contains("新建")
+            || normalizedText.contains("维护") || normalizedText.contains("修复")
+            || normalizedText.contains("开发") || normalizedText.contains("重构")
+        if writesCode { return .coder }
+        if normalizedText.contains("测试") || normalizedText.contains("验证") || normalizedText.contains("运行") { return .tester }
+        if normalizedText.contains("审查") || normalizedText.contains("检查") || normalizedText.contains("review") { return .reviewer }
         return nil
     }
 
     /// Check if a message warrants multi-agent treatment.
     public static func shouldUseMultiAgent(message: String, intent: UserIntent) -> Bool {
         guard intent == .task else { return false }
-        return !inferRoles(for: message.lowercased(), intent: intent).isEmpty
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard wantsAutomaticMultiAgent(text) else { return false }
+        return !inferRoles(for: text, intent: intent).isEmpty
+    }
+
+    private static func wantsAutomaticMultiAgent(_ message: String) -> Bool {
+        guard !message.isEmpty else { return false }
+        if message.contains("协同")
+            || message.contains("多agent")
+            || message.contains("multi-agent")
+            || message.contains("多会话")
+            || message.contains("多个 agent")
+            || message.contains("多个agent")
+            || message.contains("分工") {
+            return true
+        }
+
+        let sequentialPattern = message.contains("先")
+            && (message.contains("然后") || message.contains("再") || message.contains("最后"))
+        if sequentialPattern {
+            let segments = message.components(separatedBy: CharacterSet(charactersIn: "，。；,;"))
+            let roles = segments.compactMap { dominantRole(for: $0) }
+            var uniqueRoles: [AgentRole] = []
+            for role in roles where !uniqueRoles.contains(role) {
+                uniqueRoles.append(role)
+            }
+            if uniqueRoles.count >= 2 { return true }
+        }
+
+        let hasMutation = needsCodeMutation(message)
+        let asksTesting = message.contains("测试") || message.contains("验证") || message.contains("test")
+        let asksReview = message.contains("审查") || message.contains("review")
+        if hasMutation && asksTesting && asksReview { return true }
+        if asksReview && (message.contains("修复") || message.contains("fix") || message.contains("改")) { return true }
+
+        let implementationRequest = message.contains("实现") || message.contains("写")
+            || message.contains("开发") || message.contains("创建")
+            || message.contains("编辑") || message.contains("维护")
+        if implementationRequest && asksTesting { return true }
+        if (message.contains("搜索") || message.contains("调研") || message.contains("research"))
+            && (message.contains("实现") || message.contains("写") || message.contains("改")) {
+            return true
+        }
+        if message.contains("重构") && asksTesting { return true }
+
+        let broadMarkers = message.contains("全面") || message.contains("完整") || message.contains("端到端")
+        return broadMarkers && hasMutation && (asksTesting || asksReview)
     }
 
     private static let maxAgentRetries = 2
@@ -214,10 +302,22 @@ public final class MultiAgentOrchestrator: ObservableObject {
         allConnectors: [ConnectorProfile],
         context: TaskContext?,
         plan: MultiAgentPlan,
-        onStep: @MainActor (TaskStep) -> Void = { _ in },
-        onStreamDelta: @Sendable @MainActor (String) -> Void = { _ in },
-        onPlanUpdate: @MainActor (MultiAgentPlan) -> Void = { _ in }
+        onStep: @escaping @MainActor (TaskStep) -> Void = { _ in },
+        onStreamDelta: @escaping @Sendable @MainActor (String) -> Void = { _ in },
+        onPlanUpdate: @escaping @MainActor (MultiAgentPlan) -> Void = { _ in }
     ) async throws -> AgentTask {
+        let callbacks = AgentRunCallbacks(
+            onStep: onStep,
+            onStreamDelta: onStreamDelta,
+            onPlanUpdate: onPlanUpdate
+        )
+        let executionContext = AgentExecutionContext(
+            message: message,
+            intent: intent,
+            connector: connector,
+            allConnectors: allConnectors,
+            callbacks: callbacks
+        )
         var task = AgentTask(
             id: taskID,
             title: String(message.prefix(50)),
@@ -265,16 +365,10 @@ public final class MultiAgentOrchestrator: ObservableObject {
                 let agentNode = ready[0]
                 await runSingleAgent(
                     node: agentNode,
-                    message: message,
-                    intent: intent,
-                    connector: connector,
-                    allConnectors: allConnectors,
+                    execution: executionContext,
                     plan: &currentPlan,
                     task: &task,
-                    artifacts: &agentArtifacts,
-                    onStep: onStep,
-                    onStreamDelta: onStreamDelta,
-                    onPlanUpdate: onPlanUpdate
+                    artifacts: &agentArtifacts
                 )
             } else {
                 // Parallel: run multiple agents concurrently
@@ -302,36 +396,40 @@ public final class MultiAgentOrchestrator: ObservableObject {
                 let planSnapshot = currentPlan
                 let contextSnapshot = task.context
                 let artifactSnapshot = agentArtifacts
+                let executionSnapshot = AgentExecutionSnapshot(
+                    message: message,
+                    intent: intent,
+                    connector: connector,
+                    allConnectors: allConnectors,
+                    plan: planSnapshot,
+                    context: contextSnapshot,
+                    artifacts: artifactSnapshot
+                )
 
                 // Run concurrently using TaskGroup
-                await withTaskGroup(of: (UUID, String?, TaskStatus, [TaskStep]).self) { group in
+                await withTaskGroup(of: AgentExecutionResult.self) { group in
                     for agentNode in ready {
                         group.addTask { [self] in
                             await self.executeAgent(
                                 node: agentNode,
-                                message: message,
-                                intent: intent,
-                                connector: connector,
-                                allConnectors: allConnectors,
-                                plan: planSnapshot,
-                                context: contextSnapshot,
-                                artifacts: artifactSnapshot
+                                snapshot: executionSnapshot
                             )
                         }
                     }
 
-                    for await (agentID, output, status, steps) in group {
+                    for await result in group {
+                        let agentID = result.agentID
                         guard let idx = currentPlan.agents.firstIndex(where: { $0.id == agentID }) else { continue }
                         // Merge steps
-                        for step in steps {
+                        for step in result.steps {
                             task.steps.append(step)
                             currentPlan.agents[idx].stepIDs.append(step.id)
                             onStep(step)
                         }
                         // Update node
-                        let compactOutput = String((output ?? "").prefix(2000))
+                        let compactOutput = String((result.output ?? "").prefix(2000))
                         agentArtifacts[agentID] = compactOutput
-                        currentPlan.agents[idx].status = status
+                        currentPlan.agents[idx].status = result.status
                         currentPlan.agents[idx].output = String(compactOutput.prefix(200))
                         currentPlan.agents[idx].updatedAt = .now
                         // Update handoffs
@@ -346,29 +444,17 @@ public final class MultiAgentOrchestrator: ObservableObject {
         }
 
         await repairCodingPlanIfNeeded(
-            message: message,
-            intent: intent,
-            connector: connector,
-            allConnectors: allConnectors,
+            execution: executionContext,
             plan: &currentPlan,
             task: &task,
-            artifacts: &agentArtifacts,
-            onStep: onStep,
-            onStreamDelta: onStreamDelta,
-            onPlanUpdate: onPlanUpdate
+            artifacts: &agentArtifacts
         )
 
         await retryFailedAgentsIfUseful(
-            message: message,
-            intent: intent,
-            connector: connector,
-            allConnectors: allConnectors,
+            execution: executionContext,
             plan: &currentPlan,
             task: &task,
-            artifacts: &agentArtifacts,
-            onStep: onStep,
-            onStreamDelta: onStreamDelta,
-            onPlanUpdate: onPlanUpdate
+            artifacts: &agentArtifacts
         )
 
         // Finalize
@@ -390,17 +476,14 @@ public final class MultiAgentOrchestrator: ObservableObject {
     }
 
     private func repairCodingPlanIfNeeded(
-        message: String,
-        intent: UserIntent,
-        connector: ConnectorProfile,
-        allConnectors: [ConnectorProfile],
+        execution: AgentExecutionContext,
         plan: inout MultiAgentPlan,
         task: inout AgentTask,
-        artifacts: inout [UUID: String],
-        onStep: @MainActor (TaskStep) -> Void,
-        onStreamDelta: @Sendable @MainActor (String) -> Void,
-        onPlanUpdate: @MainActor (MultiAgentPlan) -> Void
+        artifacts: inout [UUID: String]
     ) async {
+        let message = execution.message
+        let connector = execution.connector
+        let callbacks = execution.callbacks
         guard Self.needsCodeMutation(message.lowercased()) else { return }
         guard plan.agents.contains(where: { $0.role == .coder && $0.status == .completed }) else { return }
 
@@ -417,7 +500,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
             agentRole: .planner
         )
         task.steps.append(repairStep)
-        onStep(repairStep)
+        callbacks.onStep(repairStep)
 
         let blockerArtifacts = failedQualityAgents
             .map { node -> String in
@@ -426,7 +509,11 @@ public final class MultiAgentOrchestrator: ObservableObject {
             }
             .joined(separator: "\n")
 
-        let coderConnector = ModelRouter.selectModel(forRole: .coder, connectors: allConnectors, activeConnectorID: connector.id) ?? connector
+        let coderConnector = ModelRouter.selectModel(
+            forRole: .coder,
+            connectors: execution.allConnectors,
+            activeConnectorID: connector.id
+        ) ?? connector
         var repairNode = AgentNode(role: .coder, connectorID: coderConnector.id)
         repairNode.input = """
         修复上一轮测试/审查发现的问题。必须直接读写项目文件，修复后运行 verify_build 或最接近的 shell_exec 验证。
@@ -439,20 +526,22 @@ public final class MultiAgentOrchestrator: ObservableObject {
             AgentHandoff(fromAgentID: $0.id, toAgentID: repairNode.id, artifact: String((artifacts[$0.id] ?? $0.output).prefix(500)))
         })
         task.multiAgentPlan = plan
-        onPlanUpdate(plan)
+        callbacks.onPlanUpdate(plan)
+
+        let repairExecution = AgentExecutionContext(
+            message: "\(message)\n\n上一轮验证/审查反馈：\n\(blockerArtifacts)",
+            intent: execution.intent,
+            connector: coderConnector,
+            allConnectors: execution.allConnectors,
+            callbacks: callbacks
+        )
 
         await runSingleAgent(
             node: repairNode,
-            message: "\(message)\n\n上一轮验证/审查反馈：\n\(blockerArtifacts)",
-            intent: intent,
-            connector: coderConnector,
-            allConnectors: allConnectors,
+            execution: repairExecution,
             plan: &plan,
             task: &task,
-            artifacts: &artifacts,
-            onStep: onStep,
-            onStreamDelta: onStreamDelta,
-            onPlanUpdate: onPlanUpdate
+            artifacts: &artifacts
         )
 
         guard let repairIndex = plan.agents.firstIndex(where: { $0.id == repairNode.id }),
@@ -465,36 +554,29 @@ public final class MultiAgentOrchestrator: ObservableObject {
             plan.agents[idx].retryCount = 0
             plan.agents[idx].dependsOn = [repairNode.id]
             plan.agents[idx].updatedAt = .now
-            plan.handoffs.append(AgentHandoff(fromAgentID: repairNode.id, toAgentID: failedNode.id, artifact: String((artifacts[repairNode.id] ?? "").prefix(500))))
+            plan.handoffs.append(AgentHandoff(
+                fromAgentID: repairNode.id,
+                toAgentID: failedNode.id,
+                artifact: String((artifacts[repairNode.id] ?? "").prefix(500))
+            ))
 
             await runSingleAgent(
                 node: plan.agents[idx],
-                message: message,
-                intent: intent,
-                connector: connector,
-                allConnectors: allConnectors,
+                execution: execution,
                 plan: &plan,
                 task: &task,
-                artifacts: &artifacts,
-                onStep: onStep,
-                onStreamDelta: onStreamDelta,
-                onPlanUpdate: onPlanUpdate
+                artifacts: &artifacts
             )
         }
     }
 
     private func retryFailedAgentsIfUseful(
-        message: String,
-        intent: UserIntent,
-        connector: ConnectorProfile,
-        allConnectors: [ConnectorProfile],
+        execution: AgentExecutionContext,
         plan: inout MultiAgentPlan,
         task: inout AgentTask,
-        artifacts: inout [UUID: String],
-        onStep: @MainActor (TaskStep) -> Void,
-        onStreamDelta: @Sendable @MainActor (String) -> Void,
-        onPlanUpdate: @MainActor (MultiAgentPlan) -> Void
+        artifacts: inout [UUID: String]
     ) async {
+        let callbacks = execution.callbacks
         let failedAgents = plan.agents.filter { $0.status == .failed }
         let hasSuccesses = plan.agents.contains { $0.status == .completed }
         guard !failedAgents.isEmpty, hasSuccesses, failedAgents.count <= 2 else { return }
@@ -505,22 +587,35 @@ public final class MultiAgentOrchestrator: ObservableObject {
             isCollapsible: true, isCollapsed: true, agentRole: .planner
         )
         task.steps.append(replanStep)
-        onStep(replanStep)
+        callbacks.onStep(replanStep)
 
         for failedNode in failedAgents {
             guard let idx = plan.agents.firstIndex(where: { $0.id == failedNode.id }) else { continue }
             plan.agents[idx].status = .queued
             plan.agents[idx].retryCount = 0
             plan.agents[idx].errorMessage = nil
-            let altConnector = selectFailoverConnector(excluding: failedNode.connectorID, allConnectors: allConnectors, fallback: connector)
+            let altConnector = selectFailoverConnector(
+                excluding: failedNode.connectorID,
+                allConnectors: execution.allConnectors,
+                fallback: execution.connector
+            )
             plan.agents[idx].connectorID = altConnector.id
             plan.agents[idx].updatedAt = .now
 
+            let retryExecution = AgentExecutionContext(
+                message: execution.message,
+                intent: execution.intent,
+                connector: altConnector,
+                allConnectors: execution.allConnectors,
+                callbacks: callbacks
+            )
+
             await runSingleAgent(
-                node: plan.agents[idx], message: message, intent: intent,
-                connector: altConnector, allConnectors: allConnectors,
-                plan: &plan, task: &task, artifacts: &artifacts,
-                onStep: onStep, onStreamDelta: onStreamDelta, onPlanUpdate: onPlanUpdate
+                node: plan.agents[idx],
+                execution: retryExecution,
+                plan: &plan,
+                task: &task,
+                artifacts: &artifacts
             )
         }
     }
@@ -529,23 +624,18 @@ public final class MultiAgentOrchestrator: ObservableObject {
 
     private func runSingleAgent(
         node: AgentNode,
-        message: String,
-        intent: UserIntent,
-        connector: ConnectorProfile,
-        allConnectors: [ConnectorProfile],
+        execution: AgentExecutionContext,
         plan: inout MultiAgentPlan,
         task: inout AgentTask,
-        artifacts: inout [UUID: String],
-        onStep: @MainActor (TaskStep) -> Void,
-        onStreamDelta: @Sendable @MainActor (String) -> Void,
-        onPlanUpdate: @MainActor (MultiAgentPlan) -> Void
+        artifacts: inout [UUID: String]
     ) async {
+        let callbacks = execution.callbacks
         guard let index = plan.agents.firstIndex(where: { $0.id == node.id }) else { return }
 
         plan.agents[index].status = .running
         plan.agents[index].updatedAt = .now
         task.multiAgentPlan = plan
-        onPlanUpdate(plan)
+        callbacks.onPlanUpdate(plan)
 
         // Emit handoff from dependencies
         for depID in node.dependsOn {
@@ -557,25 +647,37 @@ public final class MultiAgentOrchestrator: ObservableObject {
                     isCollapsible: true, isCollapsed: true, agentRole: node.role
                 )
                 task.steps.append(handoffStep)
-                onStep(handoffStep)
+                callbacks.onStep(handoffStep)
             }
         }
 
-        let agentInput = buildAgentInput(message: message, role: node.role, artifacts: artifacts, plan: plan, agentIndex: index)
+        let agentInput = buildAgentInput(
+            message: execution.message,
+            role: node.role,
+            artifacts: artifacts,
+            plan: plan,
+            agentIndex: index
+        )
         plan.agents[index].input = String(agentInput.prefix(200))
 
-        let startStep = TaskStep(kind: .aiThinking, text: "[\(node.role.title)] 开始工作…", isCollapsible: true, isCollapsed: false, agentRole: node.role)
+        let startStep = TaskStep(
+            kind: .aiThinking,
+            text: "[\(node.role.title)] 开始工作…",
+            isCollapsible: true,
+            isCollapsed: false,
+            agentRole: node.role
+        )
         task.steps.append(startStep)
-        onStep(startStep)
+        callbacks.onStep(startStep)
 
         // Execute with retry + connector failover
         let (output, status, _) = await executeWithRetry(
             node: node, index: index,
-            agentInput: agentInput, intent: intent,
-            connector: connector, allConnectors: allConnectors,
-            context: task.context, artifacts: artifacts,
+            agentInput: agentInput,
+            execution: execution,
+            context: task.context,
             plan: &plan, task: &task,
-            onStep: onStep, onStreamDelta: onStreamDelta, onPlanUpdate: onPlanUpdate
+            callbacks: callbacks
         )
 
         let compactOutput = String((output ?? "").prefix(2000))
@@ -583,24 +685,22 @@ public final class MultiAgentOrchestrator: ObservableObject {
         plan.agents[index].status = status
         plan.agents[index].output = String(compactOutput.prefix(200))
         plan.agents[index].updatedAt = .now
-        for hi in plan.handoffs.indices where plan.handoffs[hi].fromAgentID == node.id {
-            plan.handoffs[hi].artifact = String(compactOutput.prefix(500))
+        for handoffIndex in plan.handoffs.indices where plan.handoffs[handoffIndex].fromAgentID == node.id {
+            plan.handoffs[handoffIndex].artifact = String(compactOutput.prefix(500))
         }
         task.multiAgentPlan = plan
-        onPlanUpdate(plan)
+        callbacks.onPlanUpdate(plan)
     }
 
     // MARK: - Execute with Retry + Failover
 
     private func executeWithRetry(
         node: AgentNode, index: Int,
-        agentInput: String, intent: UserIntent,
-        connector: ConnectorProfile, allConnectors: [ConnectorProfile],
-        context: TaskContext, artifacts: [UUID: String],
+        agentInput: String,
+        execution: AgentExecutionContext,
+        context: TaskContext,
         plan: inout MultiAgentPlan, task: inout AgentTask,
-        onStep: @MainActor (TaskStep) -> Void,
-        onStreamDelta: @Sendable @MainActor (String) -> Void,
-        onPlanUpdate: @MainActor (MultiAgentPlan) -> Void
+        callbacks: AgentRunCallbacks
     ) async -> (String?, TaskStatus, [TaskStep]) {
         var lastError: String?
         let maxRetries = Self.maxAgentRetries
@@ -609,12 +709,12 @@ public final class MultiAgentOrchestrator: ObservableObject {
             // Connector failover: on retry, try a different healthy connector
             let agentConnector: ConnectorProfile
             if attempt == 0 {
-                agentConnector = allConnectors.first(where: { $0.id == node.connectorID }) ?? connector
+                agentConnector = execution.allConnectors.first(where: { $0.id == node.connectorID }) ?? execution.connector
             } else {
                 agentConnector = selectFailoverConnector(
                     excluding: node.connectorID,
-                    allConnectors: allConnectors,
-                    fallback: connector
+                    allConnectors: execution.allConnectors,
+                    fallback: execution.connector
                 )
                 let retryStep = TaskStep(
                     kind: .aiThinking,
@@ -622,25 +722,25 @@ public final class MultiAgentOrchestrator: ObservableObject {
                     isCollapsible: true, isCollapsed: true, agentRole: node.role
                 )
                 task.steps.append(retryStep)
-                onStep(retryStep)
+                callbacks.onStep(retryStep)
                 plan.agents[index].retryCount = attempt
                 plan.agents[index].updatedAt = .now
                 task.multiAgentPlan = plan
-                onPlanUpdate(plan)
+                callbacks.onPlanUpdate(plan)
             }
 
             let result = await executeSingleAgentLoop(
-                node: node, agentInput: agentInput, intent: intent,
-                connector: agentConnector, allConnectors: allConnectors,
+                node: node, agentInput: agentInput, intent: execution.intent,
+                connector: agentConnector, allConnectors: execution.allConnectors,
                 context: context,
                 onStep: { step in
                     var taggedStep = step
                     taggedStep.agentRole = node.role
                     task.steps.append(taggedStep)
                     plan.agents[index].stepIDs.append(taggedStep.id)
-                    onStep(taggedStep)
+                    callbacks.onStep(taggedStep)
                 },
-                onStreamDelta: onStreamDelta
+                onStreamDelta: callbacks.onStreamDelta
             )
 
             switch result {
@@ -661,7 +761,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
             isFailure: true, recoverable: true, agentRole: node.role
         )
         task.steps.append(errorStep)
-        onStep(errorStep)
+        callbacks.onStep(errorStep)
         return (nil, .failed, [errorStep])
     }
 
@@ -669,32 +769,42 @@ public final class MultiAgentOrchestrator: ObservableObject {
 
     private func executeAgent(
         node: AgentNode,
-        message: String,
-        intent: UserIntent,
-        connector: ConnectorProfile,
-        allConnectors: [ConnectorProfile],
-        plan: MultiAgentPlan,
-        context: TaskContext,
-        artifacts: [UUID: String]
-    ) async -> (UUID, String?, TaskStatus, [TaskStep]) {
-        guard let index = plan.agents.firstIndex(where: { $0.id == node.id }) else {
-            return (node.id, nil, .failed, [])
+        snapshot: AgentExecutionSnapshot
+    ) async -> AgentExecutionResult {
+        guard let index = snapshot.plan.agents.firstIndex(where: { $0.id == node.id }) else {
+            return AgentExecutionResult(agentID: node.id, output: nil, status: .failed, steps: [])
         }
 
-        let agentInput = buildAgentInput(message: message, role: node.role, artifacts: artifacts, plan: plan, agentIndex: index)
+        let agentInput = buildAgentInput(
+            message: snapshot.message,
+            role: node.role,
+            artifacts: snapshot.artifacts,
+            plan: snapshot.plan,
+            agentIndex: index
+        )
         var collectedSteps: [TaskStep] = []
 
         // Start step
-        let startStep = TaskStep(kind: .aiThinking, text: "[\(node.role.title)] 开始工作…", isCollapsible: true, isCollapsed: false, agentRole: node.role)
+        let startStep = TaskStep(
+            kind: .aiThinking,
+            text: "[\(node.role.title)] 开始工作…",
+            isCollapsible: true,
+            isCollapsed: false,
+            agentRole: node.role
+        )
         collectedSteps.append(startStep)
 
         // Try with failover
         for attempt in 0...Self.maxAgentRetries {
             let agentConnector: ConnectorProfile
             if attempt == 0 {
-                agentConnector = allConnectors.first(where: { $0.id == node.connectorID }) ?? connector
+                agentConnector = snapshot.allConnectors.first(where: { $0.id == node.connectorID }) ?? snapshot.connector
             } else {
-                agentConnector = selectFailoverConnector(excluding: node.connectorID, allConnectors: allConnectors, fallback: connector)
+                agentConnector = selectFailoverConnector(
+                    excluding: node.connectorID,
+                    allConnectors: snapshot.allConnectors,
+                    fallback: snapshot.connector
+                )
                 let retryStep = TaskStep(
                     kind: .aiThinking,
                     text: "[\(node.role.title)] 第\(attempt)次重试，切换到 \(agentConnector.name)…",
@@ -704,9 +814,9 @@ public final class MultiAgentOrchestrator: ObservableObject {
             }
 
             let result = await executeSingleAgentLoop(
-                node: node, agentInput: agentInput, intent: intent,
-                connector: agentConnector, allConnectors: allConnectors,
-                context: context,
+                node: node, agentInput: agentInput, intent: snapshot.intent,
+                connector: agentConnector, allConnectors: snapshot.allConnectors,
+                context: snapshot.context,
                 onStep: { step in
                     var taggedStep = step
                     taggedStep.agentRole = node.role
@@ -717,7 +827,12 @@ public final class MultiAgentOrchestrator: ObservableObject {
 
             switch result {
             case .success(let output):
-                return (node.id, output, .completed, collectedSteps)
+                return AgentExecutionResult(
+                    agentID: node.id,
+                    output: output,
+                    status: .completed,
+                    steps: collectedSteps
+                )
             case .failure(let error):
                 if attempt == Self.maxAgentRetries {
                     let errorStep = TaskStep(
@@ -726,12 +841,22 @@ public final class MultiAgentOrchestrator: ObservableObject {
                         isFailure: true, recoverable: true, agentRole: node.role
                     )
                     collectedSteps.append(errorStep)
-                    return (node.id, nil, .failed, collectedSteps)
+                    return AgentExecutionResult(
+                        agentID: node.id,
+                        output: nil,
+                        status: .failed,
+                        steps: collectedSteps
+                    )
                 }
             }
         }
 
-        return (node.id, nil, .failed, collectedSteps)
+        return AgentExecutionResult(
+            agentID: node.id,
+            output: nil,
+            status: .failed,
+            steps: collectedSteps
+        )
     }
 
     // MARK: - Core Agent Loop Execution

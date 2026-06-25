@@ -32,7 +32,7 @@ func contextSectionCard<Content: View>(
         RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
             .strokeBorder(tint.opacity(0.14), lineWidth: 0.7)
     )
-    .shadow(color: AppShadow.sm.color.opacity(0.75), radius: AppShadow.sm.radius, y: AppShadow.sm.y)
+    .shadow(color: AppShadow.sm.color.opacity(0.75), radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
 }
 
 func workbenchHeroCard<Content: View>(
@@ -81,7 +81,7 @@ func workbenchHeroCard<Content: View>(
         RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
             .strokeBorder(tint.opacity(0.14), lineWidth: 0.7)
     )
-    .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.y)
+    .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
 }
 
 func workbenchSearchField(text: Binding<String>, placeholder: String) -> some View {

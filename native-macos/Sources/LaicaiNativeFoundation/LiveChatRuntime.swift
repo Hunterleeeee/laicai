@@ -7,7 +7,7 @@ public struct ChatCompletionRequest: Codable, Sendable, Equatable {
     public var model: String
     public var messages: [ChatMessage]
     public var temperature: Double?
-    public var max_tokens: Int?
+    public var maxTokens: Int?
     public var stream: Bool
     public var tools: [ToolDefinition]?
 
@@ -15,16 +15,25 @@ public struct ChatCompletionRequest: Codable, Sendable, Equatable {
         model: String,
         messages: [ChatMessage],
         temperature: Double? = nil,
-        max_tokens: Int? = nil,
+        maxTokens: Int? = nil,
         stream: Bool = false,
         tools: [ToolDefinition]? = nil
     ) {
         self.model = model
         self.messages = messages
         self.temperature = temperature
-        self.max_tokens = max_tokens
+        self.maxTokens = maxTokens
         self.stream = stream
         self.tools = tools
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case messages
+        case temperature
+        case maxTokens = "max_tokens"
+        case stream
+        case tools
     }
 }
 
@@ -135,7 +144,12 @@ public struct StreamChunk: Codable, Sendable, Equatable {
             }
         }
         public var delta: Delta
-        public var finish_reason: String?
+        public var finishReason: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case delta
+            case finishReason = "finish_reason"
+        }
     }
     public var choices: [Choice]
     public var usage: TokenUsage?
@@ -200,8 +214,13 @@ public struct OllamaChatChunk: Codable, Sendable, Equatable {
 
 public struct OllamaChatRequest: Codable, Sendable, Equatable {
     public struct Options: Codable, Sendable, Equatable {
-        public var num_predict: Int?
-        public var num_ctx: Int?
+        public var numPredict: Int?
+        public var numContext: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case numPredict = "num_predict"
+            case numContext = "num_ctx"
+        }
     }
 
     public var model: String
@@ -210,7 +229,17 @@ public struct OllamaChatRequest: Codable, Sendable, Equatable {
     public var think: Bool?
     public var options: Options?
     public var tools: [ToolDefinition]?
-    public var keep_alive: String?
+    public var keepAlive: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case messages
+        case stream
+        case think
+        case options
+        case tools
+        case keepAlive = "keep_alive"
+    }
 }
 
 // MARK: - Anthropic Messages API Types
@@ -220,12 +249,22 @@ public struct OllamaChatRequest: Codable, Sendable, Equatable {
 /// `max_tokens` is required, and tool definitions use a different schema.
 private struct AnthropicMessagesRequest: Encodable {
     var model: String
-    var max_tokens: Int
+    var maxTokens: Int
     var system: String?
     var messages: [AnthropicMessage]
     var stream: Bool
     var tools: [AnthropicTool]?
     var temperature: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case maxTokens = "max_tokens"
+        case system
+        case messages
+        case stream
+        case tools
+        case temperature
+    }
 
     struct AnthropicMessage: Encodable {
         var role: String
@@ -235,7 +274,13 @@ private struct AnthropicMessagesRequest: Encodable {
     struct AnthropicTool: Encodable {
         var name: String
         var description: String
-        var input_schema: AnyEncodable
+        var inputSchema: AnyEncodable
+
+        private enum CodingKeys: String, CodingKey {
+            case name
+            case description
+            case inputSchema = "input_schema"
+        }
     }
 }
 
@@ -262,22 +307,29 @@ private enum RawJSONContainer: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let d = try? container.decode([String: RawJSONContainer].self) { self = .dict(d) }
-        else if let a = try? container.decode([RawJSONContainer].self) { self = .array(a) }
-        else if let s = try? container.decode(String.self) { self = .string(s) }
-        else if let n = try? container.decode(Double.self) { self = .number(n) }
-        else if let b = try? container.decode(Bool.self) { self = .bool(b) }
-        else { self = .null }
+        if let dictionary = try? container.decode([String: RawJSONContainer].self) {
+            self = .dict(dictionary)
+        } else if let array = try? container.decode([RawJSONContainer].self) {
+            self = .array(array)
+        } else if let string = try? container.decode(String.self) {
+            self = .string(string)
+        } else if let number = try? container.decode(Double.self) {
+            self = .number(number)
+        } else if let bool = try? container.decode(Bool.self) {
+            self = .bool(bool)
+        } else {
+            self = .null
+        }
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
-        case .dict(let d): try container.encode(d)
-        case .array(let a): try container.encode(a)
-        case .string(let s): try container.encode(s)
-        case .number(let n): try container.encode(n)
-        case .bool(let b): try container.encode(b)
+        case .dict(let dictionary): try container.encode(dictionary)
+        case .array(let array): try container.encode(array)
+        case .string(let string): try container.encode(string)
+        case .number(let number): try container.encode(number)
+        case .bool(let bool): try container.encode(bool)
         case .null: try container.encodeNil()
         }
     }
@@ -304,7 +356,7 @@ private enum AnthropicContentBlock: Encodable {
             try container.encode(RawJSON(data: data), forKey: .input)
         case .toolResult(let toolUseId, let content):
             try container.encode("tool_result", forKey: .type)
-            try container.encode(toolUseId, forKey: .tool_use_id)
+            try container.encode(toolUseId, forKey: .toolUseId)
             try container.encode(content, forKey: .content)
         case .image(let url):
             try container.encode("image", forKey: .type)
@@ -315,7 +367,8 @@ private enum AnthropicContentBlock: Encodable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case type, text, id, name, input, tool_use_id, content, source
+        case type, text, id, name, input, content, source
+        case toolUseId = "tool_use_id"
     }
 
     private enum SourceKeys: String, CodingKey {
@@ -329,15 +382,32 @@ private struct AnthropicStreamEvent: Decodable {
     var index: Int?
     var delta: Delta?
     var message: AnthropicMessageResponse?
-    var content_block: ContentBlock?
+    var contentBlock: ContentBlock?
     var usage: AnthropicUsage?
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case index
+        case delta
+        case message
+        case contentBlock = "content_block"
+        case usage
+    }
 
     struct Delta: Decodable {
         var type: String?
         var text: String?
         var thinking: String?
-        var partial_json: String?
-        var stop_reason: String?
+        var partialJSON: String?
+        var stopReason: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case text
+            case thinking
+            case partialJSON = "partial_json"
+            case stopReason = "stop_reason"
+        }
     }
 
     struct ContentBlock: Decodable {
@@ -352,12 +422,24 @@ private struct AnthropicStreamEvent: Decodable {
         var id: String?
         var content: [ContentBlock]?
         var usage: AnthropicUsage?
-        var stop_reason: String?
+        var stopReason: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case content
+            case usage
+            case stopReason = "stop_reason"
+        }
     }
 
     struct AnthropicUsage: Decodable {
-        var input_tokens: Int?
-        var output_tokens: Int?
+        var inputTokens: Int?
+        var outputTokens: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case inputTokens = "input_tokens"
+            case outputTokens = "output_tokens"
+        }
     }
 }
 
@@ -476,11 +558,21 @@ public struct LiveChatRuntime: ChatRuntimeClient {
 
             guard (200...299).contains(statusCode) else {
                 let bodyText = String(data: data, encoding: .utf8) ?? "empty"
-                let message = Self.userFacingErrorMessage(statusCode: statusCode, bodyText: bodyText, connectorName: connector.name)
+                let message = Self.userFacingErrorMessage(
+                    statusCode: statusCode,
+                    bodyText: bodyText,
+                    connectorName: connector.name
+                )
                 let urlHint = "URL: \(url.absoluteString)"
+                let activity = ToolActivity(
+                    name: "chat.error",
+                    summary: "\(connector.name) 返回 HTTP \(statusCode)",
+                    statusLine: "\(urlHint) · \(bodyText.prefix(80))",
+                    isFailure: true
+                )
                 return SendMessageResponse(
                     assistantText: "\(message)\n\(urlHint)",
-                    toolActivities: [ToolActivity(name: "chat.error", summary: "\(connector.name) 返回 HTTP \(statusCode)", statusLine: "\(urlHint) · \(bodyText.prefix(80))", isFailure: true)]
+                    toolActivities: [activity]
                 )
             }
 
@@ -495,10 +587,10 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 var thinkingText = ""
                 var parsedToolCalls: [FunctionCallResponse] = []
                 for block in decoded.content ?? [] {
-                    if block.type == "text", let t = block.text {
-                        contentText += t
-                    } else if block.type == "thinking", let t = block.thinking {
-                        thinkingText += t
+                    if block.type == "text", let textBlock = block.text {
+                        contentText += textBlock
+                    } else if block.type == "thinking", let thinkingBlock = block.thinking {
+                        thinkingText += thinkingBlock
                     } else if block.type == "tool_use", let id = block.id, let name = block.name {
                         // tool_use input is a JSON object in the response
                         let argsJSON = "{}"
@@ -511,9 +603,9 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 reasoningContent = thinkingText.isEmpty ? nil : thinkingText
                 text = Self.finalAssistantText(fromVisible: contentText, reasoningContent: nil, fallbackForEmpty: false)
                 toolCalls = parsedToolCalls
-                finishReason = decoded.stop_reason
-                let inputTokens = decoded.usage?.input_tokens
-                let outputTokens = decoded.usage?.output_tokens
+                finishReason = decoded.stopReason
+                let inputTokens = decoded.usage?.inputTokens
+                let outputTokens = decoded.usage?.outputTokens
                 metrics = ResponseMetrics(
                     thinkingDuration: 0,
                     totalDuration: max(0.001, Date().timeIntervalSince(startedAt)),
@@ -565,7 +657,14 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 reasoningContent: reasoningContent,
                 toolCalls: toolCalls,
                 finishReason: finishReason,
-                toolActivities: [ToolActivity(name: "chat.complete", summary: "收到 \(connector.name) 的响应", statusLine: toolCalls.isEmpty ? "文本响应" : "\(toolCalls.count) 个工具调用", isFailure: false)],
+                toolActivities: [
+                    ToolActivity(
+                        name: "chat.complete",
+                        summary: "收到 \(connector.name) 的响应",
+                        statusLine: toolCalls.isEmpty ? "文本响应" : "\(toolCalls.count) 个工具调用",
+                        isFailure: false
+                    )
+                ],
                 metrics: metrics
             )
         } catch {
@@ -573,15 +672,26 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         }
     }
 
-    public func sendMessageStream(_ request: SendMessageRequest, onChunk: @escaping @Sendable @MainActor (String) -> Void, onReasoningChunk: @escaping @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
+    public func sendMessageStream(
+        _ request: SendMessageRequest,
+        onChunk: @escaping @Sendable @MainActor (String) -> Void,
+        onReasoningChunk: @escaping @Sendable @MainActor (String) -> Void
+    ) async throws -> SendMessageResponse {
         return try await sendMessageStreamImpl(request, onChunk: onChunk, onReasoningChunk: onReasoningChunk)
     }
 
-    public func sendMessageStream(_ request: SendMessageRequest, onChunk: @escaping @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
+    public func sendMessageStream(
+        _ request: SendMessageRequest,
+        onChunk: @escaping @Sendable @MainActor (String) -> Void
+    ) async throws -> SendMessageResponse {
         return try await sendMessageStreamImpl(request, onChunk: onChunk, onReasoningChunk: nil)
     }
 
-    private func sendMessageStreamImpl(_ request: SendMessageRequest, onChunk: @escaping @Sendable @MainActor (String) -> Void, onReasoningChunk: (@Sendable @MainActor (String) -> Void)?) async throws -> SendMessageResponse {
+    private func sendMessageStreamImpl(
+        _ request: SendMessageRequest,
+        onChunk: @escaping @Sendable @MainActor (String) -> Void,
+        onReasoningChunk: (@Sendable @MainActor (String) -> Void)?
+    ) async throws -> SendMessageResponse {
         guard let connector = request.connector else {
             return Self.fallbackResponse(request: request)
         }
@@ -590,7 +700,6 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         }
 
         let startedAt = Date()
-        var firstVisibleAt: Date?
         let url = Self.buildURL(from: connector.endpoint, kind: connector.kind)
         let messages = Self.buildMessages(
             history: request.history,
@@ -628,226 +737,80 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         guard (200...299).contains(statusCode) else {
             var errorBody = ""
             for try await line in bytes.lines { errorBody += line }
-            let message = Self.userFacingErrorMessage(statusCode: statusCode, bodyText: errorBody, connectorName: connector.name)
+            let message = Self.userFacingErrorMessage(
+                statusCode: statusCode,
+                bodyText: errorBody,
+                connectorName: connector.name
+            )
             let urlHint = "URL: \(url.absoluteString)"
+            let activity = ToolActivity(
+                name: "chat.error",
+                summary: "\(connector.name) 返回 HTTP \(statusCode)",
+                statusLine: "\(urlHint) · \(errorBody.prefix(80))",
+                isFailure: true
+            )
             return SendMessageResponse(
                 assistantText: "\(message)\n\(urlHint)",
-                toolActivities: [ToolActivity(name: "chat.error", summary: "\(connector.name) 返回 HTTP \(statusCode)", statusLine: "\(urlHint) · \(errorBody.prefix(80))", isFailure: true)]
+                toolActivities: [activity]
             )
         }
 
-        var rawText = ""
-        var visibleText = ""
-        var reasoningText = ""
-        var reasoningCount = 0
-        var accumulatedToolCalls: [Int: AccumulatedToolCall] = [:]
-        var finishReason: String?
-        var usage: TokenUsage?
-        var finalOllamaChunk: OllamaChatChunk?
+        var streamState = StreamDecodeState()
         let decoder = JSONDecoder()
-
-        // H6: Micro-batch stream deltas to reduce MainActor hops.
-        // Instead of one await per SSE token, batch small deltas.
-        var pendingDelta = ""
-        var lastChunkAt = CFAbsoluteTimeGetCurrent()
-        let chunkFlushThreshold = 240  // chars
-        let chunkFlushInterval = 0.35 // seconds
-
-        // Anthropic: track tool_use block index for accumulation
-        var anthropicCurrentToolIndex: Int = 0
+        let streamProvider = Self.streamProvider(isAnthropic: isAnthropic, isOllamaNative: isOllamaNative)
 
         do {
             for try await line in bytes.lines {
-                if isAnthropic {
-                    // Anthropic SSE: "event: <type>\ndata: <json>" format
-                    // We only care about data lines; event lines are informational
-                    guard line.hasPrefix("data: ") else { continue }
-                    let jsonStr = String(line.dropFirst(6))
-                    guard let data = jsonStr.data(using: .utf8) else { continue }
-                    guard let event = try? decoder.decode(AnthropicStreamEvent.self, from: data) else { continue }
-
-                    switch event.type {
-                    case "content_block_start":
-                        if event.content_block?.type == "tool_use" {
-                            let idx = event.index ?? anthropicCurrentToolIndex
-                            accumulatedToolCalls[idx] = AccumulatedToolCall(
-                                id: event.content_block?.id ?? "call_\(idx)",
-                                name: event.content_block?.name ?? "",
-                                arguments: ""
-                            )
-                            anthropicCurrentToolIndex = idx + 1
-                        }
-                    case "content_block_delta":
-                        if event.delta?.type == "text_delta", let text = event.delta?.text {
-                            rawText += text
-                            let nextVisible = rawText  // Anthropic doesn't use think tags
-                            if nextVisible.count > visibleText.count {
-                                let visibleDelta = String(nextVisible.dropFirst(visibleText.count))
-                                visibleText = nextVisible
-                                if firstVisibleAt == nil { firstVisibleAt = Date() }
-                                pendingDelta += visibleDelta
-                                let now = CFAbsoluteTimeGetCurrent()
-                                if pendingDelta.count >= chunkFlushThreshold || (now - lastChunkAt) >= chunkFlushInterval {
-                                    let batch = pendingDelta
-                                    pendingDelta = ""
-                                    lastChunkAt = now
-                                    await onChunk(batch)
-                                }
-                            }
-                        } else if event.delta?.type == "thinking_delta", let thinking = event.delta?.thinking {
-                            reasoningText += thinking
-                            reasoningCount += thinking.count
-                            if let onReasoningChunk { await onReasoningChunk(thinking) }
-                        } else if event.delta?.type == "input_json_delta", let partial = event.delta?.partial_json {
-                            // Accumulate tool call arguments
-                            let idx = (event.index ?? anthropicCurrentToolIndex) - 1
-                            if var acc = accumulatedToolCalls[idx] {
-                                acc.arguments += partial
-                                accumulatedToolCalls[idx] = acc
-                            }
-                        }
-                    case "message_delta":
-                        if let stopReason = event.delta?.stop_reason {
-                            finishReason = stopReason
-                        }
-                        if let u = event.usage {
-                            usage = TokenUsage(promptTokens: u.input_tokens, completionTokens: u.output_tokens, totalTokens: nil)
-                        }
-                    case "message_stop":
-                        break  // End of stream
-                    default:
-                        break
-                    }
-                } else if isOllamaNative {
-                // Ollama native NDJSON (no tool calling support in native format)
-                    guard let data = line.data(using: .utf8) else { continue }
-                    if let ollamaChunk = try? decoder.decode(OllamaChatChunk.self, from: data) {
-                        if ollamaChunk.done == true {
-                            finalOllamaChunk = ollamaChunk
-                        }
-                        if let thinking = ollamaChunk.message?.thinking {
-                            reasoningText += thinking
-                            reasoningCount += thinking.count
-                            if let onReasoningChunk { await onReasoningChunk(thinking) }
-                        }
-                        if let chunkToolCalls = ollamaChunk.message?.toolCalls {
-                            for (offset, tc) in chunkToolCalls.enumerated() {
-                                let idx = accumulatedToolCalls.count + offset
-                                accumulatedToolCalls[idx] = AccumulatedToolCall(
-                                    id: tc.id ?? "call_ollama_\(idx)",
-                                    name: tc.function.name,
-                                    arguments: tc.function.arguments
-                                )
-                            }
-                        }
-                        if let content = ollamaChunk.message?.content {
-                            rawText += content
-                            let nextVisible = Self.visibleAnswer(from: rawText)
-                            if nextVisible.count > visibleText.count {
-                                let delta = String(nextVisible.dropFirst(visibleText.count))
-                                visibleText = nextVisible
-                                if firstVisibleAt == nil { firstVisibleAt = Date() }
-                                pendingDelta += delta
-                                let now = CFAbsoluteTimeGetCurrent()
-                                if pendingDelta.count >= chunkFlushThreshold || (now - lastChunkAt) >= chunkFlushInterval {
-                                    let batch = pendingDelta
-                                    pendingDelta = ""
-                                    lastChunkAt = now
-                                    await onChunk(batch)
-                                }
-                            }
-                        }
-                    }
-                } else {
-                // OpenAI compatible SSE: data: {...}
-                    guard line.hasPrefix("data: ") else { continue }
-                    let jsonStr = String(line.dropFirst(6))
-                    if jsonStr.trimmingCharacters(in: .whitespaces) == "[DONE]" { break }
-                    guard let data = jsonStr.data(using: .utf8) else { continue }
-
-                    if let chunk = try? decoder.decode(StreamChunk.self, from: data) {
-                        if let chunkUsage = chunk.usage {
-                            usage = chunkUsage
-                        }
-                        if let reasoning = chunk.choices.first?.delta.reasoningContent ?? chunk.choices.first?.delta.reasoning {
-                            reasoningText += reasoning
-                            reasoningCount += reasoning.count
-                            if let onReasoningChunk { await onReasoningChunk(reasoning) }
-                        }
-                        if let delta = chunk.choices.first?.delta.content {
-                            rawText += delta
-                            let nextVisible = Self.visibleAnswer(from: rawText)
-                            if nextVisible.count > visibleText.count {
-                                let visibleDelta = String(nextVisible.dropFirst(visibleText.count))
-                                visibleText = nextVisible
-                                if firstVisibleAt == nil { firstVisibleAt = Date() }
-                                pendingDelta += visibleDelta
-                                let now = CFAbsoluteTimeGetCurrent()
-                                if pendingDelta.count >= chunkFlushThreshold || (now - lastChunkAt) >= chunkFlushInterval {
-                                    let batch = pendingDelta
-                                    pendingDelta = ""
-                                    lastChunkAt = now
-                                    await onChunk(batch)
-                                }
-                            }
-                        }
-                        if let toolCallDeltas = chunk.choices.first?.delta.toolCalls {
-                            for tc in toolCallDeltas {
-                                let idx = tc.index ?? 0
-                                var acc = accumulatedToolCalls[idx] ?? AccumulatedToolCall()
-                                if let id = tc.id { acc.id = id }
-                                if let name = tc.function?.name { acc.name = name }
-                                if let args = tc.function?.arguments { acc.arguments += args }
-                                accumulatedToolCalls[idx] = acc
-                            }
-                        }
-                        if let fr = chunk.choices.first?.finish_reason {
-                            finishReason = fr
-                        }
-                    }
+                let didFinish = await Self.decodeStreamLine(
+                    line,
+                    provider: streamProvider,
+                    decoder: decoder,
+                    state: &streamState,
+                    onChunk: onChunk,
+                    onReasoningChunk: onReasoningChunk
+                )
+                if didFinish {
+                    break
                 }
             }
         } catch {
             throw Self.connectorRequestError(connector: connector, error: error)
         }
 
-        // H6: Flush remaining batched delta
-        if !pendingDelta.isEmpty {
-            let batch = pendingDelta
-            pendingDelta = ""
+        if let batch = streamState.flushPending() {
             await onChunk(batch)
         }
 
-        // Convert accumulated tool calls to final format
-        let toolCalls = accumulatedToolCalls.sorted { $0.key < $1.key }.compactMap { (_, acc) -> FunctionCallResponse? in
-            guard !acc.name.isEmpty else { return nil }
-            return FunctionCallResponse(
-                id: acc.id,
-                type: "function",
-                function: FunctionCallDetail(name: acc.name, arguments: acc.arguments)
-            )
-        }
+        let toolCalls = streamState.finalToolCalls()
 
         let finalText = Self.finalAssistantText(
-            fromVisible: visibleText,
-            reasoningContent: reasoningText.isEmpty ? nil : reasoningText,
+            fromVisible: streamState.visibleText,
+            reasoningContent: streamState.reasoningContent,
             fallbackForEmpty: false
         )
         let metrics = Self.metrics(
             startedAt: startedAt,
-            firstVisibleAt: firstVisibleAt,
+            firstVisibleAt: streamState.firstVisibleAt,
             messages: messages,
             outputText: finalText,
-            usage: usage,
-            ollama: finalOllamaChunk
+            usage: streamState.usage,
+            ollama: streamState.finalOllamaChunk
         )
 
+        let activity = ToolActivity(
+            name: "chat.complete",
+            summary: "流式收到 \(connector.name) 的响应",
+            statusLine: toolCalls.isEmpty
+                ? Self.responseStatusLine(finalText: finalText, reasoningCount: streamState.reasoningCount)
+                : "\(toolCalls.count) 个工具调用",
+            isFailure: false
+        )
         return SendMessageResponse(
             assistantText: finalText,
-            reasoningContent: reasoningText.isEmpty ? nil : reasoningText,
+            reasoningContent: streamState.reasoningContent,
             toolCalls: toolCalls,
-            finishReason: finishReason,
-            toolActivities: [ToolActivity(name: "chat.complete", summary: "流式收到 \(connector.name) 的响应", statusLine: toolCalls.isEmpty ? Self.responseStatusLine(finalText: finalText, reasoningCount: reasoningCount) : "\(toolCalls.count) 个工具调用", isFailure: false)],
+            finishReason: streamState.finishReason,
+            toolActivities: [activity],
             metrics: metrics
         )
     }
@@ -986,9 +949,9 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 messages: Self.probeMessages,
                 stream: false,
                 think: false,
-                options: .init(num_predict: 1, num_ctx: Self.localContextWindow(for: connector)),
+                options: .init(numPredict: 1, numContext: Self.localContextWindow(for: connector)),
                 tools: Self.probeToolDefinitions,
-                keep_alive: "30s"
+                keepAlive: "30s"
             )
         } else if isAnthropic {
             body = Self.buildAnthropicRequest(
@@ -1002,7 +965,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             body = ChatCompletionRequest(
                 model: model,
                 messages: Self.probeMessages,
-                max_tokens: 1,
+                maxTokens: 1,
                 stream: false,
                 tools: Self.probeToolDefinitions
             )
@@ -1048,50 +1011,50 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         let isAnthropic = Self.usesAnthropicProtocol(endpoint: endpoint, kind: kind)
 
         if isOllama {
-            // Ollama: POST /api/show with model name returns details including context length
-            let ollamaBase = base.hasSuffix("/v1") ? String(base.dropLast(3)) : base
-            let cleanBase = ollamaBase.hasSuffix("/api") ? String(ollamaBase.dropLast(4)) : ollamaBase
-            let urlString = cleanBase + "/api/show"
-            guard let url = URL(string: urlString) else { return nil }
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try? JSONEncoder().encode(["name": model])
-            request.timeoutInterval = 10
-            guard let (data, response) = try? await session.data(for: request),
-                  let statusCode = (response as? HTTPURLResponse)?.statusCode,
-                  (200...299).contains(statusCode),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let modelInfo = json["model_info"] as? [String: Any] else {
-                return nil
-            }
-            // Ollama reports context length as "general.context_length" key
-            for (key, value) in modelInfo {
-                if key.hasSuffix(".context_length"), let ctx = value as? Int {
-                    return ctx
-                }
-            }
-            // Fallback: check parameters for num_ctx
-            if let params = json["parameters"] as? String {
-                for line in params.split(separator: "\n") {
-                    let parts = line.split(separator: " ", maxSplits: 1)
-                    if parts.count == 2, parts[0] == "num_ctx", let ctx = Int(parts[1]) {
-                        return ctx
-                    }
-                }
-            }
+            return await ollamaContextWindow(base: base, model: model)
+        }
+        if isAnthropic {
+            return Self.anthropicContextWindow(model: model)
+        }
+        return await openAIContextWindow(base: base, model: model, apiKey: apiKey)
+    }
+
+    private func ollamaContextWindow(base: String, model: String) async -> Int? {
+        // Ollama: POST /api/show with model name returns details including context length
+        let ollamaBase = base.hasSuffix("/v1") ? String(base.dropLast(3)) : base
+        let cleanBase = ollamaBase.hasSuffix("/api") ? String(ollamaBase.dropLast(4)) : ollamaBase
+        let urlString = cleanBase + "/api/show"
+        guard let url = URL(string: urlString) else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(["name": model])
+        request.timeoutInterval = 10
+
+        guard let json = await modelInfoJSON(for: request),
+              let modelInfo = json["model_info"] as? [String: Any] else {
             return nil
         }
+        if let contextLength = Self.ollamaModelInfoContextWindow(modelInfo) {
+            return contextLength
+        }
+        return Self.ollamaParameterContextWindow(json["parameters"] as? String)
+    }
 
-        if isAnthropic {
-            // Anthropic: no model info API; use known context windows
-            let m = model.lowercased()
-            if m.contains("claude-4") || m.contains("claude-3.7") { return 1_000_000 }
-            if m.contains("claude-3-5") || m.contains("claude-3.5") { return 200_000 }
-            if m.contains("claude-3") { return 200_000 }
+    private static func anthropicContextWindow(model: String) -> Int {
+        // Anthropic: no model info API; use known context windows
+        let lowercasedModel = model.lowercased()
+        if lowercasedModel.contains("claude-4") || lowercasedModel.contains("claude-3.7") {
+            return 1_000_000
+        }
+        if lowercasedModel.contains("claude-3-5") || lowercasedModel.contains("claude-3.5") {
             return 200_000
         }
+        if lowercasedModel.contains("claude-3") { return 200_000 }
+        return 200_000
+    }
 
+    private func openAIContextWindow(base: String, model: String, apiKey: String) async -> Int? {
         // OpenAI-compatible: GET /models/{model_id} may include context_window
         let apiBase = Self.openAICompatibleBase(from: base)
         let urlString = apiBase + "/" + model
@@ -1103,12 +1066,37 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         request.timeoutInterval = 10
+        guard let json = await modelInfoJSON(for: request) else { return nil }
+        return Self.openAIContextWindow(from: json)
+    }
+
+    private func modelInfoJSON(for request: URLRequest) async -> [String: Any]? {
         guard let (data, response) = try? await session.data(for: request),
               let statusCode = (response as? HTTPURLResponse)?.statusCode,
-              (200...299).contains(statusCode),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
+              (200...299).contains(statusCode) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private static func ollamaModelInfoContextWindow(_ modelInfo: [String: Any]) -> Int? {
+        // Ollama reports context length as "general.context_length" key
+        for (key, value) in modelInfo where key.hasSuffix(".context_length") {
+            if let contextLength = value as? Int { return contextLength }
         }
+        return nil
+    }
+
+    private static func ollamaParameterContextWindow(_ parameters: String?) -> Int? {
+        guard let parameters else { return nil }
+        for line in parameters.split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 1)
+            if parts.count == 2, parts[0] == "num_ctx", let contextLength = Int(parts[1]) {
+                return contextLength
+            }
+        }
+        return nil
+    }
+
+    private static func openAIContextWindow(from json: [String: Any]) -> Int? {
         // Some providers return "context_window" or "max_context_length"
         if let ctx = json["context_window"] as? Int { return ctx }
         if let ctx = json["max_context_length"] as? Int { return ctx }
@@ -1127,6 +1115,310 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         var id: String = ""
         var name: String = ""
         var arguments: String = ""
+    }
+
+    private enum StreamProvider {
+        case anthropic
+        case ollamaNative
+        case openAICompatible
+    }
+
+    private struct StreamDecodeState {
+        var rawText = ""
+        var visibleText = ""
+        var reasoningText = ""
+        var reasoningCount = 0
+        var accumulatedToolCalls: [Int: AccumulatedToolCall] = [:]
+        var finishReason: String?
+        var usage: TokenUsage?
+        var finalOllamaChunk: OllamaChatChunk?
+        var firstVisibleAt: Date?
+        var anthropicCurrentToolIndex = 0
+
+        private var pendingDelta = ""
+        private var lastChunkAt = CFAbsoluteTimeGetCurrent()
+        private let chunkFlushThreshold = 240
+        private let chunkFlushInterval = 0.35
+
+        var reasoningContent: String? {
+            reasoningText.isEmpty ? nil : reasoningText
+        }
+
+        mutating func appendAnthropicVisibleText(_ text: String) -> String? {
+            rawText += text
+            return appendVisible(rawText)
+        }
+
+        mutating func appendVisibleRawText(_ text: String) -> String? {
+            rawText += text
+            return appendVisible(LiveChatRuntime.visibleAnswer(from: rawText))
+        }
+
+        mutating func appendReasoning(_ text: String) {
+            reasoningText += text
+            reasoningCount += text.count
+        }
+
+        mutating func startAnthropicToolUse(_ event: AnthropicStreamEvent) {
+            guard event.contentBlock?.type == "tool_use" else { return }
+            let toolIndex = event.index ?? anthropicCurrentToolIndex
+            accumulatedToolCalls[toolIndex] = AccumulatedToolCall(
+                id: event.contentBlock?.id ?? "call_\(toolIndex)",
+                name: event.contentBlock?.name ?? "",
+                arguments: ""
+            )
+            anthropicCurrentToolIndex = toolIndex + 1
+        }
+
+        mutating func appendAnthropicToolArguments(index: Int?, partial: String) {
+            let toolIndex = (index ?? anthropicCurrentToolIndex) - 1
+            guard var toolCall = accumulatedToolCalls[toolIndex] else { return }
+            toolCall.arguments += partial
+            accumulatedToolCalls[toolIndex] = toolCall
+        }
+
+        mutating func appendOllamaToolCalls(_ toolCalls: [FunctionCallResponse]) {
+            for (offset, toolCall) in toolCalls.enumerated() {
+                let toolIndex = accumulatedToolCalls.count + offset
+                accumulatedToolCalls[toolIndex] = AccumulatedToolCall(
+                    id: toolCall.id ?? "call_ollama_\(toolIndex)",
+                    name: toolCall.function.name,
+                    arguments: toolCall.function.arguments
+                )
+            }
+        }
+
+        mutating func appendOpenAIToolDeltas(_ toolCalls: [StreamingToolCall]) {
+            for toolCall in toolCalls {
+                let toolIndex = toolCall.index ?? 0
+                var accumulated = accumulatedToolCalls[toolIndex] ?? AccumulatedToolCall()
+                if let id = toolCall.id { accumulated.id = id }
+                if let name = toolCall.function?.name { accumulated.name = name }
+                if let arguments = toolCall.function?.arguments { accumulated.arguments += arguments }
+                accumulatedToolCalls[toolIndex] = accumulated
+            }
+        }
+
+        mutating func finalToolCalls() -> [FunctionCallResponse] {
+            accumulatedToolCalls
+                .sorted { $0.key < $1.key }
+                .compactMap { _, accumulated -> FunctionCallResponse? in
+                    guard !accumulated.name.isEmpty else { return nil }
+                    return FunctionCallResponse(
+                        id: accumulated.id,
+                        type: "function",
+                        function: FunctionCallDetail(name: accumulated.name, arguments: accumulated.arguments)
+                    )
+                }
+        }
+
+        mutating func flushPending() -> String? {
+            guard !pendingDelta.isEmpty else { return nil }
+            let batch = pendingDelta
+            pendingDelta = ""
+            lastChunkAt = CFAbsoluteTimeGetCurrent()
+            return batch
+        }
+
+        private mutating func appendVisible(_ nextVisible: String) -> String? {
+            guard nextVisible.count > visibleText.count else { return nil }
+            let visibleDelta = String(nextVisible.dropFirst(visibleText.count))
+            visibleText = nextVisible
+            if firstVisibleAt == nil { firstVisibleAt = Date() }
+            pendingDelta += visibleDelta
+            return flushIfNeeded()
+        }
+
+        private mutating func flushIfNeeded() -> String? {
+            let now = CFAbsoluteTimeGetCurrent()
+            let shouldFlush = pendingDelta.count >= chunkFlushThreshold
+                || (now - lastChunkAt) >= chunkFlushInterval
+            return shouldFlush ? flushPending() : nil
+        }
+    }
+
+    private static func streamProvider(isAnthropic: Bool, isOllamaNative: Bool) -> StreamProvider {
+        if isAnthropic { return .anthropic }
+        if isOllamaNative { return .ollamaNative }
+        return .openAICompatible
+    }
+
+    private static func decodeStreamLine(
+        _ line: String,
+        provider: StreamProvider,
+        decoder: JSONDecoder,
+        state: inout StreamDecodeState,
+        onChunk: @Sendable @MainActor (String) -> Void,
+        onReasoningChunk: (@Sendable @MainActor (String) -> Void)?
+    ) async -> Bool {
+        switch provider {
+        case .anthropic:
+            return await decodeAnthropicStreamLine(
+                line,
+                decoder: decoder,
+                state: &state,
+                onChunk: onChunk,
+                onReasoningChunk: onReasoningChunk
+            )
+        case .ollamaNative:
+            await decodeOllamaStreamLine(
+                line,
+                decoder: decoder,
+                state: &state,
+                onChunk: onChunk,
+                onReasoningChunk: onReasoningChunk
+            )
+            return false
+        case .openAICompatible:
+            return await decodeOpenAIStreamLine(
+                line,
+                decoder: decoder,
+                state: &state,
+                onChunk: onChunk,
+                onReasoningChunk: onReasoningChunk
+            )
+        }
+    }
+
+    private static func decodeAnthropicStreamLine(
+        _ line: String,
+        decoder: JSONDecoder,
+        state: inout StreamDecodeState,
+        onChunk: @Sendable @MainActor (String) -> Void,
+        onReasoningChunk: (@Sendable @MainActor (String) -> Void)?
+    ) async -> Bool {
+        guard line.hasPrefix("data: ") else { return false }
+        let jsonString = String(line.dropFirst(6))
+        guard let data = jsonString.data(using: .utf8),
+              let event = try? decoder.decode(AnthropicStreamEvent.self, from: data) else { return false }
+        await handleAnthropicStreamEvent(
+            event,
+            state: &state,
+            onChunk: onChunk,
+            onReasoningChunk: onReasoningChunk
+        )
+        return false
+    }
+
+    private static func handleAnthropicStreamEvent(
+        _ event: AnthropicStreamEvent,
+        state: inout StreamDecodeState,
+        onChunk: @Sendable @MainActor (String) -> Void,
+        onReasoningChunk: (@Sendable @MainActor (String) -> Void)?
+    ) async {
+        switch event.type {
+        case "content_block_start":
+            state.startAnthropicToolUse(event)
+        case "content_block_delta":
+            await handleAnthropicDelta(event, state: &state, onChunk: onChunk, onReasoningChunk: onReasoningChunk)
+        case "message_delta":
+            updateAnthropicMessageDelta(event, state: &state)
+        default:
+            break
+        }
+    }
+
+    private static func handleAnthropicDelta(
+        _ event: AnthropicStreamEvent,
+        state: inout StreamDecodeState,
+        onChunk: @Sendable @MainActor (String) -> Void,
+        onReasoningChunk: (@Sendable @MainActor (String) -> Void)?
+    ) async {
+        if event.delta?.type == "text_delta", let text = event.delta?.text {
+            if let batch = state.appendAnthropicVisibleText(text) { await onChunk(batch) }
+        } else if event.delta?.type == "thinking_delta", let thinking = event.delta?.thinking {
+            state.appendReasoning(thinking)
+            if let onReasoningChunk { await onReasoningChunk(thinking) }
+        } else if event.delta?.type == "input_json_delta", let partial = event.delta?.partialJSON {
+            state.appendAnthropicToolArguments(index: event.index, partial: partial)
+        }
+    }
+
+    private static func updateAnthropicMessageDelta(
+        _ event: AnthropicStreamEvent,
+        state: inout StreamDecodeState
+    ) {
+        if let stopReason = event.delta?.stopReason {
+            state.finishReason = stopReason
+        }
+        if let usageEvent = event.usage {
+            state.usage = TokenUsage(
+                promptTokens: usageEvent.inputTokens,
+                completionTokens: usageEvent.outputTokens,
+                totalTokens: nil
+            )
+        }
+    }
+
+    private static func decodeOllamaStreamLine(
+        _ line: String,
+        decoder: JSONDecoder,
+        state: inout StreamDecodeState,
+        onChunk: @Sendable @MainActor (String) -> Void,
+        onReasoningChunk: (@Sendable @MainActor (String) -> Void)?
+    ) async {
+        guard let data = line.data(using: .utf8),
+              let chunk = try? decoder.decode(OllamaChatChunk.self, from: data) else { return }
+        if chunk.done == true {
+            state.finalOllamaChunk = chunk
+        }
+        if let thinking = chunk.message?.thinking {
+            state.appendReasoning(thinking)
+            if let onReasoningChunk { await onReasoningChunk(thinking) }
+        }
+        if let toolCalls = chunk.message?.toolCalls {
+            state.appendOllamaToolCalls(toolCalls)
+        }
+        if let content = chunk.message?.content,
+           let batch = state.appendVisibleRawText(content) {
+            await onChunk(batch)
+        }
+    }
+
+    private static func decodeOpenAIStreamLine(
+        _ line: String,
+        decoder: JSONDecoder,
+        state: inout StreamDecodeState,
+        onChunk: @Sendable @MainActor (String) -> Void,
+        onReasoningChunk: (@Sendable @MainActor (String) -> Void)?
+    ) async -> Bool {
+        guard line.hasPrefix("data: ") else { return false }
+        let jsonString = String(line.dropFirst(6))
+        if jsonString.trimmingCharacters(in: .whitespaces) == "[DONE]" { return true }
+        guard let data = jsonString.data(using: .utf8),
+              let chunk = try? decoder.decode(StreamChunk.self, from: data) else { return false }
+        await handleOpenAIStreamChunk(
+            chunk,
+            state: &state,
+            onChunk: onChunk,
+            onReasoningChunk: onReasoningChunk
+        )
+        return false
+    }
+
+    private static func handleOpenAIStreamChunk(
+        _ chunk: StreamChunk,
+        state: inout StreamDecodeState,
+        onChunk: @Sendable @MainActor (String) -> Void,
+        onReasoningChunk: (@Sendable @MainActor (String) -> Void)?
+    ) async {
+        if let chunkUsage = chunk.usage {
+            state.usage = chunkUsage
+        }
+        if let reasoning = chunk.choices.first?.delta.reasoningContent ?? chunk.choices.first?.delta.reasoning {
+            state.appendReasoning(reasoning)
+            if let onReasoningChunk { await onReasoningChunk(reasoning) }
+        }
+        if let delta = chunk.choices.first?.delta.content,
+           let batch = state.appendVisibleRawText(delta) {
+            await onChunk(batch)
+        }
+        if let toolCallDeltas = chunk.choices.first?.delta.toolCalls {
+            state.appendOpenAIToolDeltas(toolCallDeltas)
+        }
+        if let responseFinishReason = chunk.choices.first?.finishReason {
+            state.finishReason = responseFinishReason
+        }
     }
 
     static func buildURL(from endpoint: String, kind: String = "openai-compatible") -> URL {
@@ -1493,9 +1785,9 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 messages: messages,
                 stream: stream,
                 think: false,
-                options: .init(num_predict: outputCap, num_ctx: Self.localContextWindow(for: connector)),
+                options: .init(numPredict: outputCap, numContext: Self.localContextWindow(for: connector)),
                 tools: tools,
-                keep_alive: "2m"
+                keepAlive: "2m"
             )
         }
         if isAnthropic {
@@ -1510,7 +1802,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         return ChatCompletionRequest(
             model: connector.modelName,
             messages: messages,
-            max_tokens: outputCap,
+            maxTokens: outputCap,
             stream: stream,
             tools: tools
         )
@@ -1541,8 +1833,12 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                     if let content = msg.effectiveContent, !content.isEmpty {
                         blocks.append(.text(content))
                     }
-                    for tc in toolCalls {
-                        blocks.append(.toolUse(id: tc.id ?? "", name: tc.function.name, inputJSON: tc.function.arguments))
+                    for toolCall in toolCalls {
+                        blocks.append(.toolUse(
+                            id: toolCall.id ?? "",
+                            name: toolCall.function.name,
+                            inputJSON: toolCall.function.arguments
+                        ))
                     }
                     anthropicMessages.append(.init(role: "assistant", content: AnyEncodable(blocks)))
                 } else if let content = msg.effectiveContent {
@@ -1576,7 +1872,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             AnthropicMessagesRequest.AnthropicTool(
                 name: tool.function.name,
                 description: tool.function.description,
-                input_schema: AnyEncodable(tool.function.parameters)
+                inputSchema: AnyEncodable(tool.function.parameters)
             )
         }
 
@@ -1584,7 +1880,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
 
         return AnthropicMessagesRequest(
             model: model,
-            max_tokens: maxTokens,
+            maxTokens: maxTokens,
             system: systemText,
             messages: anthropicMessages,
             stream: stream,
@@ -1724,10 +2020,12 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         let lines = reasoning.components(separatedBy: .newlines)
         // Look for common conclusion markers from the end
         let markers = ["结论", "总结", "最终", "综上", "因此", "所以", "答案", "建议", "方案"]
-        for i in stride(from: lines.count - 1, through: max(0, lines.count - 40), by: -1) {
-            let line = lines[i].trimmingCharacters(in: .whitespacesAndNewlines)
+        for lineIndex in stride(from: lines.count - 1, through: max(0, lines.count - 40), by: -1) {
+            let line = lines[lineIndex].trimmingCharacters(in: .whitespacesAndNewlines)
             if markers.contains(where: { line.hasPrefix($0) || line.hasPrefix("# ") && line.contains($0) || line.hasPrefix("## ") }) {
-                let conclusion = lines[i...].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                let conclusion = lines[lineIndex...]
+                    .joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 if conclusion.count > 20 { return conclusion }
             }
         }

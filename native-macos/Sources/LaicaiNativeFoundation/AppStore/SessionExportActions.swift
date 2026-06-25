@@ -69,7 +69,14 @@ extension AppStore {
 
     public func archiveThread(id: UUID) {
         guard let index = state.threads.firstIndex(where: { $0.id == id }) else { return }
+        let willArchive = !state.threads[index].isArchived
+        let wasGenerating = willArchive ? cancelGenerationTask(for: id) : false
         state.threads[index].isArchived.toggle()
+        if wasGenerating {
+            state.threads[index].status = .cancelled
+            state.threads[index].executionState = .paused
+            state.threads[index].updatedAt = .now
+        }
         syncAgentSnapshot(at: index)
         state.invalidateThreadSummaryCache()
         if state.threads[index].isArchived && state.selectedThread?.id == id {

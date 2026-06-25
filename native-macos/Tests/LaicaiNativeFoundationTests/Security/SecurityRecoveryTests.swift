@@ -17,9 +17,17 @@ final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(WorkspaceSandbox.isDisposableSmokeWorkspace("/var/folders/aa/bb/T/real-project"))
         XCTAssertFalse(WorkspaceSandbox.isDisposableSmokeWorkspace("/Users/test/Projects/laicai"))
     }
+    func testDefaultSandboxKeepsNativeExecutionUntilUserOptsIn() {
+        XCTAssertEqual(SandboxConfig.default.mode, .none)
+        XCTAssertFalse(SandboxConfig.default.networkEnabled)
+        XCTAssertTrue(SandboxConfig.default.mountWorkspace)
+    }
     func testShellWhitelistAllowsPwdAndRejectsSudoAndProjectTraversal() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
+        let previousSandboxConfig = SecurityManager.shared.sandboxConfig
+        SecurityManager.shared.sandboxConfig = SandboxConfig(mode: .none)
+        defer { SecurityManager.shared.sandboxConfig = previousSandboxConfig }
 
         let pwd = try await ShellTool().execute(argumentsJSON: #"{"command":"pwd"}"#, context: TaskContext(workspaceRoot: workspace.path))
         let sudo = try await ShellTool().execute(argumentsJSON: #"{"command":"sudo ls"}"#, context: TaskContext(workspaceRoot: workspace.path))

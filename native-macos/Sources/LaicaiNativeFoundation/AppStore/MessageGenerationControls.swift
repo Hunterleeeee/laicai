@@ -2,6 +2,24 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
+    @discardableResult
+    func cancelGenerationTask(for threadID: UUID, discardBuffers: Bool = true) -> Bool {
+        let wasGenerating = isThreadGenerating(threadID)
+        generationTasks[threadID]?.cancel()
+        generationTasks.removeValue(forKey: threadID)
+        agentLoops.removeValue(forKey: threadID)
+        if discardBuffers {
+            streamBuffers.removeValue(forKey: threadID)
+            streamLastFlushAt.removeValue(forKey: threadID)
+            thinkingBuffers.removeValue(forKey: threadID)
+            thinkingLastFlushAt.removeValue(forKey: threadID)
+        }
+        generationStartTimes.removeValue(forKey: threadID)
+        liveActivitiesByThread.removeValue(forKey: threadID)
+        syncGeneratingStateForSelectedThread()
+        return wasGenerating
+    }
+
     /// Codex-style steer: inject a correction into a running agent loop.
     /// Unlike stop, this does NOT cancel the task; it redirects it.
     public func steerRunningTask(_ message: String) {
@@ -12,28 +30,45 @@ extension AppStore {
     }
 
     public func stopGenerating() {
-        if let threadID = state.selectedThreadID {
-            generationTasks[threadID]?.cancel()
-            generationTasks.removeValue(forKey: threadID)
-            agentLoops.removeValue(forKey: threadID)
+        let targetThreadIDs: [UUID]
+        if let selectedID = state.selectedThreadID, isThreadGenerating(selectedID) {
+            targetThreadIDs = [selectedID]
+        } else {
+            targetThreadIDs = Array(generationTasks.keys)
         }
 
-        state.isGenerating = false
-        state.generationStartedAt = nil
-        state.liveActivity = ""
-        if let threadID = state.selectedThreadID,
-           let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }),
-           state.threads[threadIndex].isExecution,
-           state.threads[threadIndex].status == .running {
+        for threadID in targetThreadIDs {
+            cancelGenerationTask(for: threadID, discardBuffers: false)
+        }
+
+        syncGeneratingStateForSelectedThread()
+        for threadID in targetThreadIDs {
+            guard let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }) else { continue }
+            flushThinkingBuffer(for: threadID)
             flushStreamBuffer(for: threadID)
-            state.threads[threadIndex].steps.append(TaskStep(kind: .error, text: "已中断", isFailure: false, recoverable: true, retryAction: "重试"))
+            let isExecution = state.threads[threadIndex].isExecution
+            guard state.threads[threadIndex].status == .running else {
+                streamBuffers.removeValue(forKey: threadID)
+                streamLastFlushAt.removeValue(forKey: threadID)
+                thinkingBuffers.removeValue(forKey: threadID)
+                thinkingLastFlushAt.removeValue(forKey: threadID)
+                continue
+            }
+            if isExecution && !state.threads[threadIndex].steps.contains(where: { $0.kind == .error && $0.text == "已中断" }) {
+                state.threads[threadIndex].steps.append(TaskStep(kind: .error, text: "已中断", isFailure: false, recoverable: true, retryAction: "重试"))
+            }
             state.threads[threadIndex].status = .cancelled
-            syncAgentSnapshot(at: threadIndex)
+            if isExecution {
+                syncAgentSnapshot(at: threadIndex)
+            } else {
+                state.threads[threadIndex].executionState = .paused
+            }
             state.threads[threadIndex].updatedAt = .now
             BehaviorSignalTracker.record(signal: .cancel, thread: state.threads[threadIndex])
-            persistThreads()
             streamBuffers.removeValue(forKey: threadID)
             streamLastFlushAt.removeValue(forKey: threadID)
+            thinkingBuffers.removeValue(forKey: threadID)
+            thinkingLastFlushAt.removeValue(forKey: threadID)
         }
 
         if let threadID = state.selectedThreadID,

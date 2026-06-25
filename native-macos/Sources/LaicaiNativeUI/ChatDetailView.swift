@@ -72,10 +72,14 @@ struct ChatDetailView: View {
         }
     }
 
+    private var selectedThreadIsGenerating: Bool {
+        store.selectedThreadIsGenerating
+    }
+
     private func shouldShowTimeline(for thread: Thread) -> Bool {
         if !thread.steps.isEmpty { return true }
         if thread.status == .running || thread.executionState == .running { return true }
-        if store.state.isGenerating, thread.id == store.state.selectedThreadID { return true }
+        if selectedThreadIsGenerating, thread.id == store.state.selectedThreadID { return true }
         if thread.multiAgentPlan != nil { return true }
         return false
     }
@@ -146,7 +150,7 @@ struct ChatDetailView: View {
 
                     Spacer(minLength: AppSpace.sm)
 
-                    if store.state.isGenerating {
+                    if selectedThreadIsGenerating {
                         appendInstructionButton
                     } else {
                         sendButton
@@ -170,7 +174,7 @@ struct ChatDetailView: View {
             )
             .shadow(color: Color.black.opacity(0.10), radius: 24, y: 10)
 
-            if store.state.activeConnector == nil || store.state.isGenerating {
+            if store.state.activeConnector == nil || store.hasRunningGenerationTasks {
                 composerStatusBar
             }
         }
@@ -219,12 +223,30 @@ struct ChatDetailView: View {
             HStack(spacing: AppSpace.sm) {
                 if store.state.activeConnector == nil {
                     composerChip(icon: "exclamationmark.triangle", text: "未连接模型", tone: .warning)
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        HStack(spacing: AppSpace.xs) {
+                            Image(systemName: "link")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text("去连接")
+                                .font(AppFont.tiny)
+                        }
+                        .foregroundStyle(Brand.primary)
+                        .padding(.horizontal, AppSpace.sm + 1)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Brand.primary.opacity(0.10)))
+                        .overlay(Capsule().strokeBorder(Brand.primary.opacity(0.22), lineWidth: 0.6))
+                    }
+                    .buttonStyle(.plain)
                 }
-                if store.state.isGenerating {
+                if selectedThreadIsGenerating {
                     composerChip(icon: "plus.bubble", text: "追加指令", tone: .active)
                     if let thread = store.state.selectedThread {
                         composerChip(icon: "target", text: TextHelper.compactTitle(thread.title), tone: .neutral)
                     }
+                } else if store.hasRunningGenerationTasks {
+                    composerChip(icon: "waveform.path.ecg", text: "后台会话运行中", tone: .active)
                 }
             }
             .padding(.vertical, 1)
@@ -293,12 +315,12 @@ struct ChatDetailView: View {
             .help("当前会话 已用 \(gaugeTokens.formatted()) token · 约占模型窗口 \(Int(gaugePct * 100))%")
             .onAppear { refreshGauge() }
             .onChange(of: store.state.selectedThread?.id) { _ in refreshGauge() }
-            .onChange(of: store.state.isGenerating) { gen in if !gen { refreshGauge() } }
+            .onChange(of: selectedThreadIsGenerating) { gen in if !gen { refreshGauge() } }
         } else {
             Color.clear.frame(width: 0, height: 0)
                 .onAppear { refreshGauge() }
                 .onChange(of: store.state.selectedThread?.id) { _ in refreshGauge() }
-                .onChange(of: store.state.isGenerating) { gen in if !gen { refreshGauge() } }
+                .onChange(of: selectedThreadIsGenerating) { gen in if !gen { refreshGauge() } }
         }
     }
 
@@ -474,7 +496,7 @@ struct ChatDetailView: View {
             submitLocalDraft()
         } label: {
             Group {
-                if store.state.isGenerating {
+                if selectedThreadIsGenerating {
                     ZStack {
                         Circle()
                             .fill(hasPendingFollowUp ? Brand.primary.opacity(0.22) : SurfaceGrade.elevated)
@@ -501,8 +523,8 @@ struct ChatDetailView: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(store.state.isGenerating ? !hasPendingFollowUp : !canSend)
-        .help(store.state.isGenerating ? (hasPendingFollowUp ? "追加指令 (↵)" : "输入要追加的指令") : (canSend ? "发送 (↵)" : "输入内容后发送"))
+        .disabled(selectedThreadIsGenerating ? !hasPendingFollowUp : !canSend)
+        .help(selectedThreadIsGenerating ? (hasPendingFollowUp ? "追加指令 (↵)" : "输入要追加的指令") : (canSend ? "发送 (↵)" : "输入内容后发送"))
     }
 
     private var canSend: Bool {
@@ -542,7 +564,7 @@ struct ChatDetailView: View {
     private var composerPlaceholder: String {
         if store.state.activeConnector == nil { return "先连接模型…" }
         let base = "输入问题或目标…"
-        if store.state.isGenerating { return "补充一句，让它调整方向…" }
+        if selectedThreadIsGenerating { return "补充一句，让它调整方向…" }
         if let agent = store.state.selectedThread, agent.canContinue {
             switch agent.status {
             case .cancelled: return "继续处理，或输入新的处理方式…"
@@ -681,7 +703,7 @@ struct ChatDetailView: View {
 
     private func submitLocalDraft() {
         syncDraftImmediately()
-        if store.state.isGenerating {
+        if selectedThreadIsGenerating {
             store.submitFollowUp()
         } else {
             store.sendDraft()

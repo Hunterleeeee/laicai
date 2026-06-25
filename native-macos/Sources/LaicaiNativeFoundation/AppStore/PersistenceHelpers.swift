@@ -27,12 +27,12 @@ extension AppStore {
 
     func updateSummaryCaches() {
         let summaryThreshold = 20
-        let indicesToCheck: Range<Int>
-        if state.isGenerating, let selectedID = state.selectedThreadID,
-           let idx = state.threads.firstIndex(where: { $0.id == selectedID }) {
-            indicesToCheck = idx..<(idx + 1)
+        let indicesToCheck: [Int]
+        if !generationTasks.isEmpty {
+            let runningIDs = Set(generationTasks.keys)
+            indicesToCheck = state.threads.indices.filter { runningIDs.contains(state.threads[$0].id) }
         } else {
-            indicesToCheck = state.threads.startIndex..<state.threads.endIndex
+            indicesToCheck = Array(state.threads.indices)
         }
         for index in indicesToCheck {
             let thread = state.threads[index]

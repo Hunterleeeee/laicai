@@ -106,7 +106,11 @@ struct SidebarView: View {
             .padding(.top, AppSpace.xs)
 
             VStack(spacing: AppSpace.xs) {
-                PrimaryNavButton(icon: "plus.square", title: "新对话", isSelected: false) {
+                PrimaryNavButton(icon: "hammer", title: "新任务", isSelected: false) {
+                    startNewTask()
+                }
+
+                PrimaryNavButton(icon: "plus.message", title: "新会话", isSelected: false) {
                     store.newThread()
                 }
 
@@ -169,7 +173,11 @@ struct SidebarView: View {
                 .padding(.vertical, AppSpace.sm)
                 .help("展开导航")
 
-                CompactRailButton(icon: "plus.square", tooltip: "新对话") {
+                CompactRailButton(icon: "hammer", tooltip: "新任务") {
+                    startNewTask()
+                }
+
+                CompactRailButton(icon: "plus.message", tooltip: "新会话") {
                     store.newThread()
                 }
 
@@ -518,12 +526,13 @@ struct SidebarView: View {
     private var bottomBar: some View {
         Group {
             if isVisible {
+                let connectorLabel = activeConnectorLabel
                 HStack(spacing: AppSpace.sm) {
                     Circle()
                         .fill(store.state.activeConnector?.health.color ?? TextGrade.ghost)
                         .frame(width: 6, height: 6)
 
-                    Text(store.state.activeConnector?.modelName.isEmpty == false ? store.state.activeConnector?.modelName ?? "未连接" : store.state.activeConnector?.name ?? "未连接")
+                    Text(connectorLabel)
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.muted)
                         .lineLimit(1)
@@ -537,7 +546,7 @@ struct SidebarView: View {
                     .fill(store.state.activeConnector?.health.color ?? TextGrade.ghost)
                     .frame(width: 7, height: 7)
                     .padding(.vertical, AppSpace.md)
-                    .help(store.state.activeConnector?.modelName.isEmpty == false ? store.state.activeConnector?.modelName ?? "未连接" : store.state.activeConnector?.name ?? "未连接")
+                    .help(activeConnectorLabel)
             }
         }
         .background(SurfaceGrade.panel.opacity(0.92))
@@ -587,9 +596,17 @@ struct SidebarView: View {
     // MARK: - Data Helpers
 
     private var filteredThreadItems: [ThreadRecord] {
-        let query = (store.state.debouncedSearchText.isEmpty ? store.state.searchText : store.state.debouncedSearchText).trimmingCharacters(in: .whitespacesAndNewlines)
+        let searchText = store.state.debouncedSearchText.isEmpty
+            ? store.state.searchText
+            : store.state.debouncedSearchText
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let records = query.isEmpty ? store.cachedThreadRecordSummaries : store.state.filteredThreadSummaries
         return records.filter { !$0.isArchived }
+    }
+
+    private var activeConnectorLabel: String {
+        guard let connector = store.state.activeConnector else { return "未连接" }
+        return connector.modelName.isEmpty ? connector.name : connector.modelName
     }
 
     private func sidebarSectionHeader(_ title: String) -> some View {
@@ -619,6 +636,15 @@ struct SidebarView: View {
     private func openWorkbench(_ tab: WorkbenchTab) {
         store.selectWorkbenchTab(tab)
         NotificationCenter.default.post(name: .laicaiOpenWorkbench, object: tab)
+    }
+
+    private func startNewTask() {
+        if let projectID = projectManager.activeProjectID {
+            store.newThreadInProject(projectID)
+        } else {
+            store.newThread()
+        }
+        store.updateDraft("请直接处理这个目标：")
     }
 
     private var brandSubtitle: String {

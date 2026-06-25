@@ -276,19 +276,25 @@ struct AppRadius {
 // MARK: - Shadow — calmer values; dark mode keeps them barely-there
 
 struct AppShadow {
-    static let sm = Shadow(color: Color.black.opacity(0.045), radius: 4, y: 2)
-    static let card = Shadow(color: Color.black.opacity(0.065), radius: 14, y: 6)
-    static let toast = Shadow(color: Color.black.opacity(0.18), radius: 18, y: 10)
-    static let bubble = Shadow(color: Color.black.opacity(0.045), radius: 6, y: 2)
-    static let glow = Shadow(color: Brand.primary.opacity(0.12), radius: 12, y: 0)
-    static let deep = Shadow(color: Color.black.opacity(0.16), radius: 30, y: 16)
-    static let ambient = Shadow(color: Color.black.opacity(0.055), radius: 36, y: 0)
+    static let sm = Shadow(color: Color.black.opacity(0.045), radius: 4, yOffset: 2)
+    static let card = Shadow(color: Color.black.opacity(0.065), radius: 14, yOffset: 6)
+    static let toast = Shadow(color: Color.black.opacity(0.18), radius: 18, yOffset: 10)
+    static let bubble = Shadow(color: Color.black.opacity(0.045), radius: 6, yOffset: 2)
+    static let glow = Shadow(color: Brand.primary.opacity(0.12), radius: 12, yOffset: 0)
+    static let deep = Shadow(color: Color.black.opacity(0.16), radius: 30, yOffset: 16)
+    static let ambient = Shadow(color: Color.black.opacity(0.055), radius: 36, yOffset: 0)
 }
 
 struct Shadow {
     let color: Color
     let radius: CGFloat
-    let y: CGFloat
+    let verticalOffset: CGFloat
+
+    init(color: Color, radius: CGFloat, yOffset: CGFloat) {
+        self.color = color
+        self.radius = radius
+        self.verticalOffset = yOffset
+    }
 }
 
 // MARK: - Animation
@@ -348,7 +354,7 @@ extension View {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(SurfaceGrade.border.opacity(0.5), lineWidth: 0.5)
             )
-            .shadow(color: AppShadow.card.color, radius: AppShadow.card.radius, y: AppShadow.card.y)
+            .shadow(color: AppShadow.card.color, radius: AppShadow.card.radius, y: AppShadow.card.verticalOffset)
     }
 
     /// Chat bubble — neutral surface, user variant gets the brand tint.
@@ -411,7 +417,7 @@ extension View {
                 RoundedRectangle(cornerRadius: AppRadius.xxl, style: .continuous)
                     .strokeBorder(SurfaceGrade.border.opacity(0.55), lineWidth: 0.5)
             )
-            .shadow(color: AppShadow.deep.color, radius: AppShadow.deep.radius, y: AppShadow.deep.y)
+            .shadow(color: AppShadow.deep.color, radius: AppShadow.deep.radius, y: AppShadow.deep.verticalOffset)
     }
 
     /// Sidebar list row treatment.
@@ -452,23 +458,38 @@ extension Color {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var int: UInt64 = 0
         Scanner(string: hex).scanHexInt64(&int)
-        let a, r, g, b: UInt64
+        let alphaComponent: UInt64
+        let redComponent: UInt64
+        let greenComponent: UInt64
+        let blueComponent: UInt64
         switch hex.count {
         case 3:
-            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+            alphaComponent = 255
+            redComponent = (int >> 8) * 17
+            greenComponent = (int >> 4 & 0xF) * 17
+            blueComponent = (int & 0xF) * 17
         case 6:
-            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+            alphaComponent = 255
+            redComponent = int >> 16
+            greenComponent = int >> 8 & 0xFF
+            blueComponent = int & 0xFF
         case 8:
-            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+            alphaComponent = int >> 24
+            redComponent = int >> 16 & 0xFF
+            greenComponent = int >> 8 & 0xFF
+            blueComponent = int & 0xFF
         default:
-            (a, r, g, b) = (255, 0, 0, 0)
+            alphaComponent = 255
+            redComponent = 0
+            greenComponent = 0
+            blueComponent = 0
         }
         self.init(
             .sRGB,
-            red: Double(r) / 255,
-            green: Double(g) / 255,
-            blue: Double(b) / 255,
-            opacity: Double(a) / 255
+            red: Double(redComponent) / 255,
+            green: Double(greenComponent) / 255,
+            blue: Double(blueComponent) / 255,
+            opacity: Double(alphaComponent) / 255
         )
     }
 }

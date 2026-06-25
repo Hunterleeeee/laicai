@@ -194,7 +194,7 @@ struct WorkflowsPanel: View {
             RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.9), lineWidth: 0.7)
         )
-        .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.y)
+        .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
     }
 
     private func workflowMetric(icon: String, value: String, label: String, tint: Color) -> some View {
@@ -281,7 +281,7 @@ private struct WorkflowRow: View {
             RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                 .strokeBorder(isHovered ? categoryColor.opacity(0.24) : SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.7)
         )
-        .shadow(color: isHovered ? AppShadow.sm.color : .clear, radius: AppShadow.sm.radius, y: AppShadow.sm.y)
+        .shadow(color: isHovered ? AppShadow.sm.color : .clear, radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
         .onHover { isHovered = $0 }
     }
 }

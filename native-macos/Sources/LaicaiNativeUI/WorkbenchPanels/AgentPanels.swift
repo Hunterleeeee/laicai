@@ -26,9 +26,9 @@ struct AgentsPanel: View {
             agentReg.refresh(workspaceRoot: store.state.settings.workspacePath)
             toolReg.refresh(workspaceRoot: store.state.settings.workspacePath)
         }
-        .onChange(of: store.state.settings.workspacePath) { v in
-            agentReg.refresh(workspaceRoot: v)
-            toolReg.refresh(workspaceRoot: v)
+        .onChange(of: store.state.settings.workspacePath) { workspaceRoot in
+            agentReg.refresh(workspaceRoot: workspaceRoot)
+            toolReg.refresh(workspaceRoot: workspaceRoot)
         }
         .sheet(isPresented: $showAgentSheet, onDismiss: { editingAgent = nil }) {
             AgentEditorSheet(
@@ -251,8 +251,8 @@ struct AgentsPanel: View {
                 }
 
                 FlowLayout(spacing: 4) {
-                    ForEach(Self.triggerKeywords, id: \.self) { kw in
-                        Text(kw)
+                    ForEach(Self.triggerKeywords, id: \.self) { keyword in
+                        Text(keyword)
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(Brand.primary)
                             .padding(.horizontal, 7)
@@ -692,20 +692,29 @@ private struct AgentEditorSheet: View {
                     .font(AppFont.body)
 
                 HStack(spacing: 12) {
-                    ForEach(AgentRole.allCases) { r in
+                    ForEach(AgentRole.allCases) { agentRole in
                         Button {
-                            role = r
+                            role = agentRole
                             if selectedTools.isEmpty { selectedTools = role.allowedTools }
                         } label: {
                             VStack(spacing: 4) {
-                                Image(systemName: r.icon)
-                                    .font(.system(size: 14, weight: role == r ? .semibold : .regular))
-                                Text(r.title).font(.system(size: 9))
+                                Image(systemName: agentRole.icon)
+                                    .font(.system(size: 14, weight: role == agentRole ? .semibold : .regular))
+                                Text(agentRole.title).font(.system(size: 9))
                             }
-                            .foregroundStyle(role == r ? Brand.primary : TextGrade.muted)
+                            .foregroundStyle(role == agentRole ? Brand.primary : TextGrade.muted)
                             .frame(width: 52, height: 48)
-                            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(role == r ? Brand.primaryMuted : SurfaceGrade.card))
-                            .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(role == r ? Brand.primary.opacity(0.3) : Color.clear, lineWidth: 1))
+                            .background(
+                                RoundedRectangle(cornerRadius: AppRadius.md)
+                                    .fill(role == agentRole ? Brand.primaryMuted : SurfaceGrade.card)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: AppRadius.md)
+                                    .strokeBorder(
+                                        role == agentRole ? Brand.primary.opacity(0.3) : Color.clear,
+                                        lineWidth: 1
+                                    )
+                            )
                         }.buttonStyle(.plain)
                     }
                 }
@@ -762,8 +771,8 @@ private struct AgentEditorSheet: View {
     private var toolSelectionGrid: some View {
         let grouped = Dictionary(grouping: toolNames) { (name: String) -> String in
             if name.hasPrefix("custom.") { return "自定义" }
-            let p = name.split(separator: ".").first.map(String.init) ?? ""
-            switch p {
+            let categoryPrefix = name.split(separator: ".").first.map(String.init) ?? ""
+            switch categoryPrefix {
             case "file": return "文件"
             case "code", "workspace": return "搜索"
             case "web": return "网络"
@@ -799,11 +808,14 @@ private struct AgentEditorSheet: View {
     }
 
     private func loadAgent() {
-        guard let a = agent else {
+        guard let loadedAgent = agent else {
             selectedTools = Set(role.allowedTools)
             return
         }
-        name = a.name; role = a.role; prompt = a.systemPrompt; selectedTools = Set(a.tools)
+        name = loadedAgent.name
+        role = loadedAgent.role
+        prompt = loadedAgent.systemPrompt
+        selectedTools = Set(loadedAgent.tools)
     }
 
     private func save() {
@@ -887,12 +899,12 @@ private struct ToolEditorSheet: View {
                                 Label("添加", systemImage: "plus").font(AppFont.tiny)
                             }.buttonStyle(.plain).foregroundStyle(Brand.primary)
                         }
-                        ForEach(params.indices, id: \.self) { i in
+                        ForEach(params.indices, id: \.self) { paramIndex in
                             HStack(spacing: 6) {
-                                TextField("名称", text: $params[i].name).textFieldStyle(.roundedBorder).frame(width: 80)
-                                TextField("描述", text: $params[i].description).textFieldStyle(.roundedBorder)
-                                Toggle("必填", isOn: $params[i].required).toggleStyle(.checkbox)
-                                Button { params.remove(at: i) } label: {
+                                TextField("名称", text: $params[paramIndex].name).textFieldStyle(.roundedBorder).frame(width: 80)
+                                TextField("描述", text: $params[paramIndex].description).textFieldStyle(.roundedBorder)
+                                Toggle("必填", isOn: $params[paramIndex].required).toggleStyle(.checkbox)
+                                Button { params.remove(at: paramIndex) } label: {
                                     Image(systemName: "minus.circle").foregroundStyle(Semantic.error)
                                 }.buttonStyle(.plain)
                             }.font(AppFont.tiny)
@@ -917,12 +929,22 @@ private struct ToolEditorSheet: View {
     }
 
     private func loadTool() {
-        guard let t = tool else { return }
-        name = t.name; desc = t.description; params = t.parameters
-        switch t.executionMode {
-        case .shell(let tpl): execMode = 0; shellTemplate = tpl
-        case .http(let m, let u, _, _): execMode = 1; httpMethod = m; httpURL = u
-        case .script(let p, let i): execMode = 2; scriptPath = p; scriptInterpreter = i
+        guard let loadedTool = tool else { return }
+        name = loadedTool.name
+        desc = loadedTool.description
+        params = loadedTool.parameters
+        switch loadedTool.executionMode {
+        case .shell(let template):
+            execMode = 0
+            shellTemplate = template
+        case .http(let method, let urlTemplate, _, _):
+            execMode = 1
+            httpMethod = method
+            httpURL = urlTemplate
+        case .script(let path, let interpreter):
+            execMode = 2
+            scriptPath = path
+            scriptInterpreter = interpreter
         }
     }
 
@@ -970,17 +992,24 @@ private struct FlowLayout: Layout {
         }
     }
     private func arrange(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, offsets: [CGPoint]) {
-        let maxW = proposal.width ?? .infinity
+        let maxWidth = proposal.width ?? .infinity
         var offsets: [CGPoint] = []
-        var x: CGFloat = 0; var y: CGFloat = 0; var rowH: CGFloat = 0; var maxX: CGFloat = 0
+        var xOffset: CGFloat = 0
+        var yOffset: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var maxXOffset: CGFloat = 0
         for sub in subviews {
             let size = sub.sizeThatFits(.unspecified)
-            if x + size.width > maxW && x > 0 { x = 0; y += rowH + spacing; rowH = 0 }
-            offsets.append(CGPoint(x: x, y: y))
-            rowH = max(rowH, size.height)
-            x += size.width + spacing
-            maxX = max(maxX, x)
+            if xOffset + size.width > maxWidth && xOffset > 0 {
+                xOffset = 0
+                yOffset += rowHeight + spacing
+                rowHeight = 0
+            }
+            offsets.append(CGPoint(x: xOffset, y: yOffset))
+            rowHeight = max(rowHeight, size.height)
+            xOffset += size.width + spacing
+            maxXOffset = max(maxXOffset, xOffset)
         }
-        return (CGSize(width: maxX, height: y + rowH), offsets)
+        return (CGSize(width: maxXOffset, height: yOffset + rowHeight), offsets)
     }
 }

@@ -103,10 +103,10 @@ struct TaskStepCard: View {
 
 func isContinuationStrategy(_ step: TaskStep) -> Bool {
     guard step.kind == .userInput else { return false }
-    let t = step.text
-    return t.hasPrefix("继续执行这个会话")
-        || t.hasPrefix("继续执行这个任务")
-        || t == "继续执行"
+    let text = step.text
+    return text.hasPrefix("继续执行这个会话")
+        || text.hasPrefix("继续执行这个任务")
+        || text == "继续执行"
 }
 
 // MARK: - Continuation Strategy Bar
@@ -284,13 +284,13 @@ struct ThinkingCard: View {
     }
 
     private var hasReasoning: Bool {
-        guard let r = reasoningContent else { return false }
-        return !r.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard let reasoning = reasoningContent else { return false }
+        return !reasoning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var reasoningTokenCount: String {
-        guard let r = reasoningContent else { return "0" }
-        let count = r.count / 4  // rough token estimate
+        guard let reasoning = reasoningContent else { return "0" }
+        let count = reasoning.count / 4  // rough token estimate
         if count > 1000 { return "\(count / 1000)k" }
         return "\(count)"
     }
@@ -428,42 +428,50 @@ struct ToolCallCard: View {
         case "workspace.index":
             return "建立项目索引"
         case "code.search":
-            if let q = params?["query"] { return "搜索「\(String(q.prefix(30)))」" }
-            return "搜索代码"
+            return queryReason(params, fallback: "搜索代码")
         case "file.read":
-            if let p = params?["path"] ?? params?["fullPath"] { return "读取 \(String(p.suffix(from: p.lastIndex(of: "/") ?? p.startIndex)))" }
-            return "读取文件"
+            return pathReason(params, verb: "读取", fallback: "读取文件")
         case "shell.exec":
-            if let cmd = params?["command"] { return "执行 \(String(cmd.prefix(30)))" }
+            if let command = params?["command"] { return "执行 \(String(command.prefix(30)))" }
             return "执行命令"
         case "git":
             return "Git 操作"
         case "web.search":
-            if let q = params?["query"] { return "搜索「\(String(q.prefix(30)))」" }
-            return "联网搜索"
+            return queryReason(params, fallback: "联网搜索")
         case "web.fetch":
             if let url = params?["url"] { return "读取 \(String(url.prefix(40)))" }
             return "读取网页"
         case "file.write":
-            if let p = params?["path"] ?? params?["fullPath"] { return "写入 \(String(p.suffix(from: p.lastIndex(of: "/") ?? p.startIndex)))" }
-            return "写入文件"
+            return pathReason(params, verb: "写入", fallback: "写入文件")
         case "file.edit":
-            if let p = params?["path"] ?? params?["fullPath"] { return "编辑 \(String(p.suffix(from: p.lastIndex(of: "/") ?? p.startIndex)))" }
-            return "编辑文件"
+            return pathReason(params, verb: "编辑", fallback: "编辑文件")
         case "diff.apply":
-            if let p = params?["path"] ?? params?["fullPath"] { return "补丁 \(String(p.suffix(from: p.lastIndex(of: "/") ?? p.startIndex)))" }
-            return "应用补丁"
+            return pathReason(params, verb: "补丁", fallback: "应用补丁")
         case "verify.build":
-            if let cmd = params?["command"] { return "验证 \(String(cmd.prefix(30)))" }
+            if let command = params?["command"] { return "验证 \(String(command.prefix(30)))" }
             return "验证构建"
         case "wiki.build":
             return "构建知识库页面"
         case "image.generate":
-            if let p = params?["prompt"] { return "生成「\(String(p.prefix(30)))」" }
+            if let prompt = params?["prompt"] { return "生成「\(String(prompt.prefix(30)))」" }
             return "生成图片"
         default:
             return step.toolName ?? "工具调用"
         }
+    }
+
+    private func queryReason(_ params: [String: String]?, fallback: String) -> String {
+        guard let query = params?["query"] else { return fallback }
+        return "搜索「\(String(query.prefix(30)))」"
+    }
+
+    private func pathReason(_ params: [String: String]?, verb: String, fallback: String) -> String {
+        guard let path = params?["path"] ?? params?["fullPath"] else { return fallback }
+        return "\(verb) \(pathDisplayName(path))"
+    }
+
+    private func pathDisplayName(_ path: String) -> String {
+        String(path.suffix(from: path.lastIndex(of: "/") ?? path.startIndex))
     }
 }
 
@@ -1033,9 +1041,9 @@ struct TextOutputCard: View {
 
                     Divider()
 
-                    if let m = metrics {
+                    if let responseMetrics = metrics {
                         Button {} label: {
-                            Label(metricsLine(m), systemImage: "gauge.with.dots.needle.33percent")
+                            Label(metricsLine(responseMetrics), systemImage: "gauge.with.dots.needle.33percent")
                         }
                         .disabled(true)
                     }

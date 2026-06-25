@@ -7,12 +7,15 @@ extension AppStore {
         let message = composedDraftMessage()
         let selectedThreadRunning: Bool = {
             guard let tid = state.selectedThreadID else { return false }
-            return generationTasks[tid] != nil || state.isGenerating && state.selectedThread?.status == .running
+            return isThreadGenerating(tid)
         }()
         guard !message.isEmpty else { return }
         if selectedThreadRunning {
             submitFollowUp()
             state.draftMessage = ""
+            return
+        }
+        if executeQueuedMultiAgentPlanIfRequested(message) {
             return
         }
 
@@ -42,15 +45,34 @@ extension AppStore {
            let thread = state.threads.first(where: { $0.id == tid }),
            (thread.isExecution || thread.steps.contains(where: { $0.kind == .toolCall })),
            Self.shouldRouteChatFollowUpIntoSelectedTask(message: effectiveMessage, task: AgentTask(thread: thread)) {
-            var expectedCapabilities = decision.expectedCapabilities + ["运行命令", "提出文件修改"]
+            let readOnlyFollowUp = Self.isReadOnlyInvestigationFollowUp(effectiveMessage)
+            let shouldExecuteFollowUp = Self.isExplicitExecutionFollowUp(effectiveMessage)
+                || (!readOnlyFollowUp && Self.isContinuationCommand(effectiveMessage) && thread.status != .completed)
+            let originalMessage = thread.goal
+                ?? thread.steps.first(where: { $0.kind == .userInput })?.text
+                ?? thread.title
+            let originalDecision = IntentRouter.plan(originalMessage)
+            var expectedCapabilities = shouldExecuteFollowUp
+                ? originalDecision.expectedCapabilities
+                : ["读取工作区", "解释", "分析"]
+            if shouldExecuteFollowUp, expectedCapabilities.isEmpty || originalDecision.intent == .chat {
+                expectedCapabilities = ["读取工作区", "形成可验证结果"]
+            }
+            if shouldExecuteFollowUp,
+               !thread.context.workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               !expectedCapabilities.contains("读取工作区") {
+                expectedCapabilities.append("读取工作区")
+            }
             if Self.isWikiPersistenceFollowUp(effectiveMessage) {
                 expectedCapabilities.append("写入知识库")
             }
             decision = PlannerDecision(
                 intent: .task,
                 confidence: max(decision.confidence, 0.75),
-                reason: decision.reason + " [当前会话 已有工具调用历史，自动切换为执行姿态]",
-                routeLabel: "会话 执行",
+                reason: decision.reason + (shouldExecuteFollowUp
+                    ? " [当前会话已有工具调用历史，按明确续跑/执行意图恢复执行姿态]"
+                    : " [当前会话已有工具调用历史，本轮按只读追问续接，不默认修改或运行命令]"),
+                routeLabel: shouldExecuteFollowUp ? "会话 执行" : "会话 分析",
                 expectedCapabilities: Array(Set(expectedCapabilities))
             )
         }
@@ -62,5 +84,30 @@ extension AppStore {
 
         let matchedSkill = SkillMatcher.match(input: effectiveMessage, intent: decision.intent)
         sendTaskDraft(message: effectiveMessage, decision: decision, customAgent: agentInvocation?.agent, matchedSkill: matchedSkill)
+    }
+
+    private func executeQueuedMultiAgentPlanIfRequested(_ message: String) -> Bool {
+        guard let thread = state.selectedThread,
+              let plan = thread.multiAgentPlan,
+              plan.isEditable,
+              plan.status == .queued,
+              Self.isQueuedPlanExecutionCommand(message) else {
+            return false
+        }
+        executeEditedPlan(threadID: thread.id)
+        if isThreadGenerating(thread.id) {
+            state.draftMessage = ""
+            state.draftAttachments = []
+            state.draftImages = []
+        }
+        return true
+    }
+
+    private static func isQueuedPlanExecutionCommand(_ message: String) -> Bool {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        if isContinuationCommand(normalized) { return true }
+        let commands = ["执行", "开始", "确认", "确认执行", "确认并执行", "开始执行", "按这个执行", "就这样", "跑起来"]
+        return commands.contains { normalized == $0 || normalized.contains($0) }
     }
 }

@@ -37,7 +37,7 @@ struct LaicaiNativeApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("新任务") {
-                    store.newThread()
+                    startNewTask()
                 }
                 .keyboardShortcut("n", modifiers: [.command])
 
@@ -58,8 +58,8 @@ struct LaicaiNativeApp: App {
                 }
                 .keyboardShortcut("k", modifiers: [.command])
 
-                Button(store.state.isGenerating ? "停止生成" : "发送草稿") {
-                    if store.state.isGenerating {
+                Button(store.selectedThreadIsGenerating ? "停止当前生成" : "发送草稿") {
+                    if store.selectedThreadIsGenerating {
                         store.stopGenerating()
                     } else {
                         store.sendDraft()
@@ -71,7 +71,7 @@ struct LaicaiNativeApp: App {
                     store.stopGenerating()
                 }
                 .keyboardShortcut(".", modifiers: [.command])
-                .disabled(!store.state.isGenerating)
+                .disabled(!store.hasRunningGenerationTasks)
 
                 Divider()
 
@@ -91,6 +91,15 @@ struct LaicaiNativeApp: App {
             SettingsView()
                 .environmentObject(store)
         }
+    }
+
+    private func startNewTask() {
+        if let projectID = ProjectManager.shared.activeProjectID {
+            store.newThreadInProject(projectID)
+        } else {
+            store.newThread()
+        }
+        store.updateDraft("请直接处理这个目标：")
     }
 }
 

@@ -171,7 +171,8 @@ struct CommandPaletteView: View {
     private var actions: [CommandPaletteAction] {
         let typeLabel = threadTypeLabel
         var result: [CommandPaletteAction] = [
-            .init(kind: .newThread, icon: "plus.square", title: "新对话", subtitle: "开始一个新对话", keywords: ["new", "thread"]),
+            .init(kind: .newTask, icon: "hammer", title: "新任务", subtitle: "预填执行目标，适合需要读项目和跑工具", keywords: ["new", "task", "执行"]),
+            .init(kind: .newThread, icon: "plus.message", title: "新会话", subtitle: "空白聊天，不预设执行目标", keywords: ["new", "chat", "thread"]),
             .init(kind: .search, icon: "magnifyingglass", title: "搜索", subtitle: "打开侧栏搜索", keywords: ["find", "search"]),
             .init(kind: .toggleWorkbench, icon: "sidebar.right", title: "打开检查器", subtitle: "查看状态、计划和模型连接", keywords: ["workbench", "panel"]),
             .init(kind: .settings, icon: "gearshape", title: "设置", subtitle: "模型、工作区与运行配置", keywords: ["settings", "model"])
@@ -261,6 +262,13 @@ struct CommandPaletteView: View {
 
     private func run(_ action: CommandPaletteAction) {
         switch action.kind {
+        case .newTask:
+            if let projectID = ProjectManager.shared.activeProjectID {
+                store.newThreadInProject(projectID)
+            } else {
+                store.newThread()
+            }
+            store.updateDraft("请直接处理这个目标：")
         case .newThread:
             store.newThread()
         case .continueThread:
@@ -467,6 +475,7 @@ private struct CommandPaletteAction: Identifiable {
 }
 
 private enum CommandPaletteActionKind {
+    case newTask
     case newThread
     case continueThread
     case search

@@ -82,6 +82,37 @@ final class CapturingToolsRuntime: ChatRuntimeClient {
 }
 
 @MainActor
+final class BlockingMessageRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+    private var continuations: [CheckedContinuation<SendMessageResponse, Error>] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                continuations.append(continuation)
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelAll()
+            }
+        }
+    }
+
+    func resumeAll(_ response: SendMessageResponse = SendMessageResponse(assistantText: "完成")) {
+        let pending = continuations
+        continuations.removeAll()
+        pending.forEach { $0.resume(returning: response) }
+    }
+
+    func cancelAll() {
+        let pending = continuations
+        continuations.removeAll()
+        pending.forEach { $0.resume(throwing: CancellationError()) }
+    }
+}
+
+@MainActor
 final class WikiBuildWhenAvailableRuntime: ChatRuntimeClient {
     var requests: [SendMessageRequest] = []
 

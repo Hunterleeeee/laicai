@@ -3,6 +3,7 @@ import LaicaiNativeDomain
 
 extension AppStore {
     public func deleteExecutingAgent(id: UUID) {
+        cancelGenerationTask(for: id)
         state.threads.removeAll(where: { $0.id == id })
         if state.selectedThreadID == id {
             state.selectThread(id: nil)
@@ -17,6 +18,7 @@ extension AppStore {
         if let id, let thread = state.threads.first(where: { $0.id == id }) {
             state.modeLabel = thread.workflowName == nil ? "会话" : "工作流"
         }
+        syncPendingFollowUpForSelectedThread()
         syncGeneratingStateForSelectedThread()
     }
 
@@ -26,6 +28,7 @@ extension AppStore {
         syncActiveProjectForSelectedThread(id: id)
         state.modeLabel = state.threads[threadIndex].workflowName == nil ? "会话" : "工作流"
         state.draftMessage = "继续这个会话"
+        syncPendingFollowUpForSelectedThread()
         syncGeneratingStateForSelectedThread()
     }
 
@@ -44,6 +47,7 @@ extension AppStore {
         } else {
             state.modeLabel = "会话"
         }
+        syncPendingFollowUpForSelectedThread()
         syncGeneratingStateForSelectedThread()
     }
 

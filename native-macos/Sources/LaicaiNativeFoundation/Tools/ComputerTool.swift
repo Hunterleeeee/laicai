@@ -2,6 +2,36 @@ import Foundation
 import AppKit
 import LaicaiNativeDomain
 
+private struct ComputerToolParams: Decodable {
+    var action: String
+    var target: String?
+    var text: String?
+    var coordinateX: Int?
+    var coordinateY: Int?
+    var targetX: Int?
+    var targetY: Int?
+
+    var point: CGPoint? {
+        guard let coordinateX, let coordinateY else { return nil }
+        return CGPoint(x: coordinateX, y: coordinateY)
+    }
+
+    var targetPoint: CGPoint? {
+        guard let targetX, let targetY else { return nil }
+        return CGPoint(x: targetX, y: targetY)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case action
+        case target
+        case text
+        case coordinateX = "x"
+        case coordinateY = "y"
+        case targetX = "toX"
+        case targetY = "toY"
+    }
+}
+
 // MARK: - Computer Tool
 
 /// Agent tool for macOS automation: launch apps, simulate keyboard/mouse,
@@ -17,13 +47,19 @@ public struct ComputerTool: LaicaiTool {
             description: description,
             parameters: FunctionParameters(
                 properties: [
-                    "action": FunctionProperty(type: "string", description: "动作：open_app / open_url / keystroke / type_text / click / right_click / double_click / drag / screenshot / clipboard_read / clipboard_write / frontmost / windows / system_info / notify / applescript"),
-                    "target": FunctionProperty(type: "string", description: "目标：应用名(open_app)、URL(open_url)、按键(keystroke, e.g. 'cmd+c')、文本(type_text)、AppleScript代码(applescript)"),
+                    "action": FunctionProperty(
+                        type: "string",
+                        description: "动作：\(Self.supportedActionsDescription)"
+                    ),
+                    "target": FunctionProperty(
+                        type: "string",
+                        description: "目标：应用名、URL、按键组合、文本或 AppleScript 代码"
+                    ),
                     "text": FunctionProperty(type: "string", description: "文本内容（clipboard_write / type_text / notify 时用）"),
                     "x": FunctionProperty(type: "integer", description: "屏幕 X 坐标（click/right_click/double_click/drag 起点）"),
                     "y": FunctionProperty(type: "integer", description: "屏幕 Y 坐标（click/right_click/double_click/drag 起点）"),
                     "toX": FunctionProperty(type: "integer", description: "drag 终点 X 坐标"),
-                    "toY": FunctionProperty(type: "integer", description: "drag 终点 Y 坐标"),
+                    "toY": FunctionProperty(type: "integer", description: "drag 终点 Y 坐标")
                 ],
                 required: ["action"]
             )
@@ -66,134 +102,150 @@ public struct ComputerTool: LaicaiTool {
     }
 
     public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
-        struct Params: Codable {
-            var action: String
-            var target: String?
-            var text: String?
-            var x: Int?
-            var y: Int?
-            var toX: Int?
-            var toY: Int?
-        }
-
-        let params: Params
+        let params: ComputerToolParams
         do {
             let jsonData = argumentsJSON.data(using: .utf8) ?? Data()
-            params = try JSONDecoder().decode(Params.self, from: jsonData)
+            params = try JSONDecoder().decode(ComputerToolParams.self, from: jsonData)
         } catch {
             return ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params")
         }
 
-        switch params.action {
+        if let result = await handleLaunchAction(params) { return result }
+        if let result = await handleInputAction(params) { return result }
+        if let result = await handlePointerAction(params) { return result }
+        if let result = await handleCaptureAction(params) { return result }
+        if let result = handleClipboardAction(params) { return result }
+        if let result = handleInfoAction(params) { return result }
+        if let result = await handleScriptAction(params) { return result }
 
-        // MARK: - Open App
+        return unknownActionResult(params.action)
+    }
+
+    private func handleLaunchAction(_ params: ComputerToolParams) async -> ToolResult? {
+        switch params.action {
         case "open_app":
             guard let appName = params.target, !appName.isEmpty else {
                 return ToolResult(output: "缺少 target（应用名）", success: false, error: "missing_target")
             }
             return await openApp(appName)
-
-        // MARK: - Open URL
         case "open_url":
             guard let urlStr = params.target, let url = URL(string: urlStr) else {
                 return ToolResult(output: "缺少有效的 target（URL）", success: false, error: "missing_target")
             }
             NSWorkspace.shared.open(url)
             return ToolResult(output: "已在默认浏览器打开：\(urlStr)")
+        default:
+            return nil
+        }
+    }
 
-        // MARK: - Keystroke
+    private func handleInputAction(_ params: ComputerToolParams) async -> ToolResult? {
+        switch params.action {
         case "keystroke":
             guard let combo = params.target, !combo.isEmpty else {
                 return ToolResult(output: "缺少 target（按键组合，如 'cmd+c'）", success: false, error: "missing_target")
             }
             return simulateKeystroke(combo)
-
-        // MARK: - Type Text
         case "type_text":
             let text = params.text ?? params.target ?? ""
             guard !text.isEmpty else {
                 return ToolResult(output: "缺少 text 或 target", success: false, error: "missing_text")
             }
             return await typeText(text)
+        default:
+            return nil
+        }
+    }
 
-        // MARK: - Click
+    private func handlePointerAction(_ params: ComputerToolParams) async -> ToolResult? {
+        switch params.action {
         case "click":
-            guard let x = params.x, let y = params.y else {
-                return ToolResult(output: "缺少 x 和 y 坐标", success: false, error: "missing_coords")
-            }
-            return simulateClick(x: x, y: y)
-
-        // MARK: - Right Click
+            return params.point.map(simulateClick(at:)) ?? missingCoordinatesResult()
         case "right_click":
-            guard let x = params.x, let y = params.y else {
-                return ToolResult(output: "缺少 x 和 y 坐标", success: false, error: "missing_coords")
-            }
-            return simulateRightClick(x: x, y: y)
-
-        // MARK: - Double Click
+            return params.point.map(simulateRightClick(at:)) ?? missingCoordinatesResult()
         case "double_click":
-            guard let x = params.x, let y = params.y else {
-                return ToolResult(output: "缺少 x 和 y 坐标", success: false, error: "missing_coords")
-            }
-            return simulateDoubleClick(x: x, y: y)
-
-        // MARK: - Drag
+            return params.point.map(simulateDoubleClick(at:)) ?? missingCoordinatesResult()
         case "drag":
-            guard let x = params.x, let y = params.y, let toX = params.toX, let toY = params.toY else {
+            guard let startPoint = params.point, let targetPoint = params.targetPoint else {
                 return ToolResult(output: "缺少起点(x,y)或终点(toX,toY)坐标", success: false, error: "missing_coords")
             }
-            return await simulateDrag(fromX: x, fromY: y, toX: toX, toY: toY)
+            return await simulateDrag(from: startPoint, to: targetPoint)
+        default:
+            return nil
+        }
+    }
 
-        // MARK: - Screenshot
+    private func handleCaptureAction(_ params: ComputerToolParams) async -> ToolResult? {
+        switch params.action {
         case "screenshot":
             return await captureScreen()
+        default:
+            return nil
+        }
+    }
 
-        // MARK: - Clipboard Read
+    private func handleClipboardAction(_ params: ComputerToolParams) -> ToolResult? {
+        switch params.action {
         case "clipboard_read":
             return readClipboard()
-
-        // MARK: - Clipboard Write
         case "clipboard_write":
             let text = params.text ?? params.target ?? ""
             guard !text.isEmpty else {
                 return ToolResult(output: "缺少 text 参数", success: false, error: "missing_text")
             }
             return writeClipboard(text)
+        default:
+            return nil
+        }
+    }
 
-        // MARK: - Frontmost App
+    private func handleInfoAction(_ params: ComputerToolParams) -> ToolResult? {
+        switch params.action {
         case "frontmost":
             return frontmostApp()
-
-        // MARK: - Window List
         case "windows":
             return listWindows()
-
-        // MARK: - System Info
         case "system_info":
             return systemInfo()
-
-        // MARK: - Notification
         case "notify":
             let text = params.text ?? params.target ?? "来自 Laicai 的通知"
             return sendNotification(text)
+        default:
+            return nil
+        }
+    }
 
-        // MARK: - AppleScript
+    private func handleScriptAction(_ params: ComputerToolParams) async -> ToolResult? {
+        switch params.action {
         case "applescript":
             guard let script = params.target, !script.isEmpty else {
                 return ToolResult(output: "缺少 target（AppleScript 代码）", success: false, error: "missing_target")
             }
             return await runAppleScript(script)
-
         default:
-            return ToolResult(
-                output: "未知动作 '\(params.action)'，支持：open_app / open_url / keystroke / type_text / click / screenshot / clipboard_read / clipboard_write / frontmost / windows / system_info / notify / applescript",
-                success: false,
-                error: "unknown_action"
-            )
+            return nil
         }
     }
 
     // MARK: - Implementation
+
+    private static let supportedActionsDescription = [
+        "open_app", "open_url", "keystroke", "type_text", "click", "right_click", "double_click", "drag",
+        "screenshot", "clipboard_read", "clipboard_write", "frontmost", "windows", "system_info", "notify",
+        "applescript"
+    ].joined(separator: " / ")
+
+    private func unknownActionResult(_ action: String) -> ToolResult {
+        ToolResult(
+            output: "未知动作 '\(action)'，支持：\(Self.supportedActionsDescription)",
+            success: false,
+            error: "unknown_action"
+        )
+    }
+
+    private func missingCoordinatesResult() -> ToolResult {
+        ToolResult(output: "缺少 x 和 y 坐标", success: false, error: "missing_coords")
+    }
 
     private func openApp(_ name: String) async -> ToolResult {
         let config = NSWorkspace.OpenConfiguration()
@@ -229,7 +281,7 @@ public struct ComputerTool: LaicaiTool {
             "feishu": "com.bytedance.lark",
             "飞书": "com.bytedance.lark",
             "dingtalk": "com.alibaba.DingTalkMac",
-            "钉钉": "com.alibaba.DingTalkMac",
+            "钉钉": "com.alibaba.DingTalkMac"
         ]
 
         let lowerName = name.lowercased()
@@ -284,7 +336,11 @@ public struct ComputerTool: LaicaiTool {
 
         // If only modifier specified (e.g., "cmd+c"), the key is the last part
         guard let keyCode = Self.keyCodeMap[keyPart] else {
-            return ToolResult(output: "未知按键：'\(keyPart)'。支持：a-z, 0-9, return, space, tab, escape, delete, up/down/left/right, f1-f12", success: false, error: "unknown_key")
+            return ToolResult(
+                output: "未知按键：'\(keyPart)'。支持：\(Self.supportedKeyDescription)",
+                success: false,
+                error: "unknown_key"
+            )
         }
 
         guard let source = CGEventSource(stateID: .hidSystemState),
@@ -329,39 +385,36 @@ public struct ComputerTool: LaicaiTool {
         return ToolResult(output: "已输入 \(text.count) 个字符")
     }
 
-    private func simulateClick(x: Int, y: Int) -> ToolResult {
-        let point = CGPoint(x: x, y: y)
+    private func simulateClick(at point: CGPoint) -> ToolResult {
         guard let source = CGEventSource(stateID: .hidSystemState),
-              let mouseDown = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
-              let mouseUp = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
+              let mouseDown = makeMouseEvent(source: source, type: .leftMouseDown, point: point, button: .left),
+              let mouseUp = makeMouseEvent(source: source, type: .leftMouseUp, point: point, button: .left) else {
             return ToolResult(output: "无法创建鼠标事件", success: false, error: "event_failed")
         }
 
         mouseDown.post(tap: .cghidEventTap)
         mouseUp.post(tap: .cghidEventTap)
 
-        return ToolResult(output: "已点击坐标 (\(x), \(y))")
+        return ToolResult(output: "已点击坐标 \(coordinateDescription(point))")
     }
 
-    private func simulateRightClick(x: Int, y: Int) -> ToolResult {
-        let point = CGPoint(x: x, y: y)
+    private func simulateRightClick(at point: CGPoint) -> ToolResult {
         guard let source = CGEventSource(stateID: .hidSystemState),
-              let mouseDown = CGEvent(mouseEventSource: source, mouseType: .rightMouseDown, mouseCursorPosition: point, mouseButton: .right),
-              let mouseUp = CGEvent(mouseEventSource: source, mouseType: .rightMouseUp, mouseCursorPosition: point, mouseButton: .right) else {
+              let mouseDown = makeMouseEvent(source: source, type: .rightMouseDown, point: point, button: .right),
+              let mouseUp = makeMouseEvent(source: source, type: .rightMouseUp, point: point, button: .right) else {
             return ToolResult(output: "无法创建鼠标事件", success: false, error: "event_failed")
         }
         mouseDown.post(tap: .cghidEventTap)
         mouseUp.post(tap: .cghidEventTap)
-        return ToolResult(output: "已右键点击坐标 (\(x), \(y))")
+        return ToolResult(output: "已右键点击坐标 \(coordinateDescription(point))")
     }
 
-    private func simulateDoubleClick(x: Int, y: Int) -> ToolResult {
-        let point = CGPoint(x: x, y: y)
+    private func simulateDoubleClick(at point: CGPoint) -> ToolResult {
         guard let source = CGEventSource(stateID: .hidSystemState),
-              let down1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
-              let up1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left),
-              let down2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
-              let up2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
+              let down1 = makeMouseEvent(source: source, type: .leftMouseDown, point: point, button: .left),
+              let up1 = makeMouseEvent(source: source, type: .leftMouseUp, point: point, button: .left),
+              let down2 = makeMouseEvent(source: source, type: .leftMouseDown, point: point, button: .left),
+              let up2 = makeMouseEvent(source: source, type: .leftMouseUp, point: point, button: .left) else {
             return ToolResult(output: "无法创建鼠标事件", success: false, error: "event_failed")
         }
         down1.setIntegerValueField(.mouseEventClickState, value: 1)
@@ -372,16 +425,14 @@ public struct ComputerTool: LaicaiTool {
         up1.post(tap: .cghidEventTap)
         down2.post(tap: .cghidEventTap)
         up2.post(tap: .cghidEventTap)
-        return ToolResult(output: "已双击坐标 (\(x), \(y))")
+        return ToolResult(output: "已双击坐标 \(coordinateDescription(point))")
     }
 
-    private func simulateDrag(fromX: Int, fromY: Int, toX: Int, toY: Int) async -> ToolResult {
-        let from = CGPoint(x: fromX, y: fromY)
-        let to = CGPoint(x: toX, y: toY)
+    private func simulateDrag(from startPoint: CGPoint, to targetPoint: CGPoint) async -> ToolResult {
         guard let source = CGEventSource(stateID: .hidSystemState),
-              let mouseDown = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left),
-              let mouseDrag = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: to, mouseButton: .left),
-              let mouseUp = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left) else {
+              let mouseDown = makeMouseEvent(source: source, type: .leftMouseDown, point: startPoint, button: .left),
+              let mouseDrag = makeMouseEvent(source: source, type: .leftMouseDragged, point: targetPoint, button: .left),
+              let mouseUp = makeMouseEvent(source: source, type: .leftMouseUp, point: targetPoint, button: .left) else {
             return ToolResult(output: "无法创建鼠标事件", success: false, error: "event_failed")
         }
         mouseDown.post(tap: .cghidEventTap)
@@ -389,7 +440,20 @@ public struct ComputerTool: LaicaiTool {
         mouseDrag.post(tap: .cghidEventTap)
         try? await Task.sleep(for: .milliseconds(100))
         mouseUp.post(tap: .cghidEventTap)
-        return ToolResult(output: "已拖拽 (\(fromX),\(fromY)) → (\(toX),\(toY))")
+        return ToolResult(output: "已拖拽 \(coordinateDescription(startPoint)) → \(coordinateDescription(targetPoint))")
+    }
+
+    private func makeMouseEvent(
+        source: CGEventSource,
+        type: CGEventType,
+        point: CGPoint,
+        button: CGMouseButton
+    ) -> CGEvent? {
+        CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
+    }
+
+    private func coordinateDescription(_ point: CGPoint) -> String {
+        "(\(Int(point.x)), \(Int(point.y)))"
     }
 
     private func captureScreen() async -> ToolResult {
@@ -462,7 +526,10 @@ public struct ComputerTool: LaicaiTool {
     }
 
     private func listWindows() -> ToolResult {
-        guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+        guard let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
             return ToolResult(output: "无法获取窗口列表", success: false, error: "failed")
         }
 
@@ -472,12 +539,12 @@ public struct ComputerTool: LaicaiTool {
             let name = window[kCGWindowName as String] as? String ?? ""
             let layer = window[kCGWindowLayer as String] as? Int ?? 0
             let bounds = window[kCGWindowBounds as String] as? [String: Any]
-            let x = bounds?["X"] as? Int ?? 0
-            let y = bounds?["Y"] as? Int ?? 0
-            let w = bounds?["Width"] as? Int ?? 0
-            let h = bounds?["Height"] as? Int ?? 0
+            let originX = bounds?["X"] as? Int ?? 0
+            let originY = bounds?["Y"] as? Int ?? 0
+            let width = bounds?["Width"] as? Int ?? 0
+            let height = bounds?["Height"] as? Int ?? 0
             guard layer == 0 else { continue }  // Only normal windows
-            lines.append("\(owner): \(name.isEmpty ? "(无标题)" : name) [\(x),\(y) \(w)×\(h)]")
+            lines.append("\(owner): \(name.isEmpty ? "(无标题)" : name) [\(originX),\(originY) \(width)×\(height)]")
         }
 
         if lines.isEmpty {
@@ -550,13 +617,13 @@ public struct ComputerTool: LaicaiTool {
             ("g", 5), ("h", 4), ("i", 34), ("j", 38), ("k", 40), ("l", 37),
             ("m", 46), ("n", 45), ("o", 31), ("p", 35), ("q", 12), ("r", 15),
             ("s", 1), ("t", 17), ("u", 32), ("v", 9), ("w", 13), ("x", 7),
-            ("y", 16), ("z", 6),
+            ("y", 16), ("z", 6)
         ]
         for (key, code) in letters { map[key] = code }
         // Numbers
         let numbers: [(String, CGKeyCode)] = [
             ("0", 29), ("1", 18), ("2", 19), ("3", 20), ("4", 21),
-            ("5", 23), ("6", 22), ("7", 26), ("8", 28), ("9", 25),
+            ("5", 23), ("6", 22), ("7", 26), ("8", 28), ("9", 25)
         ]
         for (key, code) in numbers { map[key] = code }
         // Special keys
@@ -569,9 +636,9 @@ public struct ComputerTool: LaicaiTool {
         map["home"] = 115; map["end"] = 119
         map["pageup"] = 116; map["pagedown"] = 121
         // Function keys
-        for i in 1...12 {
+        for functionIndex in 1...12 {
             let codes: [CGKeyCode] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111]
-            map["f\(i)"] = codes[i - 1]
+            map["f\(functionIndex)"] = codes[functionIndex - 1]
         }
         // Punctuation
         map["-"] = 27; map["="] = 24; map["["] = 33; map["]"] = 30
@@ -579,4 +646,9 @@ public struct ComputerTool: LaicaiTool {
         map["/"] = 44; map["\\"] = 42; map["`"] = 50
         return map
     }()
+
+    private static let supportedKeyDescription = [
+        "a-z", "0-9", "return", "space", "tab", "escape", "delete",
+        "up/down/left/right", "f1-f12"
+    ].joined(separator: ", ")
 }

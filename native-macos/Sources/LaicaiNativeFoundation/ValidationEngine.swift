@@ -23,8 +23,8 @@ private func withTimeout<T>(seconds: TimeInterval, operation: @Sendable @escapin
 // MARK: - Validation Engine
 
 public struct ValidationEngine {
-    public static let maxRetries = 1
-    public static let baseDelayMs: UInt64 = 200  // Base delay for exponential backoff
+    public static let maxRetries = 3
+    public static let baseDelayMs: UInt64 = 250  // Base delay for exponential backoff
 
     public struct ValidationResult: Sendable {
         public let isValid: Bool
@@ -118,8 +118,11 @@ public struct ValidationEngine {
             } catch _ as TimeoutError {
                 lastError = "工具执行超时（\(Int(timeoutSeconds))秒）"
                 lastResult = ToolResult(output: "", success: false, error: lastError)
-                // Don't retry on timeout
-                return (lastResult!, ValidationResult(isValid: false, error: lastError, retryCount: attempt))
+                if attempt < maxRetries, shouldRetryTimeout(for: tool) {
+                    await exponentialBackoff(attempt: attempt)
+                } else {
+                    return (lastResult!, ValidationResult(isValid: false, error: lastError, retryCount: attempt))
+                }
             } catch {
                 lastError = error.localizedDescription
                 if attempt < maxRetries {
@@ -161,6 +164,15 @@ public struct ValidationEngine {
 
     private static func timeoutSeconds(for tool: any LaicaiTool) -> TimeInterval {
         timeoutSeconds(for: tool.name)
+    }
+
+    private static func shouldRetryTimeout(for tool: any LaicaiTool) -> Bool {
+        switch ToolNameCodec.canonicalName(tool.name) {
+        case "shell.exec", "verify.build", "image.generate":
+            return false
+        default:
+            return true
+        }
     }
 }
 
