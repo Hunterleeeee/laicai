@@ -279,8 +279,8 @@ private struct AppTopBar: View {
     }
 
     private var subtitle: String {
-        if store.selectedThreadIsGenerating {
-            let live = store.state.liveActivity.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let threadID = store.state.selectedThreadID, store.isThreadGenerating(threadID) {
+            let live = store.liveActivity(for: threadID).trimmingCharacters(in: .whitespacesAndNewlines)
             return live.isEmpty ? "正在运行" : live
         }
         if store.hasRunningGenerationTasks {

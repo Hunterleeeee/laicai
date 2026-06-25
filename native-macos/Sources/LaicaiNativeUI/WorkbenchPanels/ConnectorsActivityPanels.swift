@@ -641,7 +641,7 @@ struct ActivityPanel: View {
     }
 
     private func pulseSummary(for thread: Thread) -> String {
-        let live = store.state.liveActivity.trimmingCharacters(in: .whitespacesAndNewlines)
+        let live = store.liveActivity(for: thread.id).trimmingCharacters(in: .whitespacesAndNewlines)
         if store.isThreadGenerating(thread.id) && !live.isEmpty {
             return live
         }
@@ -725,7 +725,7 @@ struct ActivityPanel: View {
         if thread.isExecution {
             facts[1] = .init(icon: "doc.text", title: "文件", value: "\(thread.context.relevantFiles.count)", tint: Brand.teal)
         }
-        if let start = store.state.generationStartedAt, store.isThreadGenerating(thread.id) {
+        if let start = store.generationStartedAt(for: thread.id), store.isThreadGenerating(thread.id) {
             facts[3] = .init(icon: "timer", title: "用时", value: formatElapsed(Date().timeIntervalSince(start)), tint: Semantic.toolRunning)
         }
         return facts
