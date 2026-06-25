@@ -553,6 +553,53 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(store.state.isGenerating)
     }
 
+    func testStaleGenerationRunCannotClearNewRunForSameThread() throws {
+        let thread = Thread(
+            title: "同一线程重试",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "先运行")],
+            executionState: .running
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [thread],
+                selectedThreadID: thread.id
+            )
+        )
+        let oldRunID = store.markGenerationStarted(for: thread.id, activity: "旧任务运行中…")
+        let oldTask = Task {
+            _ = try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        store.generationTasks[thread.id] = oldTask
+        store.cancelGenerationTask(for: thread.id)
+
+        let newRunID = store.markGenerationStarted(for: thread.id, activity: "新任务运行中…")
+        let newTask = Task {
+            _ = try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        store.generationTasks[thread.id] = newTask
+        defer {
+            oldTask.cancel()
+            newTask.cancel()
+        }
+
+        XCTAssertFalse(store.shouldAcceptGenerationCallback(for: thread.id, runID: oldRunID))
+        XCTAssertTrue(store.shouldAcceptGenerationCallback(for: thread.id, runID: newRunID))
+
+        store.finishGenerationTask(thread.id, runID: oldRunID)
+
+        XCTAssertTrue(store.hasRunningGenerationTasks)
+        XCTAssertTrue(store.state.isGenerating)
+        XCTAssertEqual(store.generationRunIDs[thread.id], newRunID)
+        XCTAssertEqual(store.liveActivity(for: thread.id), "新任务运行中…")
+
+        store.finishGenerationTask(thread.id, runID: newRunID)
+
+        XCTAssertFalse(store.hasRunningGenerationTasks)
+        XCTAssertFalse(store.state.isGenerating)
+        XCTAssertNil(store.generationRunIDs[thread.id])
+    }
+
     func testDeletingRunningThreadCancelsBackgroundGenerationAndIgnoresLateResponse() async throws {
         let connector = makeConnector()
         let runtime = BlockingMessageRuntime()

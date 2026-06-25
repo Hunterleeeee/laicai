@@ -37,7 +37,7 @@ extension AppStore {
         let message = thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title
 
         let epThreadID = thread.id
-        markGenerationStarted(for: epThreadID, activity: "正在执行编排计划…")
+        let generationRunID = markGenerationStarted(for: epThreadID, activity: "正在执行编排计划…")
         generationTasks[epThreadID] = Task { [weak self] in
             guard let self else { return }
             let orchestrator = MultiAgentOrchestrator(
@@ -57,24 +57,24 @@ extension AppStore {
                     context: thread.context,
                     plan: plan,
                     onStep: { [weak self] step in
-                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID, runID: generationRunID) else { return }
                         self.appendTaskStep(step, to: epThreadID)
                     },
                     onStreamDelta: { [weak self] delta in
-                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID, runID: generationRunID) else { return }
                         self.appendStreamDelta(delta, to: epThreadID)
                     },
                     onPlanUpdate: { [weak self] updatedPlan in
-                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID, runID: generationRunID) else { return }
                         self.updateMultiAgentPlan(updatedPlan, for: epThreadID)
                     }
                 )
-                guard self.shouldAcceptGenerationCallback(for: epThreadID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: epThreadID, runID: generationRunID) else { return }
                 self.flushStreamBuffer(for: epThreadID)
                 self.mergeCompletedTask(completedTask, into: epThreadID)
                 self.persistThreadsNow()
             } catch {
-                guard self.shouldAcceptGenerationCallback(for: epThreadID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: epThreadID, runID: generationRunID) else { return }
                 self.flushStreamBuffer(for: epThreadID)
                 if let idx = self.state.threads.firstIndex(where: { $0.id == epThreadID }) {
                     self.state.threads[idx].steps.append(
@@ -86,7 +86,7 @@ extension AppStore {
                     self.persistThreadsNow()
                 }
             }
-            self.finishGenerationTask(epThreadID)
+            self.finishGenerationTask(epThreadID, runID: generationRunID)
         }
     }
 
@@ -123,7 +123,7 @@ extension AppStore {
         let message = thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title
 
         let rpThreadID = thread.id
-        markGenerationStarted(for: rpThreadID, activity: "正在恢复编排计划…")
+        let generationRunID = markGenerationStarted(for: rpThreadID, activity: "正在恢复编排计划…")
         generationTasks[rpThreadID] = Task { [weak self] in
             guard let self else { return }
             let orchestrator = MultiAgentOrchestrator(
@@ -143,24 +143,24 @@ extension AppStore {
                     context: thread.context,
                     plan: plan,
                     onStep: { [weak self] step in
-                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID, runID: generationRunID) else { return }
                         self.appendTaskStep(step, to: rpThreadID)
                     },
                     onStreamDelta: { [weak self] delta in
-                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID, runID: generationRunID) else { return }
                         self.appendStreamDelta(delta, to: rpThreadID)
                     },
                     onPlanUpdate: { [weak self] updatedPlan in
-                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID, runID: generationRunID) else { return }
                         self.updateMultiAgentPlan(updatedPlan, for: rpThreadID)
                     }
                 )
-                guard self.shouldAcceptGenerationCallback(for: rpThreadID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: rpThreadID, runID: generationRunID) else { return }
                 self.flushStreamBuffer(for: rpThreadID)
                 self.mergeCompletedTask(completedTask, into: rpThreadID)
                 self.persistThreadsNow()
             } catch {
-                guard self.shouldAcceptGenerationCallback(for: rpThreadID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: rpThreadID, runID: generationRunID) else { return }
                 self.flushStreamBuffer(for: rpThreadID)
                 if let idx = self.state.threads.firstIndex(where: { $0.id == rpThreadID }) {
                     self.state.threads[idx].steps.append(
@@ -172,7 +172,7 @@ extension AppStore {
                     self.persistThreadsNow()
                 }
             }
-            self.finishGenerationTask(rpThreadID)
+            self.finishGenerationTask(rpThreadID, runID: generationRunID)
         }
     }
 }

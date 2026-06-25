@@ -41,11 +41,16 @@ extension AppStore {
         }
     }
 
-    func shouldAcceptGenerationCallback(for targetTaskID: UUID) -> Bool {
-        generationTasks[targetTaskID] != nil && !Task.isCancelled
+    func shouldAcceptGenerationCallback(for targetTaskID: UUID, runID: UUID? = nil) -> Bool {
+        guard generationTasks[targetTaskID] != nil, !Task.isCancelled else { return false }
+        guard let runID else { return true }
+        return generationRunIDs[targetTaskID] == runID
     }
 
-    func finishGenerationTask(_ targetTaskID: UUID) {
+    func finishGenerationTask(_ targetTaskID: UUID, runID: UUID? = nil) {
+        if let runID, generationRunIDs[targetTaskID] != runID {
+            return
+        }
         generationTasks.removeValue(forKey: targetTaskID)
         agentLoops.removeValue(forKey: targetTaskID)
         streamBuffers.removeValue(forKey: targetTaskID)
@@ -54,6 +59,7 @@ extension AppStore {
         thinkingLastFlushAt.removeValue(forKey: targetTaskID)
         generationStartTimes.removeValue(forKey: targetTaskID)
         liveActivitiesByThread.removeValue(forKey: targetTaskID)
+        generationRunIDs.removeValue(forKey: targetTaskID)
         if generationTasks.isEmpty {
             state.isGenerating = false
             state.generationStartedAt = nil

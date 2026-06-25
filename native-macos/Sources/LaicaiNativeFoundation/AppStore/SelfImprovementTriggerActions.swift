@@ -41,7 +41,7 @@ extension AppStore {
         state.selectThread(id: thread.id)
         persistThreads()
 
-        markGenerationStarted(for: thread.id, activity: "正在执行自我改进…")
+        let generationRunID = markGenerationStarted(for: thread.id, activity: "正在执行自我改进…")
         var loopConfig = AgentLoop.Config(
             maxIterations: 20,
             maxTokensPerTurn: 16384,
@@ -67,15 +67,15 @@ extension AppStore {
                     context: context,
                     priorSteps: thread.steps,
                     onStep: { @MainActor [weak self] (step: TaskStep) in
-                        guard let self, self.shouldAcceptGenerationCallback(for: targetID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetID, runID: generationRunID) else { return }
                         self.appendTaskStep(step, to: targetID)
                     },
                     onStreamDelta: { @Sendable @MainActor [weak self] (delta: String) in
-                        guard let self, self.shouldAcceptGenerationCallback(for: targetID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetID, runID: generationRunID) else { return }
                         self.appendStreamDelta(delta, to: targetID)
                     }
                 )
-                guard self.shouldAcceptGenerationCallback(for: targetID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: targetID, runID: generationRunID) else { return }
 
                 self.flushStreamBuffer(for: targetID)
                 self.mergeCompletedTask(completedTask, into: targetID)
@@ -98,7 +98,7 @@ extension AppStore {
                     SelfImprovementEngine.shared.onImprovementFailure()
                 }
             } catch {
-                guard self.shouldAcceptGenerationCallback(for: targetID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: targetID, runID: generationRunID) else { return }
                 self.flushStreamBuffer(for: targetID)
                 if let threadIndex = self.state.threads.firstIndex(where: { $0.id == targetID }) {
                     self.state.threads[threadIndex].steps.append(
@@ -112,7 +112,7 @@ extension AppStore {
                 SelfImprovementEngine.shared.onImprovementFailure()
             }
 
-            self.finishGenerationTask(targetID)
+            self.finishGenerationTask(targetID, runID: generationRunID)
         }
     }
 }

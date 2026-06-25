@@ -70,7 +70,7 @@ extension AppStore {
         }
         state.selectThread(id: threadID)
         state.modeLabel = "会话 工作流"
-        markGenerationStarted(for: threadID, activity: "会话 正在执行工作流…")
+        let generationRunID = markGenerationStarted(for: threadID, activity: "会话 正在执行工作流…")
         state.draftMessage = ""
         state.draftAttachments = []
         state.draftImages = []
@@ -90,13 +90,13 @@ extension AppStore {
                 runtime: self.environment.runtimeClient,
                 userParams: userParams,
                 onStepProgress: { [weak self] progress in
-                    guard let self, self.shouldAcceptGenerationCallback(for: wfThreadID) else { return }
-                    self.handleWorkflowStepProgress(progress, threadID: threadID, runID: run.id)
+                    guard let self, self.shouldAcceptGenerationCallback(for: wfThreadID, runID: generationRunID) else { return }
+                    self.handleWorkflowStepProgress(progress, threadID: threadID, runID: run.id, generationRunID: generationRunID)
                 },
                 onStreamDelta: { _ in }
             )
 
-            guard self.shouldAcceptGenerationCallback(for: wfThreadID) else { return }
+            guard self.shouldAcceptGenerationCallback(for: wfThreadID, runID: generationRunID) else { return }
 
             if let threadIndex = self.state.threads.firstIndex(where: { $0.id == threadID }) {
                 let hasError = steps.contains { $0.isFailure }
@@ -112,12 +112,12 @@ extension AppStore {
                 self.persistThreadsNow()
             }
 
-            self.finishGenerationTask(wfThreadID)
+            self.finishGenerationTask(wfThreadID, runID: generationRunID)
         }
     }
 
-    func handleWorkflowStepProgress(_ progress: StepExecutor.StepProgress, threadID: UUID, runID: UUID) {
-        guard shouldAcceptGenerationCallback(for: threadID) else { return }
+    func handleWorkflowStepProgress(_ progress: StepExecutor.StepProgress, threadID: UUID, runID: UUID, generationRunID: UUID? = nil) {
+        guard shouldAcceptGenerationCallback(for: threadID, runID: generationRunID) else { return }
         if let idx = state.threads.firstIndex(where: { $0.id == threadID }) {
             state.threads[idx].steps.append(progress.taskStep)
             state.threads[idx].updatedAt = .now

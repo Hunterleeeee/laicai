@@ -303,7 +303,7 @@ extension AppStore {
         persistThreads()
 
         let capturedImages = state.draftImages
-        markGenerationStarted(
+        let generationRunID = markGenerationStarted(
             for: targetTaskID,
             activity: isChatIntent ? "思考中…" : "会话 正在分析…"
         )
@@ -367,24 +367,25 @@ extension AppStore {
                     summaryCache: state.threads.first(where: { $0.id == targetTaskID })?.summaryCache,
                     imageAttachments: capturedImages,
                     onStep: { [weak self] step in
-                        guard let self, self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetTaskID, runID: generationRunID) else { return }
                         self.appendTaskStep(step, to: targetTaskID)
                     },
                     onStreamDelta: { [weak self] delta in
-                        guard let self, self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetTaskID, runID: generationRunID) else { return }
                         self.appendStreamDelta(delta, to: targetTaskID)
                     },
                     onReasoningDelta: { [weak self] delta in
-                        guard let self, self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: targetTaskID, runID: generationRunID) else { return }
                         self.appendThinkingDelta(delta, to: targetTaskID)
                     },
                     onCheckInterrupt: { [weak self] in
-                        guard let self else { return nil }
+                        guard let self,
+                              self.shouldAcceptGenerationCallback(for: targetTaskID, runID: generationRunID) else { return nil }
                         return self.consumePendingFollowUp(for: targetTaskID)
                     }
                 )
 
-                guard self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: targetTaskID, runID: generationRunID) else { return }
 
                 self.flushThinkingBuffer(for: targetTaskID)
                 self.flushStreamBuffer(for: targetTaskID)
@@ -399,7 +400,7 @@ extension AppStore {
 
                 self.handlePostRunSelfImprovement(completedTask: completedTask, targetTaskID: targetTaskID)
             } catch {
-                guard self.shouldAcceptGenerationCallback(for: targetTaskID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: targetTaskID, runID: generationRunID) else { return }
                 self.flushThinkingBuffer(for: targetTaskID)
                 self.flushStreamBuffer(for: targetTaskID)
                 if let threadIndex = self.state.threads.firstIndex(where: { $0.id == targetTaskID }) {
@@ -421,7 +422,7 @@ extension AppStore {
             }
 
             self.appendPendingFollowUp(to: targetTaskID)
-            self.finishGenerationTask(targetTaskID)
+            self.finishGenerationTask(targetTaskID, runID: generationRunID)
         }
     }
 

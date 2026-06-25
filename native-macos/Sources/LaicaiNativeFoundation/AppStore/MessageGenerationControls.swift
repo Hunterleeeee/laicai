@@ -16,6 +16,7 @@ extension AppStore {
         }
         generationStartTimes.removeValue(forKey: threadID)
         liveActivitiesByThread.removeValue(forKey: threadID)
+        generationRunIDs.removeValue(forKey: threadID)
         syncGeneratingStateForSelectedThread()
         return wasGenerating
     }

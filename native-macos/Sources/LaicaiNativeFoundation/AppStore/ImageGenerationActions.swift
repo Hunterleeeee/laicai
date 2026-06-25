@@ -121,7 +121,7 @@ extension AppStore {
         }
         state.selectThread(id: targetThreadID)
         state.modeLabel = decision.routeLabel
-        markGenerationStarted(for: targetThreadID, activity: "正在生成图片…")
+        let generationRunID = markGenerationStarted(for: targetThreadID, activity: "正在生成图片…")
         state.draftMessage = ""
         state.draftAttachments = []
         state.draftImages = []
@@ -133,7 +133,7 @@ extension AppStore {
             let arguments = Self.imageGenerationArguments(prompt: message)
             do {
                 let result = try await tool.execute(argumentsJSON: arguments, context: context)
-                guard self.shouldAcceptGenerationCallback(for: targetThreadID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: targetThreadID, runID: generationRunID) else { return }
                 let resultStep = TaskStep(
                     kind: .toolResult,
                     text: result.output,
@@ -158,7 +158,7 @@ extension AppStore {
                     isFailure: !result.success
                 )
             } catch {
-                guard self.shouldAcceptGenerationCallback(for: targetThreadID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: targetThreadID, runID: generationRunID) else { return }
                 let errorStep = TaskStep(kind: .error, text: error.localizedDescription, isFailure: true, recoverable: true, retryAction: "重试")
                 self.appendTaskStep(errorStep, to: targetThreadID)
                 if let index = self.state.threads.firstIndex(where: { $0.id == targetThreadID }) {
@@ -169,7 +169,7 @@ extension AppStore {
                 }
                 self.recordToolActivity(name: "image.generate", summary: "图片生成失败", statusLine: error.localizedDescription, isFailure: true)
             }
-            self.finishGenerationTask(targetThreadID)
+            self.finishGenerationTask(targetThreadID, runID: generationRunID)
         }
     }
 

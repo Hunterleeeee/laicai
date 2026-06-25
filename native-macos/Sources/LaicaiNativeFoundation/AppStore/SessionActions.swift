@@ -53,13 +53,17 @@ extension AppStore {
         return min(0.95, Double(toolCalls) / expectedIterations)
     }
 
-    func markGenerationStarted(for threadID: UUID, activity: String) {
+    @discardableResult
+    func markGenerationStarted(for threadID: UUID, activity: String) -> UUID {
         let now = Date()
+        let runID = UUID()
+        generationRunIDs[threadID] = runID
         generationStartTimes[threadID] = now
         liveActivitiesByThread[threadID] = activity
         state.isGenerating = true
         state.generationStartedAt = now
         state.liveActivity = activity
+        return runID
     }
 
     func setLiveActivity(_ activity: String, for threadID: UUID) {

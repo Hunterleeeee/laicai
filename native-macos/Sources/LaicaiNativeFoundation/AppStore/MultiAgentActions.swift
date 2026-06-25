@@ -148,7 +148,7 @@ extension AppStore {
         }
         state.selectThread(id: threadID)
         state.modeLabel = "多会话协同"
-        markGenerationStarted(for: threadID, activity: "正在规划多会话协同…")
+        let generationRunID = markGenerationStarted(for: threadID, activity: "正在规划多会话协同…")
         state.draftMessage = ""
         state.draftAttachments = []
         state.draftImages = []
@@ -176,25 +176,25 @@ extension AppStore {
                     context: context,
                     plan: plan,
                     onStep: { [weak self] step in
-                        guard let self, self.shouldAcceptGenerationCallback(for: maThreadID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: maThreadID, runID: generationRunID) else { return }
                         self.appendTaskStep(step, to: maThreadID)
                     },
                     onStreamDelta: { [weak self] delta in
-                        guard let self, self.shouldAcceptGenerationCallback(for: maThreadID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: maThreadID, runID: generationRunID) else { return }
                         self.appendStreamDelta(delta, to: maThreadID)
                     },
                     onPlanUpdate: { [weak self] updatedPlan in
-                        guard let self, self.shouldAcceptGenerationCallback(for: maThreadID) else { return }
+                        guard let self, self.shouldAcceptGenerationCallback(for: maThreadID, runID: generationRunID) else { return }
                         self.updateMultiAgentPlan(updatedPlan, for: maThreadID)
                     }
                 )
 
-                guard self.shouldAcceptGenerationCallback(for: maThreadID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: maThreadID, runID: generationRunID) else { return }
                 self.flushStreamBuffer(for: maThreadID)
                 self.mergeCompletedTask(completedTask, into: maThreadID)
                 self.persistThreadsNow()
             } catch {
-                guard self.shouldAcceptGenerationCallback(for: maThreadID) else { return }
+                guard self.shouldAcceptGenerationCallback(for: maThreadID, runID: generationRunID) else { return }
                 self.flushStreamBuffer(for: maThreadID)
                 if let idx = self.state.threads.firstIndex(where: { $0.id == maThreadID }) {
                     self.state.threads[idx].steps.append(
@@ -206,7 +206,7 @@ extension AppStore {
                     self.persistThreadsNow()
                 }
             }
-            self.finishGenerationTask(maThreadID)
+            self.finishGenerationTask(maThreadID, runID: generationRunID)
         }
     }
 
