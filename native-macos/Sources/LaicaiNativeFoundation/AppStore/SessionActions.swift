@@ -22,6 +22,37 @@ extension AppStore {
         return thread.status == .running || thread.executionState == .running
     }
 
+    public func liveActivity(for threadID: UUID) -> String {
+        if let activity = liveActivitiesByThread[threadID] {
+            return activity
+        }
+        guard threadID == state.selectedThreadID, isThreadGenerating(threadID) else {
+            return ""
+        }
+        return state.liveActivity
+    }
+
+    public func generationStartedAt(for threadID: UUID) -> Date? {
+        if let startedAt = generationStartTimes[threadID] {
+            return startedAt
+        }
+        guard threadID == state.selectedThreadID, isThreadGenerating(threadID) else {
+            return nil
+        }
+        return state.generationStartedAt
+    }
+
+    public func estimatedProgress(for threadID: UUID) -> Double? {
+        guard isThreadGenerating(threadID),
+              let thread = state.threads.first(where: { $0.id == threadID }) else {
+            return nil
+        }
+        let toolCalls = thread.steps.filter { $0.kind == .toolCall }.count
+        guard toolCalls > 0 else { return nil }
+        let expectedIterations = max(3.0, Double(thread.context.metadata["expectedIterations"] ?? "8") ?? 8.0)
+        return min(0.95, Double(toolCalls) / expectedIterations)
+    }
+
     func markGenerationStarted(for threadID: UUID, activity: String) {
         let now = Date()
         generationStartTimes[threadID] = now

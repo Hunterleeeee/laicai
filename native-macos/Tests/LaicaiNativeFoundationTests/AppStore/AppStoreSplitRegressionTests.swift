@@ -499,6 +499,11 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             to: runningID
         )
         XCTAssertEqual(store.state.liveActivity, "后台会话运行中…")
+        XCTAssertEqual(store.liveActivity(for: runningID), "正在读取 README.md…")
+        XCTAssertEqual(store.generationStartedAt(for: runningID), runningStart)
+        let progress = try XCTUnwrap(store.estimatedProgress(for: runningID))
+        XCTAssertGreaterThan(progress, 0)
+        XCTAssertLessThanOrEqual(progress, 0.95)
 
         store.selectThread(id: runningID)
         XCTAssertTrue(store.selectedThreadIsGenerating)
@@ -725,6 +730,44 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertEqual(store.state.selectedThreadID, first.id)
         XCTAssertEqual(store.state.pendingFollowUp, "第一个线程的补充")
+    }
+
+    func testQueueFollowUpForBackgroundThreadDoesNotOverwriteSelectedPendingFollowUp() throws {
+        var selectedLedger = AgentExecutionLedger(
+            originalRequest: "处理当前任务",
+            goal: "处理当前任务",
+            state: .executing,
+            plan: ["读取上下文"]
+        )
+        selectedLedger.pendingFollowUp = "当前线程的补充"
+        let selected = Thread(
+            title: "当前线程",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "处理当前任务")],
+            executionState: .running,
+            executionLedger: selectedLedger
+        )
+        let background = Thread(
+            title: "后台线程",
+            status: .running,
+            steps: [TaskStep(kind: .userInput, text: "处理后台任务")],
+            executionState: .running
+        )
+        let store = AppStore(
+            state: testState(
+                threads: [selected, background],
+                selectedThreadID: selected.id
+            )
+        )
+        store.state.pendingFollowUp = "当前线程的补充"
+
+        store.queueFollowUp("后台线程的补充", for: background.id)
+
+        let updatedSelected = try XCTUnwrap(store.state.threads.first(where: { $0.id == selected.id }))
+        let updatedBackground = try XCTUnwrap(store.state.threads.first(where: { $0.id == background.id }))
+        XCTAssertEqual(store.state.pendingFollowUp, "当前线程的补充")
+        XCTAssertEqual(updatedSelected.executionLedger?.pendingFollowUp, "当前线程的补充")
+        XCTAssertEqual(updatedBackground.executionLedger?.pendingFollowUp, "后台线程的补充")
     }
 
     func testDeletingSelectedThreadClearsPendingFollowUpWhenNextThreadHasNone() {

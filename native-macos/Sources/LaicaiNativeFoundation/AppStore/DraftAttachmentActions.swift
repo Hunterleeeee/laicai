@@ -2,13 +2,15 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
-    public func queueFollowUp(_ message: String) {
+    public func queueFollowUp(_ message: String, for threadID: UUID? = nil) {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let queued = Self.mergedPendingFollowUp(existing: state.pendingFollowUp, incoming: trimmed)
-        state.pendingFollowUp = queued
-        guard let agentID = state.selectedAgentID,
-              let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }) else { return }
+        guard let targetThreadID = threadID ?? state.selectedThreadID else { return }
+        let queued = Self.mergedPendingFollowUp(existing: pendingFollowUp(for: targetThreadID), incoming: trimmed)
+        if targetThreadID == state.selectedThreadID {
+            state.pendingFollowUp = queued
+        }
+        guard let threadIndex = state.threads.firstIndex(where: { $0.id == targetThreadID }) else { return }
         if state.threads[threadIndex].executionLedger == nil {
             state.threads[threadIndex].executionLedger = AgentExecutionLedger(
                 originalRequest: state.threads[threadIndex].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[threadIndex].title,
@@ -38,11 +40,12 @@ extension AppStore {
     }
 
     public func submitFollowUp() {
+        guard let targetThreadID = state.selectedThreadID else { return }
         let draft = state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        let alreadyQueued = state.pendingFollowUp?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let alreadyQueued = pendingFollowUp(for: targetThreadID)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let followUp = draft.isEmpty ? alreadyQueued : draft
         guard !followUp.isEmpty else { return }
-        queueFollowUp(followUp)
+        queueFollowUp(followUp, for: targetThreadID)
         state.draftMessage = ""
         notify("补充指令已排队，会在当前会话 安全点继续处理。", style: .info)
         persistThreads()

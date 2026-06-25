@@ -157,7 +157,7 @@ struct ThreadTimelineView: View {
                     }
 
                     if store.isThreadGenerating(thread.id) {
-                        TypingIndicator()
+                        TypingIndicator(threadID: thread.id)
                     }
 
                     Color.clear
@@ -1518,18 +1518,19 @@ private struct TaskSummaryCard: View {
 
 private struct TypingIndicator: View {
     @EnvironmentObject private var store: AppStore
+    let threadID: UUID
     @State private var phase: Int = 0
     @State private var tick: Int = 0  // drives 1-second refresh
     @State private var pulseTimer: Timer?
     @State private var tickTimer: Timer?
 
     private var activityText: String {
-        let text = store.state.liveActivity
+        let text = store.liveActivity(for: threadID)
         return text.isEmpty ? "正在处理…" : text
     }
 
     private var elapsed: Int {
-        guard let start = store.state.generationStartedAt else { return 0 }
+        guard let start = store.generationStartedAt(for: threadID) else { return 0 }
         _ = tick  // subscribe to tick so label updates every second
         return max(0, Int(Date().timeIntervalSince(start)))
     }
@@ -1555,7 +1556,7 @@ private struct TypingIndicator: View {
                         .foregroundStyle(TextGrade.ghost)
                 }
 
-                if let progress = store.state.estimatedProgress {
+                if let progress = store.estimatedProgress(for: threadID) {
                     Text("\(Int(progress * 100))%")
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Brand.primary)
