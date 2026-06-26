@@ -19,6 +19,7 @@ native-macos/dist/
 native-macos/.bin/
 native-macos/.local-bin/
 outputs/*.dmg
+outputs/apihub-tests/
 
 # IDE
 .idea/

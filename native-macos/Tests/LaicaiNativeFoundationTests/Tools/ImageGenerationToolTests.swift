@@ -26,6 +26,34 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         store.stopGenerating()
     }
 
+    func testSemanticImageRequestSkipsOfflineImageConnectorForAgnesImageFlash() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let chatConnector = makeConnector(name: "GPT", endpoint: "https://duckcu.tech/v1", modelName: "gpt-5.5", note: "chat-key")
+        var offlineImageConnector = makeConnector(name: "旧图片", endpoint: "https://duckcu.tech", modelName: "gpt-image-2", note: "old-image-key")
+        offlineImageConnector.health = .offline
+        let agnesImageConnector = makeConnector(
+            name: "Agnes Image 2.1 Flash",
+            endpoint: "https://apihub.agnes-ai.com/v1",
+            modelName: "agnes-image-2.1-flash",
+            note: "agnes-key"
+        )
+        let store = makeTestStore(
+            workspacePath: workspace.path,
+            defaultConnectorName: "GPT",
+            connectors: [chatConnector, offlineImageConnector, agnesImageConnector],
+            activeConnectorID: chatConnector.id
+        )
+
+        store.updateDraft("生成一张产品封面图")
+        store.sendDraft()
+
+        XCTAssertTrue(store.state.isGenerating)
+        XCTAssertEqual(store.state.selectedThread?.connectorID, agnesImageConnector.id)
+        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.text.contains("正在调用 agnes-image-2.1-flash 生成图片") } == true)
+        store.stopGenerating()
+    }
+
     func testImageRequestRejectsDisposableSmokeWorkspace() {
         let chatConnector = makeConnector(name: "GPT", endpoint: "https://duckcu.tech/v1", modelName: "gpt-5.5")
         let imageConnector = makeConnector(name: "图片", endpoint: "https://duckcu.tech", modelName: "gpt-image-2")
@@ -149,6 +177,43 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         let imagePath = try XCTUnwrap(result.data?["imagePath"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: imagePath))
         XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: imagePath)), pngData)
+    }
+
+    func testAgnesImageConnectorUsesReturnBase64RequestBody() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        var capturedURL: URL?
+        var capturedBody = ""
+        let pngData = Data([0x89, 0x50, 0x4E, 0x47])
+        let responseBody = #"{"data":[{"b64_json":"\#(pngData.base64EncodedString())"}]}"#.data(using: .utf8)!
+        let session = makeStubbedSession { request in
+            capturedURL = request.url
+            capturedBody = request.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let response = HTTPURLResponse(
+                url: request.url ?? URL(string: "https://example.com")!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseBody)
+        }
+        let tool = ComfyUITool(session: session, prefersCurlTransport: false)
+
+        let result = try await tool.execute(
+            argumentsJSON: #"{"prompt":"生成一张产品封面图","width":1024,"height":1024}"#,
+            context: TaskContext(
+                workspaceRoot: workspace.path,
+                imageGenerationEndpoint: "https://apihub.agnes-ai.com/v1",
+                imageGenerationModelName: "agnes-image-2.1-flash",
+                imageGenerationAPIKey: "test-key"
+            )
+        )
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(capturedURL?.absoluteString, "https://apihub.agnes-ai.com/v1/images/generations")
+        XCTAssertTrue(capturedBody.contains(#""model":"agnes-image-2.1-flash""#))
+        XCTAssertTrue(capturedBody.contains(#""return_base64":true"#))
+        XCTAssertFalse(capturedBody.contains(#""response_format""#))
     }
 
     func testImageRequestRetriesOnceWhenConnectionIsLost() async throws {

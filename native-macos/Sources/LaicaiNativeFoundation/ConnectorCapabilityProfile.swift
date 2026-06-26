@@ -148,6 +148,8 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
 
         return model.hasPrefix("gpt-image")
             || model.contains("/gpt-image")
+            || model.hasPrefix("agnes-image")
+            || model.contains("/agnes-image")
             || model.hasPrefix("dall-e")
             || model.contains("/dall-e")
             || model.hasPrefix("imagen")

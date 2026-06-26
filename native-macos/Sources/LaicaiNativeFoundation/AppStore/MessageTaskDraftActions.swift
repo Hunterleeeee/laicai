@@ -433,7 +433,11 @@ extension AppStore {
     }
 
     private static func imageGenerationConnector(from connectors: [ConnectorProfile], activeID: UUID?) -> ConnectorProfile? {
-        let imageConnectors = connectors.filter { ConnectorCapabilityProfile.isImageOnlyModel($0.modelName) }
+        let imageConnectors = connectors.filter {
+            ConnectorCapabilityProfile.isImageOnlyModel($0.modelName)
+                && $0.health != .offline
+        }
+        guard !imageConnectors.isEmpty else { return nil }
         if let activeID, let active = imageConnectors.first(where: { $0.id == activeID }) {
             return active
         }

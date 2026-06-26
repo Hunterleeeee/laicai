@@ -112,6 +112,12 @@ final class ContextConnectorCapabilityTests: LaicaiNativeFoundationTestCase {
         XCTAssertLessThan(localProfile.maxTokensPerTurn, apiProfile.maxTokensPerTurn)
         XCTAssertEqual(localProfile.directOutputLimit, 512)
     }
+
+    func testAgnesImageFlashIsRecognizedAsImageOnlyModel() {
+        XCTAssertTrue(ConnectorCapabilityProfile.isImageOnlyModel("agnes-image-2.1-flash"))
+        XCTAssertFalse(ConnectorCapabilityProfile.isImageOnlyModel("agnes-2.0-flash"))
+    }
+
     func testConnectorCapabilityProfileRespectsDisabledToolCallingPolicy() {
         let connector = ConnectorProfile(
             name: "Local",

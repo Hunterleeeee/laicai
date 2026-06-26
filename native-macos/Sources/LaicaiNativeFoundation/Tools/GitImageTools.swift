@@ -482,7 +482,8 @@ public struct ComfyUITool: LaicaiTool {
         var prompt: String
         var count: Int
         var size: String
-        var responseFormat: String
+        var responseFormat: String?
+        var returnBase64: Bool?
 
         enum CodingKeys: String, CodingKey {
             case model
@@ -490,6 +491,7 @@ public struct ComfyUITool: LaicaiTool {
             case count = "n"
             case size
             case responseFormat = "response_format"
+            case returnBase64 = "return_base64"
         }
     }
 
@@ -569,12 +571,14 @@ public struct ComfyUITool: LaicaiTool {
         if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
+        let usesAgnesImageAPI = Self.usesAgnesImageAPI(modelName: modelName)
         let body = ImagesAPIRequest(
             model: modelName,
             prompt: prompt,
             count: 1,
             size: size,
-            responseFormat: "b64_json"
+            responseFormat: usesAgnesImageAPI ? nil : "b64_json",
+            returnBase64: usesAgnesImageAPI ? true : nil
         )
         request.httpBody = try JSONEncoder().encode(body)
         request.timeoutInterval = NetworkDefaults.imageRequest
@@ -660,6 +664,14 @@ public struct ComfyUITool: LaicaiTool {
     private static func openAIImageSize(width: Int, height: Int) -> String {
         if width == height { return "1024x1024" }
         return width > height ? "1536x1024" : "1024x1536"
+    }
+
+    private static func usesAgnesImageAPI(modelName: String) -> Bool {
+        modelName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+            .hasPrefix("agnes-image")
     }
 
     private func performImagesAPIRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
