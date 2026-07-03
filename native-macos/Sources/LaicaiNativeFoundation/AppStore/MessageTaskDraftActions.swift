@@ -2,6 +2,7 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
+    // swiftlint:disable:next cyclomatic_complexity
     func sendTaskDraft(
         message: String,
         decision: PlannerDecision,
@@ -9,18 +10,19 @@ extension AppStore {
         matchedSkill: SkillMatchResult? = nil
     ) {
         let requestedImageGeneration = RoutingTextHeuristics.requestsImageGeneration(message)
-        let selectedConnector = customAgent?.preferredConnectorID.flatMap { id in
-            state.connectors.first(where: { $0.id == id })
-        } ?? (requestedImageGeneration ? Self.imageGenerationConnector(from: state.connectors, activeID: state.activeConnectorID) : nil)
+        let selectedConnector =
+            customAgent?.preferredConnectorID.flatMap { id in
+                state.connectors.first(where: { $0.id == id })
+            } ?? (requestedImageGeneration ? Self.imageGenerationConnector(from: state.connectors, activeID: state.activeConnectorID) : nil)
             ?? switchFromUnhealthyActiveConnectorIfNeeded()
         guard let connector = selectedConnector else {
             notify("请先选择一个连接器", style: .error)
             return
         }
         if requestedImageGeneration,
-           let imageConnector = ConnectorCapabilityProfile.isImageOnlyModel(connector.modelName)
-            ? connector
-            : Self.imageGenerationConnector(from: state.connectors, activeID: state.activeConnectorID) {
+            let imageConnector = ConnectorCapabilityProfile.isImageOnlyModel(connector.modelName)
+                ? connector
+                : Self.imageGenerationConnector(from: state.connectors, activeID: state.activeConnectorID) {
             let imageDecision = PlannerDecision(
                 intent: .task,
                 confidence: max(decision.confidence, 0.84),
@@ -50,6 +52,7 @@ extension AppStore {
             return
         }
         let intent = decision.intent
+        let isChatIntent = intent == .chat
         let workflowName: String? = { if case .workflow(let name) = intent { return name } else { return nil } }()
 
         let selectedThreadProjectID = projectIDForExistingThreadSelection(allowRunningThread: true)
@@ -62,22 +65,26 @@ extension AppStore {
                     && Thread.isPlaceholderTitle(thread.title)
             }?.id
         }
-        let shouldPromoteSelectedPlaceholder = continuationTargetID == nil
+        let shouldPromoteSelectedPlaceholder =
+            continuationTargetID == nil
             && decision.intent != .chat
             && selectedPlaceholderID != nil
-        let shouldStartBesideRunningProjectThread = continuationTargetID == nil
+        let shouldStartBesideRunningProjectThread =
+            continuationTargetID == nil
             && state.selectedThread?.status == .running
             && selectedThreadProjectID != nil
-        let newThreadProjectID = shouldContinueSelectedThread || shouldPromoteSelectedPlaceholder || shouldStartBesideRunningProjectThread ? selectedThreadProjectID : nil
+        let newThreadProjectID =
+            shouldContinueSelectedThread || shouldPromoteSelectedPlaceholder || shouldStartBesideRunningProjectThread ? selectedThreadProjectID : nil
 
         if decision.intent != .chat && !shouldContinueSelectedThread {
-            let wp = state.settings.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
-            if wp.isEmpty {
+            let workspacePath = state.settings.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+            if workspacePath.isEmpty {
                 notify("请先在设置中指定工作区目录，再执行会话。", style: .error)
                 return
             }
-            if !Self.isRunningTests && (WorkspaceSandbox.isOverlyBroadWorkspace(wp)
-                || WorkspaceSandbox.isDisposableSmokeWorkspace(wp)) {
+            if !Self.isRunningTests
+                && (WorkspaceSandbox.isOverlyBroadWorkspace(workspacePath)
+                    || WorkspaceSandbox.isDisposableSmokeWorkspace(workspacePath)) {
                 notify("工作区不能设为 home、/tmp 或来财测试目录，请指定一个真实项目文件夹。", style: .error)
                 return
             }
@@ -91,7 +98,9 @@ extension AppStore {
             comfyUIServerURL: state.settings.comfyUIServerURL,
             comfyUIModelName: state.settings.comfyUIModelName
         )
-        let imageConnector = ConnectorCapabilityProfile.isImageOnlyModel(connector.modelName)
+        context.metadata["intent"] = Self.intentMetadataValue(intent)
+        let imageConnector =
+            ConnectorCapabilityProfile.isImageOnlyModel(connector.modelName)
             ? connector
             : Self.imageGenerationConnector(from: state.connectors, activeID: state.activeConnectorID)
         if let imageConnector {
@@ -114,8 +123,13 @@ extension AppStore {
         }
 
         if customAgent == nil,
-           MultiAgentOrchestrator.shouldUseMultiAgent(message: message, intent: intent),
-           let plan = MultiAgentOrchestrator.createPlan(for: message, intent: intent, connectors: state.connectors, activeConnectorID: state.activeConnectorID) {
+            MultiAgentOrchestrator.shouldUseMultiAgent(message: message, intent: intent),
+            let plan = MultiAgentOrchestrator.createPlan(
+                for: message,
+                intent: intent,
+                connectors: state.connectors,
+                activeConnectorID: state.activeConnectorID
+            ) {
             createMultiAgentPlanDraft(
                 message: message,
                 context: context,
@@ -128,7 +142,6 @@ extension AppStore {
             return
         }
 
-        let isChatIntent = intent == .chat
         let userStep = TaskStep(kind: .userInput, text: message, isCollapsible: false, isCollapsed: false)
         let initialSteps: [TaskStep]
         if isChatIntent {
@@ -156,13 +169,13 @@ extension AppStore {
 
         let targetTaskID: UUID
         let loopPriorSteps: [TaskStep]
-        var shouldRemoveEmptyPlaceholdersAfterContinuation = false
+        var shouldRemovePlaceholdersAfterResume = false
         if let selectedID = continuationTargetID,
-           let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }),
-           state.threads[threadIndex].status != .running,
-           shouldContinueSelectedThread {
+            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }),
+            state.threads[threadIndex].status != .running,
+            shouldContinueSelectedThread {
             let isEmptyPlaceholder = state.threads[threadIndex].steps.isEmpty
-            shouldRemoveEmptyPlaceholdersAfterContinuation = true
+            shouldRemovePlaceholdersAfterResume = true
             if !isEmptyPlaceholder {
                 if !state.threads[threadIndex].context.memory.isEmpty {
                     context.memory = state.threads[threadIndex].context.memory
@@ -182,8 +195,13 @@ extension AppStore {
                 goal: Self.goal(for: state.threads[threadIndex], incomingMessage: message, isContinuation: !isEmptyPlaceholder),
                 plan: Self.agentPlanLines(for: decision, message: message)
             )
+            if isChatIntent {
+                state.threads[threadIndex].taskProtocol = nil
+                state.threads[threadIndex].executionLedger = nil
+            }
             let plan = state.threads[threadIndex].currentPlan
-            if state.threads[threadIndex].taskProtocol == nil || state.threads[threadIndex].taskProtocol?.threadID != selectedID {
+            if !isChatIntent,
+                state.threads[threadIndex].taskProtocol == nil || state.threads[threadIndex].taskProtocol?.threadID != selectedID {
                 state.threads[threadIndex].taskProtocol = Self.makeTaskProtocol(
                     threadID: selectedID,
                     message: state.threads[threadIndex].goal ?? message,
@@ -191,7 +209,7 @@ extension AppStore {
                     decision: decision
                 )
             }
-            if state.threads[threadIndex].executionLedger == nil {
+            if !isChatIntent, state.threads[threadIndex].executionLedger == nil {
                 state.threads[threadIndex].executionLedger = Self.makeExecutionLedger(
                     threadID: selectedID,
                     message: state.threads[threadIndex].goal ?? message,
@@ -212,7 +230,8 @@ extension AppStore {
                 state.threads[threadIndex].steps.append(step)
             }
             let allSteps = state.threads[threadIndex].steps
-            let isHeavyThread = allSteps.count > 40
+            let isHeavyThread =
+                allSteps.count > 40
                 || allSteps.reduce(0) { $0 + $1.text.count } > 40_000
             let isLightweightFollowUp = Self.isLightweightStatusQuery(message)
             if isHeavyThread && isLightweightFollowUp {
@@ -224,22 +243,28 @@ extension AppStore {
             state.threads[threadIndex].updatedAt = .now
             targetTaskID = selectedID
         } else if shouldPromoteSelectedPlaceholder,
-                  let selectedID = selectedPlaceholderID,
-                  let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }) {
+            let selectedID = selectedPlaceholderID,
+            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }) {
             let plan = Self.agentPlanLines(for: decision, message: message)
-            let taskProtocol = Self.makeTaskProtocol(
-                threadID: selectedID,
-                message: message,
-                context: context,
-                decision: decision
-            )
-            let ledger = Self.makeExecutionLedger(
-                threadID: selectedID,
-                message: message,
-                context: context,
-                decision: decision,
-                plan: plan
-            )
+            let taskProtocol =
+                isChatIntent
+                ? nil
+                : Self.makeTaskProtocol(
+                    threadID: selectedID,
+                    message: message,
+                    context: context,
+                    decision: decision
+                )
+            let ledger =
+                isChatIntent
+                ? nil
+                : Self.makeExecutionLedger(
+                    threadID: selectedID,
+                    message: message,
+                    context: context,
+                    decision: decision,
+                    plan: plan
+                )
             state.threads[threadIndex].title = String(message.prefix(32))
             state.threads[threadIndex].status = .running
             state.threads[threadIndex].steps = initialSteps
@@ -258,19 +283,25 @@ extension AppStore {
         } else {
             let newThreadID = UUID()
             let plan = Self.agentPlanLines(for: decision, message: message)
-            let taskProtocol = Self.makeTaskProtocol(
-                threadID: newThreadID,
-                message: message,
-                context: context,
-                decision: decision
-            )
-            let ledger = Self.makeExecutionLedger(
-                threadID: newThreadID,
-                message: message,
-                context: context,
-                decision: decision,
-                plan: plan
-            )
+            let taskProtocol =
+                isChatIntent
+                ? nil
+                : Self.makeTaskProtocol(
+                    threadID: newThreadID,
+                    message: message,
+                    context: context,
+                    decision: decision
+                )
+            let ledger =
+                isChatIntent
+                ? nil
+                : Self.makeExecutionLedger(
+                    threadID: newThreadID,
+                    message: message,
+                    context: context,
+                    decision: decision,
+                    plan: plan
+                )
             let thread = Thread(
                 id: newThreadID,
                 title: String(message.prefix(32)),
@@ -290,7 +321,7 @@ extension AppStore {
             targetTaskID = thread.id
             loopPriorSteps = thread.steps
         }
-        if shouldRemoveEmptyPlaceholdersAfterContinuation {
+        if shouldRemovePlaceholdersAfterResume {
             state.threads.removeAll { thread in
                 thread.id != targetTaskID
                     && thread.steps.isEmpty
@@ -334,17 +365,28 @@ extension AppStore {
         let attemptedToolCalling = loopConfig.supportsToolCalling
 
         if !isChatIntent, let threadIdx = state.threads.firstIndex(where: { $0.id == targetTaskID }) {
-            let intentStr: String = { switch intent { case .chat: return "chat"; case .research: return "research"; case .task: return "task"; case .workflow(let n): return "workflow:\(n)" } }()
+            let intentStr: String = {
+                switch intent {
+                case .chat:
+                    return "chat"
+                case .research:
+                    return "research"
+                case .task:
+                    return "task"
+                case .workflow(let workflowName):
+                    return "workflow:\(workflowName)"
+                }
+            }()
             let avgIter = TaskOutcomeRecorder.shared.avgIterations(intent: intentStr) ?? Double(loopConfig.maxIterations)
             state.threads[threadIdx].context.metadata["expectedIterations"] = "\(Int(ceil(avgIter)))"
             if let taskProtocol = state.threads[threadIdx].taskProtocol,
-               let data = try? JSONEncoder().encode(taskProtocol),
-               let json = String(data: data, encoding: .utf8) {
+                let data = try? JSONEncoder().encode(taskProtocol),
+                let json = String(data: data, encoding: .utf8) {
                 state.threads[threadIdx].context.metadata["taskProtocolJSON"] = json
             }
             if let ledger = state.threads[threadIdx].executionLedger,
-               let data = try? JSONEncoder().encode(ledger),
-               let json = String(data: data, encoding: .utf8) {
+                let data = try? JSONEncoder().encode(ledger),
+                let json = String(data: data, encoding: .utf8) {
                 state.threads[threadIdx].context.metadata["executionLedgerJSON"] = json
             }
             context = state.threads[threadIdx].context
@@ -380,7 +422,8 @@ extension AppStore {
                     },
                     onCheckInterrupt: { [weak self] in
                         guard let self,
-                              self.shouldAcceptGenerationCallback(for: targetTaskID, runID: generationRunID) else { return nil }
+                            self.shouldAcceptGenerationCallback(for: targetTaskID, runID: generationRunID)
+                        else { return nil }
                         return self.consumePendingFollowUp(for: targetTaskID)
                     }
                 )
@@ -406,7 +449,8 @@ extension AppStore {
                 if let threadIndex = self.state.threads.firstIndex(where: { $0.id == targetTaskID }) {
                     let steps = self.state.threads[threadIndex].steps
                     let progressSummary = Self.errorProgressSummary(steps: steps)
-                    let errorText = progressSummary.isEmpty
+                    let errorText =
+                        progressSummary.isEmpty
                         ? error.localizedDescription
                         : "\(error.localizedDescription)\n\n已完成：\(progressSummary)"
                     self.state.threads[threadIndex].steps.append(
@@ -448,20 +492,24 @@ extension AppStore {
 
     func projectIDForExistingThreadSelection(allowRunningThread: Bool = false) -> UUID? {
         guard let selectedID = state.selectedThreadID,
-              let thread = state.threads.first(where: { $0.id == selectedID }) else { return nil }
+            let thread = state.threads.first(where: { $0.id == selectedID })
+        else { return nil }
         if thread.status == .running && !allowRunningThread { return nil }
         return thread.projectID
     }
 
     func shouldContinueCurrentSelectedThread(message: String, intent: UserIntent) -> Bool {
         guard let selectedID = state.selectedThreadID,
-              let thread = state.threads.first(where: { $0.id == selectedID }) else { return false }
+            let thread = state.threads.first(where: { $0.id == selectedID })
+        else { return false }
         if thread.status == .running && isThreadGenerating(selectedID) { return false }
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !thread.steps.isEmpty else {
             return !Self.canRecoverRecentThread(for: trimmed, intent: intent)
         }
-        let selectedSourceIsExecution = thread.isExecution || thread.steps.contains { $0.kind == .toolCall }
+        let selectedSourceIsExecution =
+            !Self.isPureChatLikeThread(thread)
+            && (thread.isExecution || thread.steps.contains { $0.kind == .toolCall })
         if !selectedSourceIsExecution {
             if intent == .chat {
                 if Self.isContinuationCommand(trimmed) || Self.isContextualFollowUp(trimmed, thread: thread) {
@@ -597,13 +645,13 @@ extension AppStore {
     static func goal(for thread: Thread, incomingMessage: String, isContinuation: Bool) -> String {
         let trimmed = incomingMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         if isContinuation,
-           let existing = thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !existing.isEmpty {
+            let existing = thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !existing.isEmpty {
             return existing
         }
         if isContinuation,
-           let firstUser = thread.steps.first(where: { $0.kind == .userInput })?.text.trimmingCharacters(in: .whitespacesAndNewlines),
-           !firstUser.isEmpty {
+            let firstUser = thread.steps.first(where: { $0.kind == .userInput })?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+            !firstUser.isEmpty {
             return firstUser
         }
         return trimmed
@@ -625,5 +673,14 @@ extension AppStore {
             lines.append("运行工作流：\(name)")
         }
         return lines
+    }
+
+    static func intentMetadataValue(_ intent: UserIntent) -> String {
+        switch intent {
+        case .chat: return "chat"
+        case .research: return "research"
+        case .task: return "task"
+        case .workflow(let name): return "workflow:\(name)"
+        }
     }
 }

@@ -26,9 +26,9 @@ struct WorkbenchView: View {
     // MARK: - Header
 
     private var drawerHeader: some View {
-        HStack(alignment: .center, spacing: AppSpace.sm) {
+        HStack(alignment: .center, spacing: AppSpace.small) {
             ZStack {
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .fill(activeHeaderTint.opacity(0.12))
                     .frame(width: 30, height: 30)
                 Image(systemName: activeHeaderIcon)
@@ -84,17 +84,17 @@ struct WorkbenchView: View {
             .menuIndicator(.hidden)
             .help("更多面板")
         }
-        .padding(.horizontal, AppSpace.md)
-        .padding(.top, AppSpace.sm)
-        .padding(.bottom, AppSpace.sm)
+        .padding(.horizontal, AppSpace.medium)
+        .padding(.top, AppSpace.small)
+        .padding(.bottom, AppSpace.small)
         .overlay(alignment: .bottom) {
             Rectangle().fill(SurfaceGrade.divider.opacity(0.58)).frame(height: 0.5)
         }
     }
 
     private var primarySwitch: some View {
-        VStack(spacing: AppSpace.xs) {
-            HStack(spacing: AppSpace.xs) {
+        VStack(spacing: AppSpace.extraSmall) {
+            HStack(spacing: AppSpace.extraSmall) {
                 ForEach(primaryItems) { item in
                     WorkbenchSegmentButton(
                         title: item.shortTitle,
@@ -106,18 +106,18 @@ struct WorkbenchView: View {
                 }
             }
         }
-        .padding(AppSpace.xs)
+        .padding(AppSpace.extraSmall)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.72))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline, lineWidth: 0.6)
         )
-        .padding(.horizontal, AppSpace.md)
-        .padding(.top, AppSpace.xs)
-        .padding(.bottom, AppSpace.xs)
+        .padding(.horizontal, AppSpace.medium)
+        .padding(.top, AppSpace.extraSmall)
+        .padding(.bottom, AppSpace.extraSmall)
     }
 
     private var activeTitle: String {
@@ -171,7 +171,7 @@ struct WorkbenchView: View {
     @ViewBuilder
     private var panelContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AppSpace.md) {
+            VStack(alignment: .leading, spacing: AppSpace.medium) {
                 switch store.state.workbenchTab {
                 case .tools: ActivityPanel()
                 case .context: ConnectorsPanel()
@@ -185,8 +185,8 @@ struct WorkbenchView: View {
                 case .logs: DiagnosticsPanel()
                 }
             }
-            .padding(.horizontal, AppSpace.md)
-            .padding(.vertical, AppSpace.sm)
+            .padding(.horizontal, AppSpace.medium)
+            .padding(.vertical, AppSpace.small)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollIndicators(.hidden)
@@ -265,7 +265,7 @@ private struct WorkbenchSegmentButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 Image(systemName: icon)
                     .font(.system(size: 10, weight: .semibold))
                 Text(title)
@@ -276,11 +276,11 @@ private struct WorkbenchSegmentButton: View {
             .frame(maxWidth: .infinity)
             .frame(height: 28)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                     .fill(isSelected ? SurfaceGrade.selected : (isHovering ? SurfaceGrade.hover : Color.clear))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                     .strokeBorder(isSelected ? SurfaceGrade.hairline : Color.clear, lineWidth: 0.6)
             )
         }
@@ -313,19 +313,19 @@ struct InspectorTabButton: View {
             .foregroundStyle(isSelected ? Brand.primaryDark : (isHovering ? TextGrade.secondary : TextGrade.muted))
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: 30)
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                     .fill(isSelected ? Brand.primary.opacity(0.13) : (isHovering ? SurfaceGrade.hover : Color.clear))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                     .strokeBorder(isSelected ? Brand.primary.opacity(0.24) : SurfaceGrade.hairline.opacity(0.0), lineWidth: 0.6)
             )
         }
         .buttonStyle(.plain)
         .help(item.title)
-        .onHover { h in withAnimation(AppAnimation.quick) { isHovering = h } }
+        .onHover { hovering in withAnimation(AppAnimation.quick) { isHovering = hovering } }
     }
 
     private func shortBadge(_ count: Int) -> String {

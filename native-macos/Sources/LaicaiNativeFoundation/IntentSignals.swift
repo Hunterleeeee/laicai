@@ -6,18 +6,18 @@ struct IntentSignals {
 
     /// Strip negated phrases so "不用说建议" doesn't match "建议"
     private var effectiveInput: String {
-        var s = input
+        var normalizedInput = input
         let negationPrefixes = ["不用说", "不用给", "不要说", "不要给", "不需要", "别给我", "别说", "不用", "不要", "别"]
         for prefix in negationPrefixes {
             // Remove "不用说建议" → removes the whole negated phrase
-            if let range = s.range(of: prefix) {
-                let after = s[range.upperBound...]
+            if let range = normalizedInput.range(of: prefix) {
+                let after = normalizedInput[range.upperBound...]
                 // Remove up to 4 chars after the negation prefix (the negated keyword)
                 let charsToRemove = min(4, after.count)
-                s.removeSubrange(range.lowerBound..<s.index(range.upperBound, offsetBy: charsToRemove))
+                normalizedInput.removeSubrange(range.lowerBound..<normalizedInput.index(range.upperBound, offsetBy: charsToRemove))
             }
         }
-        return s
+        return normalizedInput
     }
 
     private var isDirectQuestion: Bool {
@@ -50,11 +50,12 @@ struct IntentSignals {
 
     var isCreativePromptChat: Bool {
         guard !containsLocalPath,
-              !referencesOfficeDocument,
-              !containsExplicitURLAction,
-              !requestsShellExecution,
-              !requestsLocalIO,
-              !requestsMutation else { return false }
+            !referencesOfficeDocument,
+            !containsExplicitURLAction,
+            !requestsShellExecution,
+            !requestsLocalIO,
+            !requestsMutation
+        else { return false }
 
         let promptMarkers = ["prompt", "提示词", "描述词", "描述prompt", "怎么描述", "描述一下", "梳理一下", "帮我梳理", "润色"]
         let creativeTargets = ["gemini", "歌曲", "写歌", "作一首歌", "作歌", "音乐", "歌词", "mv", "视频", "短片", "画面", "风格", "电影感", "古风", "电子"]
@@ -65,7 +66,8 @@ struct IntentSignals {
 
         let styleWords = ["古风", "电子", "电影感", "男生", "女生", "故事", "伤感", "治愈", "热血", "赛博", "国风", "摇滚", "民谣"]
         let separators = [",", "，", "、", " "]
-        let looksLikeStyleList = separators.contains(where: { input.contains($0) })
+        let looksLikeStyleList =
+            separators.contains(where: { input.contains($0) })
             && styleWords.filter { input.contains($0) }.count >= 2
             && input.count <= 80
         return looksLikeStyleList
@@ -152,7 +154,8 @@ struct IntentSignals {
     }
 
     var shouldInspectBeforeActing: Bool {
-        let contextualInspection = hasInspectableLocalContext
+        let contextualInspection =
+            hasInspectableLocalContext
             && (requestsDiagnosis || requestsAdvice || requestsEvaluation || requestsSummary || requestsPlanOnly || reportsInspectableProblem)
         return requestsLocalIO || contextualInspection
     }
@@ -167,16 +170,17 @@ struct IntentSignals {
 
     var isPersonalDeviceHowToQuestion: Bool {
         guard isQuestion,
-              !containsURL,
-              !containsLocalPath,
-              !referencesOfficeDocument,
-              !codeOrProjectContext,
-              !requestsWikiPersistence,
-              !requestsImageGeneration,
-              !requestsWebResearch,
-              !requestsFreshInformation,
-              !requestsModelCurrentInfo,
-              !requestsPMDocument else {
+            !containsURL,
+            !containsLocalPath,
+            !referencesOfficeDocument,
+            !codeOrProjectContext,
+            !requestsWikiPersistence,
+            !requestsImageGeneration,
+            !requestsWebResearch,
+            !requestsFreshInformation,
+            !requestsModelCurrentInfo,
+            !requestsPMDocument
+        else {
             return false
         }
         let deviceMarkers = [
@@ -232,7 +236,8 @@ struct IntentSignals {
         // "搜索" alone is too broad — "你搜索到的" refers to past results, not a web search request.
         // Only count "搜索" if it's NOT preceded by backward-referencing context.
         let hasSearchMarker = markers.contains { input.contains($0) }
-        let hasPlainSearch = input.contains("搜索")
+        let hasPlainSearch =
+            input.contains("搜索")
             && !["搜索到的", "搜索结果", "你搜索", "已搜索", "刚搜索"].contains(where: { input.contains($0) })
         return hasSearchMarker || hasPlainSearch
     }
@@ -249,16 +254,20 @@ struct IntentSignals {
 
     private var requestsLocalIO: Bool {
         if containsLocalPath || referencesOfficeDocument { return true }
-        return ["读取", "读一下", "打开文件", "看这个文件", "这个路径", "这些路径", "搜索", "搜索项目", "搜索代码", "查找文件", "当前项目", "工作区",
-         "看看项目", "看下项目", "看一下项目", "看看代码", "看下代码", "查看项目", "查看代码",
-         "检查项目", "检查代码", "分析项目", "分析代码", "找到", "找一下", "定位"].contains {
+        return [
+            "读取", "读一下", "打开文件", "看这个文件", "这个路径", "这些路径", "搜索", "搜索项目", "搜索代码", "查找文件", "当前项目", "工作区",
+            "看看项目", "看下项目", "看一下项目", "看看代码", "看下代码", "查看项目", "查看代码",
+            "检查项目", "检查代码", "分析项目", "分析代码", "找到", "找一下", "定位"
+        ].contains {
             input.contains($0)
         }
     }
 
     private var requestsDiagnosis: Bool {
-        ["诊断", "排查", "分析一下", "看下原因", "为什么", "哪里出问题", "问题在哪", "哪里不好", "不对劲", "不好用", "难用", "卡住",
-         "卡顿", "卡死", "很卡", "各种卡", "慢", "很慢", "延迟", "掉帧", "性能"].contains {
+        [
+            "诊断", "排查", "分析一下", "看下原因", "为什么", "哪里出问题", "问题在哪", "哪里不好", "不对劲", "不好用", "难用", "卡住",
+            "卡顿", "卡死", "很卡", "各种卡", "慢", "很慢", "延迟", "掉帧", "性能"
+        ].contains {
             input.contains($0)
         }
     }
@@ -311,10 +320,12 @@ struct IntentSignals {
     }
 
     private var requestsShellExecution: Bool {
-        ["运行", "执行命令", "跑测试", "构建", "部署", "启动服务",
-         "安装", "卸载", "升级", "更新", "下载", "编译", "打包", "发布",
-         "npm install", "pip install", "brew install", "cargo install", "apt install", "yarn add", "pnpm add",
-         "make", "cmake", "build", "run", "setup"].contains { input.contains($0) }
+        [
+            "运行", "执行命令", "跑测试", "构建", "部署", "启动服务",
+            "安装", "卸载", "升级", "更新", "下载", "编译", "打包", "发布",
+            "npm install", "pip install", "brew install", "cargo install", "apt install", "yarn add", "pnpm add",
+            "make", "cmake", "build", "run", "setup"
+        ].contains { input.contains($0) }
     }
 
     private var requestsMutation: Bool {
@@ -359,14 +370,16 @@ struct IntentSignals {
     }
 
     private var requestsPMDocument: Bool {
-        let pmMarkers = ["prd", "PRD", "需求文档", "产品需求", "用户故事", "user story", "user stories",
-                         "竞品分析", "竞品调研", "competitive analysis", "实验设计", "a/b test", "ab test",
-                         "okr", "OKR", "复盘", "retrospective", "用户画像", "persona",
-                         "上线清单", "launch checklist", "发版说明", "release notes",
-                         "jtbd", "JTBD", "验收标准", "acceptance criteria",
-                         "边界用例", "edge case", "方案简述", "solution brief",
-                         "架构决策", "adr", "ADR", "问题定义", "problem statement",
-                         "假设验证", "hypothesis", "干系人汇报"]
+        let pmMarkers = [
+            "prd", "PRD", "需求文档", "产品需求", "用户故事", "user story", "user stories",
+            "竞品分析", "竞品调研", "competitive analysis", "实验设计", "a/b test", "ab test",
+            "okr", "OKR", "复盘", "retrospective", "用户画像", "persona",
+            "上线清单", "launch checklist", "发版说明", "release notes",
+            "jtbd", "JTBD", "验收标准", "acceptance criteria",
+            "边界用例", "edge case", "方案简述", "solution brief",
+            "架构决策", "adr", "ADR", "问题定义", "problem statement",
+            "假设验证", "hypothesis", "干系人汇报"
+        ]
         return pmMarkers.contains { input.localizedCaseInsensitiveContains($0) }
     }
 
@@ -504,12 +517,15 @@ struct IntentSignals {
         var capabilities: [String] = []
         if requestsImageGeneration { capabilities.append("生成图片") }
         if requestsFreshInformation || requestsWebResearch || requestsModelCurrentInfo || containsURL { capabilities.append("联网检索") }
-        let contextualInspection = hasInspectableLocalContext
+        let contextualInspection =
+            hasInspectableLocalContext
             && (requestsDiagnosis || requestsAdvice || requestsEvaluation || requestsSummary || requestsPlanOnly || reportsInspectableProblem)
         if requestsLocalIO || contextualInspection { capabilities.append("读取工作区") }
         if requestsShellExecution { capabilities.append("运行命令") }
         if requestsWikiPersistence { capabilities.append("写入知识库") }
-        if requestsMutation || (!prefersAnalysisOnly && hasInspectableLocalContext && (requestsDiagnosis || requestsAdvice || reportsInspectableProblem)) { capabilities.append("提出文件修改") }
+        if requestsMutation || (!prefersAnalysisOnly && hasInspectableLocalContext && (requestsDiagnosis || requestsAdvice || reportsInspectableProblem)) {
+            capabilities.append("提出文件修改")
+        }
         if requestedDeliverable || requestsWikiPersistence { capabilities.append("整理交付") }
         if !prefersAnalysisOnly, !capabilities.contains("形成可验证结果") { capabilities.append("形成可验证结果") }
         return capabilities.isEmpty ? ["规划", "执行", "总结"] : capabilities

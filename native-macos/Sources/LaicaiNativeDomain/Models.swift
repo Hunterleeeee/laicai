@@ -930,38 +930,41 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
         case id, title, preview, status, steps, connectorID, workflowName, context
         case modelName, category, isPinned, isArchived, unreadCount, summaryCache
         case multiAgentPlan, userRating, createdAt, updatedAt, projectID
-        case executionState = "agentState", goal = "agentGoal", currentPlan, artifacts
+        case executionState = "agentState"
+        case goal = "agentGoal"
+        case currentPlan, artifacts
         case taskProtocol, executionLedger
     }
 
     public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        title = try c.decodeIfPresent(String.self, forKey: .title) ?? "新会话"
-        preview = try c.decodeIfPresent(String.self, forKey: .preview) ?? ""
-        status = try c.decodeIfPresent(TaskStatus.self, forKey: .status) ?? .completed
-        steps = try c.decodeIfPresent([TaskStep].self, forKey: .steps) ?? []
-        connectorID = try c.decodeIfPresent(UUID.self, forKey: .connectorID)
-        workflowName = try c.decodeIfPresent(String.self, forKey: .workflowName)
-        context = try c.decodeIfPresent(TaskContext.self, forKey: .context) ?? TaskContext()
-        modelName = try c.decodeIfPresent(String.self, forKey: .modelName) ?? ""
-        category = try c.decodeIfPresent(SessionCategory.self, forKey: .category) ?? .engineering
-        isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
-        isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
-        unreadCount = try c.decodeIfPresent(Int.self, forKey: .unreadCount) ?? 0
-        summaryCache = try c.decodeIfPresent(String.self, forKey: .summaryCache)
-        multiAgentPlan = try c.decodeIfPresent(MultiAgentPlan.self, forKey: .multiAgentPlan)
-        userRating = try c.decodeIfPresent(Int.self, forKey: .userRating) ?? 0
-        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
-        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? updatedAt
-        projectID = try c.decodeIfPresent(UUID.self, forKey: .projectID)
-        executionState = try c.decodeIfPresent(AgentThreadState.self, forKey: .executionState)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? "新会话"
+        preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
+        status = try container.decodeIfPresent(TaskStatus.self, forKey: .status) ?? .completed
+        steps = try container.decodeIfPresent([TaskStep].self, forKey: .steps) ?? []
+        connectorID = try container.decodeIfPresent(UUID.self, forKey: .connectorID)
+        workflowName = try container.decodeIfPresent(String.self, forKey: .workflowName)
+        context = try container.decodeIfPresent(TaskContext.self, forKey: .context) ?? TaskContext()
+        modelName = try container.decodeIfPresent(String.self, forKey: .modelName) ?? ""
+        category = try container.decodeIfPresent(SessionCategory.self, forKey: .category) ?? .engineering
+        isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        unreadCount = try container.decodeIfPresent(Int.self, forKey: .unreadCount) ?? 0
+        summaryCache = try container.decodeIfPresent(String.self, forKey: .summaryCache)
+        multiAgentPlan = try container.decodeIfPresent(MultiAgentPlan.self, forKey: .multiAgentPlan)
+        userRating = try container.decodeIfPresent(Int.self, forKey: .userRating) ?? 0
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? updatedAt
+        projectID = try container.decodeIfPresent(UUID.self, forKey: .projectID)
+        executionState =
+            try container.decodeIfPresent(AgentThreadState.self, forKey: .executionState)
             ?? Self.inferAgentState(status: status)
-        goal = try c.decodeIfPresent(String.self, forKey: .goal)
-        currentPlan = try c.decodeIfPresent([String].self, forKey: .currentPlan) ?? []
-        artifacts = try c.decodeIfPresent([AgentArtifact].self, forKey: .artifacts) ?? []
-        taskProtocol = try c.decodeIfPresent(AgentTaskProtocol.self, forKey: .taskProtocol)
-        executionLedger = try c.decodeIfPresent(AgentExecutionLedger.self, forKey: .executionLedger)
+        goal = try container.decodeIfPresent(String.self, forKey: .goal)
+        currentPlan = try container.decodeIfPresent([String].self, forKey: .currentPlan) ?? []
+        artifacts = try container.decodeIfPresent([AgentArtifact].self, forKey: .artifacts) ?? []
+        taskProtocol = try container.decodeIfPresent(AgentTaskProtocol.self, forKey: .taskProtocol)
+        executionLedger = try container.decodeIfPresent(AgentExecutionLedger.self, forKey: .executionLedger)
     }
 
     /// Short human-readable ID (first 6 hex chars of UUID, uppercased)
@@ -1074,7 +1077,9 @@ public struct Thread: Identifiable, Equatable, Codable, Sendable {
                 || step.kind == .toolResult
                 || step.kind == .reviewRequest
                 || step.kind == .reviewResult
-        }) { return .act }
+        }) {
+            return .act
+        }
         if context.metadata["intent"] == "research" { return .research }
         return .ask
     }
@@ -1166,16 +1171,18 @@ public struct ThreadRecord: Identifiable, Equatable, Codable, Sendable {
         executionLedger = includeEvents ? thread.executionLedger : nil
         isArchived = thread.isArchived
         hasContent = !thread.steps.isEmpty
-        events = includeEvents ? thread.steps.map { step in
-            ThreadEvent(
-                id: step.id,
-                kind: Self.eventKind(for: step.kind, isFailure: step.isFailure),
-                text: step.text,
-                createdAt: step.createdAt,
-                sourceStepID: step.id,
-                metrics: step.metrics
-            )
-        } : []
+        events =
+            includeEvents
+            ? thread.steps.map { step in
+                ThreadEvent(
+                    id: step.id,
+                    kind: Self.eventKind(for: step.kind, isFailure: step.isFailure),
+                    text: step.text,
+                    createdAt: step.createdAt,
+                    sourceStepID: step.id,
+                    metrics: step.metrics
+                )
+            } : []
     }
 
     private static func eventKind(for stepKind: TaskStepKind, isFailure: Bool) -> ThreadEventKind {
@@ -1228,16 +1235,18 @@ public struct AgentRecord: Identifiable, Equatable, Codable, Sendable {
         projectID = thread.projectID
         taskProtocol = includeEvents ? thread.taskProtocol : nil
         executionLedger = includeEvents ? thread.executionLedger : nil
-        events = includeEvents ? thread.steps.map { step in
-            ThreadEvent(
-                id: step.id,
-                kind: Self.eventKind(for: step.kind, isFailure: step.isFailure),
-                text: step.text,
-                createdAt: step.createdAt,
-                sourceStepID: step.id,
-                metrics: step.metrics
-            )
-        } : []
+        events =
+            includeEvents
+            ? thread.steps.map { step in
+                ThreadEvent(
+                    id: step.id,
+                    kind: Self.eventKind(for: step.kind, isFailure: step.isFailure),
+                    text: step.text,
+                    createdAt: step.createdAt,
+                    sourceStepID: step.id,
+                    metrics: step.metrics
+                )
+            } : []
     }
 
     public var threadRecord: ThreadRecord {
@@ -1589,11 +1598,17 @@ extension LaicaiTool {
     public func execute(params: [String: String], context: TaskContext) async throws -> ToolResult {
         var dict: [String: Any] = [:]
         for (key, value) in params {
-            if let intVal = Int(value) { dict[key] = intVal }
-            else if let doubleVal = Double(value) { dict[key] = doubleVal }
-            else if value == "true" { dict[key] = true }
-            else if value == "false" { dict[key] = false }
-            else { dict[key] = value }
+            if let intVal = Int(value) {
+                dict[key] = intVal
+            } else if let doubleVal = Double(value) {
+                dict[key] = doubleVal
+            } else if value == "true" {
+                dict[key] = true
+            } else if value == "false" {
+                dict[key] = false
+            } else {
+                dict[key] = value
+            }
         }
         let jsonData = try JSONSerialization.data(withJSONObject: dict)
         let jsonStr = String(data: jsonData, encoding: .utf8) ?? "{}"
@@ -1605,7 +1620,7 @@ extension LaicaiTool {
 
 public enum UserIntent: Sendable, Equatable {
     case chat
-    case research   // Information retrieval: needs web search/fetch, not file mutation
+    case research  // Information retrieval: needs web search/fetch, not file mutation
     case task
     case workflow(String)
 }
@@ -1641,16 +1656,16 @@ public enum TaskPhase: String, Sendable, Equatable, CaseIterable {
     /// Restricting tools per phase was causing the agent to be unable to search,
     /// fetch web pages, or run commands when it needed to.
     public var allowedTools: Set<String> {
-            return [
-                "file.read", "file.write", "file.edit", "diff.apply",
-                "file.extract", "document.transform",
-                "code.search", "workspace.index",
-                "shell.exec", "verify.build",
-                "web.search", "web.fetch",
-                "browser", "browser.real", "computer",
-                "wiki.build", "image.generate",
-                "skill.manage", "git"
-            ]
+        return [
+            "file.read", "file.write", "file.edit", "diff.apply",
+            "file.extract", "document.transform",
+            "code.search", "workspace.index",
+            "shell.exec", "verify.build",
+            "web.search", "web.fetch",
+            "browser", "browser.real", "computer",
+            "wiki.build", "image.generate",
+            "skill.manage", "git"
+        ]
     }
 }
 
@@ -1697,11 +1712,17 @@ public enum AgentRole: String, Codable, Sendable, CaseIterable, Identifiable {
                 "browser", "browser.real", "computer"
             ]
         case .reviewer:
-            return ["file.read", "file.extract", "document.transform", "code.search", "workspace.index", "shell.exec", "verify.build", "git", "browser", "browser.real", "computer"]
+            return [
+                "file.read", "file.extract", "document.transform", "code.search", "workspace.index", "shell.exec", "verify.build", "git", "browser",
+                "browser.real", "computer"
+            ]
         case .researcher:
             return ["file.read", "file.extract", "document.transform", "code.search", "web.search", "web.fetch", "workspace.index", "browser"]
         case .tester:
-            return ["file.read", "file.extract", "document.transform", "code.search", "workspace.index", "shell.exec", "verify.build", "skill.manage", "git", "browser", "browser.real", "computer"]
+            return [
+                "file.read", "file.extract", "document.transform", "code.search", "workspace.index", "shell.exec", "verify.build", "skill.manage", "git",
+                "browser", "browser.real", "computer"
+            ]
         }
     }
 
@@ -1848,10 +1869,10 @@ public struct MultiAgentPlan: Identifiable, Equatable, Codable, Sendable {
     public func readyAgents(excluding running: Set<UUID> = []) -> [AgentNode] {
         agents.filter { node in
             node.isReady
-            && !running.contains(node.id)
-            && node.dependsOn.allSatisfy { depID in
-                agents.first(where: { $0.id == depID })?.status == .completed
-            }
+                && !running.contains(node.id)
+                && node.dependsOn.allSatisfy { depID in
+                    agents.first(where: { $0.id == depID })?.status == .completed
+                }
         }
     }
 
@@ -1866,33 +1887,33 @@ public struct MultiAgentPlan: Identifiable, Equatable, Codable, Sendable {
 
     public mutating func removeAgent(_ agentID: UUID) {
         agents.removeAll { $0.id == agentID }
-        for i in agents.indices {
-            agents[i].dependsOn.removeAll { $0 == agentID }
+        for index in agents.indices {
+            agents[index].dependsOn.removeAll { $0 == agentID }
         }
         handoffs.removeAll { $0.fromAgentID == agentID || $0.toAgentID == agentID }
     }
 
-    public mutating func moveAgent(from: Int, to: Int) {
-        guard agents.indices.contains(from), agents.indices.contains(to), from != to else { return }
-        let agent = agents.remove(at: from)
-        agents.insert(agent, at: to)
+    public mutating func moveAgent(from sourceIndex: Int, to targetIndex: Int) {
+        guard agents.indices.contains(sourceIndex), agents.indices.contains(targetIndex), sourceIndex != targetIndex else { return }
+        let agent = agents.remove(at: sourceIndex)
+        agents.insert(agent, at: targetIndex)
         rebuildLinearDependencies()
         rebuildHandoffs()
     }
 
     public mutating func rebuildLinearDependencies() {
-        for i in agents.indices {
-            agents[i].dependsOn = i > 0 ? [agents[i - 1].id] : []
+        for index in agents.indices {
+            agents[index].dependsOn = index > 0 ? [agents[index - 1].id] : []
         }
     }
 
     private mutating func rebuildHandoffs() {
         handoffs = []
-        for i in 1..<agents.count {
-            let from = agents[i - 1]
-            let to = agents[i]
-            if to.dependsOn.contains(from.id) {
-                handoffs.append(AgentHandoff(fromAgentID: from.id, toAgentID: to.id, artifact: ""))
+        for index in 1..<agents.count {
+            let fromAgent = agents[index - 1]
+            let toAgent = agents[index]
+            if toAgent.dependsOn.contains(fromAgent.id) {
+                handoffs.append(AgentHandoff(fromAgentID: fromAgent.id, toAgentID: toAgent.id, artifact: ""))
             }
         }
     }
@@ -1902,25 +1923,27 @@ public struct MultiAgentPlan: Identifiable, Equatable, Codable, Sendable {
 
 // MARK: - Multimodal Content Parts (Vision support)
 
+public struct ContentPartImageURL: Codable, Sendable, Equatable {
+    public var url: String
+    public var detail: String?
+
+    public init(url: String, detail: String? = "auto") {
+        self.url = url
+        self.detail = detail
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case url
+        case detail
+    }
+}
+
 public struct ContentPart: Codable, Sendable, Equatable {
+    public typealias ImageURL = ContentPartImageURL
+
     public var type: String  // "text" or "image_url"
     public var text: String?
     public var imageURL: ImageURL?
-
-    public struct ImageURL: Codable, Sendable, Equatable {
-        public var url: String
-        public var detail: String?
-
-        public init(url: String, detail: String? = "auto") {
-            self.url = url
-            self.detail = detail
-        }
-
-        private enum CodingKeys: String, CodingKey {
-            case url
-            case detail
-        }
-    }
 
     public static func text(_ text: String) -> ContentPart {
         ContentPart(type: "text", text: text, imageURL: nil)
@@ -2129,7 +2152,7 @@ public enum ConnectorToolCallingCapability: String, Codable, Sendable, CaseItera
     }
 }
 
-public enum ConnectorToolCallingCapabilityObservationSource: String, Codable, Sendable, CaseIterable {
+public enum ConnectorToolCallObservationSource: String, Codable, Sendable, CaseIterable {
     case connectorProbe
     case taskRun
 
@@ -2144,9 +2167,9 @@ public enum ConnectorToolCallingCapabilityObservationSource: String, Codable, Se
 /// Routing role for a connector — determines which task phases it is best suited for.
 /// nil means "general" (can handle anything, used as fallback).
 public enum ConnectorRole: String, Codable, Sendable, CaseIterable {
-    case fast = "fast"      // Quick responses: explore, chat, search
-    case code = "code"      // Code generation: execute, edit, refactor
-    case strong = "strong"  // Complex reasoning: verify, review, plan
+    case fast  // Quick responses: explore, chat, search
+    case code  // Code generation: execute, edit, refactor
+    case strong  // Complex reasoning: verify, review, plan
 
     public var title: String {
         switch self {
@@ -2184,7 +2207,7 @@ public struct ConnectorProfile: Identifiable, Equatable, Codable, Sendable {
     public var role: ConnectorRole?
     public var toolCallingPolicy: ConnectorToolCallingPolicy?
     public var toolCallingCapability: ConnectorToolCallingCapability?
-    public var toolCallingCapabilitySource: ConnectorToolCallingCapabilityObservationSource?
+    public var toolCallingCapabilitySource: ConnectorToolCallObservationSource?
     public var toolCallingCapabilityLearnedAt: Date?
     public var probedContextWindow: Int?
     public var health: ConnectorHealth
@@ -2200,7 +2223,7 @@ public struct ConnectorProfile: Identifiable, Equatable, Codable, Sendable {
         role: ConnectorRole? = nil,
         toolCallingPolicy: ConnectorToolCallingPolicy? = nil,
         toolCallingCapability: ConnectorToolCallingCapability? = nil,
-        toolCallingCapabilitySource: ConnectorToolCallingCapabilityObservationSource? = nil,
+        toolCallingCapabilitySource: ConnectorToolCallObservationSource? = nil,
         toolCallingCapabilityLearnedAt: Date? = nil,
         probedContextWindow: Int? = nil,
         health: ConnectorHealth,

@@ -1,8 +1,24 @@
-import Foundation
 import AppKit
+import Foundation
 import LaicaiNativeDomain
 
 // MARK: - Real Browser Tool
+
+private struct RealBrowserToolParams: Codable {
+    var action: String
+    var url: String?
+    var selector: String?
+    var script: String?
+    var text: String?
+    var browser: String?
+    var timeout: Int?
+    var tabIndex: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case action, url, selector, script, text, browser, timeout
+        case tabIndex = "tab_index"
+    }
+}
 
 /// Controls the user's real browser (Safari or Chrome) via AppleScript/JXA.
 /// Unlike the headless BrowserTool, this operates on the actual visible browser
@@ -17,14 +33,16 @@ public struct RealBrowserTool: LaicaiTool {
             description: description,
             parameters: FunctionParameters(
                 properties: [
-                    "action": FunctionProperty(type: "string", description: "动作：open / tabs / extract / js / click / fill / screenshot / scroll / back / forward / close_tab / switch_tab / wait_for"),
+                    "action": FunctionProperty(
+                        type: "string",
+                        description: "动作：open / tabs / extract / js / click / fill / screenshot / scroll / back / forward / close_tab / switch_tab / wait_for"),
                     "url": FunctionProperty(type: "string", description: "目标 URL（open 时必填）"),
                     "selector": FunctionProperty(type: "string", description: "CSS 选择器（extract/click/fill 时用）"),
                     "script": FunctionProperty(type: "string", description: "JavaScript 代码（js 动作时必填）"),
                     "text": FunctionProperty(type: "string", description: "文本内容（fill 动作时用）"),
                     "browser": FunctionProperty(type: "string", description: "浏览器：safari / chrome（默认自动检测）"),
                     "tab_index": FunctionProperty(type: "integer", description: "标签页索引（switch_tab/close_tab 时用，从1开始）"),
-                    "timeout": FunctionProperty(type: "integer", description: "wait_for 超时秒数（默认 10）"),
+                    "timeout": FunctionProperty(type: "integer", description: "wait_for 超时秒数（默认 10）")
                 ],
                 required: ["action"]
             )
@@ -35,21 +53,10 @@ public struct RealBrowserTool: LaicaiTool {
     public var executionPolicy: ToolExecutionPolicy { .explicitUserApproval }
 
     public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
-        struct Params: Codable {
-            var action: String
-            var url: String?
-            var selector: String?
-            var script: String?
-            var text: String?
-            var browser: String?
-            var timeout: Int?
-            var tab_index: Int?
-        }
-
-        let params: Params
+        let params: RealBrowserToolParams
         do {
             let jsonData = argumentsJSON.data(using: .utf8) ?? Data()
-            params = try JSONDecoder().decode(Params.self, from: jsonData)
+            params = try JSONDecoder().decode(RealBrowserToolParams.self, from: jsonData)
         } catch {
             return ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params")
         }
@@ -57,71 +64,78 @@ public struct RealBrowserTool: LaicaiTool {
         let browser = detectBrowser(params.browser)
 
         switch params.action {
-
         case "open":
-            guard let urlStr = params.url, !urlStr.isEmpty else {
-                return ToolResult(output: "缺少 url 参数", success: false, error: "missing_url")
-            }
-            return await openURL(urlStr, browser: browser)
-
-        case "tabs":
-            return await listTabs(browser: browser)
-
-        case "extract":
-            return await extractContent(selector: params.selector, browser: browser)
-
+            return await executeOpen(params, browser: browser)
         case "js":
-            guard let script = params.script, !script.isEmpty else {
-                return ToolResult(output: "缺少 script 参数", success: false, error: "missing_script")
-            }
-            return await executeJS(script, browser: browser)
-
-        case "click":
-            guard let selector = params.selector, !selector.isEmpty else {
-                return ToolResult(output: "缺少 selector 参数", success: false, error: "missing_selector")
-            }
-            return await clickElement(selector: selector, browser: browser)
-
-        case "fill":
-            guard let selector = params.selector, !selector.isEmpty else {
-                return ToolResult(output: "缺少 selector 参数", success: false, error: "missing_selector")
-            }
-            let text = params.text ?? ""
-            return await fillElement(selector: selector, text: text, browser: browser)
-
-        case "screenshot":
-            return await screenshotBrowser(browser: browser)
-
-        case "scroll":
-            let direction = params.text ?? "down"
-            return await scrollPage(direction: direction, browser: browser)
-
-        case "back":
-            return await navigateHistory(direction: "back", browser: browser)
-
-        case "forward":
-            return await navigateHistory(direction: "forward", browser: browser)
-
-        case "close_tab":
-            return await closeTab(index: params.tab_index, browser: browser)
-
+            return await executeScript(params, browser: browser)
+        case "click", "fill":
+            return await executeElementAction(params, browser: browser)
         case "switch_tab":
-            guard let idx = params.tab_index else {
-                return ToolResult(output: "缺少 tab_index 参数", success: false, error: "missing_tab_index")
-            }
-            return await switchTab(index: idx, browser: browser)
-
-        case "wait_for":
-            let sel = params.selector ?? ""
-            let timeoutSec = params.timeout ?? 10
-            return await waitForElement(selector: sel, timeout: timeoutSec, browser: browser)
-
+            return await executeSwitchTab(params, browser: browser)
+        case "tabs", "extract", "screenshot", "scroll", "back", "forward", "close_tab", "wait_for":
+            return await executeSimpleAction(params, browser: browser)
         default:
             return ToolResult(
-                output: "未知动作 '\(params.action)'，支持：open / tabs / extract / js / click / fill / screenshot / scroll / back / forward / close_tab / switch_tab / wait_for",
+                output:
+                    [
+                        "未知动作 '\(params.action)'，支持：open / tabs / extract / js / click / fill / screenshot",
+                        "/ scroll / back / forward / close_tab / switch_tab / wait_for"
+                    ].joined(separator: " "),
                 success: false,
                 error: "unknown_action"
             )
+        }
+    }
+
+    private func executeOpen(_ params: RealBrowserToolParams, browser: BrowserType) async -> ToolResult {
+        guard let urlStr = params.url, !urlStr.isEmpty else {
+            return ToolResult(output: "缺少 url 参数", success: false, error: "missing_url")
+        }
+        return await openURL(urlStr, browser: browser)
+    }
+
+    private func executeScript(_ params: RealBrowserToolParams, browser: BrowserType) async -> ToolResult {
+        guard let script = params.script, !script.isEmpty else {
+            return ToolResult(output: "缺少 script 参数", success: false, error: "missing_script")
+        }
+        return await executeJS(script, browser: browser)
+    }
+
+    private func executeElementAction(_ params: RealBrowserToolParams, browser: BrowserType) async -> ToolResult {
+        guard let selector = params.selector, !selector.isEmpty else {
+            return ToolResult(output: "缺少 selector 参数", success: false, error: "missing_selector")
+        }
+        if params.action == "click" {
+            return await clickElement(selector: selector, browser: browser)
+        }
+        return await fillElement(selector: selector, text: params.text ?? "", browser: browser)
+    }
+
+    private func executeSwitchTab(_ params: RealBrowserToolParams, browser: BrowserType) async -> ToolResult {
+        guard let idx = params.tabIndex else {
+            return ToolResult(output: "缺少 tab_index 参数", success: false, error: "missing_tab_index")
+        }
+        return await switchTab(index: idx, browser: browser)
+    }
+
+    private func executeSimpleAction(_ params: RealBrowserToolParams, browser: BrowserType) async -> ToolResult {
+        switch params.action {
+        case "tabs":
+            return await listTabs(browser: browser)
+        case "extract":
+            return await extractContent(selector: params.selector, browser: browser)
+        case "screenshot":
+            return await screenshotBrowser(browser: browser)
+        case "scroll":
+            return await scrollPage(direction: params.text ?? "down", browser: browser)
+        case "back":
+            return await navigateHistory(direction: "back", browser: browser)
+        case "forward":
+            return await navigateHistory(direction: "forward", browser: browser)
+        case "close_tab":
+            return await closeTab(index: params.tabIndex, browser: browser)
+        default:
+            return await waitForElement(selector: params.selector ?? "", timeout: params.timeout ?? 10, browser: browser)
         }
     }
 
@@ -162,35 +176,35 @@ public struct RealBrowserTool: LaicaiTool {
         switch browser {
         case .safari:
             script = """
-            tell application "Safari"
-                activate
-                if (count of windows) = 0 then
-                    make new document with properties {URL:"\(escapeAS(urlStr))"}
-                else
-                    tell front window
-                        set current tab to (make new tab with properties {URL:"\(escapeAS(urlStr))"})
-                    end tell
-                end if
-                delay 2
-                set pageTitle to name of current tab of front window
-                return pageTitle
-            end tell
-            """
+                tell application "Safari"
+                    activate
+                    if (count of windows) = 0 then
+                        make new document with properties {URL:"\(escapeAS(urlStr))"}
+                    else
+                        tell front window
+                            set current tab to (make new tab with properties {URL:"\(escapeAS(urlStr))"})
+                        end tell
+                    end if
+                    delay 2
+                    set pageTitle to name of current tab of front window
+                    return pageTitle
+                end tell
+                """
         case .chrome:
             script = """
-            tell application "Google Chrome"
-                activate
-                if (count of windows) = 0 then
-                    make new window
-                end if
-                tell front window
-                    make new tab with properties {URL:"\(escapeAS(urlStr))"}
+                tell application "Google Chrome"
+                    activate
+                    if (count of windows) = 0 then
+                        make new window
+                    end if
+                    tell front window
+                        make new tab with properties {URL:"\(escapeAS(urlStr))"}
+                    end tell
+                    delay 2
+                    set pageTitle to title of active tab of front window
+                    return pageTitle
                 end tell
-                delay 2
-                set pageTitle to title of active tab of front window
-                return pageTitle
-            end tell
-            """
+                """
         }
 
         let result = runAS(script)
@@ -205,77 +219,80 @@ public struct RealBrowserTool: LaicaiTool {
         switch browser {
         case .safari:
             script = """
-            tell application "Safari"
-                set tabList to ""
-                set winCount to count of windows
-                repeat with w from 1 to winCount
-                    set tabCount to count of tabs of window w
-                    repeat with t from 1 to tabCount
-                        set tabTitle to name of tab t of window w
-                        set tabURL to URL of tab t of window w
-                        set isCurrent to (current tab of window w) is (tab t of window w)
-                        set marker to ""
-                        if isCurrent and w = 1 then set marker to " ★"
-                        set tabList to tabList & "[W" & w & "T" & t & marker & "] " & tabTitle & " — " & tabURL & linefeed
+                tell application "Safari"
+                    set tabList to ""
+                    set winCount to count of windows
+                    repeat with w from 1 to winCount
+                        set tabCount to count of tabs of window w
+                        repeat with t from 1 to tabCount
+                            set tabTitle to name of tab t of window w
+                            set tabURL to URL of tab t of window w
+                            set isCurrent to (current tab of window w) is (tab t of window w)
+                            set marker to ""
+                            if isCurrent and w = 1 then set marker to " ★"
+                            set tabList to tabList & "[W" & w & "T" & t & marker & "] " & tabTitle & " — " & tabURL & linefeed
+                        end repeat
                     end repeat
-                end repeat
-                return tabList
-            end tell
-            """
+                    return tabList
+                end tell
+                """
         case .chrome:
             script = """
-            tell application "Google Chrome"
-                set tabList to ""
-                set winCount to count of windows
-                repeat with w from 1 to winCount
-                    set tabCount to count of tabs of window w
-                    set activeIdx to active tab index of window w
-                    repeat with t from 1 to tabCount
-                        set tabTitle to title of tab t of window w
-                        set tabURL to URL of tab t of window w
-                        set marker to ""
-                        if t = activeIdx and w = 1 then set marker to " ★"
-                        set tabList to tabList & "[W" & w & "T" & t & marker & "] " & tabTitle & " — " & tabURL & linefeed
+                tell application "Google Chrome"
+                    set tabList to ""
+                    set winCount to count of windows
+                    repeat with w from 1 to winCount
+                        set tabCount to count of tabs of window w
+                        set activeIdx to active tab index of window w
+                        repeat with t from 1 to tabCount
+                            set tabTitle to title of tab t of window w
+                            set tabURL to URL of tab t of window w
+                            set marker to ""
+                            if t = activeIdx and w = 1 then set marker to " ★"
+                            set tabList to tabList & "[W" & w & "T" & t & marker & "] " & tabTitle & " — " & tabURL & linefeed
+                        end repeat
                     end repeat
-                end repeat
-                return tabList
-            end tell
-            """
+                    return tabList
+                end tell
+                """
         }
 
         return runAS(script)
     }
 
     private func extractContent(selector: String?, browser: BrowserType) async -> ToolResult {
-        let js: String
+        let javaScript: String
         if let sel = selector, !sel.isEmpty {
-            js = """
-            (function() {
-                var els = document.querySelectorAll('\(escapeJS(sel))');
-                if (els.length === 0) return '(未找到匹配元素: \(escapeJS(sel)))';
-                return Array.from(els).map(function(el) {
-                    return el.innerText || el.textContent || '';
-                }).join('\\n---\\n');
-            })()
-            """
+            javaScript = """
+                (function() {
+                    var els = document.querySelectorAll('\(escapeJS(sel))');
+                    if (els.length === 0) return '(未找到匹配元素: \(escapeJS(sel)))';
+                    return Array.from(els).map(function(el) {
+                        return el.innerText || el.textContent || '';
+                    }).join('\\n---\\n');
+                })()
+                """
         } else {
-            js = """
-            (function() {
-                var article = document.querySelector('article') || document.querySelector('main') || document.querySelector('[role="main"]') || document.body;
-                var clone = article.cloneNode(true);
-                clone.querySelectorAll('script, style, nav, header, footer, aside, iframe, [aria-hidden]').forEach(function(el) { el.remove(); });
-                var text = clone.innerText || clone.textContent || '';
-                text = text.replace(/\\n{3,}/g, '\\n\\n').trim();
-                var title = document.title || '';
-                var url = window.location.href;
-                var meta = document.querySelector('meta[name="description"]');
-                var desc = meta ? meta.content : '';
-                return '# ' + title + '\\nURL: ' + url + '\\n' + (desc ? desc + '\\n\\n' : '\\n') + text.substring(0, 12000);
-            })()
-            """
+            javaScript = """
+                (function() {
+                    var article = document.querySelector('article') ||
+                        document.querySelector('main') ||
+                        document.querySelector('[role="main"]') ||
+                        document.body;
+                    var clone = article.cloneNode(true);
+                    clone.querySelectorAll('script, style, nav, header, footer, aside, iframe, [aria-hidden]').forEach(function(el) { el.remove(); });
+                    var text = clone.innerText || clone.textContent || '';
+                    text = text.replace(/\\n{3,}/g, '\\n\\n').trim();
+                    var title = document.title || '';
+                    var url = window.location.href;
+                    var meta = document.querySelector('meta[name="description"]');
+                    var desc = meta ? meta.content : '';
+                    return '# ' + title + '\\nURL: ' + url + '\\n' + (desc ? desc + '\\n\\n' : '\\n') + text.substring(0, 12000);
+                })()
+                """
         }
 
-        return await executeJS(js, browser: browser)
+        return await executeJS(javaScript, browser: browser)
     }
 
     private func executeJS(_ jsCode: String, browser: BrowserType) async -> ToolResult {
@@ -286,34 +303,34 @@ public struct RealBrowserTool: LaicaiTool {
         switch browser {
         case .safari:
             script = """
-            tell application "Safari"
-                set jsResult to do JavaScript "\(escapedJS)" in current tab of front window
-                return jsResult as text
-            end tell
-            """
+                tell application "Safari"
+                    set jsResult to do JavaScript "\(escapedJS)" in current tab of front window
+                    return jsResult as text
+                end tell
+                """
         case .chrome:
             script = """
-            tell application "Google Chrome"
-                set jsResult to execute active tab of front window javascript "\(escapedJS)"
-                return jsResult as text
-            end tell
-            """
+                tell application "Google Chrome"
+                    set jsResult to execute active tab of front window javascript "\(escapedJS)"
+                    return jsResult as text
+                end tell
+                """
         }
 
         return runAS(script)
     }
 
     private func clickElement(selector: String, browser: BrowserType) async -> ToolResult {
-        let js = """
-        (function() {
-            var el = document.querySelector('\(escapeJS(selector))');
-            if (!el) return 'NOT_FOUND';
-            el.scrollIntoView({behavior: 'smooth', block: 'center'});
-            el.click();
-            return 'CLICKED: ' + (el.tagName || '') + ' ' + (el.innerText || '').substring(0, 50);
-        })()
-        """
-        let result = await executeJS(js, browser: browser)
+        let javaScript = """
+            (function() {
+                var el = document.querySelector('\(escapeJS(selector))');
+                if (!el) return 'NOT_FOUND';
+                el.scrollIntoView({behavior: 'smooth', block: 'center'});
+                el.click();
+                return 'CLICKED: ' + (el.tagName || '') + ' ' + (el.innerText || '').substring(0, 50);
+            })()
+            """
+        let result = await executeJS(javaScript, browser: browser)
         if result.output.contains("NOT_FOUND") {
             return ToolResult(output: "未找到元素：\(selector)", success: false, error: "not_found")
         }
@@ -323,18 +340,18 @@ public struct RealBrowserTool: LaicaiTool {
     private func fillElement(selector: String, text: String, browser: BrowserType) async -> ToolResult {
         let escapedText = text.replacingOccurrences(of: "'", with: "\\'")
             .replacingOccurrences(of: "\n", with: "\\n")
-        let js = """
-        (function() {
-            var el = document.querySelector('\(escapeJS(selector))');
-            if (!el) return 'NOT_FOUND';
-            el.focus();
-            el.value = '\(escapedText)';
-            el.dispatchEvent(new Event('input', {bubbles: true}));
-            el.dispatchEvent(new Event('change', {bubbles: true}));
-            return 'FILLED: ' + el.tagName + ' value=' + el.value.substring(0, 50);
-        })()
-        """
-        let result = await executeJS(js, browser: browser)
+        let javaScript = """
+            (function() {
+                var el = document.querySelector('\(escapeJS(selector))');
+                if (!el) return 'NOT_FOUND';
+                el.focus();
+                el.value = '\(escapedText)';
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+                return 'FILLED: ' + el.tagName + ' value=' + el.value.substring(0, 50);
+            })()
+            """
+        let result = await executeJS(javaScript, browser: browser)
         if result.output.contains("NOT_FOUND") {
             return ToolResult(output: "未找到元素：\(selector)", success: false, error: "not_found")
         }
@@ -343,13 +360,13 @@ public struct RealBrowserTool: LaicaiTool {
 
     private func waitForElement(selector: String, timeout: Int, browser: BrowserType) async -> ToolResult {
         let clampedTimeout = min(max(1, timeout), 30)  // hard cap at 30s
-        let actualAttempts = clampedTimeout * 2        // poll every 500ms
+        let actualAttempts = clampedTimeout * 2  // poll every 500ms
 
         if selector.isEmpty {
             // No selector: wait for page load (document.readyState == 'complete')
             for attempt in 1...actualAttempts {
-                let js = "document.readyState"
-                let result = await executeJS(js, browser: browser)
+                let javaScript = "document.readyState"
+                let result = await executeJS(javaScript, browser: browser)
                 if result.output.trimmingCharacters(in: .whitespacesAndNewlines) == "complete" {
                     return ToolResult(output: "页面加载完成（第 \(attempt) 次检查）")
                 }
@@ -360,8 +377,13 @@ public struct RealBrowserTool: LaicaiTool {
 
         // Wait for CSS selector to appear
         for attempt in 1...actualAttempts {
-            let js = "(function(){ var el = document.querySelector('\(escapeJS(selector))'); return el ? 'FOUND:' + (el.tagName||'') + ' ' + (el.innerText||'').substring(0,50) : 'NOT_FOUND'; })()"
-            let result = await executeJS(js, browser: browser)
+            let javaScript = """
+                (function() {
+                    var el = document.querySelector('\(escapeJS(selector))');
+                    return el ? 'FOUND:' + (el.tagName || '') + ' ' + (el.innerText || '').substring(0, 50) : 'NOT_FOUND';
+                })()
+                """
+            let result = await executeJS(javaScript, browser: browser)
             if result.output.hasPrefix("FOUND:") {
                 let detail = String(result.output.dropFirst("FOUND:".count))
                 return ToolResult(output: "元素已出现（第 \(attempt) 次检查）：\(detail)")
@@ -408,19 +430,19 @@ public struct RealBrowserTool: LaicaiTool {
     }
 
     private func scrollPage(direction: String, browser: BrowserType) async -> ToolResult {
-        let js: String
+        let javaScript: String
         switch direction.lowercased() {
-        case "up": js = "window.scrollBy(0, -window.innerHeight * 0.8); 'scrolled up'"
-        case "top": js = "window.scrollTo(0, 0); 'scrolled to top'"
-        case "bottom": js = "window.scrollTo(0, document.body.scrollHeight); 'scrolled to bottom'"
-        default: js = "window.scrollBy(0, window.innerHeight * 0.8); 'scrolled down'"
+        case "up": javaScript = "window.scrollBy(0, -window.innerHeight * 0.8); 'scrolled up'"
+        case "top": javaScript = "window.scrollTo(0, 0); 'scrolled to top'"
+        case "bottom": javaScript = "window.scrollTo(0, document.body.scrollHeight); 'scrolled to bottom'"
+        default: javaScript = "window.scrollBy(0, window.innerHeight * 0.8); 'scrolled down'"
         }
-        return await executeJS(js, browser: browser)
+        return await executeJS(javaScript, browser: browser)
     }
 
     private func navigateHistory(direction: String, browser: BrowserType) async -> ToolResult {
-        let js = direction == "back" ? "history.back(); 'went back'" : "history.forward(); 'went forward'"
-        return await executeJS(js, browser: browser)
+        let javaScript = direction == "back" ? "history.back(); 'went back'" : "history.forward(); 'went forward'"
+        return await executeJS(javaScript, browser: browser)
     }
 
     private func closeTab(index: Int?, browser: BrowserType) async -> ToolResult {
@@ -448,18 +470,18 @@ public struct RealBrowserTool: LaicaiTool {
         switch browser {
         case .safari:
             script = """
-            tell application "Safari"
-                set current tab of front window to tab \(index) of front window
-                return name of current tab of front window
-            end tell
-            """
+                tell application "Safari"
+                    set current tab of front window to tab \(index) of front window
+                    return name of current tab of front window
+                end tell
+                """
         case .chrome:
             script = """
-            tell application "Google Chrome"
-                set active tab index of front window to \(index)
-                return title of active tab of front window
-            end tell
-            """
+                tell application "Google Chrome"
+                    set active tab index of front window to \(index)
+                    return title of active tab of front window
+                end tell
+                """
         }
         let result = runAS(script)
         if result.success {
@@ -470,14 +492,22 @@ public struct RealBrowserTool: LaicaiTool {
 
     // MARK: - Helpers
 
-    private func escapeAS(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\")
-         .replacingOccurrences(of: "\"", with: "\\\"")
+    private func escapeAS(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\u{2028}", with: "\\u2028")
+            .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
     }
 
-    private func escapeJS(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\")
-         .replacingOccurrences(of: "'", with: "\\'")
+    private func escapeJS(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\u{2028}", with: "\\u2028")
+            .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
     }
 
     @discardableResult
@@ -510,9 +540,9 @@ public struct RealBrowserTool: LaicaiTool {
         }
         for window in windowList {
             if let ownerPID = window[kCGWindowOwnerPID as String] as? Int32,
-               ownerPID == pid,
-               let layer = window[kCGWindowLayer as String] as? Int, layer == 0,
-               let windowNumber = window[kCGWindowNumber as String] as? Int {
+                ownerPID == pid,
+                let layer = window[kCGWindowLayer as String] as? Int, layer == 0,
+                let windowNumber = window[kCGWindowNumber as String] as? Int {
                 return String(windowNumber)
             }
         }

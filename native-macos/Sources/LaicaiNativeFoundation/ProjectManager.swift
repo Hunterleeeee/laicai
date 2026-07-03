@@ -150,7 +150,9 @@ public final class ProjectManager: ObservableObject {
     private let storePath: String
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport =
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let dir = appSupport.appendingPathComponent("Laicai", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         storePath = dir.appendingPathComponent("projects.json").path
@@ -254,97 +256,77 @@ public final class ProjectManager: ObservableObject {
         lines.append("# \(project.name)")
         lines.append("")
 
-        if !project.techStack.isEmpty {
-            lines.append("## 技术栈")
-            lines.append(project.techStack.joined(separator: ", "))
-            lines.append("")
-        }
-
-        if !project.architecture.isEmpty {
-            lines.append("## 架构")
-            lines.append(project.architecture)
-            lines.append("")
-        }
-
-        if !project.conventions.isEmpty {
-            lines.append("## 约定")
-            for c in project.conventions {
-                lines.append("- \(c)")
-            }
-            lines.append("")
-        }
-
-        if !project.entryPoints.isEmpty {
-            lines.append("## 关键文件")
-            for e in project.entryPoints {
-                lines.append("- `\(e)`")
-            }
-            lines.append("")
-        }
-
-        if let build = project.buildCommand {
-            lines.append("## 构建")
-            lines.append("```bash")
-            lines.append(build)
-            lines.append("```")
-            lines.append("")
-        }
-
-        if let test = project.testCommand {
-            lines.append("## 测试")
-            lines.append("```bash")
-            lines.append(test)
-            lines.append("```")
-            lines.append("")
-        }
-
-        if !project.notes.isEmpty {
-            lines.append("## 项目备忘")
-            lines.append(project.notes)
-            lines.append("")
-        }
-
-        let pending = project.activeTasks.filter { $0.status != .completed }
-        if !pending.isEmpty {
-            lines.append("## 当前项目事项")
-            for task in pending {
-                let icon = task.status == .inProgress ? "🔄" : "⬜"
-                lines.append("- \(icon) \(task.title)")
-            }
-            lines.append("")
-        }
-
-        // Rolling memory: recent Agent summaries
-        if !project.recentTaskSummaries.isEmpty {
-            lines.append("## 最近会话记忆")
-            for entry in project.recentTaskSummaries.suffix(5) {
-                let f = DateFormatter()
-                f.dateFormat = "yyyy-MM-dd HH:mm"
-                lines.append("### \(f.string(from: entry.date))")
-                lines.append(entry.summary)
-                if !entry.conclusions.isEmpty {
-                    for c in entry.conclusions.prefix(3) {
-                        lines.append("- \(c)")
-                    }
-                }
-                lines.append("")
-            }
-        } else if let last = project.lastTaskSummary {
-            lines.append("## 上次会话")
-            lines.append(last)
-            lines.append("")
-        }
-
-        if !project.discoveredIssues.isEmpty {
-            lines.append("## 已知问题")
-            for issue in project.discoveredIssues.suffix(10) {
-                lines.append("- \(issue)")
-            }
-            lines.append("")
-        }
+        appendTextSection("技术栈", content: project.techStack.joined(separator: ", "), to: &lines)
+        appendTextSection("架构", content: project.architecture, to: &lines)
+        appendBulletSection("约定", items: project.conventions, to: &lines)
+        appendBulletSection("关键文件", items: project.entryPoints.map { "`\($0)`" }, to: &lines)
+        appendCommandSection("构建", command: project.buildCommand, to: &lines)
+        appendCommandSection("测试", command: project.testCommand, to: &lines)
+        appendTextSection("项目备忘", content: project.notes, to: &lines)
+        appendActiveTasks(project.activeTasks, to: &lines)
+        appendRecentTaskMemory(project, to: &lines)
+        appendBulletSection("已知问题", items: Array(project.discoveredIssues.suffix(10)), to: &lines)
 
         let content = lines.joined(separator: "\n")
         try? content.write(toFile: mdPath, atomically: true, encoding: .utf8)
+    }
+
+    private func appendTextSection(_ title: String, content: String, to lines: inout [String]) {
+        guard !content.isEmpty else { return }
+        lines.append("## \(title)")
+        lines.append(content)
+        lines.append("")
+    }
+
+    private func appendBulletSection(_ title: String, items: [String], to lines: inout [String]) {
+        guard !items.isEmpty else { return }
+        lines.append("## \(title)")
+        for item in items {
+            lines.append("- \(item)")
+        }
+        lines.append("")
+    }
+
+    private func appendCommandSection(_ title: String, command: String?, to lines: inout [String]) {
+        guard let command else { return }
+        lines.append("## \(title)")
+        lines.append("```bash")
+        lines.append(command)
+        lines.append("```")
+        lines.append("")
+    }
+
+    private func appendActiveTasks(_ tasks: [ProjectTask], to lines: inout [String]) {
+        let pending = tasks.filter { $0.status != .completed }
+        guard !pending.isEmpty else { return }
+        lines.append("## 当前项目事项")
+        for task in pending {
+            let icon = task.status == .inProgress ? "🔄" : "⬜"
+            lines.append("- \(icon) \(task.title)")
+        }
+        lines.append("")
+    }
+
+    private func appendRecentTaskMemory(_ project: Project, to lines: inout [String]) {
+        if !project.recentTaskSummaries.isEmpty {
+            appendRecentTaskSummaries(project.recentTaskSummaries, to: &lines)
+        } else if let last = project.lastTaskSummary {
+            appendTextSection("上次会话", content: last, to: &lines)
+        }
+    }
+
+    private func appendRecentTaskSummaries(_ entries: [TaskSummaryEntry], to lines: inout [String]) {
+        lines.append("## 最近会话记忆")
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        for entry in entries.suffix(5) {
+            lines.append("### \(formatter.string(from: entry.date))")
+            lines.append(entry.summary)
+            for conclusion in entry.conclusions.prefix(3) {
+                lines.append("- \(conclusion)")
+            }
+            lines.append("")
+        }
     }
 
     /// Update project knowledge after a task completes.
@@ -356,65 +338,83 @@ public final class ProjectManager: ObservableObject {
         projects[idx].lastTaskSummary = String(summary.prefix(500))
         projects[idx].lastOpenedAt = Date()
 
-        // Rolling task memory: keep last 10 task summaries for cross-session continuity
+        appendTaskMemory(summary: summary, filesModified: filesModified, conclusions: conclusions, to: &projects[idx])
+        updateDiscoveredIssues(from: conclusions, in: &projects[idx])
+        updateEntryPoints(from: filesModified, in: &projects[idx])
+        updateConventions(from: conclusions, in: &projects[idx])
+
+        save()
+        generateProjectMD(for: projects[idx])
+    }
+
+    private func appendTaskMemory(
+        summary: String,
+        filesModified: [String],
+        conclusions: [String],
+        to project: inout Project
+    ) {
         let entry = TaskSummaryEntry(
             title: String(summary.prefix(80)),
             summary: String(summary.prefix(300)),
             conclusions: conclusions.map { String($0.prefix(200)) },
             filesModified: Array(filesModified.prefix(20))
         )
-        projects[idx].recentTaskSummaries.append(entry)
-        if projects[idx].recentTaskSummaries.count > 10 {
-            projects[idx].recentTaskSummaries = Array(projects[idx].recentTaskSummaries.suffix(10))
-        }
+        project.recentTaskSummaries.append(entry)
+        project.recentTaskSummaries = Array(project.recentTaskSummaries.suffix(10))
+    }
 
-        // Extract discovered issues from conclusions
+    private func updateDiscoveredIssues(from conclusions: [String], in project: inout Project) {
         let issueMarkers = ["bug", "问题", "issue", "todo", "fixme", "待修复", "待解决", "需要", "broken", "失败"]
-        for conclusion in conclusions {
-            let lower = conclusion.lowercased()
-            if issueMarkers.contains(where: { lower.contains($0) }) {
-                let short = String(conclusion.prefix(150))
-                if !projects[idx].discoveredIssues.contains(short) {
-                    projects[idx].discoveredIssues.append(short)
-                    if projects[idx].discoveredIssues.count > 20 {
-                        projects[idx].discoveredIssues = Array(projects[idx].discoveredIssues.suffix(20))
-                    }
-                }
-            }
-        }
+        appendUniqueConclusionSnippets(
+            from: conclusions,
+            markers: issueMarkers,
+            prefixLength: 150,
+            limit: 20,
+            to: &project.discoveredIssues
+        )
+    }
 
-        // Auto-update entry points if important files were modified
+    private func updateEntryPoints(from filesModified: [String], in project: inout Project) {
         let importantExtensions = Set(["swift", "ts", "tsx", "py", "go", "rs", "java", "kt"])
-        for file in filesModified {
-            let ext = (file as NSString).pathExtension
-            guard importantExtensions.contains(ext) else { continue }
-            let lower = file.lowercased()
-            if lower.contains("main") || lower.contains("app.") || lower.contains("index.") {
-                if !projects[idx].entryPoints.contains(file) {
-                    projects[idx].entryPoints.append(file)
-                    if projects[idx].entryPoints.count > 20 {
-                        projects[idx].entryPoints = Array(projects[idx].entryPoints.suffix(20))
-                    }
-                }
-            }
+        for file in filesModified where isEntryPointCandidate(file, importantExtensions: importantExtensions) {
+            appendUnique(file, limit: 20, to: &project.entryPoints)
         }
+    }
 
-        // Extract conventions from conclusions
-        for conclusion in conclusions {
-            let lower = conclusion.lowercased()
-            if lower.contains("convention") || lower.contains("约定") || lower.contains("规范") || lower.contains("always") || lower.contains("never") {
-                let short = String(conclusion.prefix(100))
-                if !projects[idx].conventions.contains(short) {
-                    projects[idx].conventions.append(short)
-                    if projects[idx].conventions.count > 15 {
-                        projects[idx].conventions = Array(projects[idx].conventions.suffix(15))
-                    }
-                }
-            }
+    private func updateConventions(from conclusions: [String], in project: inout Project) {
+        let conventionMarkers = ["convention", "约定", "规范", "always", "never"]
+        appendUniqueConclusionSnippets(
+            from: conclusions,
+            markers: conventionMarkers,
+            prefixLength: 100,
+            limit: 15,
+            to: &project.conventions
+        )
+    }
+
+    private func appendUniqueConclusionSnippets(
+        from conclusions: [String],
+        markers: [String],
+        prefixLength: Int,
+        limit: Int,
+        to values: inout [String]
+    ) {
+        for conclusion in conclusions where markers.contains(where: { conclusion.lowercased().contains($0) }) {
+            appendUnique(String(conclusion.prefix(prefixLength)), limit: limit, to: &values)
         }
+    }
 
-        save()
-        generateProjectMD(for: projects[idx])
+    private func isEntryPointCandidate(_ file: String, importantExtensions: Set<String>) -> Bool {
+        let ext = (file as NSString).pathExtension
+        guard importantExtensions.contains(ext) else { return false }
+        let lower = file.lowercased()
+        return lower.contains("main") || lower.contains("app.") || lower.contains("index.")
+    }
+
+    private func appendUnique(_ value: String, limit: Int, to values: inout [String]) {
+        guard !values.contains(value) else { return }
+        values.append(value)
+        values = Array(values.suffix(limit))
     }
 
     // MARK: - Context for System Prompt
@@ -430,6 +430,13 @@ public final class ProjectManager: ObservableObject {
         guard let project = projects.first(where: { $0.rootPath == rootPath }) else { return nil }
         var parts: [String] = []
 
+        appendProjectBasics(project, to: &parts)
+        appendProjectMemory(project, to: &parts)
+        appendProjectIssues(project, to: &parts)
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
+    }
+
+    nonisolated private static func appendProjectBasics(_ project: Project, to parts: inout [String]) {
         parts.append("项目：\(project.name)")
         if !project.techStack.isEmpty {
             parts.append("技术栈：\(project.techStack.joined(separator: ", "))")
@@ -451,35 +458,36 @@ public final class ProjectManager: ObservableObject {
         if !pending.isEmpty {
             parts.append("待办（\(pending.count)项）：\(pending.prefix(3).map(\.title).joined(separator: "、"))")
         }
-        // Rolling Agent memory: inject recent Agent summaries for continuity
+    }
+
+    nonisolated private static func appendProjectMemory(_ project: Project, to parts: inout [String]) {
         if !project.recentTaskSummaries.isEmpty {
             let recent = project.recentTaskSummaries.suffix(3)
             var historyLines: [String] = ["最近会话记忆："]
             for entry in recent {
                 let dateStr = Self.shortDateString(entry.date)
                 historyLines.append("  - [\(dateStr)] \(entry.summary)")
-                for c in entry.conclusions.prefix(2) {
-                    historyLines.append("    → \(c)")
+                for conclusion in entry.conclusions.prefix(2) {
+                    historyLines.append("    → \(conclusion)")
                 }
             }
             parts.append(historyLines.joined(separator: "\n"))
         } else if let last = project.lastTaskSummary {
             parts.append("上次：\(String(last.prefix(200)))")
         }
+    }
 
-        // Unresolved issues discovered during previous tasks
+    nonisolated private static func appendProjectIssues(_ project: Project, to parts: inout [String]) {
         if !project.discoveredIssues.isEmpty {
             let issues = project.discoveredIssues.suffix(5)
             parts.append("已知问题（\(issues.count)项）：\(issues.joined(separator: "；"))")
         }
-
-        return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 
     nonisolated private static func shortDateString(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "M/d HH:mm"
-        return f.string(from: date)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d HH:mm"
+        return formatter.string(from: date)
     }
 
     public nonisolated static var cachedProjects: [Project] {
@@ -521,125 +529,135 @@ public enum ProjectDetector {
     }
 
     public static func detect(rootPath: String) -> DetectionResult {
-        let fm = FileManager.default
-        var stack: [String] = []
-        var buildCmd: String?
-        var testCmd: String?
-        var entries: [String] = []
-        var arch = ""
-
+        var draft = DetectionDraft()
         let exists: (String) -> Bool = { name in
-            fm.fileExists(atPath: (rootPath as NSString).appendingPathComponent(name))
+            FileManager.default.fileExists(atPath: (rootPath as NSString).appendingPathComponent(name))
         }
-
-        // Swift
-        if exists("Package.swift") {
-            stack.append("Swift")
-            stack.append("Swift Package Manager")
-            buildCmd = "swift build"
-            testCmd = "swift test"
-            entries.append("Package.swift")
-            if exists("Sources") {
-                // Find main entry points
-                if let enumerator = fm.enumerator(atPath: (rootPath as NSString).appendingPathComponent("Sources")) {
-                    while let file = enumerator.nextObject() as? String {
-                        if file.hasSuffix("App.swift") || file.hasSuffix("main.swift") || file.hasSuffix("AppDelegate.swift") {
-                            entries.append("Sources/\(file)")
-                            if entries.count > 10 { break }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Xcode
-        if let contents = try? fm.contentsOfDirectory(atPath: rootPath),
-           contents.contains(where: { $0.hasSuffix(".xcodeproj") || $0.hasSuffix(".xcworkspace") }) {
-            if !stack.contains("Swift") { stack.append("Swift") }
-            stack.append("Xcode")
-            if buildCmd == nil { buildCmd = "xcodebuild" }
-        }
-
-        // Node.js
-        if exists("package.json") {
-            stack.append("Node.js")
-            if let data = try? Data(contentsOf: URL(fileURLWithPath: (rootPath as NSString).appendingPathComponent("package.json"))),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                if let deps = json["dependencies"] as? [String: Any] {
-                    if deps["react"] != nil { stack.append("React") }
-                    if deps["next"] != nil { stack.append("Next.js"); arch = "Next.js App" }
-                    if deps["vue"] != nil { stack.append("Vue") }
-                    if deps["express"] != nil { stack.append("Express") }
-                    if deps["tailwindcss"] != nil || (json["devDependencies"] as? [String: Any])?["tailwindcss"] != nil {
-                        stack.append("Tailwind CSS")
-                    }
-                }
-                if let scripts = json["scripts"] as? [String: String] {
-                    if scripts["build"] != nil { buildCmd = "npm run build" }
-                    if scripts["test"] != nil { testCmd = "npm test" }
-                }
-            }
-            if exists("pnpm-lock.yaml") { stack.append("pnpm") }
-            else if exists("yarn.lock") { stack.append("yarn") }
-            entries.append("package.json")
-        }
-
-        // TypeScript
-        if exists("tsconfig.json") {
-            stack.append("TypeScript")
-            entries.append("tsconfig.json")
-        }
-
-        // Python
-        if exists("requirements.txt") || exists("pyproject.toml") || exists("setup.py") {
-            stack.append("Python")
-            if exists("pyproject.toml") {
-                entries.append("pyproject.toml")
-                if exists("poetry.lock") { stack.append("Poetry") }
-            }
-            if testCmd == nil { testCmd = "pytest" }
-        }
-
-        // Rust
-        if exists("Cargo.toml") {
-            stack.append("Rust")
-            buildCmd = "cargo build"
-            testCmd = "cargo test"
-            entries.append("Cargo.toml")
-        }
-
-        // Go
-        if exists("go.mod") {
-            stack.append("Go")
-            buildCmd = "go build ./..."
-            testCmd = "go test ./..."
-            entries.append("go.mod")
-        }
-
-        // Docker
-        if exists("Dockerfile") || exists("docker-compose.yml") || exists("docker-compose.yaml") {
-            stack.append("Docker")
-        }
-
-        // Git
-        if exists(".git") {
-            // not a "tech" but useful context
-        }
-
-        // Architecture hints from directory structure
-        if arch.isEmpty {
-            if exists("src/app") || exists("app") { arch = "App Router" }
-            else if exists("src/pages") || exists("pages") { arch = "Pages Router" }
-            else if exists("Sources") && exists("Tests") { arch = "Swift Package (Sources/Tests)" }
-            else if exists("src") && exists("tests") { arch = "src/tests layout" }
-        }
-
+        detectSwift(rootPath: rootPath, exists: exists, draft: &draft)
+        detectNode(rootPath: rootPath, exists: exists, draft: &draft)
+        detectLanguageAndInfra(exists: exists, draft: &draft)
+        detectArchitecture(exists: exists, draft: &draft)
         return DetectionResult(
-            techStack: stack,
-            buildCommand: buildCmd,
-            testCommand: testCmd,
-            entryPoints: Array(entries.prefix(15)),
-            architecture: arch
+            techStack: draft.stack,
+            buildCommand: draft.buildCommand,
+            testCommand: draft.testCommand,
+            entryPoints: Array(draft.entries.prefix(15)),
+            architecture: draft.architecture
         )
+    }
+
+    private struct DetectionDraft {
+        var stack: [String] = []
+        var buildCommand: String?
+        var testCommand: String?
+        var entries: [String] = []
+        var architecture = ""
+    }
+
+    private static func detectSwift(rootPath: String, exists: (String) -> Bool, draft: inout DetectionDraft) {
+        if exists("Package.swift") {
+            draft.stack.append(contentsOf: ["Swift", "Swift Package Manager"])
+            draft.buildCommand = "swift build"
+            draft.testCommand = "swift test"
+            draft.entries.append("Package.swift")
+            draft.entries.append(contentsOf: swiftEntryPoints(rootPath: rootPath))
+        }
+        let contents = (try? FileManager.default.contentsOfDirectory(atPath: rootPath)) ?? []
+        guard contents.contains(where: { $0.hasSuffix(".xcodeproj") || $0.hasSuffix(".xcworkspace") }) else { return }
+        if !draft.stack.contains("Swift") { draft.stack.append("Swift") }
+        draft.stack.append("Xcode")
+        if draft.buildCommand == nil { draft.buildCommand = "xcodebuild" }
+    }
+
+    private static func swiftEntryPoints(rootPath: String) -> [String] {
+        let sourcesPath = (rootPath as NSString).appendingPathComponent("Sources")
+        guard let enumerator = FileManager.default.enumerator(atPath: sourcesPath) else { return [] }
+        var entries: [String] = []
+        while let file = enumerator.nextObject() as? String {
+            if file.hasSuffix("App.swift") || file.hasSuffix("main.swift") || file.hasSuffix("AppDelegate.swift") {
+                entries.append("Sources/\(file)")
+                if entries.count > 10 { break }
+            }
+        }
+        return entries
+    }
+
+    private static func detectNode(rootPath: String, exists: (String) -> Bool, draft: inout DetectionDraft) {
+        guard exists("package.json") else { return }
+        draft.stack.append("Node.js")
+        let json = packageJSON(rootPath: rootPath)
+        appendNodeDependencies(json: json, draft: &draft)
+        if let scripts = json?["scripts"] as? [String: String] {
+            if scripts["build"] != nil { draft.buildCommand = "npm run build" }
+            if scripts["test"] != nil { draft.testCommand = "npm test" }
+        }
+        if exists("pnpm-lock.yaml") { draft.stack.append("pnpm") } else if exists("yarn.lock") { draft.stack.append("yarn") }
+        draft.entries.append("package.json")
+    }
+
+    private static func packageJSON(rootPath: String) -> [String: Any]? {
+        let path = (rootPath as NSString).appendingPathComponent("package.json")
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private static func appendNodeDependencies(json: [String: Any]?, draft: inout DetectionDraft) {
+        let deps = json?["dependencies"] as? [String: Any] ?? [:]
+        if deps["react"] != nil { draft.stack.append("React") }
+        if deps["next"] != nil {
+            draft.stack.append("Next.js")
+            draft.architecture = "Next.js App"
+        }
+        if deps["vue"] != nil { draft.stack.append("Vue") }
+        if deps["express"] != nil { draft.stack.append("Express") }
+        if deps["tailwindcss"] != nil || (json?["devDependencies"] as? [String: Any])?["tailwindcss"] != nil {
+            draft.stack.append("Tailwind CSS")
+        }
+    }
+
+    private static func detectLanguageAndInfra(exists: (String) -> Bool, draft: inout DetectionDraft) {
+        if exists("tsconfig.json") {
+            draft.stack.append("TypeScript")
+            draft.entries.append("tsconfig.json")
+        }
+        detectPython(exists: exists, draft: &draft)
+        if exists("Cargo.toml") {
+            draft.stack.append("Rust")
+            draft.buildCommand = "cargo build"
+            draft.testCommand = "cargo test"
+            draft.entries.append("Cargo.toml")
+        }
+        if exists("go.mod") {
+            draft.stack.append("Go")
+            draft.buildCommand = "go build ./..."
+            draft.testCommand = "go test ./..."
+            draft.entries.append("go.mod")
+        }
+        if exists("Dockerfile") || exists("docker-compose.yml") || exists("docker-compose.yaml") {
+            draft.stack.append("Docker")
+        }
+    }
+
+    private static func detectPython(exists: (String) -> Bool, draft: inout DetectionDraft) {
+        guard exists("requirements.txt") || exists("pyproject.toml") || exists("setup.py") else { return }
+        draft.stack.append("Python")
+        if exists("pyproject.toml") {
+            draft.entries.append("pyproject.toml")
+            if exists("poetry.lock") { draft.stack.append("Poetry") }
+        }
+        if draft.testCommand == nil { draft.testCommand = "pytest" }
+    }
+
+    private static func detectArchitecture(exists: (String) -> Bool, draft: inout DetectionDraft) {
+        guard draft.architecture.isEmpty else { return }
+        if exists("src/app") || exists("app") {
+            draft.architecture = "App Router"
+        } else if exists("src/pages") || exists("pages") {
+            draft.architecture = "Pages Router"
+        } else if exists("Sources") && exists("Tests") {
+            draft.architecture = "Swift Package (Sources/Tests)"
+        } else if exists("src") && exists("tests") {
+            draft.architecture = "src/tests layout"
+        }
     }
 }

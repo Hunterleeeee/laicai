@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
@@ -13,8 +14,12 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             status: .completed,
             steps: [
                 TaskStep(kind: .userInput, text: "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA 阅读并理解，整理"),
-                TaskStep(kind: .toolCall, text: "正在读取网页：https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA", toolName: "web.fetch", toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
-                TaskStep(kind: .toolResult, text: "已读取网页：mp.weixin.qq.com · 4188 字符", toolName: "web.fetch", toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
+                TaskStep(
+                    kind: .toolCall, text: "正在读取网页：https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA", toolName: "web.fetch",
+                    toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
+                TaskStep(
+                    kind: .toolResult, text: "已读取网页：mp.weixin.qq.com · 4188 字符", toolName: "web.fetch",
+                    toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
                 TaskStep(kind: .textOutput, text: "## Vibe Coding 产品上线安全检查清单\n\n- 供应链安全\n- 权限边界\n- 上线前验证")
             ],
             connectorID: connector.id,
@@ -55,8 +60,12 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             status: .completed,
             steps: [
                 TaskStep(kind: .userInput, text: "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA 阅读并理解，整理"),
-                TaskStep(kind: .toolCall, text: "正在读取网页：https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA", toolName: "web.fetch", toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
-                TaskStep(kind: .toolResult, text: "已读取网页：mp.weixin.qq.com · 4188 字符", toolName: "web.fetch", toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
+                TaskStep(
+                    kind: .toolCall, text: "正在读取网页：https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA", toolName: "web.fetch",
+                    toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
+                TaskStep(
+                    kind: .toolResult, text: "已读取网页：mp.weixin.qq.com · 4188 字符", toolName: "web.fetch",
+                    toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
                 TaskStep(kind: .textOutput, text: "已基于微信文章整理出 Vibe Coding 产品上线安全检查清单，包含供应链、权限、代码审查、上线前验证等要点。")
             ],
             connectorID: connector.id,
@@ -96,9 +105,14 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             status: .completed,
             steps: [
                 TaskStep(kind: .userInput, text: "出一个水生万物，财自流转的icon图"),
-                TaskStep(kind: .toolCall, text: "准备写入文件：water-wealth-cycle-icon.svg", toolName: "file.write", toolParams: ["path": "water-wealth-cycle-icon.svg"]),
-                TaskStep(kind: .reviewRequest, text: "已写入文件（可回滚）：/tmp/water-wealth-cycle-icon.svg", toolName: "file.write", diffFilePath: "/tmp/water-wealth-cycle-icon.svg"),
-                TaskStep(kind: .toolResult, text: "已准备文件写入 · /tmp/water-wealth-cycle-icon.svg", toolName: "file.write", toolParams: ["path": "/tmp/water-wealth-cycle-icon.svg"]),
+                TaskStep(
+                    kind: .toolCall, text: "准备写入文件：water-wealth-cycle-icon.svg", toolName: "file.write", toolParams: ["path": "water-wealth-cycle-icon.svg"]),
+                TaskStep(
+                    kind: .reviewRequest, text: "已写入文件（可回滚）：/tmp/water-wealth-cycle-icon.svg", toolName: "file.write",
+                    diffFilePath: "/tmp/water-wealth-cycle-icon.svg"),
+                TaskStep(
+                    kind: .toolResult, text: "已准备文件写入 · /tmp/water-wealth-cycle-icon.svg", toolName: "file.write",
+                    toolParams: ["path": "/tmp/water-wealth-cycle-icon.svg"]),
                 TaskStep(kind: .textOutput, text: "已生成 SVG icon 文件：/tmp/water-wealth-cycle-icon.svg")
             ],
             updatedAt: .now.addingTimeInterval(-30),
@@ -143,7 +157,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
     }
 
     func testTinyFollowUpWithoutSelectionDoesNotRestoreRandomRecentTask() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
             title: "读取项目",
             status: .completed,
@@ -155,21 +170,23 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             state: .init(
                 workspaceName: "Test",
                 modeLabel: "会话 问答",
-                threads: [Thread(
-                    id: task.id,
-                    title: task.title,
-                    preview: task.preview,
-                    status: task.status,
-                    steps: task.steps,
-                    connectorID: task.connectorID,
-                    workflowName: task.workflowName,
-                    context: task.context,
-                    updatedAt: task.updatedAt,
-                    executionState: Thread.inferAgentState(status: task.status),
-                    goal: task.steps.first(where: { $0.kind == .userInput })?.text,
-                    taskProtocol: task.taskProtocol,
-                    executionLedger: task.executionLedger
-                )],
+                threads: [
+                    Thread(
+                        id: task.id,
+                        title: task.title,
+                        preview: task.preview,
+                        status: task.status,
+                        steps: task.steps,
+                        connectorID: task.connectorID,
+                        workflowName: task.workflowName,
+                        context: task.context,
+                        updatedAt: task.updatedAt,
+                        executionState: Thread.inferAgentState(status: task.status),
+                        goal: task.steps.first(where: { $0.kind == .userInput })?.text,
+                        taskProtocol: task.taskProtocol,
+                        executionLedger: task.executionLedger
+                    )
+                ],
                 selectedThreadID: nil,
                 workbenchTab: .tools,
                 connectors: [connector],
@@ -178,7 +195,9 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -201,7 +220,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
         XCTAssertNotNil(runtime.requests.last?.tools)
     }
     func testExplicitContinuationRestoresRecentTaskEvenFromEmptySession() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
             title: "读取项目",
             status: .cancelled,
@@ -245,7 +265,9 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -264,7 +286,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == TaskStepKind.userInput }.last?.text, "继续这个 Agent")
     }
     func testContextualTaskReferenceFromEmptySessionRestoresRecentTask() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
             title: "读取本地项目",
             status: .completed,
@@ -311,7 +334,9 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,
@@ -330,7 +355,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == TaskStepKind.userInput }.last?.text, "刚才那个读取本地项目的对话输出没结束就被截断了")
     }
     func testFrustratedEmptySessionRestoresRecentTask() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
             title: "读取本地项目",
             status: .completed,
@@ -374,7 +400,9 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    showDebugPanels: false)
             ),
             environment: AppEnvironment(
                 runtimeClient: runtime,

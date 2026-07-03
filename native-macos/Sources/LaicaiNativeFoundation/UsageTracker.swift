@@ -37,7 +37,7 @@ public final class UsageTracker {
     }
 
     private func migrate() {
-        withDatabase(()) { db in
+        withDatabase(()) { database in
             SQLiteSupport.exec("""
             CREATE TABLE IF NOT EXISTS usage_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,17 +57,17 @@ public final class UsageTracker {
                 tool_call_count INTEGER NOT NULL DEFAULT 0,
                 error_count INTEGER NOT NULL DEFAULT 0
             );
-            """, on: db)
-            SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_usage_date ON usage_records(date_key);", on: db)
-            SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_records(model_name);", on: db)
-            SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_usage_project ON usage_records(project_name);", on: db)
-            SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_records(timestamp);", on: db)
-            SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_usage_thread ON usage_records(thread_id);", on: db)
+            """, on: database)
+            SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_usage_date ON usage_records(date_key);", on: database)
+            SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_records(model_name);", on: database)
+            SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_usage_project ON usage_records(project_name);", on: database)
+            SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage_records(timestamp);", on: database)
+            SQLiteSupport.exec("CREATE INDEX IF NOT EXISTS idx_usage_thread ON usage_records(thread_id);", on: database)
 
             // Migration: add columns if they don't exist
-            SQLiteSupport.exec("ALTER TABLE usage_records ADD COLUMN phase TEXT NOT NULL DEFAULT '';", on: db)
-            SQLiteSupport.exec("ALTER TABLE usage_records ADD COLUMN tool_call_count INTEGER NOT NULL DEFAULT 0;", on: db)
-            SQLiteSupport.exec("ALTER TABLE usage_records ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0;", on: db)
+            SQLiteSupport.exec("ALTER TABLE usage_records ADD COLUMN phase TEXT NOT NULL DEFAULT '';", on: database)
+            SQLiteSupport.exec("ALTER TABLE usage_records ADD COLUMN tool_call_count INTEGER NOT NULL DEFAULT 0;", on: database)
+            SQLiteSupport.exec("ALTER TABLE usage_records ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0;", on: database)
         }
     }
 
@@ -89,7 +89,7 @@ public final class UsageTracker {
         errorCount: Int = 0
     ) {
         invalidateThreadUsageCache(threadID: threadID)
-        withDatabaseAsync { db in
+        withDatabaseAsync { database in
             let now = Date()
             let dateKey = Self.dateKey(from: now)
             let sql = """
@@ -100,7 +100,7 @@ public final class UsageTracker {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return }
             sqlite3_bind_double(stmt, 1, now.timeIntervalSince1970)
             sqlite3_bind_text_safe(stmt, 2, dateKey)
             sqlite3_bind_text_safe(stmt, 3, modelName)
@@ -126,7 +126,7 @@ public final class UsageTracker {
 
     /// Daily usage for the last N days
     public func dailyUsage(days: Int = 30) -> [DailyUsageRow] {
-        withReadOnlyDatabase([]) { db in
+        withReadOnlyDatabase([]) { database in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT date_key,
@@ -141,7 +141,7 @@ public final class UsageTracker {
             ORDER BY date_key ASC;
             """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_double(stmt, 1, cutoff)
             var rows: [DailyUsageRow] = []
@@ -161,7 +161,7 @@ public final class UsageTracker {
 
     /// Per-model usage breakdown
     public func modelBreakdown(days: Int = 30) -> [ModelUsageRow] {
-        withReadOnlyDatabase([]) { db in
+        withReadOnlyDatabase([]) { database in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT model_name,
@@ -175,7 +175,7 @@ public final class UsageTracker {
             ORDER BY (total_input + total_output) DESC;
             """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_double(stmt, 1, cutoff)
             var rows: [ModelUsageRow] = []
@@ -194,7 +194,7 @@ public final class UsageTracker {
 
     /// Per-project usage breakdown
     public func projectBreakdown(days: Int = 30) -> [ProjectUsageRow] {
-        withReadOnlyDatabase([]) { db in
+        withReadOnlyDatabase([]) { database in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT project_name,
@@ -207,7 +207,7 @@ public final class UsageTracker {
             ORDER BY (total_input + total_output) DESC;
             """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_double(stmt, 1, cutoff)
             var rows: [ProjectUsageRow] = []
@@ -225,7 +225,7 @@ public final class UsageTracker {
 
     /// Totals for a period
     public func totals(days: Int = 30) -> UsageTotals {
-        withReadOnlyDatabase(UsageTotals()) { db in
+        withReadOnlyDatabase(UsageTotals()) { database in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT SUM(input_tokens), SUM(output_tokens), COUNT(*),
@@ -233,7 +233,7 @@ public final class UsageTracker {
             FROM usage_records WHERE timestamp > ?;
             """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return UsageTotals() }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return UsageTotals() }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_double(stmt, 1, cutoff)
             var result = UsageTotals()
@@ -250,7 +250,7 @@ public final class UsageTracker {
 
     /// Hourly pattern for today
     public func hourlyToday() -> [HourlyUsageRow] {
-        withReadOnlyDatabase([]) { db in
+        withReadOnlyDatabase([]) { database in
             let startOfDay = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
             let sql = """
             SELECT CAST(strftime('%H', timestamp, 'unixepoch', 'localtime') AS INTEGER) as hour,
@@ -263,7 +263,7 @@ public final class UsageTracker {
             ORDER BY hour;
             """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_double(stmt, 1, startOfDay)
             var rows: [HourlyUsageRow] = []
@@ -281,7 +281,7 @@ public final class UsageTracker {
 
     /// Top threads by token usage (for session ranking)
     public func topThreads(days: Int = 30, limit: Int = 10) -> [ThreadUsageRow] {
-        withReadOnlyDatabase([]) { db in
+        withReadOnlyDatabase([]) { database in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT thread_id,
@@ -297,7 +297,7 @@ public final class UsageTracker {
             LIMIT ?;
             """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_double(stmt, 1, cutoff)
             sqlite3_bind_int(stmt, 2, Int32(limit))
@@ -317,7 +317,7 @@ public final class UsageTracker {
 
     /// Intent breakdown (chat vs task vs research)
     public func intentBreakdown(days: Int = 30) -> [IntentUsageRow] {
-        withReadOnlyDatabase([]) { db in
+        withReadOnlyDatabase([]) { database in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970
             let sql = """
             SELECT CASE WHEN intent = '' THEN 'chat' ELSE intent END as intent_label,
@@ -331,7 +331,7 @@ public final class UsageTracker {
             ORDER BY request_count DESC;
             """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_double(stmt, 1, cutoff)
             var rows: [IntentUsageRow] = []
@@ -354,10 +354,10 @@ public final class UsageTracker {
         if let cached = cachedThreadUsage(threadID: threadID) {
             return cached
         }
-        let usage = withReadOnlyDatabase(UsageTotals()) { db in
+        let usage = withReadOnlyDatabase(UsageTotals()) { database in
             let sql = "SELECT SUM(input_tokens), SUM(output_tokens), COUNT(*) FROM usage_records WHERE thread_id = ?;"
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return UsageTotals() }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return UsageTotals() }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text_safe(stmt, 1, threadID)
             guard sqlite3_step(stmt) == SQLITE_ROW else { return UsageTotals() }
@@ -533,27 +533,32 @@ public enum ModelPricing {
         public let outputPerMillion: Double
     }
 
+    private struct PricingRule {
+        let patterns: [String]
+        let price: Price
+    }
+
+    private static let pricingRules: [PricingRule] = [
+        PricingRule(patterns: ["gpt-5", "gpt5"], price: Price(inputPerMillion: 10.0, outputPerMillion: 30.0)),
+        PricingRule(patterns: ["gpt-4.1"], price: Price(inputPerMillion: 2.0, outputPerMillion: 8.0)),
+        PricingRule(patterns: ["gpt-4o"], price: Price(inputPerMillion: 2.5, outputPerMillion: 10.0)),
+        PricingRule(patterns: ["o3", "o4"], price: Price(inputPerMillion: 10.0, outputPerMillion: 40.0)),
+        PricingRule(patterns: ["o1"], price: Price(inputPerMillion: 15.0, outputPerMillion: 60.0)),
+        PricingRule(patterns: ["claude-4", "claude-3.7"], price: Price(inputPerMillion: 3.0, outputPerMillion: 15.0)),
+        PricingRule(patterns: ["claude-3.5"], price: Price(inputPerMillion: 3.0, outputPerMillion: 15.0)),
+        PricingRule(patterns: ["claude"], price: Price(inputPerMillion: 3.0, outputPerMillion: 15.0)),
+        PricingRule(patterns: ["deepseek"], price: Price(inputPerMillion: 0.27, outputPerMillion: 1.10)),
+        PricingRule(patterns: ["gemini"], price: Price(inputPerMillion: 1.25, outputPerMillion: 5.0)),
+        PricingRule(patterns: ["llama", "qwen", "mistral", "phi"], price: Price(inputPerMillion: 0, outputPerMillion: 0))
+    ]
+
     public static func lookup(_ model: String) -> Price {
         let normalizedModel = model.lowercased()
-        // GPT-5 / GPT-4.1
-        if normalizedModel.contains("gpt-5") || normalizedModel.contains("gpt5") { return Price(inputPerMillion: 10.0, outputPerMillion: 30.0) }
-        if normalizedModel.contains("gpt-4.1") { return Price(inputPerMillion: 2.0, outputPerMillion: 8.0) }
-        if normalizedModel.contains("gpt-4o") { return Price(inputPerMillion: 2.5, outputPerMillion: 10.0) }
-        if normalizedModel.contains("o3") || normalizedModel.contains("o4") { return Price(inputPerMillion: 10.0, outputPerMillion: 40.0) }
-        if normalizedModel.contains("o1") { return Price(inputPerMillion: 15.0, outputPerMillion: 60.0) }
-        // Claude
-        if normalizedModel.contains("claude-4") || normalizedModel.contains("claude-3.7") { return Price(inputPerMillion: 3.0, outputPerMillion: 15.0) }
-        if normalizedModel.contains("claude-3.5") { return Price(inputPerMillion: 3.0, outputPerMillion: 15.0) }
-        if normalizedModel.contains("claude") { return Price(inputPerMillion: 3.0, outputPerMillion: 15.0) }
-        // DeepSeek
-        if normalizedModel.contains("deepseek") { return Price(inputPerMillion: 0.27, outputPerMillion: 1.10) }
-        // Gemini
-        if normalizedModel.contains("gemini") { return Price(inputPerMillion: 1.25, outputPerMillion: 5.0) }
-        // Local models — free
-        if normalizedModel.contains("llama") || normalizedModel.contains("qwen") || normalizedModel.contains("mistral") || normalizedModel.contains("phi") {
-            return Price(inputPerMillion: 0, outputPerMillion: 0)
+        if let match = pricingRules.first(where: { rule in
+            rule.patterns.contains { normalizedModel.contains($0) }
+        }) {
+            return match.price
         }
-        // Default frontier pricing
         return Price(inputPerMillion: 3.0, outputPerMillion: 15.0)
     }
 }

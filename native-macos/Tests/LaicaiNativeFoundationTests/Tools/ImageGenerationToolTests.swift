@@ -144,7 +144,7 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         var capturedBody = ""
         var capturedAuth = ""
         let pngData = Data([0x89, 0x50, 0x4E, 0x47])
-        let responseBody = #"{"data":[{"b64_json":"\#(pngData.base64EncodedString())"}]}"#.data(using: .utf8)!
+        let responseBody = Data(#"{"data":[{"b64_json":"\#(pngData.base64EncodedString())"}]}"#.utf8)
         let session = makeStubbedSession { request in
             capturedURL = request.url
             capturedBody = request.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? ""
@@ -185,7 +185,7 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         var capturedURL: URL?
         var capturedBody = ""
         let pngData = Data([0x89, 0x50, 0x4E, 0x47])
-        let responseBody = #"{"data":[{"b64_json":"\#(pngData.base64EncodedString())"}]}"#.data(using: .utf8)!
+        let responseBody = Data(#"{"data":[{"b64_json":"\#(pngData.base64EncodedString())"}]}"#.utf8)
         let session = makeStubbedSession { request in
             capturedURL = request.url
             capturedBody = request.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? ""
@@ -221,7 +221,7 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         defer { try? FileManager.default.removeItem(at: workspace) }
         var requestCount = 0
         let pngData = Data([0x89, 0x50, 0x4E, 0x47])
-        let responseBody = #"{"data":[{"b64_json":"\#(pngData.base64EncodedString())"}]}"#.data(using: .utf8)!
+        let responseBody = Data(#"{"data":[{"b64_json":"\#(pngData.base64EncodedString())"}]}"#.utf8)
         let session = makeStubbedSession { request in
             requestCount += 1
             if requestCount == 1 {
@@ -278,7 +278,7 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let pngData = Data([0x89, 0x50, 0x4E, 0x47])
-        let responseBody = #"{"data":[{"b64_json":"\#(pngData.base64EncodedString())"}]}"#.data(using: .utf8)!
+        let responseBody = Data(#"{"data":[{"b64_json":"\#(pngData.base64EncodedString())"}]}"#.utf8)
         let session = makeStubbedSession { request in
             let response = HTTPURLResponse(
                 url: request.url ?? URL(string: "https://example.com")!,

@@ -19,7 +19,7 @@ public struct PersistentMemoryRow: Sendable, Identifiable {
 }
 
 public final class SQLiteRepository {
-    private var db: OpaquePointer?
+    private var database: OpaquePointer?
     private let queue = DispatchQueue(label: "laicai.sqlite", qos: .utility)
     private let path: String
     /// H3: Track last-saved timestamps to enable incremental saves
@@ -42,12 +42,12 @@ public final class SQLiteRepository {
     }
 
     deinit {
-        sqlite3_close(db)
+        sqlite3_close(database)
     }
 
     private func open() {
-        if sqlite3_open(path, &db) != SQLITE_OK {
-            db = nil
+        if sqlite3_open(path, &database) != SQLITE_OK {
+            database = nil
         }
     }
 
@@ -198,13 +198,13 @@ public final class SQLiteRepository {
 
     private func exec(_ sql: String) {
         var err: UnsafeMutablePointer<CChar>?
-        sqlite3_exec(db, sql, nil, nil, &err)
+        sqlite3_exec(database, sql, nil, nil, &err)
         if let err { sqlite3_free(err) }
     }
 
     private func prepare(_ sql: String) -> OpaquePointer? {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         return stmt
     }
 
@@ -213,9 +213,9 @@ public final class SQLiteRepository {
     }
 
     private func step(_ stmt: OpaquePointer) -> Bool {
-        let rc = sqlite3_step(stmt)
+        let resultCode = sqlite3_step(stmt)
         sqlite3_finalize(stmt)
-        return rc == SQLITE_DONE
+        return resultCode == SQLITE_DONE
     }
 
     private func refreshThreadSaveCache() {
@@ -260,17 +260,7 @@ extension SQLiteRepository: ThreadRepository {
 
     public func saveThreads(_ threads: [LaicaiThread]) throws {
         // Safety: never wipe a non-empty DB with an empty list (protects against decode-fail cascades)
-        if threads.isEmpty {
-            if let countStmt = prepare("SELECT count(*) FROM threads") {
-                if sqlite3_step(countStmt) == SQLITE_ROW {
-                    let existing = sqlite3_column_int(countStmt, 0)
-                    sqlite3_finalize(countStmt)
-                    if existing > 0 { return }
-                } else {
-                    sqlite3_finalize(countStmt)
-                }
-            }
-        }
+        if shouldSkipEmptyThreadSave(threads) { return }
 
         let encoder = JSONEncoder()
         let currentIDs = Set(threads.map { $0.id })
@@ -316,6 +306,13 @@ extension SQLiteRepository: ThreadRepository {
         }
 
         exec("COMMIT")
+    }
+
+    private func shouldSkipEmptyThreadSave(_ threads: [LaicaiThread]) -> Bool {
+        guard threads.isEmpty, let countStmt = prepare("SELECT count(*) FROM threads") else { return false }
+        defer { sqlite3_finalize(countStmt) }
+        guard sqlite3_step(countStmt) == SQLITE_ROW else { return false }
+        return sqlite3_column_int(countStmt, 0) > 0
     }
 
     /// One-time migration: load sessions + tasks from legacy tables, convert to Thread, save to threads table.
@@ -537,7 +534,7 @@ extension SQLiteRepository: ConnectorRepository {
             let kind = String(cString: sqlite3_column_text(stmt, 2))
             let endpoint = String(cString: sqlite3_column_text(stmt, 3))
             let modelName = String(cString: sqlite3_column_text(stmt, 4))
-            let apiKey = String(cString: sqlite3_column_text(stmt, 5))
+            let apiKey = SecretStore.resolve(String(cString: sqlite3_column_text(stmt, 5)))
             let healthInt = sqlite3_column_int(stmt, 6)
             let health: ConnectorHealth = healthInt == 2 ? .ready : healthInt == 1 ? .attention : .offline
             let lastChecked = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 7))
@@ -553,11 +550,11 @@ extension SQLiteRepository: ConnectorRepository {
             } else {
                 toolCallingCapability = ConnectorToolCallingCapability(rawValue: String(cString: sqlite3_column_text(stmt, 9)))
             }
-            let toolCallingCapabilitySource: ConnectorToolCallingCapabilityObservationSource?
+            let toolCallingCapabilitySource: ConnectorToolCallObservationSource?
             if sqlite3_column_type(stmt, 10) == SQLITE_NULL {
                 toolCallingCapabilitySource = nil
             } else {
-                toolCallingCapabilitySource = ConnectorToolCallingCapabilityObservationSource(rawValue: String(cString: sqlite3_column_text(stmt, 10)))
+                toolCallingCapabilitySource = ConnectorToolCallObservationSource(rawValue: String(cString: sqlite3_column_text(stmt, 10)))
             }
             let toolCallingCapabilityLearnedAt: Date?
             if sqlite3_column_type(stmt, 11) == SQLITE_NULL {
@@ -615,7 +612,11 @@ extension SQLiteRepository: ConnectorRepository {
             bindText(stmt, index: 3, value: connector.kind)
             bindText(stmt, index: 4, value: connector.endpoint)
             bindText(stmt, index: 5, value: connector.modelName)
-            bindText(stmt, index: 6, value: connector.note)
+            let secretRef = SecretStore.reference(for: "connector", id: connector.id, field: "api_key")
+            if !connector.note.isEmpty {
+                SecretStore.save(connector.note, reference: secretRef)
+            }
+            bindText(stmt, index: 6, value: connector.note.isEmpty ? "" : secretRef)
             let healthInt: Int32 = connector.health == .ready ? 2 : connector.health == .attention ? 1 : 0
             sqlite3_bind_int(stmt, 7, healthInt)
             sqlite3_bind_double(stmt, 8, connector.lastCheckedAt.timeIntervalSince1970)

@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AgentLoopWikiSkillTests: LaicaiNativeFoundationTestCase {
@@ -17,7 +18,8 @@ final class AgentLoopWikiSkillTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "整理到 wiki\n请读取这个附件：\(workspace.appendingPathComponent("notes.txt").path)",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path, vaultRoot: workspace.path)
         )
 
@@ -36,20 +38,22 @@ final class AgentLoopWikiSkillTests: LaicaiNativeFoundationTestCase {
             ]
         )
 
-        XCTAssertFalse(AgentLoop.meetsCompletionCriteria(task: task, intent: .task, didComplete: true, hadFailure: false, wasTruncated: false, isReadOnlyRun: true))
+        XCTAssertFalse(
+            AgentLoop.meetsCompletionCriteria(task: task, intent: .task, didComplete: true, hadFailure: false, wasTruncated: false, isReadOnlyRun: true))
     }
     func testLearnedSkillDoesNotReturnUnrelatedHighQSkill() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let engine = SkillEvolutionEngine(path: workspace.path)
         engine.extractSkill(
-            taskTitle: "你是谁",
-            intent: "task",
-            toolsUsed: ["code.search"],
-            modelName: "test-model",
-            outcomeScore: 95,
-            strategy: "回答模型身份"
-        )
+            SkillExtractionRequest(
+                taskTitle: "你是谁",
+                intent: "task",
+                toolsUsed: ["code.search"],
+                modelName: "test-model",
+                outcomeScore: 95,
+                strategy: "回答模型身份"
+            ))
         try await Task.sleep(nanoseconds: 100_000_000)
 
         XCTAssertNil(engine.bestSkill(intent: "task", modelName: "test-model", message: "整理到 wiki\n请读取这个附件：/tmp/需求.xlsx"))

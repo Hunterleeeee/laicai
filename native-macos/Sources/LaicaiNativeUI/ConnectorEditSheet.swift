@@ -11,7 +11,7 @@ enum ConnectorEditMode: Identifiable {
     var id: String {
         switch self {
         case .add: return "add"
-        case .edit(let c): return c.id.uuidString
+        case .edit(let connector): return connector.id.uuidString
         }
     }
 }
@@ -29,7 +29,7 @@ struct ConnectorEditSheet: View {
     @State private var endpoint = ""
     @State private var modelName = ""
     @State private var apiKey = ""
-    @State private var role: ConnectorRole? = nil
+    @State private var role: ConnectorRole?
     @State private var toolCallingPolicy: ConnectorToolCallingPolicy = .automatic
 
     init(
@@ -40,14 +40,14 @@ struct ConnectorEditSheet: View {
         self.mode = mode
         self.onSave = onSave
         self.onSaveAndTest = onSaveAndTest
-        if case .edit(let c) = mode {
-            _name = State(initialValue: c.name)
-            _kind = State(initialValue: c.kind)
-            _endpoint = State(initialValue: c.endpoint)
-            _modelName = State(initialValue: c.modelName)
-            _apiKey = State(initialValue: c.note)
-            _role = State(initialValue: c.role)
-            _toolCallingPolicy = State(initialValue: c.toolCallingPolicy ?? .automatic)
+        if case .edit(let connector) = mode {
+            _name = State(initialValue: connector.name)
+            _kind = State(initialValue: connector.kind)
+            _endpoint = State(initialValue: connector.endpoint)
+            _modelName = State(initialValue: connector.modelName)
+            _apiKey = State(initialValue: connector.note)
+            _role = State(initialValue: connector.role)
+            _toolCallingPolicy = State(initialValue: connector.toolCallingPolicy ?? .automatic)
         }
     }
 
@@ -66,9 +66,9 @@ struct ConnectorEditSheet: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, AppSpace.xl)
-            .padding(.top, AppSpace.xl)
-            .padding(.bottom, AppSpace.lg)
+            .padding(.horizontal, AppSpace.extraLarge)
+            .padding(.top, AppSpace.extraLarge)
+            .padding(.bottom, AppSpace.large)
 
             Divider()
 
@@ -124,15 +124,15 @@ struct ConnectorEditSheet: View {
 
                 Section {
                     HStack(spacing: 8) {
-                        ForEach(ConnectorRole.allCases, id: \.self) { r in
+                        ForEach(ConnectorRole.allCases, id: \.self) { connectorRole in
                             Button {
-                                role = role == r ? nil : r
+                                role = role == connectorRole ? nil : connectorRole
                             } label: {
-                                Label(r.title, systemImage: r.icon)
+                                Label(connectorRole.title, systemImage: connectorRole.icon)
                                     .font(AppFont.captionMedium)
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
-                                    .background(role == r ? Color.accentColor.opacity(0.15) : Color.clear)
+                                    .background(role == connectorRole ? Color.accentColor.opacity(0.15) : Color.clear)
                                     .cornerRadius(6)
                             }
                             .buttonStyle(.plain)
@@ -167,7 +167,7 @@ struct ConnectorEditSheet: View {
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
-            .onChange(of: kind) { newKind in
+            .onChange(of: kind) { _, newKind in
                 if newKind == "ollama" && endpoint.trimmingCharacters(in: .whitespaces).isEmpty {
                     endpoint = "http://127.0.0.1:11434"
                 } else if newKind == "anthropic" && (endpoint.isEmpty || endpoint.contains("openai") || endpoint.contains("11434")) {
@@ -206,8 +206,8 @@ struct ConnectorEditSheet: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!isValid)
             }
-            .padding(.horizontal, AppSpace.xl)
-            .padding(.vertical, AppSpace.lg)
+            .padding(.horizontal, AppSpace.extraLarge)
+            .padding(.vertical, AppSpace.large)
         }
         .frame(width: 440)
     }
@@ -310,7 +310,7 @@ struct ConnectorEditSheet: View {
         let modelValue = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
         if toolCallingPolicy == .automatic,
            previewConnector.toolCallingCapability == nil,
-           (endpointValue.isEmpty || modelValue.isEmpty) {
+           endpointValue.isEmpty || modelValue.isEmpty {
             return "当前生效：等待端点和模型填写完整后再自动判断工具调用能力。"
         }
         let capability = ConnectorCapabilityProfile.infer(for: previewConnector, mode: .balanced)

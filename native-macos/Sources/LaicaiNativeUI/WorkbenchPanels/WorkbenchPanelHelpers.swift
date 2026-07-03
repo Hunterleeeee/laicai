@@ -5,8 +5,8 @@ func contextSectionCard<Content: View>(
     tint: Color = Brand.primary,
     @ViewBuilder content: () -> Content
 ) -> some View {
-    VStack(alignment: .leading, spacing: AppSpace.md) {
-        HStack(spacing: AppSpace.xs) {
+    VStack(alignment: .leading, spacing: AppSpace.medium) {
+        HStack(spacing: AppSpace.extraSmall) {
             Circle()
                 .fill(tint.opacity(0.55))
                 .frame(width: 5, height: 5)
@@ -17,9 +17,9 @@ func contextSectionCard<Content: View>(
         }
         content()
     }
-    .padding(AppSpace.md)
+    .padding(AppSpace.medium)
     .background(
-        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
             .fill(
                 LinearGradient(
                     colors: [SurfaceGrade.card.opacity(0.88), SurfaceGrade.elevated.opacity(0.72)],
@@ -29,10 +29,10 @@ func contextSectionCard<Content: View>(
             )
     )
     .overlay(
-        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
             .strokeBorder(tint.opacity(0.14), lineWidth: 0.7)
     )
-    .shadow(color: AppShadow.sm.color.opacity(0.75), radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
+    .shadow(color: AppShadow.small.color.opacity(0.75), radius: AppShadow.small.radius, y: AppShadow.small.verticalOffset)
 }
 
 func workbenchHeroCard<Content: View>(
@@ -42,15 +42,15 @@ func workbenchHeroCard<Content: View>(
     tint: Color = Brand.primary,
     @ViewBuilder content: () -> Content
 ) -> some View {
-    VStack(alignment: .leading, spacing: AppSpace.md) {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+    VStack(alignment: .leading, spacing: AppSpace.medium) {
+        HStack(alignment: .top, spacing: AppSpace.small) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 34, height: 34)
                 .background(Circle().fill(tint.opacity(0.10)))
 
-            VStack(alignment: .leading, spacing: AppSpace.xs) {
+            VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                 Text(title)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(TextGrade.primary)
@@ -66,9 +66,9 @@ func workbenchHeroCard<Content: View>(
 
         content()
     }
-    .padding(AppSpace.lg)
+    .padding(AppSpace.large)
     .background(
-        RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+        RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
             .fill(
                 LinearGradient(
                     colors: [SurfaceGrade.card, SurfaceGrade.elevated.opacity(0.78)],
@@ -78,14 +78,14 @@ func workbenchHeroCard<Content: View>(
             )
     )
     .overlay(
-        RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+        RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
             .strokeBorder(tint.opacity(0.14), lineWidth: 0.7)
     )
-    .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
+    .shadow(color: AppShadow.small.color, radius: AppShadow.small.radius, y: AppShadow.small.verticalOffset)
 }
 
 func workbenchSearchField(text: Binding<String>, placeholder: String) -> some View {
-    HStack(spacing: AppSpace.sm) {
+    HStack(spacing: AppSpace.small) {
         Image(systemName: "magnifyingglass")
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(TextGrade.ghost)
@@ -93,14 +93,14 @@ func workbenchSearchField(text: Binding<String>, placeholder: String) -> some Vi
             .textFieldStyle(.plain)
             .font(AppFont.caption)
     }
-    .padding(.horizontal, AppSpace.md)
-    .padding(.vertical, AppSpace.sm)
+    .padding(.horizontal, AppSpace.medium)
+    .padding(.vertical, AppSpace.small)
     .background(
-        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
             .fill(SurfaceGrade.card.opacity(0.76))
     )
     .overlay(
-        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
             .strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.7)
     )
 }
@@ -123,13 +123,13 @@ func workbenchSectionHeader(title: String, count: Int? = nil) -> some View {
 }
 
 func workbenchEmptyState(icon: String, title: String, hint: String) -> some View {
-    VStack(spacing: AppSpace.md) {
+    VStack(spacing: AppSpace.medium) {
         Image(systemName: icon)
             .font(.system(size: 18, weight: .semibold))
             .foregroundStyle(Brand.primary)
             .frame(width: 36, height: 36)
             .background(Circle().fill(Brand.primary.opacity(0.10)))
-        VStack(spacing: AppSpace.xs) {
+        VStack(spacing: AppSpace.extraSmall) {
             Text(title)
                 .font(AppFont.captionMedium)
                 .foregroundStyle(TextGrade.secondary)
@@ -140,19 +140,19 @@ func workbenchEmptyState(icon: String, title: String, hint: String) -> some View
         }
     }
     .frame(maxWidth: .infinity)
-    .padding(.vertical, AppSpace.lg)
+    .padding(.vertical, AppSpace.large)
     .background(
-        RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+        RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
             .fill(SurfaceGrade.card.opacity(0.62))
     )
     .overlay(
-        RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+        RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
             .strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6)
     )
 }
 
 func summaryRow(icon: String, label: String, value: String) -> some View {
-    HStack(spacing: AppSpace.sm) {
+    HStack(spacing: AppSpace.small) {
         Image(systemName: icon)
             .font(.system(size: 9, weight: .semibold))
             .foregroundStyle(Brand.primary)

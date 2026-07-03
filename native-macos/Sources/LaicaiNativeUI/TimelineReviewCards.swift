@@ -11,8 +11,8 @@ struct ReviewCard: View {
     let taskID: UUID
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: "eye.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(Semantic.warning)
@@ -29,22 +29,22 @@ struct ReviewCard: View {
                 .foregroundStyle(TextGrade.primary)
 
             if let filePath = step.diffFilePath {
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                     reviewInfoRow(icon: "doc.text", label: "文件", value: filePath)
                     reviewInfoRow(icon: "shield", label: "风险", value: riskLabel(for: filePath))
                     if let added = step.toolParams?["addedLines"], let removed = step.toolParams?["removedLines"] {
                         reviewInfoRow(icon: "plus.forwardslash.minus", label: "变更", value: "+\(added) -\(removed) 行")
                     }
                 }
-                .padding(AppSpace.sm)
+                .padding(AppSpace.small)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .fill(SurfaceGrade.card.opacity(0.65))
                 )
             }
 
             if let hunks = step.diffHunks, !hunks.isEmpty {
-                VStack(alignment: .leading, spacing: AppSpace.sm) {
+                VStack(alignment: .leading, spacing: AppSpace.small) {
                     ForEach(hunks) { hunk in
                         HunkCard(hunk: hunk, stepID: step.id, taskID: taskID, allDecided: step.approved != nil)
                     }
@@ -56,15 +56,15 @@ struct ReviewCard: View {
             }
 
             if step.approved == nil && (step.diffHunks == nil || step.diffHunks?.isEmpty == true) {
-                HStack(spacing: AppSpace.md) {
+                HStack(spacing: AppSpace.medium) {
                     Button {
                         store.approveReview(taskID: taskID, stepID: step.id)
                     } label: {
                         Label("批准", systemImage: "checkmark")
                             .font(AppFont.captionMedium)
                             .foregroundStyle(.white)
-                            .padding(.horizontal, AppSpace.lg)
-                            .padding(.vertical, AppSpace.sm + 2)
+                            .padding(.horizontal, AppSpace.large)
+                            .padding(.vertical, AppSpace.small + 2)
                             .background(Capsule().fill(Semantic.success))
                     }
                     .buttonStyle(.plain)
@@ -76,8 +76,8 @@ struct ReviewCard: View {
                         Label("拒绝", systemImage: "xmark")
                             .font(AppFont.captionMedium)
                             .foregroundStyle(.white)
-                            .padding(.horizontal, AppSpace.lg)
-                            .padding(.vertical, AppSpace.sm + 2)
+                            .padding(.horizontal, AppSpace.large)
+                            .padding(.vertical, AppSpace.small + 2)
                             .background(Capsule().fill(Semantic.error))
                     }
                     .buttonStyle(.plain)
@@ -89,15 +89,15 @@ struct ReviewCard: View {
                         Label("复制 diff", systemImage: "doc.on.doc")
                             .font(AppFont.captionMedium)
                             .foregroundStyle(TextGrade.secondary)
-                            .padding(.horizontal, AppSpace.lg)
-                            .padding(.vertical, AppSpace.sm + 2)
+                            .padding(.horizontal, AppSpace.large)
+                            .padding(.vertical, AppSpace.small + 2)
                             .background(Capsule().fill(SurfaceGrade.elevated.opacity(0.78)))
                             .overlay(Capsule().strokeBorder(SurfaceGrade.divider, lineWidth: 0.7))
                     }
                     .buttonStyle(.plain)
                 }
             } else if step.approved == nil && step.diffHunks != nil {
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Image(systemName: "info.circle")
                         .font(.system(size: 10))
                         .foregroundStyle(TextGrade.muted)
@@ -106,8 +106,8 @@ struct ReviewCard: View {
                         .foregroundStyle(TextGrade.muted)
                 }
             } else {
-                HStack(spacing: AppSpace.sm) {
-                    HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.small) {
+                    HStack(spacing: AppSpace.extraSmall) {
                         Image(systemName: step.approved == true ? "checkmark.circle.fill" : "xmark.circle.fill")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(step.approved == true ? Semantic.success : Semantic.error)
@@ -123,8 +123,8 @@ struct ReviewCard: View {
                             Label("回滚此变更", systemImage: "arrow.uturn.backward")
                                 .font(AppFont.captionMedium)
                                 .foregroundStyle(TextGrade.secondary)
-                                .padding(.horizontal, AppSpace.md)
-                                .padding(.vertical, AppSpace.xs + 1)
+                                .padding(.horizontal, AppSpace.medium)
+                                .padding(.vertical, AppSpace.extraSmall + 1)
                                 .background(Capsule().fill(SurfaceGrade.elevated.opacity(0.75)))
                                 .overlay(Capsule().strokeBorder(SurfaceGrade.divider, lineWidth: 0.7))
                         }
@@ -134,20 +134,20 @@ struct ReviewCard: View {
                 }
             }
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .frame(maxWidth: 580, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
                 .fill(Semantic.warningMuted)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
                 .strokeBorder(Semantic.warning.opacity(0.25), lineWidth: 1)
         )
     }
 
     private func reviewInfoRow(icon: String, label: String, value: String) -> some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Semantic.warning)
@@ -281,7 +281,7 @@ struct ReviewResultCard: View {
     let step: TaskStep
 
     var body: some View {
-        HStack(spacing: AppSpace.xs) {
+        HStack(spacing: AppSpace.extraSmall) {
             Image(systemName: step.approved == true ? "checkmark.circle.fill" : "xmark.circle.fill")
                 .font(.system(size: 12))
                 .foregroundStyle(step.approved == true ? Semantic.success : Semantic.error)
@@ -290,8 +290,8 @@ struct ReviewResultCard: View {
                 .font(AppFont.captionMedium)
                 .foregroundStyle(step.approved == true ? Semantic.success : Semantic.error)
         }
-        .padding(.horizontal, AppSpace.md)
-        .padding(.vertical, AppSpace.sm)
+        .padding(.horizontal, AppSpace.medium)
+        .padding(.vertical, AppSpace.small)
         .background(
             Capsule()
                 .fill((step.approved == true ? Semantic.success : Semantic.error).opacity(0.1))
@@ -309,8 +309,8 @@ struct HunkCard: View {
     let allDecided: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.xs) {
-            HStack(spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: "number")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Brand.primary)
@@ -339,27 +339,27 @@ struct HunkCard: View {
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(.horizontal, AppSpace.sm)
+                    .padding(.horizontal, AppSpace.small)
                     .padding(.vertical, 1)
                     .background(hunkLineBackground(item.element.prefix))
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                     .strokeBorder(SurfaceGrade.divider, lineWidth: 0.5)
             )
 
             if hunk.approved == nil && !allDecided {
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Button {
                         store.approveHunk(taskID: taskID, stepID: stepID, hunkID: hunk.id)
                     } label: {
                         Label("接受", systemImage: "checkmark")
                             .font(AppFont.tiny)
                             .foregroundStyle(.white)
-                            .padding(.horizontal, AppSpace.md)
-                            .padding(.vertical, AppSpace.xs)
+                            .padding(.horizontal, AppSpace.medium)
+                            .padding(.vertical, AppSpace.extraSmall)
                             .background(Capsule().fill(Semantic.success))
                     }
                     .buttonStyle(.plain)
@@ -370,21 +370,21 @@ struct HunkCard: View {
                         Label("拒绝", systemImage: "xmark")
                             .font(AppFont.tiny)
                             .foregroundStyle(.white)
-                            .padding(.horizontal, AppSpace.md)
-                            .padding(.vertical, AppSpace.xs)
+                            .padding(.horizontal, AppSpace.medium)
+                            .padding(.vertical, AppSpace.extraSmall)
                             .background(Capsule().fill(Semantic.error))
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.5))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(hunkBorderColor, lineWidth: 0.7)
         )
     }
@@ -447,9 +447,9 @@ struct DiffPreviewCard: View {
                 unifiedView
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.divider, lineWidth: 0.5)
         )
     }
@@ -469,7 +469,7 @@ struct DiffPreviewCard: View {
             Spacer()
 
             let stats = diffStats
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 if stats.added > 0 {
                     Text("+\(stats.added)")
                         .font(AppFont.tiny)
@@ -502,8 +502,8 @@ struct DiffPreviewCard: View {
             .buttonStyle(.plain)
             .help(isExpanded ? "收起" : "展开")
         }
-        .padding(.horizontal, AppSpace.md)
-        .padding(.vertical, AppSpace.sm)
+        .padding(.horizontal, AppSpace.medium)
+        .padding(.vertical, AppSpace.small)
         .background(SurfaceGrade.elevated.opacity(0.5))
     }
 
@@ -542,7 +542,7 @@ struct DiffPreviewCard: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .padding(.horizontal, AppSpace.sm)
+                    .padding(.horizontal, AppSpace.small)
                     .padding(.vertical, 1.5)
                     .background(lineBackground(line.type))
                 }
@@ -740,10 +740,10 @@ struct DiffPreviewCard: View {
                                 .foregroundStyle(pair.oldType == .removed ? Semantic.error : TextGrade.secondary)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.leading, AppSpace.xs)
+                                .padding(.leading, AppSpace.extraSmall)
                         }
                         .padding(.vertical, 1.5)
-                        .padding(.horizontal, AppSpace.sm)
+                        .padding(.horizontal, AppSpace.small)
                         .background(pair.oldType == .removed ? Semantic.error.opacity(0.10) : Color.clear)
 
                         Rectangle().fill(SurfaceGrade.divider).frame(width: 1)
@@ -760,10 +760,10 @@ struct DiffPreviewCard: View {
                                 .foregroundStyle(pair.newType == .added ? Semantic.success : TextGrade.secondary)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.leading, AppSpace.xs)
+                                .padding(.leading, AppSpace.extraSmall)
                         }
                         .padding(.vertical, 1.5)
-                        .padding(.horizontal, AppSpace.sm)
+                        .padding(.horizontal, AppSpace.small)
                         .background(pair.newType == .added ? Semantic.success.opacity(0.10) : Color.clear)
                     }
                 }

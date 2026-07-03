@@ -25,7 +25,7 @@ final class TaskOutcomeRecorderTests: LaicaiNativeFoundationTestCase {
             for index in 0..<80 {
                 group.addTask {
                     let id = "task-\(index)"
-                    recorder.record(
+                    recorder.record(TaskOutcomeRecord(
                         taskID: id,
                         intent: "task",
                         routeLabel: "会话 执行",
@@ -40,8 +40,9 @@ final class TaskOutcomeRecorderTests: LaicaiNativeFoundationTestCase {
                         durationSeconds: 0.1,
                         userFollowupCount: 0,
                         promptTag: "baseline",
+                        userRating: 0,
                         modelName: "test-model"
-                    )
+                    ))
                     recorder.recordToolOutcome(
                         taskID: id,
                         toolName: "file.read",
@@ -72,7 +73,7 @@ final class TaskOutcomeRecorderTests: LaicaiNativeFoundationTestCase {
         defer { try? FileManager.default.removeItem(at: base) }
         let recorder = TaskOutcomeRecorder(path: base.path)
 
-        recorder.record(
+        recorder.record(TaskOutcomeRecord(
             taskID: "legacy-1",
             intent: "task",
             routeLabel: "会话 执行",
@@ -86,9 +87,11 @@ final class TaskOutcomeRecorderTests: LaicaiNativeFoundationTestCase {
             toolFailures: 0,
             durationSeconds: 1.2,
             userFollowupCount: 0,
+            promptTag: "",
+            userRating: 0,
             modelName: "test-model"
-        )
-        recorder.record(
+        ))
+        recorder.record(TaskOutcomeRecord(
             taskID: "codex-1",
             intent: "task",
             routeLabel: "会话 执行",
@@ -102,8 +105,10 @@ final class TaskOutcomeRecorderTests: LaicaiNativeFoundationTestCase {
             toolFailures: 1,
             durationSeconds: 2.3,
             userFollowupCount: 1,
+            promptTag: "",
+            userRating: 0,
             modelName: "test-model"
-        )
+        ))
 
         try await Task.sleep(nanoseconds: 200_000_000)
         let rows = recorder.stats(days: 1).filter { $0.intent == "task" && $0.routeLabel == "会话 执行" }

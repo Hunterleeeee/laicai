@@ -45,11 +45,11 @@ final class MockURLProtocol: URLProtocol {
     static var responseProvider: ((URLRequest) -> (HTTPURLResponse, Data))?
     static var errorProvider: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
-    override class func canInit(with request: URLRequest) -> Bool {
+    override static func canInit(with request: URLRequest) -> Bool {
         true
     }
 
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest {
         var canonical = request
         if canonical.httpBody == nil, let stream = canonical.httpBodyStream {
             stream.open()

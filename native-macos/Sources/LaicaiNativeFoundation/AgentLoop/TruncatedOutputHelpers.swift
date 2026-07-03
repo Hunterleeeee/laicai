@@ -3,6 +3,17 @@ import LaicaiNativeDomain
 
 @MainActor
 extension AgentLoop {
+    struct TruncatedContinuationRequest {
+        let taskID: UUID
+        let originalMessage: String
+        let previousText: String
+        let messages: [ChatMessage]
+        let connector: ConnectorProfile
+        let runtime: any ChatRuntimeClient
+        let maxOutputTokens: Int
+        let originalStepID: UUID?
+    }
+
     static func shouldContinueTruncatedOutputOnly(message: String, priorSteps: [TaskStep]) -> Bool {
         guard hasTruncatedOutput(in: priorSteps) else { return false }
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -30,18 +41,9 @@ extension AgentLoop {
         }?.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    static func continueTruncatedOutput(
-        taskID: UUID,
-        originalMessage: String,
-        previousText: String,
-        messages: [ChatMessage],
-        connector: ConnectorProfile,
-        runtime: any ChatRuntimeClient,
-        maxOutputTokens: Int,
-        originalStepID: UUID? = nil
-    ) async throws -> TaskStep? {
-        var continuationMessages = messages
-        continuationMessages.append(ChatMessage(role: "assistant", content: previousText))
+    static func continueTruncatedOutput(_ request: TruncatedContinuationRequest) async throws -> TaskStep? {
+        var continuationMessages = request.messages
+        continuationMessages.append(ChatMessage(role: "assistant", content: request.previousText))
         continuationMessages.append(ChatMessage(
             role: "user",
             content: """
@@ -51,20 +53,20 @@ extension AgentLoop {
             - 不要重新调用工具
             - 如果确实已经完成，只输出最后缺失的收尾
 
-            原始用户目标：\(originalMessage)
+            原始用户目标：\(request.originalMessage)
             """
         ))
 
-        let response = try await runtime.sendMessage(SendMessageRequest(
-            sessionID: taskID,
+        let response = try await request.runtime.sendMessage(SendMessageRequest(
+            sessionID: request.taskID,
             message: "继续输出被截断的上一段",
-            connector: connector,
+            connector: request.connector,
             modeLabel: "会话 执行",
             history: [],
             systemPrompt: nil,
             tools: nil,
             messages: continuationMessages,
-            maxOutputTokens: maxOutputTokens
+            maxOutputTokens: request.maxOutputTokens
         ))
         let text = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !looksLikeProviderError(text) else { return nil }
@@ -77,7 +79,7 @@ extension AgentLoop {
             isCollapsible: false,
             isCollapsed: false,
             metrics: response.metrics,
-            continuationOf: originalStepID
+            continuationOf: request.originalStepID
         )
     }
 }

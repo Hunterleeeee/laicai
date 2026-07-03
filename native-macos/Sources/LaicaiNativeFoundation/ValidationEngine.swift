@@ -208,7 +208,7 @@ public struct RecoveryPlan: Sendable {
 extension ValidationEngine {
     /// Suggest a verification command based on project type detected from workspace files.
     public static func suggestVerificationCommand(workspaceRoot: String) -> String? {
-        let fm = FileManager.default
+        let fileManager = FileManager.default
         let projectIndicators: [(file: String, command: String)] = [
             ("Package.swift", "swift build"),
             ("Podfile", "pod lib lint"),
@@ -220,11 +220,11 @@ extension ValidationEngine {
             ("pom.xml", "mvn test"),
             ("build.gradle", "gradle test"),
             ("Gemfile", "bundle exec rspec"),
-            ("Makefile", "make test"),
+            ("Makefile", "make test")
         ]
         for indicator in projectIndicators {
             let fullPath = (workspaceRoot as NSString).appendingPathComponent(indicator.file)
-            if fm.fileExists(atPath: fullPath) {
+            if fileManager.fileExists(atPath: fullPath) {
                 return indicator.command
             }
         }
@@ -239,156 +239,211 @@ public struct ErrorRecoveryEngine {
         params: [String: String],
         attemptCount: Int
     ) -> RecoveryPlan {
-        // File not found: try similar path → code.search → ask user
-        if error.contains("file_not_found") || error.contains("文件不存在") {
-            if let path = params["path"] {
-                let altPath = findSimilarFile(hint: path)
-                if !altPath.isEmpty {
-                    return RecoveryPlan(
-                        action: .retryWithModifiedParams(["path": altPath]),
-                        description: "文件未找到，尝试相似路径：\(altPath)",
-                        fallbackChain: [
-                            .fallbackTool("code.search", "{\"query\":\"\((path as NSString).lastPathComponent)\"}"),
-                            .askUser("文件不存在：\(path)，请确认路径")
-                        ],
-                        suppressOriginalFailure: true
-                    )
-                }
-            }
-            return RecoveryPlan(
-                action: .fallbackTool("code.search", "{\"query\":\"\(params["path"] ?? "")\"}"),
-                description: "文件未找到，改用代码搜索定位",
-                fallbackChain: [.askUser("文件不存在：\(params["path"] ?? "未知")，请确认路径")],
-                suppressOriginalFailure: false
-            )
+        let recoveryBuilders: [() -> RecoveryPlan?] = [
+            { fileNotFoundRecovery(error: error, params: params) },
+            { policyRecovery(error: error, toolName: toolName) },
+            { securityRecovery(error: error) },
+            { forbiddenCommandRecovery(error: error) },
+            { exitRecovery(error: error, attemptCount: attemptCount) },
+            { authRecovery(error: error) },
+            { timeoutRecovery(error: error, toolName: toolName, params: params) },
+            { codeSearchRecovery(toolName: toolName) },
+            { binaryFileReadRecovery(error: error, toolName: toolName, params: params) },
+            { fileExtractUnsupportedRecovery(error: error, toolName: toolName, params: params) },
+            { fileReadRecovery(toolName: toolName, params: params, attemptCount: attemptCount) }
+        ]
+        for builder in recoveryBuilders {
+            if let plan = builder() { return plan }
         }
+        return genericRecovery(attemptCount: attemptCount)
+    }
 
-        // Shell blocked by tool policy: workspace.index → code.search
-        if toolName == "shell.exec", error.contains("工具策略拦截") {
-            return RecoveryPlan(
-                action: .fallbackTool("workspace.index", "{\"maxFiles\":300,\"maxDepth\":5}"),
-                description: "shell 遍历被工具策略拦截，改用受控项目索引",
-                fallbackChain: [.fallbackTool("code.search", "{\"query\":\"文件列表\"}")],
-                suppressOriginalFailure: true
-            )
+    private static func fileNotFoundRecovery(error: String, params: [String: String]) -> RecoveryPlan? {
+        guard error.contains("file_not_found") || error.contains("文件不存在") else { return nil }
+        if let plan = similarFileRecovery(params: params) {
+            return plan
         }
+        return RecoveryPlan(
+            action: .fallbackTool("code.search", "{\"query\":\"\(params["path"] ?? "")\"}"),
+            description: "文件未找到，改用代码搜索定位",
+            fallbackChain: [.askUser("文件不存在：\(params["path"] ?? "未知")，请确认路径")],
+            suppressOriginalFailure: false
+        )
+    }
 
-        // Security denied: ask user
-        if error.contains("security_denied") || error.contains("安全") {
-            return RecoveryPlan(
-                action: .askUser("操作被安全策略拦截：\(error)"),
-                description: "请求用户授权"
-            )
+    private static func similarFileRecovery(params: [String: String]) -> RecoveryPlan? {
+        guard let path = params["path"] else { return nil }
+        let altPath = findSimilarFile(hint: path)
+        guard !altPath.isEmpty else { return nil }
+        return RecoveryPlan(
+            action: .retryWithModifiedParams(["path": altPath]),
+            description: "文件未找到，尝试相似路径：\(altPath)",
+            fallbackChain: [
+                .fallbackTool("code.search", "{\"query\":\"\((path as NSString).lastPathComponent)\"}"),
+                .askUser("文件不存在：\(path)，请确认路径")
+            ],
+            suppressOriginalFailure: true
+        )
+    }
+
+    private static func policyRecovery(error: String, toolName: String) -> RecoveryPlan? {
+        guard toolName == "shell.exec", error.contains("工具策略拦截") else { return nil }
+        return RecoveryPlan(
+            action: .fallbackTool("workspace.index", "{\"maxFiles\":300,\"maxDepth\":5}"),
+            description: "shell 遍历被工具策略拦截，改用受控项目索引",
+            fallbackChain: [.fallbackTool("code.search", "{\"query\":\"文件列表\"}")],
+            suppressOriginalFailure: true
+        )
+    }
+
+    private static func securityRecovery(error: String) -> RecoveryPlan? {
+        guard error.contains("security_denied") || error.contains("安全") else { return nil }
+        return RecoveryPlan(
+            action: .askUser("操作被安全策略拦截：\(error)"),
+            description: "请求用户授权"
+        )
+    }
+
+    private static func forbiddenCommandRecovery(error: String) -> RecoveryPlan? {
+        guard error.contains("forbidden_command") || error.contains("白名单") else { return nil }
+        return RecoveryPlan(
+            action: .askUser("命令不在白名单中，是否允许执行？"),
+            description: "请求用户授权执行"
+        )
+    }
+
+    private static func exitRecovery(error: String, attemptCount: Int) -> RecoveryPlan? {
+        guard error.contains("exit_") else { return nil }
+        return RecoveryPlan(
+            action: .retry,
+            description: "命令执行失败，重试（第 \(attemptCount + 1) 次）",
+            fallbackChain: attemptCount >= 2 ? [.abort("重试次数已达上限")] : []
+        )
+    }
+
+    private static func authRecovery(error: String) -> RecoveryPlan? {
+        guard error.contains("鉴权失败") || error.contains("401") else { return nil }
+        return RecoveryPlan(
+            action: .askUser("鉴权失败，请检查 API 密钥"),
+            description: "请求用户检查密钥配置"
+        )
+    }
+
+    private static func timeoutRecovery(
+        error: String,
+        toolName: String,
+        params: [String: String]
+    ) -> RecoveryPlan? {
+        guard error.contains("timeout") || error.contains("超时") else { return nil }
+        var newParams = params
+        let currentTimeout = Int(newParams["timeout"] ?? "30") ?? 30
+        newParams["timeout"] = "\(min(currentTimeout * 2, 120))"
+        return RecoveryPlan(
+            action: .retryWithModifiedParams(newParams),
+            description: "超时，增加超时时间到 \(newParams["timeout"] ?? "60")s 重试",
+            fallbackChain: toolName == "code.search"
+                ? [.fallbackTool("workspace.index", "{\"maxFiles\":200,\"maxDepth\":4}")]
+                : [],
+            suppressOriginalFailure: true
+        )
+    }
+
+    private static func codeSearchRecovery(toolName: String) -> RecoveryPlan? {
+        guard toolName == "code.search" else { return nil }
+        return RecoveryPlan(
+            action: .fallbackTool("workspace.index", "{\"maxFiles\":300,\"maxDepth\":5}"),
+            description: "搜索工具失败，回退到受控项目索引",
+            suppressOriginalFailure: true
+        )
+    }
+
+    private static func binaryFileReadRecovery(
+        error: String,
+        toolName: String,
+        params: [String: String]
+    ) -> RecoveryPlan? {
+        guard toolName == "file.read",
+              error.contains("unsupported_binary_file") || error.contains("file_extract") else {
+            return nil
         }
+        let path = params["path"] ?? ""
+        let payload: [String: Any] = ["path": path, "limit": 60_000]
+        let json = jsonString(payload, fallback: "{\"path\":\"\(path)\"}", options: [.withoutEscapingSlashes])
+        return RecoveryPlan(
+            action: .fallbackTool("file.extract", json),
+            description: "file.read 检测到表格/文档，改用 file.extract 提取文本",
+            suppressOriginalFailure: true
+        )
+    }
 
-        // Forbidden command: ask user
-        if error.contains("forbidden_command") || error.contains("白名单") {
-            return RecoveryPlan(
-                action: .askUser("命令不在白名单中，是否允许执行？"),
-                description: "请求用户授权执行"
-            )
+    private static func fileExtractUnsupportedRecovery(
+        error: String,
+        toolName: String,
+        params: [String: String]
+    ) -> RecoveryPlan? {
+        guard toolName == "file.extract",
+              error.contains("unsupported_file_type") || error.contains("暂不支持提取") else {
+            return nil
         }
-
-        // Exit code failure: retry → retry with modified params
-        if error.contains("exit_") {
-            return RecoveryPlan(
-                action: .retry,
-                description: "命令执行失败，重试（第 \(attemptCount + 1) 次）",
-                fallbackChain: attemptCount >= 2 ? [.abort("重试次数已达上限")] : []
-            )
+        let path = params["path"] ?? ""
+        if ["pptx", "docx", "xlsx", "xlsm"].contains((path as NSString).pathExtension.lowercased()) {
+            return officeDocumentRecovery(path: path)
         }
+        return RecoveryPlan(
+            action: .askUser("当前内置提取器不支持此文件类型：\(path)。请改用 shell_exec/系统工具转换，或说明缺少转换/OCR组件，不能重复调用 file.extract。"),
+            description: "file.extract 不支持该类型，停止同参数重试"
+        )
+    }
 
-        // Auth failure: ask user
-        if error.contains("鉴权失败") || error.contains("401") {
-            return RecoveryPlan(
-                action: .askUser("鉴权失败，请检查 API 密钥"),
-                description: "请求用户检查密钥配置"
-            )
-        }
+    private static func officeDocumentRecovery(path: String) -> RecoveryPlan {
+        let payload: [String: Any] = [
+            "action": "prepare",
+            "sourcePath": path,
+            "chunkSize": 80,
+            "onlyChinese": true
+        ]
+        let json = jsonString(payload, fallback: "{\"sourcePath\":\"\(path)\"}")
+        return RecoveryPlan(
+            action: .fallbackTool("document.transform", json),
+            description: "file.extract 不足以完成 Office 文档交付，改用 document.transform",
+            suppressOriginalFailure: true
+        )
+    }
 
-        // Timeout: increase timeout → retry with simpler query
-        if error.contains("timeout") || error.contains("超时") {
-            var newParams = params
-            let currentTimeout = Int(newParams["timeout"] ?? "30") ?? 30
-            newParams["timeout"] = "\(min(currentTimeout * 2, 120))"
-            return RecoveryPlan(
-                action: .retryWithModifiedParams(newParams),
-                description: "超时，增加超时时间到 \(newParams["timeout"] ?? "60")s 重试",
-                fallbackChain: toolName == "code.search"
-                    ? [.fallbackTool("workspace.index", "{\"maxFiles\":200,\"maxDepth\":4}")]
-                    : [],
-                suppressOriginalFailure: true
-            )
-        }
+    private static func fileReadRecovery(
+        toolName: String,
+        params: [String: String],
+        attemptCount: Int
+    ) -> RecoveryPlan? {
+        guard toolName == "file.read" else { return nil }
+        return RecoveryPlan(
+            action: .retry,
+            description: "文件读取失败，重试（第 \(attemptCount + 1) 次）",
+            fallbackChain: [
+                .fallbackTool("code.search", "{\"query\":\"\(params["path"] ?? "")\"}"),
+                .fallbackTool("workspace.index", "{\"maxFiles\":200,\"maxDepth\":4}")
+            ],
+            suppressOriginalFailure: attemptCount >= 1
+        )
+    }
 
-        // Code search failure: workspace.index
-        if toolName == "code.search" {
-            return RecoveryPlan(
-                action: .fallbackTool("workspace.index", "{\"maxFiles\":300,\"maxDepth\":5}"),
-                description: "搜索工具失败，回退到受控项目索引",
-                suppressOriginalFailure: true
-            )
-        }
-
-        if toolName == "file.read", error.contains("unsupported_binary_file") || error.contains("file_extract") {
-            let path = params["path"] ?? ""
-            let payload: [String: Any] = ["path": path, "limit": 60_000]
-            let json = (try? JSONSerialization.data(withJSONObject: payload, options: [.withoutEscapingSlashes])).flatMap { String(data: $0, encoding: .utf8) } ?? "{\"path\":\"\(path)\"}"
-            return RecoveryPlan(
-                action: .fallbackTool("file.extract", json),
-                description: "file.read 检测到表格/文档，改用 file.extract 提取文本",
-                suppressOriginalFailure: true
-            )
-        }
-
-        if toolName == "file.extract", error.contains("unsupported_file_type") || error.contains("暂不支持提取") {
-            let path = params["path"] ?? ""
-            let ext = (path as NSString).pathExtension.lowercased()
-            if ["pptx", "docx", "xlsx", "xlsm"].contains(ext) {
-                let payload: [String: Any] = [
-                    "action": "prepare",
-                    "sourcePath": path,
-                    "chunkSize": 80,
-                    "onlyChinese": true
-                ]
-                let json = (try? JSONSerialization.data(withJSONObject: payload)).flatMap { String(data: $0, encoding: .utf8) } ?? "{\"sourcePath\":\"\(path)\"}"
-                return RecoveryPlan(
-                    action: .fallbackTool("document.transform", json),
-                    description: "file.extract 不足以完成 Office 文档交付，改用 document.transform",
-                    suppressOriginalFailure: true
-                )
-            }
-            return RecoveryPlan(
-                action: .askUser("当前内置提取器不支持此文件类型：\(path)。请改用 shell_exec/系统工具转换，或说明缺少转换/OCR组件，不能重复调用 file.extract。"),
-                description: "file.extract 不支持该类型，停止同参数重试"
-            )
-        }
-
-        // File read failure: code.search → workspace.index
-        if toolName == "file.read" {
-            return RecoveryPlan(
-                action: .retry,
-                description: "文件读取失败，重试（第 \(attemptCount + 1) 次）",
-                fallbackChain: [
-                    .fallbackTool("code.search", "{\"query\":\"\(params["path"] ?? "")\"}"),
-                    .fallbackTool("workspace.index", "{\"maxFiles\":200,\"maxDepth\":4}")
-                ],
-                suppressOriginalFailure: attemptCount >= 1
-            )
-        }
-
-        // Generic: retry with limit
+    private static func genericRecovery(attemptCount: Int) -> RecoveryPlan {
         if attemptCount >= 3 {
             return RecoveryPlan(
                 action: .abort("重试次数已达上限（\(attemptCount) 次）"),
                 description: "放弃重试，报告失败"
             )
         }
+        return RecoveryPlan(action: .retry, description: "重试（第 \(attemptCount + 1) 次）")
+    }
 
-        return RecoveryPlan(
-            action: .retry,
-            description: "重试（第 \(attemptCount + 1) 次）"
-        )
+    private static func jsonString(
+        _ payload: [String: Any],
+        fallback: String,
+        options: JSONSerialization.WritingOptions = []
+    ) -> String {
+        (try? JSONSerialization.data(withJSONObject: payload, options: options))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? fallback
     }
 
     /// Plan recovery for JSON-based function calls

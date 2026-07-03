@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import LaicaiNativeDomain
 
 // MARK: - Hook Definition
@@ -15,8 +16,8 @@ public struct HookDefinition: Identifiable, Codable, Sendable {
     public var enabled: Bool
 
     public enum Phase: String, Codable, Sendable {
-        case pre = "pre"
-        case post = "post"
+        case pre
+        case post
     }
 
     public init(
@@ -75,11 +76,13 @@ public final class HookEngine: ObservableObject {
         let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !root.isEmpty else { return }
 
-        let hookDirs = [
-            (root as NSString).appendingPathComponent(".laicai/hooks"),
+        var hookDirs = [
             (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? "")
                 .appending("/Laicai/hooks")
         ]
+        if WorkspaceTrust.isTrusted(root) {
+            hookDirs.insert((root as NSString).appendingPathComponent(".laicai/hooks"), at: 0)
+        }
 
         var loadedHooks: [HookDefinition] = []
         let decoder = JSONDecoder()
@@ -162,13 +165,13 @@ public final class HookEngine: ObservableObject {
         do {
             try process.run()
 
-            // Timeout: 10 seconds for hooks
-            let timeoutTask = Task {
-                try await Task.sleep(for: .seconds(10))
-                if process.isRunning { process.terminate() }
+            if !Self.waitForExit(process, timeoutSeconds: 10) {
+                process.terminate()
+                if !Self.waitForExit(process, timeoutSeconds: 2) {
+                    Darwin.kill(process.processIdentifier, SIGKILL)
+                    _ = Self.waitForExit(process, timeoutSeconds: 1)
+                }
             }
-            process.waitUntilExit()
-            timeoutTask.cancel()
 
             let outData = stdout.fileHandleForReading.readDataToEndOfFile()
             let errData = stderr.fileHandleForReading.readDataToEndOfFile()
@@ -216,5 +219,14 @@ public final class HookEngine: ObservableObject {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(hook) else { return }
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+
+    private static func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) -> Bool {
+        let semaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in semaphore.signal() }
+        if !process.isRunning { return true }
+        let result = semaphore.wait(timeout: .now() + timeoutSeconds)
+        process.terminationHandler = nil
+        return result == .success || !process.isRunning
     }
 }

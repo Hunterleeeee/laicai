@@ -3,6 +3,15 @@ import LaicaiNativeDomain
 
 @MainActor
 extension AgentLoop {
+    private struct FallbackWikiBuildRequest {
+        let tool: any LaicaiTool
+        let topic: String
+        let mode: String
+        let source: FallbackWikiSource
+        let taskContext: TaskContext
+        var emitFailure: Bool = true
+    }
+
     func runFallbackWikiBuildIfNeeded(
         message: String,
         taskContext: inout TaskContext,
@@ -64,11 +73,13 @@ extension AgentLoop {
 
         let topic = Self.fallbackWikiTopic(message: message, source: source)
         guard let atomicResult = await executeFallbackWikiBuild(
-            tool: wikiTool,
-            topic: topic,
-            mode: "atomic",
-            source: source,
-            taskContext: taskContext,
+            FallbackWikiBuildRequest(
+                tool: wikiTool,
+                topic: topic,
+                mode: "atomic",
+                source: source,
+                taskContext: taskContext
+            ),
             task: &task,
             onStep: onStep
         ) else {
@@ -81,14 +92,16 @@ extension AgentLoop {
         taskContext.memory.appendDecision("已保存 Wiki：\(topic)")
 
         if let mocResult = await executeFallbackWikiBuild(
-            tool: wikiTool,
-            topic: topic,
-            mode: "moc",
-            source: source,
-            taskContext: taskContext,
+            FallbackWikiBuildRequest(
+                tool: wikiTool,
+                topic: topic,
+                mode: "moc",
+                source: source,
+                taskContext: taskContext,
+                emitFailure: false
+            ),
             task: &task,
-            onStep: onStep,
-            emitFailure: false
+            onStep: onStep
         ), mocResult.success {
             taskContext.memory.appendDecision("已保存 Wiki 索引：\(topic)")
         }
@@ -106,18 +119,14 @@ extension AgentLoop {
     }
 
     private func executeFallbackWikiBuild(
-        tool: any LaicaiTool,
-        topic: String,
-        mode: String,
-        source: FallbackWikiSource,
-        taskContext: TaskContext,
+        _ request: FallbackWikiBuildRequest,
         task: inout AgentTask,
-        onStep: @MainActor (TaskStep) -> Void,
-        emitFailure: Bool = true
+        onStep: @MainActor (TaskStep) -> Void
     ) async -> ToolResult? {
+        let source = request.source
         let args: [String: Any] = [
-            "topic": topic,
-            "mode": mode,
+            "topic": request.topic,
+            "mode": request.mode,
             "save": true,
             "topK": 8,
             "sourceTitle": source.title,
@@ -127,7 +136,7 @@ extension AgentLoop {
         let argumentsJSON = (try? JSONSerialization.data(withJSONObject: args))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         let params = Self.displayParamsFromJSON(argumentsJSON)
-        let callId = "call_fallback_wiki_\(mode)_\(UUID().uuidString.prefix(8))"
+        let callId = "call_fallback_wiki_\(request.mode)_\(UUID().uuidString.prefix(8))"
         let callStep = TaskStep(
             kind: .toolCall,
             text: ToolStepFormatter.callText(toolName: "wiki.build", arguments: params),
@@ -141,12 +150,12 @@ extension AgentLoop {
         onStep(callStep)
 
         let (result, _) = await ValidationEngine.executeWithValidationJSON(
-            tool: tool,
+            tool: request.tool,
             argumentsJSON: argumentsJSON,
-            context: taskContext,
+            context: request.taskContext,
             maxRetries: 1
         )
-        if result.success || emitFailure {
+        if result.success || request.emitFailure {
             let resultText = ToolResultFormatter.displayText(
                 toolName: "wiki.build",
                 arguments: params,

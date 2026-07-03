@@ -4,24 +4,40 @@ import LaicaiNativeDomain
 extension AppStore {
     static func prepareThreadForContinuation(_ thread: inout Thread, message: String) {
         let checkpoint = latestCheckpoint(in: thread)
-        thread.steps.removeAll { step in
-            if step.kind == .textOutput,
-               step.toolCallId == streamingOutputID,
-               step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return true
-            }
-            guard step.kind == .error else { return false }
-            let text = step.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if step.recoverable && !step.isFailure { return true }
-            if text.contains("已达到最大迭代次数") { return true }
-            if text.contains("上次运行被中断") || text.contains("已自动标记为已暂停") || text.contains("已自动标记为已取消") { return true }
-            return false
-        }
+        thread.steps.removeAll(where: shouldRemoveContinuationTransientStep)
 
-        guard (isContinuationCommand(message) || isLikelyTaskFollowUp(message)),
+        guard isContinuationCommand(message) || isLikelyTaskFollowUp(message),
               !thread.context.memory.userDecisions.contains(where: { $0.contains("[continuation]") }) else { return }
         let checkpointText = checkpoint.map { "\n\n最近检查点：\($0)" } ?? ""
+        let summary = continuationSummary(for: thread, checkpointText: checkpointText)
 
+        thread.context.memory.appendDecision("[continuation] \(summary)")
+        if !checkpointText.isEmpty {
+            thread.steps.append(TaskStep(
+                kind: .aiThinking,
+                text: "恢复现场：最近检查点已写入本轮上下文。\(checkpointText)",
+                isCollapsible: true,
+                isCollapsed: true
+            ))
+        }
+    }
+
+    private static func shouldRemoveContinuationTransientStep(_ step: TaskStep) -> Bool {
+        if step.kind == .textOutput,
+           step.toolCallId == streamingOutputID,
+           step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        guard step.kind == .error else { return false }
+        let text = step.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if step.recoverable && !step.isFailure { return true }
+        if text.contains("已达到最大迭代次数") { return true }
+        return text.contains("上次运行被中断")
+            || text.contains("已自动标记为已暂停")
+            || text.contains("已自动标记为已取消")
+    }
+
+    private static func continuationSummary(for thread: Thread, checkpointText: String) -> String {
         let readFiles = thread.steps
             .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
             .compactMap { $0.toolParams?["path"] }
@@ -51,16 +67,7 @@ extension AppStore {
         summary += "- 从上次中断处继续执行\n"
         summary += "- 如果用户反馈某些文件内容为空，先用 file_read 验证再重写"
         summary += checkpointText
-
-        thread.context.memory.appendDecision("[continuation] \(summary)")
-        if !checkpointText.isEmpty {
-            thread.steps.append(TaskStep(
-                kind: .aiThinking,
-                text: "恢复现场：最近检查点已写入本轮上下文。\(checkpointText)",
-                isCollapsible: true,
-                isCollapsed: true
-            ))
-        }
+        return summary
     }
 
     static func ensureCheckpointIfNeeded(_ thread: inout Thread) {

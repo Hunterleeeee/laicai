@@ -128,19 +128,21 @@ struct ContextBuilder {
     @discardableResult
     private static func enrichWithSkillGuidance(prompt: inout String, state: inout PipelineState, config: AgentLoop.Config) -> Int {
         guard state.intent != .chat else { return 0 }
-        guard let learnedSkill = SkillEvolutionEngine.shared.bestSkill(
-            intent: state.intentString,
-            modelName: config.modelName,
-            message: state.message
-        ) else { return 0 }
+        guard
+            let learnedSkill = SkillEvolutionEngine.shared.bestSkill(
+                intent: state.intentString,
+                modelName: config.modelName,
+                message: state.message
+            )
+        else { return 0 }
 
         let toolSequence = learnedSkill.toolSequence.map { ToolNameCodec.canonicalName($0) }.joined(separator: " → ")
         let skillInjection = """
 
-## 已学技能提示（仅供参考）
-此类任务曾使用策略「\(learnedSkill.strategy)」，工具序列：\(toolSequence)（成功率 \(Int(learnedSkill.successRate * 100))%）
-请根据当前实际情况决定是否采用，不匹配时自行组合工具。
-"""
+            ## 已学技能提示（仅供参考）
+            此类任务曾使用策略「\(learnedSkill.strategy)」，工具序列：\(toolSequence)（成功率 \(Int(learnedSkill.successRate * 100))%）
+            请根据当前实际情况决定是否采用，不匹配时自行组合工具。
+            """
         prompt += skillInjection
         state.task.context.metadata["learnedSkillID"] = "\(learnedSkill.id)"
 
@@ -159,11 +161,11 @@ struct ContextBuilder {
         guard state.intent != .chat else { return 0 }
         let injection = """
 
-## 自适应工作流
-- 为当前目标生成临时工作流，每次工具结果后重新评估，工作流是假设不是脚本。
-- 根据当前证据决定下一步：有足够证据就动手，证据不足就先探索，失败就换路径。
-- 最终答案只报告交付物、验证结果和残余风险。
-"""
+            ## 自适应工作流
+            - 为当前目标生成临时工作流，每次工具结果后重新评估，工作流是假设不是脚本。
+            - 根据当前证据决定下一步：有足够证据就动手，证据不足就先探索，失败就换路径。
+            - 最终答案只报告交付物、验证结果和残余风险。
+            """
         prompt += injection
         return estimateTokens(injection)
     }
@@ -184,13 +186,13 @@ struct ContextBuilder {
         )
         guard !matchedPatterns.isEmpty else { return 0 }
 
-        let topPattern = matchedPatterns.first!
+        guard let topPattern = matchedPatterns.first else { return 0 }
         injectedHashes.append(topPattern.patternHash)
         let injection = """
 
-## 历史经验提醒
-上次类似任务因「\(topPattern.rootCause)」导致失败。本次策略：\(topPattern.preemptiveInstruction)
-"""
+            ## 历史经验提醒
+            上次类似任务因「\(topPattern.rootCause)」导致失败。本次策略：\(topPattern.preemptiveInstruction)
+            """
         prompt += injection
 
         let patternStep = TaskStep(
@@ -206,7 +208,7 @@ struct ContextBuilder {
     @discardableResult
     private static func enrichWithCustomPrompt(prompt: inout String, config: AgentLoop.Config) -> Int {
         if let customSystemPrompt = config.customSystemPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !customSystemPrompt.isEmpty {
+            !customSystemPrompt.isEmpty {
             let injection = "\n\n## 用户自定义指令\n\(customSystemPrompt)"
             prompt += injection
             return estimateTokens(injection)
@@ -231,7 +233,8 @@ struct ContextBuilder {
         guard state.intent != .chat else { return 0 }
         var toolHints: [String] = []
         let lowerMsg = state.message.lowercased()
-        let isFileCreation = lowerMsg.contains("创建") || lowerMsg.contains("写入") || lowerMsg.contains("新建") || lowerMsg.contains("create") || lowerMsg.contains("write")
+        let isFileCreation =
+            lowerMsg.contains("创建") || lowerMsg.contains("写入") || lowerMsg.contains("新建") || lowerMsg.contains("create") || lowerMsg.contains("write")
         if isFileCreation {
             toolHints.append("创建文件：用 file_write，不要用 wiki_build（wiki_build 只用于 Obsidian 知识库整理）")
         }
@@ -279,13 +282,15 @@ struct ContextBuilder {
                 let successes = rows.reduce(0) { $0 + $1.successes }
                 return total >= 3 ? Double(successes) / Double(total) : 1.0
             }
-        toolDefs.sort { a, b in
-            let rateA = successMap[a.function.name] ?? 1.0
-            let rateB = successMap[b.function.name] ?? 1.0
+        toolDefs.sort { lhs, rhs in
+            let rateA = successMap[lhs.function.name] ?? 1.0
+            let rateB = successMap[rhs.function.name] ?? 1.0
             return rateA > rateB
         }
 
-        let problemTools = successMap.filter { kv in kv.value < 0.4 && (tStats.filter { $0.toolName == kv.key }.reduce(0) { $0 + $1.total }) >= 5 }
+        let problemTools = successMap.filter { entry in
+            entry.value < 0.4 && (tStats.filter { $0.toolName == entry.key }.reduce(0) { $0 + $1.total }) >= 5
+        }
         if !problemTools.isEmpty {
             let warnings = problemTools.map { "\($0.key)（成功率\(Int($0.value * 100))%）" }.joined(separator: "、")
             prompt += "\n\n## 工具效率提示\n以下工具近期成功率较低，请优先使用替代方案或仔细检查参数：\(warnings)"
@@ -297,14 +302,14 @@ struct ContextBuilder {
             let names = toolDefs.map(\.function.name).sorted()
             prompt += """
 
-## 当前真实可用工具（由 App 编排层强制声明，不要自行判断或否认）
-\(names.map { "- \($0)" }.joined(separator: "\n"))
+                ## 当前真实可用工具（由 App 编排层强制声明，不要自行判断或否认）
+                \(names.map { "- \($0)" }.joined(separator: "\n"))
 
-约束：
-- 这是当前轮次实际暴露给你的工具完整列表，不能凭空声称"没有 file_read / file_edit"等。
-- 如某工具不在列表里，请直接说"当前未启用 X，建议改用 Y"，不要编造。
-- 历史记录里出现过的工具名（即使本轮未启用）不代表当前可用，以本列表为准。
-"""
+                约束：
+                - 这是当前轮次实际暴露给你的工具完整列表，不能凭空声称"没有 file_read / file_edit"等。
+                - 如某工具不在列表里，请直接说"当前未启用 X，建议改用 Y"，不要编造。
+                - 历史记录里出现过的工具名（即使本轮未启用）不代表当前可用，以本列表为准。
+                """
         } else if !config.supportsToolCalling {
             prompt += "\n\n## 当前真实可用工具\n本轮未启用任何工具（纯文本姿态）。如需文件读写/搜索/执行，请提示用户切换到支持工具调用的连接器后重试。"
         }

@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
@@ -14,7 +15,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "你能做什么？",
             intent: .chat,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: "/tmp")
         )
 
@@ -39,7 +41,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "全量读取项目",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -47,9 +50,10 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(task.steps.contains { $0.kind == .toolResult && $0.toolName == "shell.exec" && $0.isFailure })
         XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "workspace.index" && $0.text.contains("自动恢复") })
         XCTAssertTrue(task.steps.contains { $0.kind == .toolResult && $0.toolName == "workspace.index" && !$0.isFailure && $0.text.contains("自动恢复成功") })
-        XCTAssertTrue(runtime.requests.contains { request in
-            (request.messages ?? []).contains { $0.role == "user" && ($0.content ?? "").contains("自动恢复工具 workspace.index") }
-        })
+        XCTAssertTrue(
+            runtime.requests.contains { request in
+                (request.messages ?? []).contains { $0.role == "user" && ($0.content ?? "").contains("自动恢复工具 workspace.index") }
+            })
     }
     func testAgentLoopRetriesEmptyResponsesWithoutSurfacingRuntimeFallbackText() async throws {
         let workspace = try makeTemporaryWorkspace()
@@ -63,15 +67,18 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "整理到 wiki",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path, vaultRoot: workspace.path)
         )
 
         XCTAssertGreaterThanOrEqual(runtime.requests.count, 3)
-        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.contains("空内容") && $0.text.contains("重试") },
-                       "Expected a step about empty response retry, got: \(task.steps.filter { $0.kind == .aiThinking }.map(\.text))")
-        XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.contains("移除工具") },
-                       "Expected a step about tool stripping, got: \(task.steps.filter { $0.kind == .aiThinking }.map(\.text))")
+        XCTAssertTrue(
+            task.steps.contains { $0.kind == .aiThinking && $0.text.contains("空内容") && $0.text.contains("重试") },
+            "Expected a step about empty response retry, got: \(task.steps.filter { $0.kind == .aiThinking }.map(\.text))")
+        XCTAssertTrue(
+            task.steps.contains { $0.kind == .aiThinking && $0.text.contains("移除工具") },
+            "Expected a step about tool stripping, got: \(task.steps.filter { $0.kind == .aiThinking }.map(\.text))")
         XCTAssertFalse(task.steps.contains { $0.kind == .textOutput && $0.text.contains("模型没有返回可显示内容") })
     }
     func testUITaskRequiresScreenshotOrPageEvidence() {
@@ -86,13 +93,14 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             context: TaskContext(workspaceRoot: "/tmp")
         )
 
-        XCTAssertFalse(AgentLoop.meetsCompletionCriteria(
-            task: noEvidence,
-            intent: .task,
-            didComplete: true,
-            hadFailure: false,
-            wasTruncated: false
-        ))
+        XCTAssertFalse(
+            AgentLoop.meetsCompletionCriteria(
+                task: noEvidence,
+                intent: .task,
+                didComplete: true,
+                hadFailure: false,
+                wasTruncated: false
+            ))
 
         let withScreenshot = AgentTask(
             title: "检查 UI 页面",
@@ -105,13 +113,14 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             context: TaskContext(workspaceRoot: "/tmp")
         )
 
-        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(
-            task: withScreenshot,
-            intent: .task,
-            didComplete: true,
-            hadFailure: false,
-            wasTruncated: false
-        ))
+        XCTAssertTrue(
+            AgentLoop.meetsCompletionCriteria(
+                task: withScreenshot,
+                intent: .task,
+                didComplete: true,
+                hadFailure: false,
+                wasTruncated: false
+            ))
     }
     func testResearchTaskRequiresFetchedSource() {
         let searchOnly = AgentTask(
@@ -126,13 +135,14 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         )
 
         // Research now accepts search-only tasks (hasSearch || hasFetch || hasEvidence)
-        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(
-            task: searchOnly,
-            intent: .research,
-            didComplete: true,
-            hadFailure: false,
-            wasTruncated: false
-        ))
+        XCTAssertTrue(
+            AgentLoop.meetsCompletionCriteria(
+                task: searchOnly,
+                intent: .research,
+                didComplete: true,
+                hadFailure: false,
+                wasTruncated: false
+            ))
 
         let fetched = AgentTask(
             title: "研究模型新闻",
@@ -147,13 +157,14 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             ]
         )
 
-        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(
-            task: fetched,
-            intent: .research,
-            didComplete: true,
-            hadFailure: false,
-            wasTruncated: false
-        ))
+        XCTAssertTrue(
+            AgentLoop.meetsCompletionCriteria(
+                task: fetched,
+                intent: .research,
+                didComplete: true,
+                hadFailure: false,
+                wasTruncated: false
+            ))
     }
     func testTaskCompletionNeedsRealEvidenceNotOnlyWorkspacePathLedger() {
         var task = AgentTask(
@@ -178,13 +189,14 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             pages: ["/tmp"]
         )
 
-        XCTAssertFalse(AgentLoop.meetsCompletionCriteria(
-            task: task,
-            intent: .task,
-            didComplete: true,
-            hadFailure: false,
-            wasTruncated: false
-        ))
+        XCTAssertFalse(
+            AgentLoop.meetsCompletionCriteria(
+                task: task,
+                intent: .task,
+                didComplete: true,
+                hadFailure: false,
+                wasTruncated: false
+            ))
     }
 
     func testRecoveredToolFailureDoesNotForceFinalFailureByCount() {
@@ -200,13 +212,14 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             context: TaskContext(workspaceRoot: "/tmp")
         )
 
-        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(
-            task: task,
-            intent: .task,
-            didComplete: true,
-            hadFailure: true,
-            wasTruncated: false
-        ))
+        XCTAssertTrue(
+            AgentLoop.meetsCompletionCriteria(
+                task: task,
+                intent: .task,
+                didComplete: true,
+                hadFailure: true,
+                wasTruncated: false
+            ))
     }
 
     func testAgentLoopIncludesToolsForTasks() async throws {
@@ -219,7 +232,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         _ = try await loop.run(
             message: "搜索 README",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: "/tmp")
         )
 
@@ -240,7 +254,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "优化下性能，觉得各种卡",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -261,16 +276,19 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "处理这个会话目标",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
         let autoRoundTexts = task.steps.filter { $0.kind == .aiThinking && $0.text.contains("自动继续处理中") }.map(\.text)
-        XCTAssertEqual(autoRoundTexts, [
-            "自动继续处理中（第 1 轮）…",
-            "自动继续处理中（第 2 轮）…",
-            "自动继续处理中（第 3 轮）…"
-        ])
+        XCTAssertEqual(
+            autoRoundTexts,
+            [
+                "自动继续处理中（第 1 轮）…",
+                "自动继续处理中（第 2 轮）…",
+                "自动继续处理中（第 3 轮）…"
+            ])
         XCTAssertEqual(runtime.requests.count, 4)
         XCTAssertEqual(task.status, .failed)
         XCTAssertTrue(task.steps.contains { $0.kind == .error && $0.text.contains("已达到最大迭代次数") })
@@ -288,7 +306,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "帮我梳理 Gemini 作歌 prompt",
             intent: .chat,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -311,7 +330,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "看下项目结构",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -333,7 +353,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "搜索 README",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: "/tmp")
         )
 
@@ -377,7 +398,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "全量读取这个项目并找问题",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -406,7 +428,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         _ = try await loop.run(
             message: "全量读取这个项目并找问题",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -433,7 +456,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         _ = try await loop.run(
             message: "全量读取这个项目并找问题",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -490,14 +514,16 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         _ = try await loop.run(
             message: "读 README",
             intent: .task,
-            connector: ConnectorProfile(name: "DeepSeek", kind: "openai-compatible", endpoint: "https://api.deepseek.com/v1", modelName: "deepseek-v4-pro", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "DeepSeek", kind: "openai-compatible", endpoint: "https://api.deepseek.com/v1", modelName: "deepseek-v4-pro", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
         XCTAssertEqual(runtime.requests.count, 2)
-        XCTAssertTrue((runtime.requests[1].messages ?? []).contains {
-            $0.role == "assistant" && $0.reasoningContent == "先读取文件。"
-        })
+        XCTAssertTrue(
+            (runtime.requests[1].messages ?? []).contains {
+                $0.role == "assistant" && $0.reasoningContent == "先读取文件。"
+            })
     }
     func testOllamaToolResultsAreFedBackAsPlainText() async throws {
         let workspace = try makeTemporaryWorkspace()

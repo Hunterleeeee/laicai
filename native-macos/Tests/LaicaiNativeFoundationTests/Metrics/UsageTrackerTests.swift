@@ -85,13 +85,13 @@ final class UsageTrackerTests: LaicaiNativeFoundationTestCase {
         _ = UsageTracker(path: base.path)
 
         let dbPath = base.appendingPathComponent("Laicai/usage.sqlite3").path
-        var db: OpaquePointer?
-        XCTAssertEqual(sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
-        defer { sqlite3_close(db) }
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(dbPath, &database, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
+        defer { sqlite3_close(database) }
 
         var stmt: OpaquePointer?
         XCTAssertEqual(sqlite3_prepare_v2(
-            db,
+            database,
             "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_usage_thread';",
             -1,
             &stmt,

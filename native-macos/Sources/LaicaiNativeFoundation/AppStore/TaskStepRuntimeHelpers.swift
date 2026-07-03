@@ -156,23 +156,28 @@ extension AppStore {
         // the thread keeps the connector the user originally selected.
         state.threads[threadIndex].updatedAt = completedTask.updatedAt
         Self.ensureCheckpointIfNeeded(&state.threads[threadIndex])
-        Self.rebuildExecutionLedger(&state.threads[threadIndex])
+        if !Self.isPureChatLikeThread(state.threads[threadIndex]) {
+            Self.rebuildExecutionLedger(&state.threads[threadIndex])
+        }
         state.selectThread(id: taskID)
 
-        let appIsActive = NSApplication.shared.isActive
-        if !appIsActive {
-            let threadTitle = state.threads[threadIndex].title
-            let noteTitle: String
-            switch completedTask.status {
-            case .completed: noteTitle = "会话 完成"
-            case .failed: noteTitle = "会话 失败"
-            default: noteTitle = "会话状态更新"
-            }
-            NotificationManager.shared.post(
-                title: noteTitle,
-                body: threadTitle,
-                threadID: taskID.uuidString
-            )
+        notifyCompletedTaskIfNeeded(completedTask, threadIndex: threadIndex, taskID: taskID)
+    }
+
+    private func notifyCompletedTaskIfNeeded(_ completedTask: AgentTask, threadIndex: Int, taskID: UUID) {
+        guard !NSApplication.shared.isActive else { return }
+        NotificationManager.shared.post(
+            title: notificationTitle(for: completedTask.status),
+            body: state.threads[threadIndex].title,
+            threadID: taskID.uuidString
+        )
+    }
+
+    private func notificationTitle(for status: TaskStatus) -> String {
+        switch status {
+        case .completed: return "会话 完成"
+        case .failed: return "会话 失败"
+        default: return "会话状态更新"
         }
     }
 
@@ -189,6 +194,15 @@ extension AppStore {
         let goal = (thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
             ?? thread.steps.first(where: { $0.kind == .userInput })?.text.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? thread.title
+        if !thread.steps.contains(where: { $0.kind == .aiThinking && $0.text == "正在理解会话目标并准备执行。" }) {
+            let insertIndex = thread.steps.firstIndex { $0.kind != .userInput } ?? thread.steps.count
+            thread.steps.insert(TaskStep(kind: .aiThinking, text: "正在理解会话目标并准备执行。", isCollapsible: true, isCollapsed: true), at: insertIndex)
+        }
+        guard !isPureChatLikeThread(thread) else {
+            thread.taskProtocol = nil
+            thread.executionLedger = nil
+            return
+        }
         if thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
             thread.goal = goal
         }
@@ -217,13 +231,14 @@ extension AppStore {
         }
         thread.executionLedger?.goal = goal
         thread.executionLedger?.plan = thread.currentPlan
-        if !thread.steps.contains(where: { $0.kind == .aiThinking && $0.text == "正在理解会话目标并准备执行。" }) {
-            let insertIndex = thread.steps.firstIndex { $0.kind != .userInput } ?? thread.steps.count
-            thread.steps.insert(TaskStep(kind: .aiThinking, text: "正在理解会话目标并准备执行。", isCollapsible: true, isCollapsed: true), at: insertIndex)
-        }
     }
 
     nonisolated static func rebuildExecutionLedger(_ thread: inout Thread) {
+        guard !isPureChatLikeThread(thread) else {
+            thread.executionLedger = nil
+            thread.taskProtocol = nil
+            return
+        }
         ensureAgentRuntimeContract(&thread)
         var ledger = thread.executionLedger ?? AgentExecutionLedger(
             originalRequest: thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title,
@@ -266,6 +281,22 @@ extension AppStore {
         thread.executionLedger = ledger
     }
 
+    nonisolated static func isPureChatLikeThread(_ thread: Thread) -> Bool {
+        let intent = thread.context.metadata["intent"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let hasExecutionEvidence = thread.steps.contains { step in
+            step.kind == .toolCall
+                || step.kind == .toolResult
+                || step.kind == .reviewRequest
+                || step.kind == .reviewResult
+        }
+        let explicitlyChat = intent == "chat"
+        let legacyChatWithoutEvidence = intent == nil
+            && thread.workflowName == nil
+            && thread.multiAgentPlan == nil
+        return !hasExecutionEvidence && (explicitlyChat || legacyChatWithoutEvidence)
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity
     nonisolated static func updateExecutionLedger(
         _ thread: inout Thread,
         with step: TaskStep,

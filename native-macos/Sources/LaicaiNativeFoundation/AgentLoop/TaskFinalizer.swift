@@ -22,14 +22,14 @@ struct TaskFinalizer {
         // ── Evidence-based finalization ──
         let hasFinalOutput = state.task.steps.contains { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         if !state.didComplete && !state.hadFailure && !state.wasTruncated && !hasFinalOutput {
-            if let summaryStep = try? await AgentLoop.finalizeFromCollectedEvidence(
+            if let summaryStep = try? await AgentLoop.finalizeFromCollectedEvidence(AgentLoop.EvidenceFinalizationRequest(
                 task: state.task,
                 originalMessage: state.message,
                 connector: state.connector,
                 runtime: runtime,
                 systemPrompt: systemPrompt,
                 maxOutputTokens: config.maxTokensPerTurn
-            ) {
+            )) {
                 state.task.steps.append(summaryStep)
                 onStep(summaryStep)
                 state.didComplete = true
@@ -187,9 +187,8 @@ struct TaskFinalizer {
         if hasFileEdits {
             suggestions.append("编写或运行相关测试")
         }
-        guard !suggestions.isEmpty else { return }
+        guard let firstSuggestion = suggestions.first else { return }
 
-        let firstSuggestion = suggestions[0]
         let nextStep = TaskStep(
             kind: .aiThinking,
             text: "建议下一步：\n" + suggestions.enumerated().map { "  \($0.offset + 1). \($0.element)" }.joined(separator: "\n"),
@@ -202,48 +201,82 @@ struct TaskFinalizer {
     }
 
     private static func updateExecutionLedger(state: inout PipelineState, finalStatus: TaskStatus) {
-        if state.task.executionLedger == nil {
-            state.task.executionLedger = AgentExecutionLedger(
-                originalRequest: state.message,
-                goal: state.task.title,
-                state: .created,
-                plan: state.taskContext.memory.userDecisions.filter { $0.hasPrefix("执行计划：") },
-                nextAction: "继续处理当前会话"
-            )
-        }
+        ensureExecutionLedger(state: &state)
         guard var ledger = state.task.executionLedger else { return }
-        ledger.plan = ledger.plan.isEmpty ? state.taskContext.memory.userDecisions.filter { $0.hasPrefix("执行计划：") } : ledger.plan
-        ledger.readFiles = Array(Set(ledger.readFiles + state.taskContext.memory.readFiles)).sorted()
-        ledger.searches = Array(Set(ledger.searches + state.taskContext.memory.searchedQueries)).sorted()
-        ledger.failedTools = Array(Set(ledger.failedTools + state.taskContext.memory.failedTools)).sorted()
+        let planEntries = state.taskContext.memory.userDecisions.filter { $0.hasPrefix("执行计划：") }
+        ledger.plan = ledger.plan.isEmpty ? planEntries : ledger.plan
+        ledger.readFiles = merged(ledger.readFiles, state.taskContext.memory.readFiles)
+        ledger.searches = merged(ledger.searches, state.taskContext.memory.searchedQueries)
+        ledger.failedTools = merged(ledger.failedTools, state.taskContext.memory.failedTools)
         if let verification = state.taskContext.memory.verificationStatus, !verification.isEmpty {
             ledger.appendUnique(verification, to: \.verification)
         }
         for step in state.task.steps {
-            if step.kind == .reviewRequest, let path = step.diffFilePath {
-                if step.approved == true {
-                    ledger.appendUnique(path, to: \.modifiedFiles)
-                } else {
-                    ledger.appendUnique(path, to: \.artifacts)
-                }
-            }
-            if step.toolName == "document.transform",
-               let path = step.toolParams?["outputPath"] ?? step.toolParams?["pdfPath"] ?? step.diffFilePath {
-                ledger.appendUnique(path, to: \.artifacts)
-            }
-            if step.toolName == "shell.exec" || step.toolName == "verify.build" {
-                if let command = step.toolParams?["command"] {
-                    ledger.appendUnique(command, to: \.commands)
-                }
-            }
-            if step.isFailure {
-                ledger.appendUnique(step.toolName ?? "unknown", to: \.failedTools)
-                ledger.appendUnique(String(step.text.prefix(500)), to: \.errorReasons)
-                if let recovery = recoveryPath(for: step.toolName ?? "unknown", step: step) {
-                    ledger.appendUnique(recovery, to: \.alternativePaths)
-                }
-            }
+            record(step, in: &ledger)
         }
+        applyFinalStatus(finalStatus, intent: state.intent, ledger: &ledger)
+        ledger.updatedAt = .now
+        state.task.executionLedger = ledger
+    }
+
+    private static func ensureExecutionLedger(state: inout PipelineState) {
+        guard state.task.executionLedger == nil else { return }
+        state.task.executionLedger = AgentExecutionLedger(
+            originalRequest: state.message,
+            goal: state.task.title,
+            state: .created,
+            plan: state.taskContext.memory.userDecisions.filter { $0.hasPrefix("执行计划：") },
+            nextAction: "继续处理当前会话"
+        )
+    }
+
+    private static func merged(_ existing: [String], _ additions: [String]) -> [String] {
+        Array(Set(existing + additions)).sorted()
+    }
+
+    private static func record(_ step: TaskStep, in ledger: inout AgentExecutionLedger) {
+        recordReviewStep(step, in: &ledger)
+        recordDocumentArtifact(step, in: &ledger)
+        recordCommand(step, in: &ledger)
+        recordFailure(step, in: &ledger)
+    }
+
+    private static func recordReviewStep(_ step: TaskStep, in ledger: inout AgentExecutionLedger) {
+        guard step.kind == .reviewRequest, let path = step.diffFilePath else { return }
+        if step.approved == true {
+            ledger.appendUnique(path, to: \.modifiedFiles)
+        } else {
+            ledger.appendUnique(path, to: \.artifacts)
+        }
+    }
+
+    private static func recordDocumentArtifact(_ step: TaskStep, in ledger: inout AgentExecutionLedger) {
+        guard step.toolName == "document.transform",
+              let path = step.toolParams?["outputPath"] ?? step.toolParams?["pdfPath"] ?? step.diffFilePath else { return }
+        ledger.appendUnique(path, to: \.artifacts)
+    }
+
+    private static func recordCommand(_ step: TaskStep, in ledger: inout AgentExecutionLedger) {
+        guard step.toolName == "shell.exec" || step.toolName == "verify.build",
+              let command = step.toolParams?["command"] else { return }
+        ledger.appendUnique(command, to: \.commands)
+    }
+
+    private static func recordFailure(_ step: TaskStep, in ledger: inout AgentExecutionLedger) {
+        guard step.isFailure else { return }
+        let toolName = step.toolName ?? "unknown"
+        ledger.appendUnique(toolName, to: \.failedTools)
+        ledger.appendUnique(String(step.text.prefix(500)), to: \.errorReasons)
+        if let recovery = recoveryPath(for: toolName, step: step) {
+            ledger.appendUnique(recovery, to: \.alternativePaths)
+        }
+    }
+
+    private static func applyFinalStatus(
+        _ finalStatus: TaskStatus,
+        intent: UserIntent,
+        ledger: inout AgentExecutionLedger
+    ) {
         switch finalStatus {
         case .completed:
             ledger.transition(to: .completed, reason: "完成门禁通过")
@@ -252,7 +285,7 @@ struct TaskFinalizer {
         case .failed:
             ledger.transition(to: .failed, reason: "完成门禁未通过")
             ledger.nextAction = "从失败点恢复或补齐证据"
-            if !ledger.hasToolEvidence && state.intent != .chat {
+            if !ledger.hasToolEvidence && intent != .chat {
                 ledger.unfinishedWork.append("缺少真实工具证据")
             }
         case .cancelled:
@@ -264,8 +297,6 @@ struct TaskFinalizer {
         case .queued, .running:
             ledger.transition(to: .executing, reason: "任务仍在执行")
         }
-        ledger.updatedAt = .now
-        state.task.executionLedger = ledger
     }
 
     private static func recoveryPath(for toolName: String, step: TaskStep) -> String? {
@@ -331,7 +362,7 @@ struct TaskFinalizer {
         let userFollowups = state.task.steps.filter { $0.kind == .userInput && $0.text != state.message }.count
         let promptTag = PromptRegistry.shared.versionTag(for: PromptRegistry.tagContinueTask)
 
-        TaskOutcomeRecorder.shared.record(
+        TaskOutcomeRecorder.shared.record(TaskOutcomeRecord(
             taskID: state.task.id.uuidString,
             intent: state.intentString,
             routeLabel: "会话 执行",
@@ -346,8 +377,9 @@ struct TaskFinalizer {
             durationSeconds: duration,
             userFollowupCount: userFollowups,
             promptTag: promptTag,
+            userRating: 0,
             modelName: config.modelName
-        )
+        ))
     }
 
     static func executionModeLabel(state: PipelineState, config: AgentLoop.Config) -> String {
@@ -357,7 +389,7 @@ struct TaskFinalizer {
 
     private static func computeOutcomeScore(state: PipelineState, config: AgentLoop.Config, finalStatus: TaskStatus, duration: Double) -> Int {
         let userFollowups = state.task.steps.filter { $0.kind == .userInput && $0.text != state.message }.count
-        return ResultEvaluator.score(
+        return ResultEvaluator.score(ResultEvaluator.ScoreRequest(
             status: finalStatus,
             iterations: state.iteration,
             maxIterations: state.effectiveMaxIterations,
@@ -366,7 +398,7 @@ struct TaskFinalizer {
             wasTruncated: state.wasTruncated,
             durationSeconds: duration,
             userFollowupCount: userFollowups
-        )
+        ))
     }
 
     private static func learnFromFailures(state: PipelineState, config: AgentLoop.Config, finalStatus: TaskStatus, outcomeScore: Int) {
@@ -378,7 +410,7 @@ struct TaskFinalizer {
         let failedToolNamesRaw = state.task.steps.filter { $0.kind == .toolResult && $0.isFailure }.compactMap { $0.toolName }
 
         var failedCounts: [String: Int] = [:]
-        for t in failedToolNamesRaw { failedCounts[t, default: 0] += 1 }
+        for toolName in failedToolNamesRaw { failedCounts[toolName, default: 0] += 1 }
         let failedSummary = failedCounts.sorted(by: { $0.value > $1.value })
             .prefix(5)
             .map { $0.value > 1 ? "\($0.key)(\($0.value)次)" : $0.key }
@@ -427,14 +459,14 @@ struct TaskFinalizer {
                 return orderedTools.filter { seen.insert($0).inserted }
             }()
             let strategy = dedupedSequence.isEmpty ? "工具辅助完成" : dedupedSequence.prefix(8).joined(separator: " → ")
-            SkillEvolutionEngine.shared.extractSkill(
+            SkillEvolutionEngine.shared.extractSkill(SkillExtractionRequest(
                 taskTitle: state.task.title,
                 intent: state.intentString,
                 toolsUsed: uniqueTools,
                 modelName: config.modelName,
                 outcomeScore: outcomeScore,
                 strategy: strategy
-            )
+            ))
         }
 
         // Update Q-value if a learned skill was used
@@ -508,11 +540,11 @@ struct TaskFinalizer {
     // MARK: - Utility
 
     static func classifyTaskType(message: String) -> String {
-        let lm = message.lowercased()
-        if lm.contains("修改") || lm.contains("fix") || lm.contains("修复") { return "modify" }
-        if lm.contains("创建") || lm.contains("新建") || lm.contains("create") { return "create" }
-        if lm.contains("搜索") || lm.contains("查找") || lm.contains("search") { return "search" }
-        if lm.contains("解释") || lm.contains("分析") || lm.contains("explain") { return "explain" }
+        let lowercaseMessage = message.lowercased()
+        if lowercaseMessage.contains("修改") || lowercaseMessage.contains("fix") || lowercaseMessage.contains("修复") { return "modify" }
+        if lowercaseMessage.contains("创建") || lowercaseMessage.contains("新建") || lowercaseMessage.contains("create") { return "create" }
+        if lowercaseMessage.contains("搜索") || lowercaseMessage.contains("查找") || lowercaseMessage.contains("search") { return "search" }
+        if lowercaseMessage.contains("解释") || lowercaseMessage.contains("分析") || lowercaseMessage.contains("explain") { return "explain" }
         return "general"
     }
 }

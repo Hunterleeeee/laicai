@@ -87,7 +87,7 @@ public final class SchedulerEngine: ObservableObject {
     }
 
     /// Callback to execute a task message through the main app
-    public var onExecuteTask: ((String, String?) async -> String)? // (message, workflowName) -> result
+    public var onExecuteTask: ((String, String?) async -> String)?  // (message, workflowName) -> result
 
     private var timer: Timer?
     private var persistPath: String = ""
@@ -98,8 +98,11 @@ public final class SchedulerEngine: ObservableObject {
 
     public func start(workspaceRoot: String) {
         let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
-        let dir = root.isEmpty
-            ? ((FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory()) as NSString).appendingPathComponent("Laicai")
+        let useWorkspaceSchedule = !root.isEmpty && WorkspaceTrust.isTrusted(root)
+        let dir =
+            !useWorkspaceSchedule
+            ? ((FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory()) as NSString)
+                .appendingPathComponent("Laicai")
             : (root as NSString).appendingPathComponent(".laicai")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         persistPath = (dir as NSString).appendingPathComponent("scheduled_tasks.json")
@@ -124,9 +127,9 @@ public final class SchedulerEngine: ObservableObject {
     // MARK: - Task Management
 
     public func addTask(_ task: ScheduledTask) {
-        var t = task
-        t.nextRun = computeNextRun(for: t.schedule)
-        tasks.append(t)
+        var scheduledTask = task
+        scheduledTask.nextRun = computeNextRun(for: scheduledTask.schedule)
+        tasks.append(scheduledTask)
         persist()
     }
 
@@ -148,20 +151,20 @@ public final class SchedulerEngine: ObservableObject {
 
     private func tick() async {
         let now = Date()
-        for i in tasks.indices {
-            guard tasks[i].enabled else { continue }
-            guard let nextRun = tasks[i].nextRun, nextRun <= now else { continue }
+        for index in tasks.indices {
+            guard tasks[index].enabled else { continue }
+            guard let nextRun = tasks[index].nextRun, nextRun <= now else { continue }
 
             // Check max runs
-            if let maxRuns = tasks[i].maxRuns, tasks[i].runCount >= maxRuns {
-                tasks[i].enabled = false
+            if let maxRuns = tasks[index].maxRuns, tasks[index].runCount >= maxRuns {
+                tasks[index].enabled = false
                 continue
             }
 
             // Execute
-            let taskName = tasks[i].name
-            let message = tasks[i].message
-            let workflowName = tasks[i].workflowName
+            let taskName = tasks[index].name
+            let message = tasks[index].message
+            let workflowName = tasks[index].workflowName
 
             var entry = ScheduleExecutionEntry(taskName: taskName, startedAt: now, success: false)
 
@@ -178,9 +181,9 @@ public final class SchedulerEngine: ObservableObject {
             lastExecutionLog.append(entry)
             if lastExecutionLog.count > 100 { lastExecutionLog.removeFirst(lastExecutionLog.count - 100) }
 
-            tasks[i].lastRun = now
-            tasks[i].runCount += 1
-            tasks[i].nextRun = computeNextRun(for: tasks[i].schedule, after: now)
+            tasks[index].lastRun = now
+            tasks[index].runCount += 1
+            tasks[index].nextRun = computeNextRun(for: tasks[index].schedule, after: now)
 
             NotificationManager.shared.post(
                 title: "定时会话完成",
@@ -194,9 +197,9 @@ public final class SchedulerEngine: ObservableObject {
 
     private func computeNextRuns() {
         let now = Date()
-        for i in tasks.indices where tasks[i].enabled {
-            if tasks[i].nextRun == nil || tasks[i].nextRun! < now {
-                tasks[i].nextRun = computeNextRun(for: tasks[i].schedule, after: now)
+        for index in tasks.indices where tasks[index].enabled {
+            if tasks[index].nextRun == nil || tasks[index].nextRun! < now {
+                tasks[index].nextRun = computeNextRun(for: tasks[index].schedule, after: now)
             }
         }
     }
@@ -219,7 +222,7 @@ public final class SchedulerEngine: ObservableObject {
 
         case .weekly(let dayOfWeek, let hour, let minute):
             var components = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: after)
-            components.weekday = dayOfWeek == 7 ? 1 : dayOfWeek + 1 // Convert Mon=1 to Calendar weekday
+            components.weekday = dayOfWeek == 7 ? 1 : dayOfWeek + 1  // Convert Mon=1 to Calendar weekday
             components.hour = hour
             components.minute = minute
             components.second = 0
@@ -251,21 +254,20 @@ public final class SchedulerEngine: ObservableObject {
 
             // Try up to 1 year of minutes (525600)
             for _ in 0..<525600 {
-                let c = cal.dateComponents([.minute, .hour, .day, .month, .weekday], from: candidate)
-                guard let minute = c.minute,
-                      let hour = c.hour,
-                      let day = c.day,
-                      let month = c.month,
-                      let weekday = c.weekday else {
+                let components = cal.dateComponents([.minute, .hour, .day, .month, .weekday], from: candidate)
+                guard let minute = components.minute,
+                    let hour = components.hour,
+                    let day = components.day,
+                    let month = components.month,
+                    let weekday = components.weekday
+                else {
                     candidate = cal.date(byAdding: .minute, value: 1, to: candidate) ?? candidate.addingTimeInterval(60)
                     continue
                 }
 
-                if matches(field: fields[0], value: minute, range: 0...59) &&
-                   matches(field: fields[1], value: hour, range: 0...23) &&
-                   matches(field: fields[2], value: day, range: 1...31) &&
-                   matches(field: fields[3], value: month, range: 1...12) &&
-                   matches(field: fields[4], value: weekday == 1 ? 0 : weekday - 1, range: 0...6) {
+                if matches(field: fields[0], value: minute, range: 0...59) && matches(field: fields[1], value: hour, range: 0...23)
+                    && matches(field: fields[2], value: day, range: 1...31) && matches(field: fields[3], value: month, range: 1...12)
+                    && matches(field: fields[4], value: weekday == 1 ? 0 : weekday - 1, range: 0...6) {
                     return candidate
                 }
                 candidate = cal.date(byAdding: .minute, value: 1, to: candidate)!
@@ -287,8 +289,8 @@ public final class SchedulerEngine: ObservableObject {
                 // Range: N-M
                 if part.contains("-") {
                     let bounds = part.components(separatedBy: "-")
-                    if bounds.count == 2, let lo = Int(bounds[0]), let hi = Int(bounds[1]) {
-                        if value >= lo && value <= hi { return true }
+                    if bounds.count == 2, let lowerBound = Int(bounds[0]), let upperBound = Int(bounds[1]) {
+                        if value >= lowerBound && value <= upperBound { return true }
                     }
                 } else if let exact = Int(part) {
                     if exact == value { return true }
@@ -302,8 +304,9 @@ public final class SchedulerEngine: ObservableObject {
 
     private func loadTasks() {
         guard !persistPath.isEmpty,
-              let data = try? Data(contentsOf: URL(fileURLWithPath: persistPath)),
-              let loaded = try? JSONDecoder().decode([ScheduledTask].self, from: data) else { return }
+            let data = try? Data(contentsOf: URL(fileURLWithPath: persistPath)),
+            let loaded = try? JSONDecoder().decode([ScheduledTask].self, from: data)
+        else { return }
         tasks = loaded
     }
 

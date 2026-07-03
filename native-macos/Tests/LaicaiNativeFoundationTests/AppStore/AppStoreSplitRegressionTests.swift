@@ -153,14 +153,13 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             ]
         )
 
-        store.executeMultiAgent(
+        store.executeMultiAgent(MultiAgentExecutionRequest(
             message: "优化项目 UI 并运行验证",
             context: TaskContext(workspaceRoot: "/tmp/laicai-project"),
             connector: connector,
             plan: plan,
-            intent: .task,
             decision: decision
-        )
+        ))
 
         XCTAssertEqual(store.state.selectedThread?.steps.first?.kind, .userInput)
         XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .aiThinking && $0.text.contains("多会话协同已创建") } == true)

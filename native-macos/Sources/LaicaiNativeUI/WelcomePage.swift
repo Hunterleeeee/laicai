@@ -58,7 +58,7 @@ struct WelcomeView: View {
                         if store.state.activeConnector == nil {
                             connectPrompt
                         } else {
-                            VStack(alignment: .leading, spacing: AppSpace.lg) {
+                            VStack(alignment: .leading, spacing: AppSpace.large) {
                                 contextStrip(narrow: isNarrow)
                                 quickActionRow(narrow: isNarrow)
                                 Divider().background(SurfaceGrade.hairline)
@@ -70,9 +70,9 @@ struct WelcomeView: View {
                     }
                     .frame(maxWidth: contentWidth)
                     .frame(maxWidth: .infinity)
-                    .padding(.horizontal, isNarrow ? AppSpace.md : AppSpace.xl)
+                    .padding(.horizontal, isNarrow ? AppSpace.medium : AppSpace.extraLarge)
                     .padding(.top, topPad)
-                    .padding(.bottom, composerHeight + AppSpace.lg)
+                    .padding(.bottom, composerHeight + AppSpace.large)
                 }
             }
         }
@@ -118,7 +118,7 @@ struct WelcomeView: View {
     private func heroSection(compact: Bool) -> some View {
         let logoSize: CGFloat = compact ? 38 : 44
 
-        return HStack(alignment: .center, spacing: AppSpace.lg) {
+        return HStack(alignment: .center, spacing: AppSpace.large) {
             BrandLogo(size: logoSize)
                 .shadow(color: Brand.jade.opacity(0.18), radius: 12, y: 4)
 
@@ -143,19 +143,19 @@ struct WelcomeView: View {
     // MARK: - Connect Prompt (when no connector is set)
 
     private var connectPrompt: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             Button {
                 showingSettings = true
             } label: {
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 14, weight: .semibold))
                     Text("连接 AI 模型")
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, AppSpace.xl)
-                .padding(.vertical, AppSpace.md)
+                .padding(.horizontal, AppSpace.extraLarge)
+                .padding(.vertical, AppSpace.medium)
                 .background(Capsule().fill(Brand.jade))
                 .shadow(color: Brand.jade.opacity(0.18), radius: 12, y: 4)
             }
@@ -165,7 +165,7 @@ struct WelcomeView: View {
                 .font(AppFont.caption)
                 .foregroundStyle(TextGrade.ghost)
         }
-        .padding(.vertical, AppSpace.sm)
+        .padding(.vertical, AppSpace.small)
     }
 
     // MARK: - Primary Actions
@@ -175,7 +175,7 @@ struct WelcomeView: View {
             ? [GridItem(.flexible())]
             : [GridItem(.flexible()), GridItem(.flexible())]
 
-        return LazyVGrid(columns: columns, spacing: AppSpace.sm) {
+        return LazyVGrid(columns: columns, spacing: AppSpace.small) {
             PrimaryActionTile(
                 icon: "hammer",
                 title: "执行一个目标",
@@ -223,7 +223,7 @@ struct WelcomeView: View {
             ? (store.state.activeConnector?.modelName ?? "已连接模型")
             : (store.state.activeConnector?.name ?? "已连接模型")
 
-        return HStack(spacing: AppSpace.sm) {
+        return HStack(spacing: AppSpace.small) {
             ContextPill(icon: "cpu", text: modelLabel, tint: Brand.teal)
             ContextPill(
                 icon: "folder",
@@ -233,7 +233,7 @@ struct WelcomeView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, narrow ? 0 : AppSpace.xs)
+        .padding(.bottom, narrow ? 0 : AppSpace.extraSmall)
     }
 
     private func startTask(draft: String = "请直接处理这个目标：") {
@@ -256,14 +256,14 @@ struct WelcomeView: View {
             ? [GridItem(.flexible())]
             : [GridItem(.flexible()), GridItem(.flexible())]
 
-        return VStack(alignment: .leading, spacing: AppSpace.sm) {
+        return VStack(alignment: .leading, spacing: AppSpace.small) {
             Text("常用起点")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(TextGrade.ghost)
                 .textCase(.uppercase)
                 .padding(.leading, 2)
 
-            LazyVGrid(columns: columns, spacing: AppSpace.sm) {
+            LazyVGrid(columns: columns, spacing: AppSpace.small) {
                 ForEach(samplePrompts) { prompt in
                     SamplePromptCard(prompt: prompt) {
                         store.updateDraft(prompt.text)
@@ -276,7 +276,7 @@ struct WelcomeView: View {
     // MARK: - Keyboard Hints
 
     private var keyboardHints: some View {
-        HStack(spacing: AppSpace.lg) {
+        HStack(spacing: AppSpace.large) {
             KeyHint(keys: "↵", desc: "发送")
             KeyHint(keys: "⇧↵", desc: "换行")
             KeyHint(keys: "⌘N", desc: "新任务")
@@ -284,7 +284,7 @@ struct WelcomeView: View {
             KeyHint(keys: "⌘K", desc: "命令面板")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, AppSpace.sm)
+        .padding(.top, AppSpace.small)
     }
 }
 
@@ -311,9 +311,9 @@ struct PrimaryActionTile: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.medium) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .fill(iconBackground)
                         .frame(width: 34, height: 34)
                     Image(systemName: icon)
@@ -339,12 +339,12 @@ struct PrimaryActionTile: View {
                     .foregroundStyle(arrowColor)
                     .offset(x: isHovered ? 2 : 0)
             }
-            .padding(.horizontal, AppSpace.md)
-            .padding(.vertical, AppSpace.md)
+            .padding(.horizontal, AppSpace.medium)
+            .padding(.vertical, AppSpace.medium)
             .background(tileBackground)
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .strokeBorder(
                         borderColor,
                         lineWidth: isHovered ? 1 : 0.7
@@ -414,7 +414,7 @@ private struct ContextPill: View {
     let tint: Color
 
     var body: some View {
-        HStack(spacing: AppSpace.xs) {
+        HStack(spacing: AppSpace.extraSmall) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .semibold))
             Text(text)
@@ -423,7 +423,7 @@ private struct ContextPill: View {
                 .truncationMode(.middle)
         }
         .foregroundStyle(tint)
-        .padding(.horizontal, AppSpace.sm + 2)
+        .padding(.horizontal, AppSpace.small + 2)
         .frame(height: 24)
         .background(Capsule().fill(tint.opacity(0.10)))
         .overlay(Capsule().strokeBorder(tint.opacity(0.18), lineWidth: 0.6))
@@ -439,7 +439,7 @@ struct SamplePromptCard: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .top, spacing: AppSpace.md) {
+            HStack(alignment: .top, spacing: AppSpace.medium) {
                 Image(systemName: prompt.icon)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(isHovered ? prompt.tint : TextGrade.muted)
@@ -459,14 +459,14 @@ struct SamplePromptCard: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, AppSpace.md)
-            .padding(.vertical, AppSpace.sm + 2)
+            .padding(.horizontal, AppSpace.medium)
+            .padding(.vertical, AppSpace.small + 2)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .fill(isHovered ? SurfaceGrade.card.opacity(0.92) : SurfaceGrade.elevated.opacity(0.46))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .strokeBorder(
                         isHovered ? prompt.tint.opacity(0.32) : SurfaceGrade.hairline,
                         lineWidth: isHovered ? 1 : 0.7
@@ -487,7 +487,7 @@ struct KeyHint: View {
     let desc: String
 
     var body: some View {
-        HStack(spacing: AppSpace.xs) {
+        HStack(spacing: AppSpace.extraSmall) {
             Text(keys)
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundStyle(TextGrade.muted)

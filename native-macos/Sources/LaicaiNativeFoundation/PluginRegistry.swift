@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import LaicaiNativeDomain
 
 // MARK: - Plugin System
@@ -119,11 +120,27 @@ public struct PluginToolAdapter: LaicaiTool {
         process.standardError = pipe
 
         try process.run()
-        process.waitUntilExit()
+        if !Self.waitForExit(process, timeoutSeconds: 60) {
+            process.terminate()
+            if !Self.waitForExit(process, timeoutSeconds: 2) {
+                Darwin.kill(process.processIdentifier, SIGKILL)
+                _ = Self.waitForExit(process, timeoutSeconds: 1)
+            }
+            return ToolResult(output: "插件执行超时", success: false, error: "plugin_timeout")
+        }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let output = String(data: data, encoding: .utf8) ?? ""
         return ToolResult(output: String(output.prefix(8000)), success: process.terminationStatus == 0)
+    }
+
+    private static func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) -> Bool {
+        let semaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in semaphore.signal() }
+        if !process.isRunning { return true }
+        let result = semaphore.wait(timeout: .now() + timeoutSeconds)
+        process.terminationHandler = nil
+        return result == .success || !process.isRunning
     }
 
     private func executeHTTP(params: [String: Any]) async throws -> ToolResult {
@@ -168,16 +185,20 @@ public final class PluginRegistry: ObservableObject {
 
     /// Scan .laicai/plugins/ directory for plugin manifests
     public func loadPlugins(workspaceRoot: String) {
+        guard WorkspaceTrust.isTrusted(workspaceRoot) else {
+            plugins = []
+            return
+        }
         let pluginDir = (workspaceRoot as NSString).appendingPathComponent(".laicai/plugins")
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: pluginDir) else { return }
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: pluginDir) else { return }
 
-        guard let files = try? fm.contentsOfDirectory(atPath: pluginDir) else { return }
+        guard let files = try? fileManager.contentsOfDirectory(atPath: pluginDir) else { return }
         var loaded: [PluginManifest] = []
 
         for file in files where file.hasSuffix(".json") {
             let path = (pluginDir as NSString).appendingPathComponent(file)
-            guard let data = fm.contents(atPath: path),
+            guard let data = fileManager.contents(atPath: path),
                   let manifest = try? JSONDecoder().decode(PluginManifest.self, from: data) else {
                 continue
             }
@@ -206,7 +227,7 @@ public final class PluginRegistry: ObservableObject {
             description: "自定义工具描述",
             type: .shell,
             parameters: [
-                .init(name: "input", description: "输入参数"),
+                .init(name: "input", description: "输入参数")
             ],
             command: "echo '处理: {{input}}'",
             enabled: true

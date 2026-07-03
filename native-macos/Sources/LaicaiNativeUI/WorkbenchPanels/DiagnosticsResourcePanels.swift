@@ -11,11 +11,11 @@ struct DiagnosticsPanel: View {
     @State private var copiedDiagnostics = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.lg) {
+        VStack(alignment: .leading, spacing: AppSpace.large) {
             diagnosticsOverview
 
             // Stats grid
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 diagStatBadge(
                     icon: "rectangle.stack",
                     label: "线程",
@@ -59,7 +59,7 @@ struct DiagnosticsPanel: View {
             if auditLog.recentEntries.isEmpty {
                 workbenchEmptyState(icon: "checkmark.shield", title: "暂无记录", hint: "本机操作会在这里留下简要记录")
             } else {
-                VStack(alignment: .leading, spacing: AppSpace.sm) {
+                VStack(alignment: .leading, spacing: AppSpace.small) {
                     HStack {
                         workbenchSectionHeader(title: "最近记录", count: auditLog.recentEntries.count)
                         Button {
@@ -73,7 +73,7 @@ struct DiagnosticsPanel: View {
                         .help("清空记录")
                     }
 
-                    VStack(spacing: AppSpace.xs) {
+                    VStack(spacing: AppSpace.extraSmall) {
                         ForEach(auditLog.recentEntries.prefix(15)) { entry in
                             AuditEntryRow(entry: entry)
                         }
@@ -125,7 +125,7 @@ struct DiagnosticsPanel: View {
             subtitle: store.hasRunningGenerationTasks ? "后台会话运行中" : "运行正常 · 最近 \(auditLog.recentEntries.count) 条记录",
             tint: store.hasRunningGenerationTasks ? Brand.teal : Semantic.success
         ) {
-            VStack(spacing: AppSpace.sm) {
+            VStack(spacing: AppSpace.small) {
                 diagRow("状态", store.hasRunningGenerationTasks ? "生成中" : "空闲",
                         color: store.hasRunningGenerationTasks ? Semantic.toolRunning : Semantic.success)
                 Divider().opacity(0.3)
@@ -143,9 +143,9 @@ struct DiagnosticsPanel: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(copiedDiagnostics ? Semantic.success : Brand.primary)
-                .padding(.vertical, AppSpace.sm)
-                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.62)))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.8), lineWidth: 0.6))
+                .padding(.vertical, AppSpace.small)
+                .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.62)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.8), lineWidth: 0.6))
                 .help("复制当前信息到剪贴板")
             }
         }
@@ -178,9 +178,9 @@ struct DiagnosticsPanel: View {
                 .foregroundStyle(TextGrade.muted)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, AppSpace.sm)
-        .background(RoundedRectangle(cornerRadius: AppRadius.sm).fill(color.opacity(0.06)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.sm).strokeBorder(color.opacity(0.12), lineWidth: 0.5))
+        .padding(.vertical, AppSpace.small)
+        .background(RoundedRectangle(cornerRadius: AppRadius.small).fill(color.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.small).strokeBorder(color.opacity(0.12), lineWidth: 0.5))
     }
 
     private func formatMemory() -> String {
@@ -216,7 +216,7 @@ struct DiagnosticsPanel: View {
             "工具活动: \(store.state.toolActivities.count)",
             "审计: \(auditLog.recentEntries.count)",
             "内存: \(formatMemory())",
-            "系统: \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            "系统: \(ProcessInfo.processInfo.operatingSystemVersionString)"
         ]
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
@@ -276,10 +276,12 @@ private struct AuditEntryRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button(action: { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } }) {
-                HStack(alignment: .center, spacing: AppSpace.sm) {
-                    // Status + tool icon
-                    ZStack {
+            Button(
+                action: { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } },
+                label: {
+                    HStack(alignment: .center, spacing: AppSpace.small) {
+                        // Status + tool icon
+                        ZStack {
                         Circle()
                             .fill(entry.success ? Semantic.success.opacity(0.12) : Semantic.error.opacity(0.12))
                             .frame(width: 22, height: 22)
@@ -305,13 +307,14 @@ private struct AuditEntryRow: View {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 8, weight: .bold))
                             .foregroundStyle(TextGrade.ghost)
+                        }
                     }
                 }
-            }
+            )
             .buttonStyle(.plain)
 
             if isExpanded && hasDetails {
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                     if !entry.input.isEmpty {
                         auditDetailRow("输入", entry.input)
                     }
@@ -323,16 +326,16 @@ private struct AuditEntryRow: View {
                     }
                 }
                 .padding(.leading, 34)
-                .padding(.top, AppSpace.xs)
+                .padding(.top, AppSpace.extraSmall)
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(entry.success ? SurfaceGrade.card.opacity(0.72) : Semantic.errorMuted.opacity(0.55))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(entry.success ? SurfaceGrade.divider : Semantic.error.opacity(0.18), lineWidth: 0.75)
         )
     }
@@ -342,7 +345,7 @@ private struct AuditEntryRow: View {
     }
 
     private func auditDetailRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: AppSpace.xs) {
+        HStack(alignment: .top, spacing: AppSpace.extraSmall) {
             Text(label)
                 .font(AppFont.tiny)
                 .foregroundStyle(TextGrade.ghost)
@@ -355,25 +358,26 @@ private struct AuditEntryRow: View {
         }
     }
 
+    private static let toolDisplayNames: [String: String] = [
+        "file.write": "文件写入",
+        "file.edit": "文件编辑",
+        "file.read": "文件读取",
+        "file.rollback": "文件回滚",
+        "code.search": "项目搜索",
+        "shell.exec": "命令执行",
+        "workspace.index": "项目索引",
+        "git": "Git 操作",
+        "git.reset": "Git 回滚",
+        "web.search": "网页搜索",
+        "web.fetch": "网页读取",
+        "wiki.build": "知识页生成",
+        "image.generate": "图片生成",
+        "batch.apply": "批量写入",
+        "batch.rollback": "批量回滚"
+    ]
+
     private func displayToolName(_ name: String) -> String {
-        switch name {
-        case "file.write": return "文件写入"
-        case "file.edit": return "文件编辑"
-        case "file.read": return "文件读取"
-        case "file.rollback": return "文件回滚"
-        case "code.search": return "项目搜索"
-        case "shell.exec": return "命令执行"
-        case "workspace.index": return "项目索引"
-        case "git": return "Git 操作"
-        case "git.reset": return "Git 回滚"
-        case "web.search": return "网页搜索"
-        case "web.fetch": return "网页读取"
-        case "wiki.build": return "知识页生成"
-        case "image.generate": return "图片生成"
-        case "batch.apply": return "批量写入"
-        case "batch.rollback": return "批量回滚"
-        default: return name.isEmpty ? "操作" : name
-        }
+        Self.toolDisplayNames[name] ?? (name.isEmpty ? "操作" : name)
     }
 }
 
@@ -381,12 +385,12 @@ private struct AuditEntryRow: View {
 
 struct ResourcesPanel: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             Text("资源")
                 .font(AppFont.subheadline)
                 .foregroundStyle(TextGrade.primary)
 
-            VStack(spacing: AppSpace.sm) {
+            VStack(spacing: AppSpace.small) {
                 Image(systemName: "folder")
                     .font(.system(size: 32, weight: .ultraLight))
                     .foregroundStyle(TextGrade.ghost)
@@ -395,7 +399,7 @@ struct ResourcesPanel: View {
                     .foregroundStyle(TextGrade.muted)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, AppSpace.xl)
+            .padding(.vertical, AppSpace.extraLarge)
         }
     }
 }
@@ -409,21 +413,21 @@ struct SessionCostCard: View {
         let stats = aggregateMetrics()
         if stats.totalInput > 0 || stats.totalOutput > 0 {
                 contextSectionCard(title: "会话消耗") {
-                VStack(alignment: .leading, spacing: AppSpace.sm) {
-                    HStack(spacing: AppSpace.lg) {
+                VStack(alignment: .leading, spacing: AppSpace.small) {
+                    HStack(spacing: AppSpace.large) {
                         costMetric(icon: "arrow.down.left", label: "输入", value: formatTokens(stats.totalInput), color: Brand.primary)
                         costMetric(icon: "arrow.up.right", label: "输出", value: formatTokens(stats.totalOutput), color: Brand.purple)
                     }
 
                     Divider().opacity(0.3)
 
-                    HStack(spacing: AppSpace.lg) {
+                    HStack(spacing: AppSpace.large) {
                         costMetric(icon: "sum", label: "总计", value: formatTokens(stats.totalInput + stats.totalOutput), color: TextGrade.primary)
                         costMetric(icon: "dollarsign.circle", label: "预估", value: formatCost(stats.estimatedCost), color: Semantic.warning)
                     }
 
                     if stats.requestCount > 1 {
-                        HStack(spacing: AppSpace.lg) {
+                        HStack(spacing: AppSpace.large) {
                             costMetric(icon: "arrow.triangle.2.circlepath", label: "请求", value: "\(stats.requestCount) 次", color: TextGrade.secondary)
                             if stats.avgSpeed > 0 {
                                 costMetric(icon: "speedometer", label: "均速", value: "\(String(format: "%.0f", stats.avgSpeed)) t/s", color: TextGrade.secondary)
@@ -468,7 +472,7 @@ struct SessionCostCard: View {
     }
 
     private func costMetric(icon: String, label: String, value: String, color: Color) -> some View {
-        HStack(spacing: AppSpace.xs) {
+        HStack(spacing: AppSpace.extraSmall) {
             Image(systemName: icon)
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(color.opacity(0.6))
@@ -508,7 +512,7 @@ struct OutcomeStatsPanel: View {
     @State private var promptStats: [PromptTagStatsRow] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.lg) {
+        VStack(alignment: .leading, spacing: AppSpace.large) {
             // Header
             HStack {
                 Image(systemName: "waveform.path.ecg")
@@ -544,7 +548,7 @@ struct OutcomeStatsPanel: View {
             // 6. Prompt version comparison
             promptComparisonSection
         }
-        .padding(AppSpace.md)
+        .padding(AppSpace.medium)
         .onAppear { refresh() }
     }
 
@@ -563,8 +567,8 @@ struct OutcomeStatsPanel: View {
     private var diagnosisCard: some View {
         if let diagnosis {
             let color: Color = diagnosis.severity == .critical ? Semantic.error : Semantic.warning
-            VStack(alignment: .leading, spacing: AppSpace.sm) {
-                HStack(spacing: AppSpace.sm) {
+            VStack(alignment: .leading, spacing: AppSpace.small) {
+                HStack(spacing: AppSpace.small) {
                     Circle().fill(color).frame(width: 8, height: 8)
                     Text(diagnosis.severity == .critical ? "需要自我改进" : "可优化")
                         .font(AppFont.captionMedium)
@@ -582,11 +586,11 @@ struct OutcomeStatsPanel: View {
                     .foregroundStyle(TextGrade.secondary)
                     .lineLimit(3)
             }
-            .padding(AppSpace.md)
-            .background(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).fill(color.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).strokeBorder(color.opacity(0.2), lineWidth: 0.5))
+            .padding(AppSpace.medium)
+            .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(color.opacity(0.06)))
+            .overlay(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(color.opacity(0.2), lineWidth: 0.5))
         } else {
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 Circle().fill(Semantic.success).frame(width: 8, height: 8)
                 Text("系统健康")
                     .font(AppFont.captionMedium)
@@ -596,9 +600,9 @@ struct OutcomeStatsPanel: View {
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.ghost)
             }
-            .padding(AppSpace.md)
-            .background(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).fill(Semantic.success.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).strokeBorder(Semantic.success.opacity(0.2), lineWidth: 0.5))
+            .padding(AppSpace.medium)
+            .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(Semantic.success.opacity(0.06)))
+            .overlay(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(Semantic.success.opacity(0.2), lineWidth: 0.5))
         }
     }
 
@@ -610,7 +614,7 @@ struct OutcomeStatsPanel: View {
         if stats.isEmpty {
             emptyHint(icon: "chart.bar", title: "暂无数据", hint: "会话完成后自动统计")
         } else {
-            VStack(spacing: AppSpace.sm) {
+            VStack(spacing: AppSpace.small) {
                 ForEach(stats, id: \.intent) { row in
                     outcomeRow(row)
                 }
@@ -644,7 +648,7 @@ struct OutcomeStatsPanel: View {
                 }
             }
             .frame(height: 6)
-            HStack(spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.medium) {
                 statPill("完成", value: "\(Int(row.completionRate * 100))%", color: row.completionRate > 0.7 ? Semantic.success : Semantic.warning)
                 statPill("取消", value: "\(Int(row.cancellationRate * 100))%", color: row.cancellationRate < 0.2 ? Semantic.success : Semantic.error)
                 statPill("迭代", value: String(format: "%.1f", row.avgIterations), color: row.avgIterations < 8 ? Brand.primary : Semantic.warning)
@@ -653,9 +657,9 @@ struct OutcomeStatsPanel: View {
                 }
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(SurfaceGrade.card.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous))
     }
 
     // MARK: - 3. Tool Effectiveness
@@ -664,7 +668,7 @@ struct OutcomeStatsPanel: View {
     private var toolEffectivenessSection: some View {
         if !toolStats.isEmpty {
             sectionHeader("工具效能", icon: "wrench.and.screwdriver.fill")
-            VStack(spacing: AppSpace.xs) {
+            VStack(spacing: AppSpace.extraSmall) {
                 // Table header
                 HStack {
                     Text("工具").font(AppFont.tiny).foregroundStyle(TextGrade.ghost).frame(width: 100, alignment: .leading)
@@ -713,9 +717,9 @@ struct OutcomeStatsPanel: View {
     private var failurePatternsSection: some View {
         if !patterns.isEmpty {
             sectionHeader("失败模式", icon: "exclamationmark.triangle.fill")
-            VStack(spacing: AppSpace.xs) {
+            VStack(spacing: AppSpace.extraSmall) {
                 ForEach(Array(patterns.enumerated()), id: \.offset) { _, pattern in
-                    HStack(spacing: AppSpace.sm) {
+                    HStack(spacing: AppSpace.small) {
                         Text("\(pattern.frequency)x")
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
                             .foregroundStyle(pattern.successAfterFix > 0 ? Semantic.success : Semantic.error)
@@ -751,9 +755,9 @@ struct OutcomeStatsPanel: View {
         if improvements.isEmpty {
             emptyHint(icon: "sparkles", title: "尚未触发", hint: "系统检测到性能问题时自动改进代码")
         } else {
-            VStack(spacing: AppSpace.xs) {
+            VStack(spacing: AppSpace.extraSmall) {
                 ForEach(Array(improvements.prefix(5).enumerated()), id: \.offset) { _, record in
-                    HStack(spacing: AppSpace.sm) {
+                    HStack(spacing: AppSpace.small) {
                         Image(systemName: record.buildSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(record.buildSuccess ? Semantic.success : Semantic.error)
@@ -762,7 +766,7 @@ struct OutcomeStatsPanel: View {
                                 .font(AppFont.tiny)
                                 .foregroundStyle(TextGrade.secondary)
                                 .lineLimit(2)
-                            HStack(spacing: AppSpace.sm) {
+                            HStack(spacing: AppSpace.small) {
                                 Text(record.category)
                                     .font(.system(size: 9))
                                     .foregroundStyle(TextGrade.ghost)
@@ -796,7 +800,7 @@ struct OutcomeStatsPanel: View {
     private var promptComparisonSection: some View {
         if !promptStats.isEmpty {
             sectionHeader("Prompt 版本", icon: "doc.text.fill")
-            VStack(spacing: AppSpace.xs) {
+            VStack(spacing: AppSpace.extraSmall) {
                 ForEach(promptStats, id: \.tag) { row in
                     HStack {
                         Text(row.tag)
@@ -847,7 +851,7 @@ struct OutcomeStatsPanel: View {
     }
 
     private func sectionHeader(_ title: String, icon: String) -> some View {
-        HStack(spacing: AppSpace.xs) {
+        HStack(spacing: AppSpace.extraSmall) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(TextGrade.muted)
@@ -858,7 +862,7 @@ struct OutcomeStatsPanel: View {
     }
 
     private func emptyHint(icon: String, title: String, hint: String) -> some View {
-        VStack(spacing: AppSpace.xs) {
+        VStack(spacing: AppSpace.extraSmall) {
             Image(systemName: icon)
                 .font(.system(size: 20))
                 .foregroundStyle(TextGrade.muted.opacity(0.5))
@@ -870,7 +874,7 @@ struct OutcomeStatsPanel: View {
                 .foregroundStyle(TextGrade.muted.opacity(0.6))
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, AppSpace.lg)
+        .padding(.vertical, AppSpace.large)
     }
 
     private func relativeTime(_ date: Date) -> String {

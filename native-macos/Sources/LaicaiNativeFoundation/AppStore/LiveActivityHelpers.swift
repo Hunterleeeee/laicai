@@ -2,72 +2,73 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppStore {
+    private static let simpleActivityNames: [String: String] = [
+        "workspace.index": "索引项目结构…",
+        "git": "查看 Git 信息…",
+        "web.fetch": "读取网页…",
+        "wiki.build": "构建知识页…",
+        "image.generate": "生成图片…",
+        "verify.build": "验证构建…",
+        "llm": "LLM 分析…"
+    ]
+
     func updateLiveActivity(from step: TaskStep, for threadID: UUID) {
-        let activity: String?
+        guard let activity = Self.liveActivityText(for: step) else { return }
+        setLiveActivity(activity, for: threadID)
+    }
+
+    private static func liveActivityText(for step: TaskStep) -> String? {
         switch step.kind {
         case .aiThinking:
-            activity = "正在思考…"
+            return "正在思考…"
         case .toolCall:
-            if let name = step.toolName {
-                activity = "正在\(Self.friendlyActivityName(name, params: step.toolParams))"
-            } else {
-                activity = "正在调用工具…"
-            }
+            return toolCallActivity(step)
         case .toolResult:
-            if step.isFailure {
-                activity = "工具执行失败，正在处理…"
-            } else {
-                activity = nil
-            }
+            return step.isFailure ? "工具执行失败，正在处理…" : nil
         case .textOutput:
-            activity = "正在生成回复…"
+            return "正在生成回复…"
         case .reviewRequest:
-            activity = "等待审查确认"
+            return "等待审查确认"
         case .error:
-            if step.recoverable {
-                activity = "遇到错误，尝试恢复…"
-            } else {
-                activity = ""
-            }
+            return errorActivity(step)
         case .userInput, .reviewResult:
-            activity = nil
-        }
-        if let activity {
-            setLiveActivity(activity, for: threadID)
+            return nil
         }
     }
 
+    private static func toolCallActivity(_ step: TaskStep) -> String {
+        guard let name = step.toolName else { return "正在调用工具…" }
+        return "正在\(Self.friendlyActivityName(name, params: step.toolParams))"
+    }
+
+    private static func errorActivity(_ step: TaskStep) -> String {
+        step.recoverable ? "遇到错误，尝试恢复…" : ""
+    }
+
     static func friendlyActivityName(_ toolName: String, params: [String: String]?) -> String {
-        switch toolName {
-        case "workspace.index": return "索引项目结构…"
-        case "code.search":
-            if let q = params?["query"], !q.isEmpty { return "搜索「\(String(q.prefix(20)))」…" }
-            return "搜索代码…"
-        case "file.read":
-            if let p = params?["path"] ?? params?["fullPath"] {
-                let name = URL(fileURLWithPath: p).lastPathComponent
-                return "读取 \(name)…"
-            }
-            return "读取文件…"
-        case "file.write", "file.edit", "diff.apply":
-            if let p = params?["path"] ?? params?["fullPath"] {
-                let name = URL(fileURLWithPath: p).lastPathComponent
-                return "修改 \(name)…"
-            }
-            return "写入文件…"
-        case "shell.exec":
-            if let cmd = params?["command"] { return "执行 \(String(cmd.prefix(25)))…" }
-            return "执行命令…"
-        case "git": return "查看 Git 信息…"
-        case "web.search":
-            if let q = params?["query"] { return "搜索「\(String(q.prefix(20)))」…" }
-            return "联网搜索…"
-        case "web.fetch": return "读取网页…"
-        case "wiki.build": return "构建知识页…"
-        case "image.generate": return "生成图片…"
-        case "verify.build": return "验证构建…"
-        case "llm": return "LLM 分析…"
-        default: return "调用 \(toolName)…"
+        if toolName == "code.search" || toolName == "web.search" {
+            return searchActivityName(params: params, fallback: toolName == "code.search" ? "搜索代码…" : "联网搜索…")
         }
+        if toolName == "file.read" {
+            return fileActivityName(params: params, verb: "读取", fallback: "读取文件…")
+        }
+        if ["file.write", "file.edit", "diff.apply"].contains(toolName) {
+            return fileActivityName(params: params, verb: "修改", fallback: "写入文件…")
+        }
+        if toolName == "shell.exec" {
+            return params?["command"].map { "执行 \(String($0.prefix(25)))…" } ?? "执行命令…"
+        }
+        return simpleActivityNames[toolName] ?? "调用 \(toolName)…"
+    }
+
+    private static func searchActivityName(params: [String: String]?, fallback: String) -> String {
+        guard let query = params?["query"], !query.isEmpty else { return fallback }
+        return "搜索「\(String(query.prefix(20)))」…"
+    }
+
+    private static func fileActivityName(params: [String: String]?, verb: String, fallback: String) -> String {
+        guard let path = params?["path"] ?? params?["fullPath"] else { return fallback }
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return "\(verb) \(name)…"
     }
 }

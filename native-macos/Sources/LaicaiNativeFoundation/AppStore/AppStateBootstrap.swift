@@ -65,12 +65,31 @@ public extension AppState {
 
     static func bootstrap(environment: AppEnvironment) -> AppState {
         var state = SampleData.appState
+        restoreSettings(into: &state)
+        restoreThreads(into: &state, environment: environment)
+        restoreConnectors(into: &state, environment: environment)
+        startWorkspaceServices(for: state.settings.workspacePath)
+
+        if normalizeThreads(in: &state) {
+            try? environment.agentRepository.saveAgents(state.threads)
+        }
+
+        state.selectThread(id: state.threads.sorted { $0.updatedAt > $1.updatedAt }.first?.id)
+        startMCPServers()
+        loadPluginsIfNeeded(workspaceRoot: state.settings.workspacePath)
+        return state
+    }
+
+    private static func restoreSettings(into state: inout AppState) {
         if let settings = AppSettingsStorage.load() {
             state.settings = normalizedPersistedSettings(settings)
             let last = URL(fileURLWithPath: state.settings.workspacePath).lastPathComponent
             if !last.isEmpty { state.workspaceName = last }
         }
+        if state.workspaceName == "来采原生版" { state.workspaceName = "来财原生版" }
+    }
 
+    private static func restoreThreads(into state: inout AppState, environment: AppEnvironment) {
         if let savedThreads = try? environment.agentRepository.loadAgents(), !savedThreads.isEmpty {
             state.threads = savedThreads.filter { !$0.isEmptyPlaceholder }
         } else if let savedThreads = try? environment.threadRepository.loadThreads(), !savedThreads.isEmpty {
@@ -89,7 +108,9 @@ public extension AppState {
                 }
             }
         }
+    }
 
+    private static func restoreConnectors(into state: inout AppState, environment: AppEnvironment) {
         if let catalog = try? environment.connectorRepository.loadConnectorCatalog(), !catalog.connectors.isEmpty {
             state.connectors = catalog.connectors.map(normalizedBootstrapConnector)
             state.activeConnectorID = catalog.activeConnectorID ?? catalog.connectors.first?.id
@@ -110,13 +131,15 @@ public extension AppState {
             state.settings.defaultConnectorName = state.activeConnector?.name ?? migrated.connectors.first?.name ?? state.settings.defaultConnectorName
             try? environment.connectorRepository.saveConnectors(state.connectors, activeConnectorID: state.activeConnectorID)
         }
+    }
 
-        if state.workspaceName == "来采原生版" { state.workspaceName = "来财原生版" }
-        let workspacePath = state.settings.workspacePath
+    private static func startWorkspaceServices(for workspacePath: String) {
         Task { @MainActor in
             WorkspaceSandbox.shared.workspaceRoot = workspacePath
         }
+    }
 
+    private static func normalizeThreads(in state: inout AppState) -> Bool {
         var normalizedThreads = false
         for index in state.threads.indices {
             if state.threads[index].isChatOnly {
@@ -160,29 +183,23 @@ public extension AppState {
                 normalizedThreads = true
             }
         }
+        return normalizedThreads
+    }
 
-        if normalizedThreads {
-            try? environment.agentRepository.saveAgents(state.threads)
-        }
-
-        state.selectThread(id: state.threads.sorted { $0.updatedAt > $1.updatedAt }.first?.id)
-
-        // Start MCP servers and register their tools
+    private static func startMCPServers() {
         Task { @MainActor in
             let manager = MCPManager.shared
             await manager.startAll()
             manager.registerTools(in: ToolRegistry.shared)
         }
+    }
 
-        // Load plugins from .laicai/plugins/
-        let wsRoot = state.settings.workspacePath
-        if !wsRoot.isEmpty {
+    private static func loadPluginsIfNeeded(workspaceRoot: String) {
+        if !workspaceRoot.isEmpty {
             Task { @MainActor in
-                PluginRegistry.shared.loadPlugins(workspaceRoot: wsRoot)
+                PluginRegistry.shared.loadPlugins(workspaceRoot: workspaceRoot)
             }
         }
-
-        return state
     }
 }
 

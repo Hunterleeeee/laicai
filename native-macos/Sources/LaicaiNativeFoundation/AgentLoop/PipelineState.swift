@@ -15,16 +15,19 @@ struct PipelineDependencies {
     var securityManager: SecurityManager
     var workspaceSandbox: WorkspaceSandbox
 
-    static let shared = PipelineDependencies(
-        toolRegistry: .shared,
-        memoryEngine: .shared,
-        skillEvolutionEngine: .shared,
-        failurePatternDB: .shared,
-        taskOutcomeRecorder: .shared,
-        promptRegistry: .shared,
-        securityManager: .shared,
-        workspaceSandbox: .shared
-    )
+    @MainActor
+    static var shared: PipelineDependencies {
+        PipelineDependencies(
+            toolRegistry: .shared,
+            memoryEngine: .shared,
+            skillEvolutionEngine: .shared,
+            failurePatternDB: .shared,
+            taskOutcomeRecorder: .shared,
+            promptRegistry: .shared,
+            securityManager: .shared,
+            workspaceSandbox: .shared
+        )
+    }
 }
 
 // MARK: - Pipeline Config (Immutable)
@@ -84,7 +87,7 @@ struct PipelineConfig {
         priorSteps: [TaskStep],
         summaryCache: String?,
         config: AgentLoop.Config,
-        dependencies: PipelineDependencies = .shared,
+        dependencies: PipelineDependencies? = nil,
         startTime: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()
     ) {
         self.taskID = task.id
@@ -95,7 +98,7 @@ struct PipelineConfig {
         self.priorSteps = priorSteps
         self.summaryCache = summaryCache
         self.startTime = startTime
-        self.dependencies = dependencies
+        self.dependencies = dependencies ?? PipelineDependencies.shared
 
         self.needsPlanning = intent != .chat
             && priorSteps.isEmpty

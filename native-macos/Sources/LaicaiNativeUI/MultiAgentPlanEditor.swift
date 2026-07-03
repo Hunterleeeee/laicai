@@ -46,7 +46,7 @@ public struct PlanTemplate: Identifiable {
             description: "编码员重构 → 测试员验证 → 审查员检查",
             icon: "arrow.2.squarepath",
             roles: [.coder, .tester, .reviewer]
-        ),
+        )
     ]
 }
 
@@ -66,7 +66,7 @@ struct MultiAgentPlanEditorView: View {
     @State private var draggedAgent: AgentNode?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.lg) {
+        VStack(alignment: .leading, spacing: AppSpace.large) {
             // Header
             HStack {
                 Image(systemName: "person.3.fill")
@@ -123,10 +123,10 @@ struct MultiAgentPlanEditorView: View {
                             .font(AppFont.captionMedium)
                     }
                     .foregroundStyle(Brand.primary)
-                    .padding(.horizontal, AppSpace.md)
-                    .padding(.vertical, AppSpace.xs)
+                    .padding(.horizontal, AppSpace.medium)
+                    .padding(.vertical, AppSpace.extraSmall)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .fill(Brand.primaryMuted)
                     )
                 }
@@ -142,10 +142,10 @@ struct MultiAgentPlanEditorView: View {
                             .font(AppFont.captionMedium)
                     }
                     .foregroundStyle(Brand.primary)
-                    .padding(.horizontal, AppSpace.md)
-                    .padding(.vertical, AppSpace.xs)
+                    .padding(.horizontal, AppSpace.medium)
+                    .padding(.vertical, AppSpace.extraSmall)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .fill(Brand.primaryMuted)
                     )
                 }
@@ -162,15 +162,15 @@ struct MultiAgentPlanEditorView: View {
             agentFlowEditor
 
             // Action buttons
-            HStack(spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.medium) {
                 Button(action: onCancel) {
                     Text("取消")
                         .font(AppFont.bodyMedium)
                         .foregroundStyle(TextGrade.secondary)
-                        .padding(.horizontal, AppSpace.lg)
-                        .padding(.vertical, AppSpace.sm)
+                        .padding(.horizontal, AppSpace.large)
+                        .padding(.vertical, AppSpace.small)
                         .background(
-                            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                 .fill(SurfaceGrade.elevated)
                         )
                 }
@@ -181,17 +181,17 @@ struct MultiAgentPlanEditorView: View {
                 Button {
                     onExecute()
                 } label: {
-                    HStack(spacing: AppSpace.xs) {
+                    HStack(spacing: AppSpace.extraSmall) {
                         Image(systemName: "play.fill")
                             .font(.system(size: 11))
                         Text("确认并执行")
                             .font(AppFont.bodyMedium)
                     }
                     .foregroundStyle(.white)
-                    .padding(.horizontal, AppSpace.xl)
-                    .padding(.vertical, AppSpace.sm)
+                    .padding(.horizontal, AppSpace.extraLarge)
+                    .padding(.vertical, AppSpace.small)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .fill(Brand.primary)
                     )
                 }
@@ -199,13 +199,13 @@ struct MultiAgentPlanEditorView: View {
                 .disabled(plan.agents.count < 2)
             }
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(SurfaceGrade.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(Brand.primary.opacity(0.2), lineWidth: 1)
         )
         .onAppear {
@@ -216,23 +216,23 @@ struct MultiAgentPlanEditorView: View {
     // MARK: - Template Grid
 
     private var templateGrid: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             Text("快速选择协作模板")
                 .font(AppFont.captionMedium)
                 .foregroundStyle(TextGrade.muted)
 
             LazyVGrid(columns: [
-                GridItem(.flexible(), spacing: AppSpace.sm),
-                GridItem(.flexible(), spacing: AppSpace.sm),
-            ], spacing: AppSpace.sm) {
+                GridItem(.flexible(), spacing: AppSpace.small),
+                GridItem(.flexible(), spacing: AppSpace.small)
+            ], spacing: AppSpace.small) {
                 ForEach(PlanTemplate.templates) { template in
                     templateCard(template)
                 }
             }
         }
-        .padding(AppSpace.md)
+        .padding(AppSpace.medium)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.panel.opacity(0.5))
         )
     }
@@ -243,7 +243,7 @@ struct MultiAgentPlanEditorView: View {
             withAnimation(AppAnimation.quick) { showTemplates = false }
         } label: {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(Brand.primary.opacity(0.1))
@@ -278,11 +278,11 @@ struct MultiAgentPlanEditorView: View {
             }
             .padding(12)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .fill(SurfaceGrade.card)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .strokeBorder(SurfaceGrade.border.opacity(0.12), lineWidth: 0.5)
             )
         }
@@ -292,7 +292,7 @@ struct MultiAgentPlanEditorView: View {
     // MARK: - Agent Flow Editor
 
     private var agentFlowEditor: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             // Agent chain
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
@@ -310,7 +310,7 @@ struct MultiAgentPlanEditorView: View {
                     // Add agent button
                     addAgentButton
                 }
-                .padding(.horizontal, AppSpace.xs)
+                .padding(.horizontal, AppSpace.extraSmall)
             }
 
             // Connector assignment row
@@ -333,7 +333,7 @@ struct MultiAgentPlanEditorView: View {
     private func editableAgentNode(agent: AgentNode, index: Int) -> some View {
         let color = roleColor(for: agent.role)
 
-        return VStack(spacing: AppSpace.xs) {
+        return VStack(spacing: AppSpace.extraSmall) {
             ZStack(alignment: .topTrailing) {
                 VStack(spacing: 6) {
                     ZStack {
@@ -364,11 +364,11 @@ struct MultiAgentPlanEditorView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                         .fill(SurfaceGrade.card)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                         .strokeBorder(color.opacity(0.2), lineWidth: 1)
                 )
                 .shadow(color: color.opacity(0.08), radius: 8, y: 3)
@@ -443,12 +443,12 @@ struct MultiAgentPlanEditorView: View {
     }
 
     private var connectorAssignmentRow: some View {
-        VStack(alignment: .leading, spacing: AppSpace.xs) {
+        VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
             Text("模型分配")
                 .font(AppFont.tiny)
                 .foregroundStyle(TextGrade.muted)
 
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 ForEach(Array(plan.agents.enumerated()), id: \.element.id) { index, agent in
                     Menu {
                         ForEach(connectors) { conn in
@@ -475,10 +475,10 @@ struct MultiAgentPlanEditorView: View {
                                 .lineLimit(1)
                         }
                         .foregroundStyle(TextGrade.secondary)
-                        .padding(.horizontal, AppSpace.sm)
+                        .padding(.horizontal, AppSpace.small)
                         .padding(.vertical, 3)
                         .background(
-                            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                                 .fill(SurfaceGrade.panel)
                         )
                     }
@@ -507,14 +507,14 @@ struct MultiAgentPlanEditorView: View {
             agents.append(AgentNode(role: role, connectorID: conn?.id))
         }
         // Build linear dependencies
-        for i in 1..<agents.count {
-            agents[i].dependsOn = [agents[i - 1].id]
+        for index in 1..<agents.count {
+            agents[index].dependsOn = [agents[index - 1].id]
         }
         var handoffs: [AgentHandoff] = []
-        for i in 1..<agents.count {
+        for index in 1..<agents.count {
             handoffs.append(AgentHandoff(
-                fromAgentID: agents[i - 1].id,
-                toAgentID: agents[i].id,
+                fromAgentID: agents[index - 1].id,
+                toAgentID: agents[index].id,
                 artifact: ""
             ))
         }
@@ -542,17 +542,17 @@ struct ResumePlanButton: View {
     var body: some View {
         if !plan.failedAgents.isEmpty && plan.status == .failed {
             Button(action: onResume) {
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Image(systemName: "arrow.counterclockwise")
                         .font(.system(size: 12, weight: .medium))
                     Text("从失败处继续（\(plan.failedAgents.count)个会话）")
                         .font(AppFont.captionMedium)
                 }
                 .foregroundStyle(Semantic.warning)
-                .padding(.horizontal, AppSpace.lg)
-                .padding(.vertical, AppSpace.sm)
+                .padding(.horizontal, AppSpace.large)
+                .padding(.vertical, AppSpace.small)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .fill(Semantic.warningMuted)
                 )
             }

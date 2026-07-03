@@ -152,11 +152,14 @@ extension AgentLoop {
     static func evidenceChecklistStep(for task: AgentTask, didComplete: Bool, hadFailure: Bool, wasTruncated: Bool, isReadOnlyRun: Bool = false) -> TaskStep? {
         let toolCalls = task.steps.filter { $0.kind == .toolCall }
         guard !toolCalls.isEmpty || hadFailure || wasTruncated else { return nil }
-        let hasWriteOrCommand = toolCalls.contains {
-            isFileChangeTool($0.toolName ?? "") || ["document.transform", "shell.exec", "verify.build"].contains($0.toolName ?? "")
-        }
         let hasPlan = task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("执行计划") }
-        guard hadFailure || wasTruncated || hasWriteOrCommand || hasPlan || (!isReadOnlyRun && toolCalls.count >= 4) else { return nil }
+        guard shouldEmitEvidenceChecklist(
+            toolCalls: toolCalls,
+            hadFailure: hadFailure,
+            wasTruncated: wasTruncated,
+            hasPlan: hasPlan,
+            isReadOnlyRun: isReadOnlyRun
+        ) else { return nil }
 
         let readFiles = uniqueValues(task.steps
             .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
@@ -176,17 +179,20 @@ extension AgentLoop {
             .map { "\($0.key) ×\($0.value.count)" }
             .sorted()
 
-        var lines = ["证据清单"]
-        lines.append("状态：\(didComplete && !hadFailure && !wasTruncated ? "已形成结果" : "仍需继续")")
-        if indexed { lines.append("已建立项目索引：是") }
-        if !readFiles.isEmpty { lines.append("已读文件：\(readFiles.prefix(12).joined(separator: "、"))") }
-        if !searchQueries.isEmpty { lines.append("已搜索：\(searchQueries.prefix(8).joined(separator: "、"))") }
-        if !commands.isEmpty { lines.append("已运行命令：\(commands.prefix(6).joined(separator: "、"))") }
-        if !documents.isEmpty { lines.append("已处理文档：\(documents.prefix(8).joined(separator: "、"))") }
-        if !writeReviews.isEmpty { lines.append("待审查/已审查文件：\(uniqueValues(writeReviews).prefix(8).joined(separator: "、"))") }
-        if !failedTools.isEmpty { lines.append("失败工具：\(failedTools.joined(separator: "、"))") }
-        if wasTruncated { lines.append("未验证：输出仍可能被截断，需要沿用当前会话 继续。") }
-        if hadFailure { lines.append("未验证：存在未恢复失败，需要重试或换路径。") }
+        var lines = [
+            "证据清单",
+            "状态：\(didComplete && !hadFailure && !wasTruncated ? "已形成结果" : "仍需继续")"
+        ] + evidenceDetailLines(EvidenceDetailInput(
+            indexed: indexed,
+            readFiles: readFiles,
+            searchQueries: searchQueries,
+            commands: commands,
+            documents: documents,
+            writeReviews: writeReviews,
+            failedTools: failedTools,
+            wasTruncated: wasTruncated,
+            hadFailure: hadFailure
+        ))
         if lines.count == 2 && !indexed {
             lines.append("已调用工具：\(uniqueValues(toolCalls.compactMap(\.toolName)).joined(separator: "、"))")
         }
@@ -198,6 +204,52 @@ extension AgentLoop {
             isCollapsed: false,
             isFailure: hadFailure
         )
+    }
+
+    private static func shouldEmitEvidenceChecklist(
+        toolCalls: [TaskStep],
+        hadFailure: Bool,
+        wasTruncated: Bool,
+        hasPlan: Bool,
+        isReadOnlyRun: Bool
+    ) -> Bool {
+        hadFailure
+            || wasTruncated
+            || hasWriteOrCommand(toolCalls)
+            || hasPlan
+            || (!isReadOnlyRun && toolCalls.count >= 4)
+    }
+
+    private static func hasWriteOrCommand(_ toolCalls: [TaskStep]) -> Bool {
+        toolCalls.contains {
+            isFileChangeTool($0.toolName ?? "") || ["document.transform", "shell.exec", "verify.build"].contains($0.toolName ?? "")
+        }
+    }
+
+    private struct EvidenceDetailInput {
+        let indexed: Bool
+        let readFiles: [String]
+        let searchQueries: [String]
+        let commands: [String]
+        let documents: [String]
+        let writeReviews: [String]
+        let failedTools: [String]
+        let wasTruncated: Bool
+        let hadFailure: Bool
+    }
+
+    private static func evidenceDetailLines(_ input: EvidenceDetailInput) -> [String] {
+        [
+            input.indexed ? "已建立项目索引：是" : nil,
+            input.readFiles.isEmpty ? nil : "已读文件：\(input.readFiles.prefix(12).joined(separator: "、"))",
+            input.searchQueries.isEmpty ? nil : "已搜索：\(input.searchQueries.prefix(8).joined(separator: "、"))",
+            input.commands.isEmpty ? nil : "已运行命令：\(input.commands.prefix(6).joined(separator: "、"))",
+            input.documents.isEmpty ? nil : "已处理文档：\(input.documents.prefix(8).joined(separator: "、"))",
+            input.writeReviews.isEmpty ? nil : "待审查/已审查文件：\(uniqueValues(input.writeReviews).prefix(8).joined(separator: "、"))",
+            input.failedTools.isEmpty ? nil : "失败工具：\(input.failedTools.joined(separator: "、"))",
+            input.wasTruncated ? "未验证：输出仍可能被截断，需要沿用当前会话 继续。" : nil,
+            input.hadFailure ? "未验证：存在未恢复失败，需要重试或换路径。" : nil
+        ].compactMap { $0 }
     }
 
 }

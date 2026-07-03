@@ -4,6 +4,12 @@ import UniformTypeIdentifiers
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
 
+private struct ChatIntentModeLabel {
+    let text: String
+    let icon: String
+    let color: Color
+}
+
 struct ChatDetailView: View {
     @EnvironmentObject private var store: AppStore
     @Binding var showingSettings: Bool
@@ -20,12 +26,12 @@ struct ChatDetailView: View {
     @State private var lastPublishedDraftMessage = ""
     @State private var lastLocalDraftEditAt = Date.distantPast
 
-    private var intentModeLabel: (text: String, icon: String, color: Color) {
+    private var intentModeLabel: ChatIntentModeLabel {
         switch predictedIntent {
-        case .chat: return ("问答", "bubble.left.and.bubble.right", .blue)
-        case .research: return ("研究", "magnifyingglass", .purple)
-        case .task: return ("执行", "hammer", .orange)
-        case .workflow: return ("工作流", "arrow.triangle.branch", .green)
+        case .chat: return ChatIntentModeLabel(text: "问答", icon: "bubble.left.and.bubble.right", color: .blue)
+        case .research: return ChatIntentModeLabel(text: "研究", icon: "magnifyingglass", color: .purple)
+        case .task: return ChatIntentModeLabel(text: "执行", icon: "hammer", color: .orange)
+        case .workflow: return ChatIntentModeLabel(text: "工作流", icon: "arrow.triangle.branch", color: .green)
         }
     }
 
@@ -87,7 +93,7 @@ struct ChatDetailView: View {
     // MARK: - Composer
 
     private var composer: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             if !store.state.draftAttachments.isEmpty {
                 attachmentChips
             }
@@ -125,7 +131,7 @@ struct ChatDetailView: View {
                 .disabled(store.state.activeConnector == nil)
                 .opacity(store.state.activeConnector == nil ? 0.4 : 1)
 
-                HStack(alignment: .center, spacing: AppSpace.sm) {
+                HStack(alignment: .center, spacing: AppSpace.small) {
                     attachImageButton
                     attachFileButton
                     skillPickerMenu
@@ -148,7 +154,7 @@ struct ChatDetailView: View {
                         .help("当前意图模式：\(mode.text)")
                     }
 
-                    Spacer(minLength: AppSpace.sm)
+                    Spacer(minLength: AppSpace.small)
 
                     if selectedThreadIsGenerating {
                         appendInstructionButton
@@ -156,11 +162,11 @@ struct ChatDetailView: View {
                         sendButton
                     }
                 }
-                .padding(.top, AppSpace.sm)
+                .padding(.top, AppSpace.small)
             }
-            .padding(.horizontal, AppSpace.lg)
-            .padding(.top, AppSpace.md + 2)
-            .padding(.bottom, AppSpace.sm + 2)
+            .padding(.horizontal, AppSpace.large)
+            .padding(.top, AppSpace.medium + 2)
+            .padding(.bottom, AppSpace.small + 2)
             .background(
                 RoundedRectangle(cornerRadius: LayoutConst.composerCornerRadius, style: .continuous)
                     .fill(SurfaceGrade.card)
@@ -180,9 +186,9 @@ struct ChatDetailView: View {
         }
         .frame(maxWidth: LayoutConst.composerMaxWidth)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, AppSpace.xl)
-        .padding(.top, AppSpace.xs)
-        .padding(.bottom, AppSpace.xl)
+        .padding(.horizontal, AppSpace.extraLarge)
+        .padding(.top, AppSpace.extraSmall)
+        .padding(.bottom, AppSpace.extraLarge)
         .background(
             LinearGradient(
                 colors: [
@@ -220,20 +226,20 @@ struct ChatDetailView: View {
 
     private var composerStatusBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 if store.state.activeConnector == nil {
                     composerChip(icon: "exclamationmark.triangle", text: "未连接模型", tone: .warning)
                     Button {
                         showingSettings = true
                     } label: {
-                        HStack(spacing: AppSpace.xs) {
+                        HStack(spacing: AppSpace.extraSmall) {
                             Image(systemName: "link")
                                 .font(.system(size: 10, weight: .semibold))
                             Text("去连接")
                                 .font(AppFont.tiny)
                         }
                         .foregroundStyle(Brand.primary)
-                        .padding(.horizontal, AppSpace.sm + 1)
+                        .padding(.horizontal, AppSpace.small + 1)
                         .padding(.vertical, 3)
                         .background(Capsule().fill(Brand.primary.opacity(0.10)))
                         .overlay(Capsule().strokeBorder(Brand.primary.opacity(0.22), lineWidth: 0.6))
@@ -269,7 +275,7 @@ struct ChatDetailView: View {
             Image(systemName: "sparkles")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(TextGrade.muted)
-                .padding(.horizontal, AppSpace.sm)
+                .padding(.horizontal, AppSpace.small)
                 .frame(height: 24)
                 .background(
                     Capsule()
@@ -314,13 +320,13 @@ struct ChatDetailView: View {
             .overlay(Capsule().strokeBorder(color.opacity(0.22), lineWidth: 0.6))
             .help("当前会话 已用 \(gaugeTokens.formatted()) token · 约占模型窗口 \(Int(gaugePct * 100))%")
             .onAppear { refreshGauge() }
-            .onChange(of: store.state.selectedThread?.id) { _ in refreshGauge() }
-            .onChange(of: selectedThreadIsGenerating) { gen in if !gen { refreshGauge() } }
+            .onChange(of: store.state.selectedThread?.id) { _, _ in refreshGauge() }
+            .onChange(of: selectedThreadIsGenerating) { _, gen in if !gen { refreshGauge() } }
         } else {
             Color.clear.frame(width: 0, height: 0)
                 .onAppear { refreshGauge() }
-                .onChange(of: store.state.selectedThread?.id) { _ in refreshGauge() }
-                .onChange(of: selectedThreadIsGenerating) { gen in if !gen { refreshGauge() } }
+                .onChange(of: store.state.selectedThread?.id) { _, _ in refreshGauge() }
+                .onChange(of: selectedThreadIsGenerating) { _, gen in if !gen { refreshGauge() } }
         }
     }
 
@@ -337,7 +343,9 @@ struct ChatDetailView: View {
             let usage = UsageTracker.shared.threadUsage(threadID: threadID)
             let total = usage.inputTokens + usage.outputTokens
             let contextWindow: Int = {
-                if let c = conn { return max(128_000, ConnectorCapabilityProfile.infer(for: c, mode: connMode).contextWindow) }
+                if let connector = conn {
+                    return max(128_000, ConnectorCapabilityProfile.infer(for: connector, mode: connMode).contextWindow)
+                }
                 return 128_000
             }()
             let pct = min(1.0, Double(usage.inputTokens) / Double(contextWindow))
@@ -415,7 +423,7 @@ struct ChatDetailView: View {
 
     private var imagePreviewStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 ForEach(store.state.draftImages) { img in
                     ZStack(alignment: .topTrailing) {
                         if let nsImage = NSImage(data: img.data) {
@@ -471,7 +479,7 @@ struct ChatDetailView: View {
     }
 
     private func composerChip(icon: String, text: String, tone: ComposerChipTone = .neutral) -> some View {
-        HStack(spacing: AppSpace.xs) {
+        HStack(spacing: AppSpace.extraSmall) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .medium))
             Text(text)
@@ -479,7 +487,7 @@ struct ChatDetailView: View {
                 .lineLimit(1)
         }
         .foregroundStyle(tone.foreground)
-        .padding(.horizontal, AppSpace.sm + 1)
+        .padding(.horizontal, AppSpace.small + 1)
         .padding(.vertical, 3)
         .background(
             Capsule()
@@ -542,15 +550,15 @@ struct ChatDetailView: View {
         Button {
             submitLocalDraft()
         } label: {
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 Image(systemName: "plus.bubble.fill")
                     .font(.system(size: 11, weight: .semibold))
                 Text("追加")
                     .font(AppFont.captionMedium)
             }
             .foregroundStyle(hasPendingFollowUp ? .white : TextGrade.ghost)
-            .padding(.horizontal, AppSpace.md)
-            .padding(.vertical, AppSpace.sm)
+            .padding(.horizontal, AppSpace.medium)
+            .padding(.vertical, AppSpace.small)
             .background(
                 Capsule()
                     .fill(hasPendingFollowUp ? Brand.primary : SurfaceGrade.sunken)
@@ -592,10 +600,10 @@ struct ChatDetailView: View {
 
     private var attachmentChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 ForEach(store.state.draftAttachments, id: \.self) { path in
                     let isDir = isDirectory(path)
-                    HStack(spacing: AppSpace.xs + 1) {
+                    HStack(spacing: AppSpace.extraSmall + 1) {
                         Image(systemName: isDir ? "folder.fill" : "doc.fill")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(isDir ? Brand.primary : TextGrade.muted)
@@ -620,15 +628,15 @@ struct ChatDetailView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(.leading, AppSpace.sm)
-                    .padding(.trailing, AppSpace.xs + 2)
-                    .padding(.vertical, AppSpace.xs + 1)
+                    .padding(.leading, AppSpace.small)
+                    .padding(.trailing, AppSpace.extraSmall + 2)
+                    .padding(.vertical, AppSpace.extraSmall + 1)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .fill(SurfaceGrade.card.opacity(0.8))
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .strokeBorder(isDir ? Brand.primary.opacity(0.2) : SurfaceGrade.border.opacity(0.3), lineWidth: 0.5)
                     )
                     .frame(maxWidth: 200)

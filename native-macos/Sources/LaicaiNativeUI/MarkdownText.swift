@@ -61,7 +61,7 @@ struct MarkdownText: View {
                         .foregroundStyle(Brand.primary)
                 }
                 .buttonStyle(.plain)
-                .padding(.top, AppSpace.sm)
+                .padding(.top, AppSpace.small)
             }
         }
     }
@@ -85,18 +85,12 @@ struct MarkdownText: View {
     private func renderBlock(_ block: Block) -> some View {
         switch block {
         case .heading(let level, let text):
-            let size: CGFloat = {
-                switch level {
-                case 1: return fontSize + 5
-                case 2: return fontSize + 3
-                case 3: return fontSize + 1.5
-                default: return fontSize + 1
-                }
-            }()
-            let weight: Font.Weight = level <= 2 ? .bold : (level == 3 ? .semibold : .medium)
             VStack(alignment: .leading, spacing: 0) {
                 Text(Self.inlineAttributed(text))
-                    .font(.system(size: size, weight: weight))
+                    .font(.system(
+                        size: Self.headingSize(level: level, base: fontSize),
+                        weight: Self.headingWeight(level: level)
+                    ))
                     .foregroundStyle(level <= 3 ? TextGrade.primary : TextGrade.secondary)
                     .selectableText(enablesTextSelection)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -108,8 +102,8 @@ struct MarkdownText: View {
                         .padding(.top, 6)
                 }
             }
-            .padding(.top, level == 1 ? 14 : (level == 2 ? 12 : 8))
-            .padding(.bottom, level == 1 ? 6 : 4)
+            .padding(.top, Self.headingTopPadding(level: level))
+            .padding(.bottom, Self.headingBottomPadding(level: level))
 
         case .paragraph(let text):
             Text(Self.inlineAttributed(text))
@@ -164,7 +158,7 @@ struct MarkdownText: View {
             .padding(.horizontal, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                     .fill(Brand.primary.opacity(0.03))
             )
 
@@ -185,6 +179,29 @@ struct MarkdownText: View {
         case .blank:
             Spacer().frame(height: 6)
         }
+    }
+
+    private static func headingSize(level: Int, base: CGFloat) -> CGFloat {
+        switch level {
+        case 1: return base + 5
+        case 2: return base + 3
+        case 3: return base + 1.5
+        default: return base + 1
+        }
+    }
+
+    private static func headingWeight(level: Int) -> Font.Weight {
+        if level <= 2 { return .bold }
+        return level == 3 ? .semibold : .medium
+    }
+
+    private static func headingTopPadding(level: Int) -> CGFloat {
+        if level == 1 { return 14 }
+        return level == 2 ? 12 : 8
+    }
+
+    private static func headingBottomPadding(level: Int) -> CGFloat {
+        level == 1 ? 6 : 4
     }
 
     // MARK: - Inline formatting (bold, code, links)
@@ -274,23 +291,23 @@ struct MarkdownText: View {
 
     /// Normalize LLM output: ensure headings/lists start on their own line.
     private static func preprocess(_ text: String) -> String {
-        var r = text
+        var result = text
         // Heading not at line start
-        r = r.replacingOccurrences(of: "([^\\n])\\s*(#{1,6}\\s)", with: "$1\n\n$2", options: .regularExpression)
+        result = result.replacingOccurrences(of: "([^\\n])\\s*(#{1,6}\\s)", with: "$1\n\n$2", options: .regularExpression)
         // List item not at line start
-        r = r.replacingOccurrences(of: "([：:;；。!?])\\s+([-*]\\s)", with: "$1\n$2", options: .regularExpression)
-        r = r.replacingOccurrences(of: "([^\\n])\\s{2,}([-*]\\s)", with: "$1\n$2", options: .regularExpression)
-        r = r.replacingOccurrences(of: "([：:;；。!?])\\s+(\\d{1,3}[\\.)]\\s+)", with: "$1\n$2", options: .regularExpression)
-        r = r.replacingOccurrences(of: "([^\\n])\\s{2,}(\\d{1,3}[\\.)]\\s+)", with: "$1\n$2", options: .regularExpression)
+        result = result.replacingOccurrences(of: "([：:;；。!?])\\s+([-*]\\s)", with: "$1\n$2", options: .regularExpression)
+        result = result.replacingOccurrences(of: "([^\\n])\\s{2,}([-*]\\s)", with: "$1\n$2", options: .regularExpression)
+        result = result.replacingOccurrences(of: "([：:;；。!?])\\s+(\\d{1,3}[\\.)]\\s+)", with: "$1\n$2", options: .regularExpression)
+        result = result.replacingOccurrences(of: "([^\\n])\\s{2,}(\\d{1,3}[\\.)]\\s+)", with: "$1\n$2", options: .regularExpression)
         // Collapse excessive newlines
-        r = r.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
-        return r
+        result = result.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
+        return result
     }
 
     private static func parseBlocks(from source: String) -> [Block] {
         var blocks: [Block] = []
         let lines = source.components(separatedBy: "\n")
-        var i = 0
+        var index = 0
         var orderedCounters: [Int: Int] = [:]
 
         func resetOrderedCounters(atOrBelow indent: Int? = nil) {
@@ -303,29 +320,27 @@ struct MarkdownText: View {
             }
         }
 
-        while i < lines.count {
-            let line = lines[i]
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            // Code fence
+        func consumeCodeFence(line: String, trimmed: String) -> Bool {
             if trimmed.hasPrefix("```") {
                 let lang = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 var codeLines: [String] = []
-                i += 1
-                while i < lines.count {
-                    if lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
-                        i += 1
+                index += 1
+                while index < lines.count {
+                    if lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                        index += 1
                         break
                     }
-                    codeLines.append(lines[i])
-                    i += 1
+                    codeLines.append(lines[index])
+                    index += 1
                 }
                 blocks.append(.code(lang: lang, code: codeLines.joined(separator: "\n")))
                 resetOrderedCounters()
-                continue
+                return true
             }
+            return false
+        }
 
-            // Blank line
+        func consumeBlank(line: String, trimmed: String) -> Bool {
             if trimmed.isEmpty {
                 if let last = blocks.last, case .blank = last {
                     // skip consecutive blanks
@@ -333,79 +348,91 @@ struct MarkdownText: View {
                     blocks.append(.blank)
                 }
                 resetOrderedCounters()
-                i += 1
-                continue
+                index += 1
+                return true
             }
+            return false
+        }
 
-            // Divider (--- or ***)
+        func consumeDivider(line: String, trimmed: String) -> Bool {
             if trimmed.allSatisfy({ $0 == "-" || $0 == "*" || $0 == " " }) && trimmed.filter({ $0 == "-" || $0 == "*" }).count >= 3 {
                 blocks.append(.divider)
                 resetOrderedCounters()
-                i += 1
-                continue
+                index += 1
+                return true
             }
+            return false
+        }
 
-            // Table (lines starting with |)
+        func consumeTable(line: String, trimmed: String) -> Bool {
             if trimmed.hasPrefix("|") && trimmed.hasSuffix("|") && trimmed.filter({ $0 == "|" }).count >= 3 {
                 var tableLines: [String] = []
-                while i < lines.count {
-                    let tl = lines[i].trimmingCharacters(in: .whitespaces)
-                    guard tl.hasPrefix("|") else { break }
-                    tableLines.append(tl)
-                    i += 1
+                while index < lines.count {
+                    let tableLine = lines[index].trimmingCharacters(in: .whitespaces)
+                    guard tableLine.hasPrefix("|") else { break }
+                    tableLines.append(tableLine)
+                    index += 1
                 }
                 if let tbl = Self.parseTable(tableLines) {
                     blocks.append(.table(headers: tbl.headers, rows: tbl.rows))
                 } else {
-                    for tl in tableLines {
-                        blocks.append(.paragraph(tl))
+                    for tableLine in tableLines {
+                        blocks.append(.paragraph(tableLine))
                     }
                 }
                 resetOrderedCounters()
-                continue
+                return true
             }
+            return false
+        }
 
-            // Heading
+        func consumeHeading(line: String, trimmed: String) -> Bool {
             if let headingMatch = trimmed.range(of: "^#{1,6}\\s+", options: .regularExpression) {
                 let hashes = trimmed[headingMatch].filter { $0 == "#" }.count
                 let content = String(trimmed[headingMatch.upperBound...])
                 blocks.append(.heading(level: hashes, text: content))
                 resetOrderedCounters()
-                i += 1
-                continue
+                index += 1
+                return true
             }
+            return false
+        }
 
-            // Blockquote
+        func consumeBlockquote(line: String, trimmed: String) -> Bool {
             if trimmed.hasPrefix("> ") || trimmed == ">" {
                 var quoteLines: [String] = []
-                while i < lines.count {
-                    let ql = lines[i].trimmingCharacters(in: .whitespaces)
-                    if ql.hasPrefix("> ") {
-                        quoteLines.append(String(ql.dropFirst(2)))
-                    } else if ql == ">" {
+                while index < lines.count {
+                    let quoteLine = lines[index].trimmingCharacters(in: .whitespaces)
+                    if quoteLine.hasPrefix("> ") {
+                        quoteLines.append(String(quoteLine.dropFirst(2)))
+                    } else if quoteLine == ">" {
                         quoteLines.append("")
                     } else {
                         break
                     }
-                    i += 1
+                    index += 1
                 }
                 blocks.append(.blockquote(quoteLines.joined(separator: " ").trimmingCharacters(in: .whitespaces)))
                 resetOrderedCounters()
-                continue
+                return true
             }
+            return false
+        }
 
-            // Unordered list item
+        func consumeUnorderedList(line: String, trimmed: String) -> Bool {
             if let listMatch = trimmed.range(of: "^[-*+]\\s+", options: .regularExpression) {
                 let leadingSpaces = line.prefix(while: { $0 == " " || $0 == "\t" }).count
                 let indent = leadingSpaces / 2
                 let content = String(trimmed[listMatch.upperBound...])
                 blocks.append(.listItem(indent: indent, ordered: false, index: 0, text: content))
                 resetOrderedCounters(atOrBelow: indent)
-                i += 1
-                continue
+                index += 1
+                return true
             }
+            return false
+        }
 
-            // Ordered list item
+        func consumeOrderedList(line: String, trimmed: String) -> Bool {
             if let numMatch = trimmed.range(of: "^\\d+[\\.)]\\s+", options: .regularExpression) {
                 let leadingSpaces = line.prefix(while: { $0 == " " || $0 == "\t" }).count
                 let indent = leadingSpaces / 2
@@ -424,18 +451,21 @@ struct MarkdownText: View {
                 }
                 orderedCounters[indent] = displayIndex
                 blocks.append(.listItem(indent: indent, ordered: true, index: displayIndex, text: content))
-                i += 1
-                continue
+                index += 1
+                return true
             }
+            return false
+        }
 
+        func consumeParagraph(trimmed: String) {
             // Paragraph: collect consecutive non-special lines.
             // For CJK text, preserve line breaks instead of joining with space —
             // Chinese content uses line breaks semantically (计划/结论/总结 etc.).
             var paraLines: [String] = [trimmed]
             resetOrderedCounters()
-            i += 1
-            while i < lines.count {
-                let next = lines[i].trimmingCharacters(in: .whitespaces)
+            index += 1
+            while index < lines.count {
+                let next = lines[index].trimmingCharacters(in: .whitespaces)
                 if next.isEmpty || next.hasPrefix("#") || next.hasPrefix("```")
                     || next.hasPrefix(">")
                     || (next.hasPrefix("|") && next.hasSuffix("|"))
@@ -449,7 +479,7 @@ struct MarkdownText: View {
                     break
                 }
                 paraLines.append(next)
-                i += 1
+                index += 1
             }
             // Use newline for CJK content to preserve intentional line breaks
             let hasCJK = paraLines.contains { line in
@@ -458,11 +488,30 @@ struct MarkdownText: View {
             blocks.append(.paragraph(paraLines.joined(separator: hasCJK ? "\n" : " ")))
         }
 
+        let blockConsumers: [(String, String) -> Bool] = [
+            consumeCodeFence,
+            consumeBlank,
+            consumeDivider,
+            consumeTable,
+            consumeHeading,
+            consumeBlockquote,
+            consumeUnorderedList,
+            consumeOrderedList
+        ]
+
+        while index < lines.count {
+            let line = lines[index]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if blockConsumers.contains(where: { $0(line, trimmed) }) {
+                continue
+            }
+            consumeParagraph(trimmed: trimmed)
+        }
+
         return blocks
     }
 
     // MARK: - Table parser
-
     private static func parseTable(_ lines: [String]) -> (headers: [String], rows: [[String]])? {
         guard lines.count >= 2 else { return nil }
         func splitCells(_ line: String) -> [String] {
@@ -476,8 +525,8 @@ struct MarkdownText: View {
         // Line 1 is the separator (|---|---|)
         let startRow = lines.count > 1 && lines[1].contains("-") ? 2 : 1
         var rows: [[String]] = []
-        for i in startRow..<lines.count {
-            let cells = splitCells(lines[i])
+        for index in startRow..<lines.count {
+            let cells = splitCells(lines[index])
             // Skip separator-only lines
             if cells.allSatisfy({ $0.allSatisfy({ $0 == "-" || $0 == ":" || $0 == " " }) }) { continue }
             rows.append(cells)
@@ -533,8 +582,8 @@ private struct CodeBlockView: View {
                 .buttonStyle(.plain)
                 .opacity(isHovered || copied ? 1 : 0)
             }
-            .padding(.horizontal, AppSpace.md)
-            .padding(.vertical, AppSpace.sm)
+            .padding(.horizontal, AppSpace.medium)
+            .padding(.vertical, AppSpace.small)
             .background(SurfaceGrade.elevated)
 
             Rectangle().fill(SurfaceGrade.divider).frame(height: 1)
@@ -546,20 +595,20 @@ private struct CodeBlockView: View {
                     .foregroundStyle(TextGrade.secondary)
                     .lineSpacing(4)
                     .selectableText(enablesTextSelection)
-                    .padding(.horizontal, AppSpace.md)
-                    .padding(.vertical, AppSpace.sm)
+                    .padding(.horizontal, AppSpace.medium)
+                    .padding(.vertical, AppSpace.small)
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.sunken)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.border.opacity(0.55), lineWidth: 0.8)
         )
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
-        .onHover { h in withAnimation(.easeOut(duration: 0.15)) { isHovered = h } }
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous))
+        .onHover { hovering in withAnimation(.easeOut(duration: 0.15)) { isHovered = hovering } }
     }
 }
 
@@ -612,14 +661,14 @@ private struct TableBlockView: View {
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.sunken)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.border.opacity(0.55), lineWidth: 0.8)
         )
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous))
     }
 
     private func columnWidth(_ index: Int) -> CGFloat {

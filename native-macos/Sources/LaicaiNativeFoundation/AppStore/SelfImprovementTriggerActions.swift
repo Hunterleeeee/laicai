@@ -50,7 +50,9 @@ extension AppStore {
             contextMode: .deep,
             modelName: connector.modelName
         )
-        loopConfig.allowedTools = ["file.read", "file.edit", "diff.apply", "code.search", "workspace.index", "shell.exec", "verify.build", "skill.manage", "git"]
+        loopConfig.allowedTools = [
+            "file.read", "file.edit", "diff.apply", "code.search", "workspace.index", "shell.exec", "verify.build", "skill.manage", "git"
+        ]
 
         let loop = AgentLoop(config: loopConfig, runtime: environment.runtimeClient)
         let targetID = thread.id
@@ -58,61 +60,107 @@ extension AppStore {
 
         generationTasks[targetID] = Task { [weak self] in
             guard let self else { return }
-            do {
-                let completedTask: AgentTask = try await loop.run(
-                    taskID: targetID,
+            await self.runTriggeredSelfImprovementTask(
+                SelfImprovementRun(
+                    loop: loop,
+                    thread: thread,
+                    targetID: targetID,
+                    generationRunID: generationRunID,
                     message: message,
-                    intent: UserIntent.task,
                     connector: connector,
                     context: context,
-                    priorSteps: thread.steps,
-                    onStep: { @MainActor [weak self] (step: TaskStep) in
-                        guard let self, self.shouldAcceptGenerationCallback(for: targetID, runID: generationRunID) else { return }
-                        self.appendTaskStep(step, to: targetID)
-                    },
-                    onStreamDelta: { @Sendable @MainActor [weak self] (delta: String) in
-                        guard let self, self.shouldAcceptGenerationCallback(for: targetID, runID: generationRunID) else { return }
-                        self.appendStreamDelta(delta, to: targetID)
-                    }
-                )
-                guard self.shouldAcceptGenerationCallback(for: targetID, runID: generationRunID) else { return }
-
-                self.flushStreamBuffer(for: targetID)
-                self.mergeCompletedTask(completedTask, into: targetID)
-                self.persistThreadsNow()
-
-                let succeeded = completedTask.status == .completed
-                SelfImprovementEngine.shared.recordAttempt(
-                    category: diagnosis.category.rawValue,
-                    description: diagnosis.description,
-                    filesChanged: completedTask.steps
-                        .filter { $0.kind == .toolCall && AgentLoop.isFileChangeTool($0.toolName ?? "") }
-                        .map { AgentLoop.pathForFileChange(callStep: $0) }
-                        .filter { !$0.isEmpty },
-                    buildSuccess: succeeded,
-                    commitHash: nil
-                )
-                if succeeded {
-                    SelfImprovementEngine.shared.onImprovementSuccess()
-                } else {
-                    SelfImprovementEngine.shared.onImprovementFailure()
-                }
-            } catch {
-                guard self.shouldAcceptGenerationCallback(for: targetID, runID: generationRunID) else { return }
-                self.flushStreamBuffer(for: targetID)
-                if let threadIndex = self.state.threads.firstIndex(where: { $0.id == targetID }) {
-                    self.state.threads[threadIndex].steps.append(
-                        TaskStep(kind: .error, text: "自我改进失败：\(error.localizedDescription)", isFailure: true, recoverable: false)
-                    )
-                    self.state.threads[threadIndex].status = .failed
-                    self.syncAgentSnapshot(at: threadIndex)
-                    self.state.threads[threadIndex].updatedAt = Date()
-                    self.persistThreadsNow()
-                }
-                SelfImprovementEngine.shared.onImprovementFailure()
-            }
-
-            self.finishGenerationTask(targetID, runID: generationRunID)
+                    diagnosis: diagnosis
+                ))
         }
+    }
+
+    private struct SelfImprovementRun {
+        let loop: AgentLoop
+        let thread: Thread
+        let targetID: UUID
+        let generationRunID: UUID
+        let message: String
+        let connector: ConnectorProfile
+        let context: TaskContext
+        let diagnosis: SelfImprovementEngine.Diagnosis
+    }
+
+    private func runTriggeredSelfImprovementTask(_ run: SelfImprovementRun) async {
+        do {
+            let completedTask = try await run.loop.run(
+                taskID: run.targetID,
+                message: run.message,
+                intent: UserIntent.task,
+                connector: run.connector,
+                context: run.context,
+                priorSteps: run.thread.steps,
+                onStep: { @MainActor [weak self] (step: TaskStep) in
+                    guard let self, self.shouldAcceptGenerationCallback(for: run.targetID, runID: run.generationRunID) else { return }
+                    self.appendTaskStep(step, to: run.targetID)
+                },
+                onStreamDelta: { @Sendable @MainActor [weak self] (delta: String) in
+                    guard let self, self.shouldAcceptGenerationCallback(for: run.targetID, runID: run.generationRunID) else { return }
+                    self.appendStreamDelta(delta, to: run.targetID)
+                }
+            )
+            guard shouldAcceptGenerationCallback(for: run.targetID, runID: run.generationRunID) else { return }
+            completeTriggeredSelfImprovement(completedTask, targetID: run.targetID, diagnosis: run.diagnosis)
+        } catch {
+            failTriggeredSelfImprovement(targetID: run.targetID, generationRunID: run.generationRunID, error: error)
+        }
+
+        finishGenerationTask(run.targetID, runID: run.generationRunID)
+    }
+
+    private func completeTriggeredSelfImprovement(
+        _ completedTask: AgentTask,
+        targetID: UUID,
+        diagnosis: SelfImprovementEngine.Diagnosis
+    ) {
+        flushStreamBuffer(for: targetID)
+        mergeCompletedTask(completedTask, into: targetID)
+        persistThreadsNow()
+        recordTriggeredSelfImprovementAttempt(completedTask, diagnosis: diagnosis)
+    }
+
+    private func recordTriggeredSelfImprovementAttempt(
+        _ completedTask: AgentTask,
+        diagnosis: SelfImprovementEngine.Diagnosis
+    ) {
+        let succeeded = completedTask.status == .completed
+        SelfImprovementEngine.shared.recordAttempt(
+            category: diagnosis.category.rawValue,
+            description: diagnosis.description,
+            filesChanged: triggeredSelfImprovementFilesChanged(from: completedTask),
+            buildSuccess: succeeded,
+            commitHash: nil
+        )
+        if succeeded {
+            SelfImprovementEngine.shared.onImprovementSuccess()
+        } else {
+            SelfImprovementEngine.shared.onImprovementFailure()
+        }
+    }
+
+    private func triggeredSelfImprovementFilesChanged(from completedTask: AgentTask) -> [String] {
+        completedTask.steps
+            .filter { $0.kind == .toolCall && AgentLoop.isFileChangeTool($0.toolName ?? "") }
+            .map { AgentLoop.pathForFileChange(callStep: $0) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func failTriggeredSelfImprovement(targetID: UUID, generationRunID: UUID, error: Error) {
+        guard shouldAcceptGenerationCallback(for: targetID, runID: generationRunID) else { return }
+        flushStreamBuffer(for: targetID)
+        if let threadIndex = state.threads.firstIndex(where: { $0.id == targetID }) {
+            state.threads[threadIndex].steps.append(
+                TaskStep(kind: .error, text: "自我改进失败：\(error.localizedDescription)", isFailure: true, recoverable: false)
+            )
+            state.threads[threadIndex].status = .failed
+            syncAgentSnapshot(at: threadIndex)
+            state.threads[threadIndex].updatedAt = Date()
+            persistThreadsNow()
+        }
+        SelfImprovementEngine.shared.onImprovementFailure()
     }
 }

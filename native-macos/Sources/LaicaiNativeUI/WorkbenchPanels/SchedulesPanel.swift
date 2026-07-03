@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 struct SchedulesPanel: View {
     @EnvironmentObject private var store: AppStore
@@ -13,7 +13,7 @@ struct SchedulesPanel: View {
     @State private var maxRunsText = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             overview
             createForm
             taskList
@@ -29,8 +29,9 @@ struct SchedulesPanel: View {
             subtitle: scheduler.tasks.isEmpty ? "定期触发会话，适合巡检、复盘和固定报告。" : "\(enabledCount)/\(scheduler.tasks.count) 个任务启用",
             tint: Brand.teal
         ) {
-            HStack(spacing: AppSpace.xs) {
-                scheduleMetric(icon: "power", value: scheduler.isRunning ? "运行中" : "未启动", label: "调度器", tint: scheduler.isRunning ? Semantic.success : TextGrade.ghost)
+            HStack(spacing: AppSpace.extraSmall) {
+                scheduleMetric(
+                    icon: "power", value: scheduler.isRunning ? "运行中" : "未启动", label: "调度器", tint: scheduler.isRunning ? Semantic.success : TextGrade.ghost)
                 scheduleMetric(icon: "alarm", value: "\(scheduler.tasks.count)", label: "任务", tint: Brand.primary)
                 scheduleMetric(icon: "clock.arrow.circlepath", value: nextRunSummary, label: "下次", tint: Semantic.warning)
             }
@@ -39,37 +40,37 @@ struct SchedulesPanel: View {
 
     private var createForm: some View {
         contextSectionCard(title: "新建定时任务", tint: Brand.teal) {
-            VStack(alignment: .leading, spacing: AppSpace.sm) {
+            VStack(alignment: .leading, spacing: AppSpace.small) {
                 TextField("任务名，例如：每日项目巡检", text: $name)
                     .textFieldStyle(.plain)
                     .font(AppFont.caption)
-                    .padding(.horizontal, AppSpace.md)
+                    .padding(.horizontal, AppSpace.medium)
                     .frame(height: 32)
-                    .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.76)))
-                    .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.7))
+                    .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.76)))
+                    .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.7))
 
                 TextEditor(text: $message)
                     .font(AppFont.caption)
                     .foregroundStyle(TextGrade.primary)
                     .frame(minHeight: 74)
                     .scrollContentBackground(.hidden)
-                    .padding(AppSpace.sm)
-                    .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.76)))
-                    .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.7))
+                    .padding(AppSpace.small)
+                    .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.76)))
+                    .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.7))
                     .overlay(alignment: .topLeading) {
                         if message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text("要定时执行的会话指令…")
                                 .font(AppFont.caption)
                                 .foregroundStyle(TextGrade.ghost)
-                                .padding(.horizontal, AppSpace.md)
-                                .padding(.vertical, AppSpace.md)
+                                .padding(.horizontal, AppSpace.medium)
+                                .padding(.vertical, AppSpace.medium)
                                 .allowsHitTesting(false)
                         }
                     }
 
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Stepper(value: $intervalMinutes, in: 1...1440, step: intervalStep) {
-                        HStack(spacing: AppSpace.xs) {
+                        HStack(spacing: AppSpace.extraSmall) {
                             Image(systemName: "timer")
                                 .font(.system(size: 10, weight: .medium))
                             Text("每 \(intervalMinutes) 分钟")
@@ -83,10 +84,10 @@ struct SchedulesPanel: View {
                         .textFieldStyle(.plain)
                         .font(AppFont.caption)
                         .frame(width: 72)
-                        .padding(.horizontal, AppSpace.sm)
+                        .padding(.horizontal, AppSpace.small)
                         .frame(height: 28)
-                        .background(RoundedRectangle(cornerRadius: AppRadius.sm).fill(SurfaceGrade.card.opacity(0.72)))
-                        .overlay(RoundedRectangle(cornerRadius: AppRadius.sm).strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.6))
+                        .background(RoundedRectangle(cornerRadius: AppRadius.small).fill(SurfaceGrade.card.opacity(0.72)))
+                        .overlay(RoundedRectangle(cornerRadius: AppRadius.small).strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.6))
                 }
 
                 if !workflowOptions.isEmpty {
@@ -106,9 +107,13 @@ struct SchedulesPanel: View {
                     Label("创建定时会话", systemImage: "plus")
                         .font(AppFont.captionMedium)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, AppSpace.sm)
-                        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(canCreate ? Brand.teal.opacity(0.14) : SurfaceGrade.elevated.opacity(0.62)))
-                        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(canCreate ? Brand.teal.opacity(0.22) : SurfaceGrade.hairline, lineWidth: 0.6))
+                        .padding(.vertical, AppSpace.small)
+                        .background(
+                            RoundedRectangle(cornerRadius: AppRadius.medium).fill(canCreate ? Brand.teal.opacity(0.14) : SurfaceGrade.elevated.opacity(0.62))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(
+                                canCreate ? Brand.teal.opacity(0.22) : SurfaceGrade.hairline, lineWidth: 0.6))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(canCreate ? Brand.teal : TextGrade.ghost)
@@ -126,7 +131,7 @@ struct SchedulesPanel: View {
                 hint: "创建后会保存在当前工作区的 .laicai/scheduled_tasks.json"
             )
         } else {
-            VStack(alignment: .leading, spacing: AppSpace.sm) {
+            VStack(alignment: .leading, spacing: AppSpace.small) {
                 workbenchSectionHeader(title: "任务列表", count: scheduler.tasks.count)
                 ForEach(scheduler.tasks) { task in
                     scheduleTaskRow(task)
@@ -138,11 +143,11 @@ struct SchedulesPanel: View {
     @ViewBuilder
     private var executionLog: some View {
         if !scheduler.lastExecutionLog.isEmpty {
-            VStack(alignment: .leading, spacing: AppSpace.sm) {
+            VStack(alignment: .leading, spacing: AppSpace.small) {
                 workbenchSectionHeader(title: "最近触发", count: scheduler.lastExecutionLog.count)
-                VStack(spacing: AppSpace.xs) {
+                VStack(spacing: AppSpace.extraSmall) {
                     ForEach(scheduler.lastExecutionLog.suffix(6).reversed()) { entry in
-                        HStack(spacing: AppSpace.sm) {
+                        HStack(spacing: AppSpace.small) {
                             Image(systemName: entry.success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(entry.success ? Semantic.success : Semantic.warning)
@@ -161,9 +166,9 @@ struct SchedulesPanel: View {
                                 .font(AppFont.tiny)
                                 .foregroundStyle(TextGrade.ghost)
                         }
-                        .padding(AppSpace.sm)
-                        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.66)))
-                        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
+                        .padding(AppSpace.small)
+                        .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.66)))
+                        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
                     }
                 }
             }
@@ -171,7 +176,7 @@ struct SchedulesPanel: View {
     }
 
     private func scheduleTaskRow(_ task: ScheduledTask) -> some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+        HStack(alignment: .top, spacing: AppSpace.small) {
             Button {
                 scheduler.toggleTask(id: task.id)
             } label: {
@@ -183,8 +188,8 @@ struct SchedulesPanel: View {
             .buttonStyle(.plain)
             .help(task.enabled ? "暂停任务" : "启用任务")
 
-            VStack(alignment: .leading, spacing: AppSpace.xs) {
-                HStack(spacing: AppSpace.xs) {
+            VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Text(task.name)
                         .font(AppFont.captionMedium)
                         .foregroundStyle(TextGrade.primary)
@@ -202,7 +207,7 @@ struct SchedulesPanel: View {
                     .foregroundStyle(TextGrade.muted)
                     .lineLimit(2)
 
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     if let workflowName = task.workflowName, !workflowName.isEmpty {
                         scheduleChip(icon: "arrow.triangle.branch", text: workflowName)
                     }
@@ -229,14 +234,14 @@ struct SchedulesPanel: View {
             .buttonStyle(.plain)
             .help("删除定时任务")
         }
-        .padding(AppSpace.md)
-        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.72)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.82), lineWidth: 0.6))
+        .padding(AppSpace.medium)
+        .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.72)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.82), lineWidth: 0.6))
     }
 
     private func scheduleMetric(icon: String, value: String, label: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 Image(systemName: icon)
                     .font(.system(size: 9, weight: .semibold))
                 Text(label)
@@ -249,9 +254,9 @@ struct SchedulesPanel: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(AppSpace.sm)
-        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.66)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
+        .padding(AppSpace.small)
+        .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.66)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
     }
 
     private func scheduleChip(icon: String, text: String) -> some View {

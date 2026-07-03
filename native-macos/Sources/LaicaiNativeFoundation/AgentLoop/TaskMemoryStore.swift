@@ -1,6 +1,18 @@
 import Foundation
 import LaicaiNativeDomain
 
+public struct TaskMemoryHistoryEntry: Sendable {
+    public let timestamp: Date
+    public let description: String
+    public let conclusions: [String]
+
+    public init(timestamp: Date, description: String, conclusions: [String]) {
+        self.timestamp = timestamp
+        self.description = description
+        self.conclusions = conclusions
+    }
+}
+
 // MARK: - Cross-Session Task Memory Store
 
 public enum TaskMemoryStore {
@@ -108,7 +120,7 @@ public enum TaskMemoryStore {
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
-    public static func loadHistory(workspaceRoot: String) -> [(timestamp: Date, description: String, conclusions: [String])] {
+    public static func loadHistory(workspaceRoot: String) -> [TaskMemoryHistoryEntry] {
         let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !root.isEmpty else { return [] }
         let path = (root as NSString).appendingPathComponent(historyFileName)
@@ -116,7 +128,13 @@ public enum TaskMemoryStore {
               let history = try? JSONDecoder().decode([HistoryEntry].self, from: data) else {
             return []
         }
-        return history.map { (timestamp: $0.timestamp, description: $0.taskDescription, conclusions: $0.conclusions) }
+        return history.map {
+            TaskMemoryHistoryEntry(
+                timestamp: $0.timestamp,
+                description: $0.taskDescription,
+                conclusions: $0.conclusions
+            )
+        }
     }
 
     // MARK: - Save / Load / Merge

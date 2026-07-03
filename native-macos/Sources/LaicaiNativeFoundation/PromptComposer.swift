@@ -8,18 +8,28 @@ public struct PromptComposer {
     /// This is used as the system message for LLM calls with function calling.
     public static func composeSystemPrompt(context: TaskContext, intent: UserIntent) -> String {
         var parts: [String] = []
-
         parts.append("你是来财（Laicai），macOS 本机 AI 助手。\(currentDateString())。")
-
         if intent == .chat {
-            parts.append("直接回答问题。简洁、准确、不啰嗦。")
-            if let claudeMD = context.claudeMD {
-                parts.append("\n## 项目记忆\n\(claudeMD)")
-            }
-            return parts.joined(separator: "\n")
+            return composeDirectChatSystemPrompt(parts: parts, context: context)
         }
 
-        // Non-chat: compact workflow protocol
+        appendCoreProtocol(to: &parts)
+        appendTaskProtocol(to: &parts, context: context)
+        appendContext(to: &parts, context: context)
+        appendIntentMode(to: &parts, context: context, intent: intent)
+        return parts.joined(separator: "\n")
+    }
+
+    private static func composeDirectChatSystemPrompt(parts: [String], context: TaskContext) -> String {
+        var parts = parts
+        parts.append("直接回答问题。简洁、准确、不啰嗦。")
+        if let claudeMD = context.claudeMD {
+            parts.append("\n## 项目记忆\n\(claudeMD)")
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    private static func appendCoreProtocol(to parts: inout [String]) {
         parts.append("""
         ## 核心原则
         - 目标：完成用户交给的任务。根据当前证据决定下一步，不盲目调用工具，不套固定流程。
@@ -28,24 +38,17 @@ public struct PromptComposer {
         - 危险操作（删除、sudo、密钥、强推）默认停止并说明风险，除非用户明确授权。
         - 收口只说：做了什么、验证了什么、剩余风险。
         """)
+    }
 
+    private static func appendTaskProtocol(to parts: inout [String], context: TaskContext) {
         if let protocolGoal = context.metadata["taskProtocolGoal"] {
             parts.append("\n## 任务协议\n目标：\(protocolGoal)\n工作区：\(context.workspaceRoot.isEmpty ? "未指定" : context.workspaceRoot)")
         }
+    }
 
-        // Context injection
-        if let claudeMD = context.claudeMD {
-            parts.append("\n## 项目记忆\n\(claudeMD)")
-        }
-        if let projectCtx = ProjectManager.buildProjectContext(projects: ProjectManager.cachedProjects, rootPath: context.workspaceRoot) {
-            parts.append("\n## 项目概况\n\(projectCtx)")
-        }
-        if let branch = context.gitBranch {
-            parts.append("\n## 分支\n\(branch)")
-        } else if !context.workspaceRoot.isEmpty {
-            let isGit = FileManager.default.fileExists(atPath: (context.workspaceRoot as NSString).appendingPathComponent(".git"))
-            if !isGit { parts.append("\n## 非 Git 工作区\n不要调用 git 工具。") }
-        }
+    private static func appendContext(to parts: inout [String], context: TaskContext) {
+        appendProjectMemory(to: &parts, context: context)
+        appendGitContext(to: &parts, context: context)
         if let diff = context.gitDiff {
             parts.append("\n## 未提交变更\n\(diff)")
         }
@@ -56,8 +59,27 @@ public struct PromptComposer {
             let fileList = context.relevantFiles.prefix(10).map { "- \($0.path)" }.joined(separator: "\n")
             parts.append("\n## 相关文件\n\(fileList)")
         }
+    }
 
-        // Intent-specific mode
+    private static func appendProjectMemory(to parts: inout [String], context: TaskContext) {
+        if let claudeMD = context.claudeMD {
+            parts.append("\n## 项目记忆\n\(claudeMD)")
+        }
+        if let projectCtx = ProjectManager.buildProjectContext(projects: ProjectManager.cachedProjects, rootPath: context.workspaceRoot) {
+            parts.append("\n## 项目概况\n\(projectCtx)")
+        }
+    }
+
+    private static func appendGitContext(to parts: inout [String], context: TaskContext) {
+        if let branch = context.gitBranch {
+            parts.append("\n## 分支\n\(branch)")
+        } else if !context.workspaceRoot.isEmpty {
+            let isGit = FileManager.default.fileExists(atPath: (context.workspaceRoot as NSString).appendingPathComponent(".git"))
+            if !isGit { parts.append("\n## 非 Git 工作区\n不要调用 git 工具。") }
+        }
+    }
+
+    private static func appendIntentMode(to parts: inout [String], context: TaskContext, intent: UserIntent) {
         switch intent {
         case .chat: break
         case .research:
@@ -70,8 +92,6 @@ public struct PromptComposer {
         case .workflow(let name):
             parts.append("\n## 工作流模式\n\(name)。工具结果证明需要调整时先调整，最终以完成用户目标为准。")
         }
-
-        return parts.joined(separator: "\n")
     }
 
     private static func currentDateString() -> String {

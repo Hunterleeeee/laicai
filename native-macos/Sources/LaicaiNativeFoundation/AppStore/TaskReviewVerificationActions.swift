@@ -3,11 +3,11 @@ import LaicaiNativeDomain
 
 extension AppStore {
     func schedulePostWriteVerification(threadIndex: Int, filePath: String? = nil) {
-        if let fp = filePath?.lowercased() {
+        if let lowercasedFilePath = filePath?.lowercased() {
             let skipExtensions = [".json", ".md", ".txt", ".yaml", ".yml", ".toml", ".lock", ".png", ".jpg", ".svg", ".ico"]
             let skipDirectories = ["skills/", "docs/", "assets/", ".github/", ".vscode/"]
-            if skipExtensions.contains(where: { fp.hasSuffix($0) })
-                || skipDirectories.contains(where: { fp.contains($0) }) {
+            if skipExtensions.contains(where: { lowercasedFilePath.hasSuffix($0) })
+                || skipDirectories.contains(where: { lowercasedFilePath.contains($0) }) {
                 return
             }
         }
@@ -57,8 +57,10 @@ extension AppStore {
     }
 
     func refreshSkillsIfNeeded(filePath: String) {
-        let fp = filePath.lowercased()
-        if fp.contains("/skills/") || fp.hasPrefix("skills/") || fp.contains(".laicai/skills") {
+        let lowercasedFilePath = filePath.lowercased()
+        if lowercasedFilePath.contains("/skills/")
+            || lowercasedFilePath.hasPrefix("skills/")
+            || lowercasedFilePath.contains(".laicai/skills") {
             SkillRegistry.shared.refresh(workspaceRoot: state.settings.workspacePath)
         }
     }
@@ -148,20 +150,20 @@ extension AppStore {
                     intent: .task,
                     connector: connector,
                     context: context,
-                    onStep: { @MainActor step in },
+                    onStep: { @MainActor _ in },
                     onStreamDelta: { _ in }
                 )
 
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    guard let ti = self.state.threads.firstIndex(where: { $0.id == taskID }) else { return }
+                    guard let threadIndex = self.state.threads.firstIndex(where: { $0.id == taskID }) else { return }
 
                     let repairSteps = repairTask.steps.map { step -> TaskStep in
-                        var s = step
-                        s.agentRole = .coder
-                        return s
+                        var repairStep = step
+                        repairStep.agentRole = .coder
+                        return repairStep
                     }
-                    self.state.threads[ti].steps.append(contentsOf: repairSteps)
+                    self.state.threads[threadIndex].steps.append(contentsOf: repairSteps)
 
                     let hasNewReviews = repairSteps.contains { $0.kind == .reviewRequest && $0.approved == nil }
                     let summaryStep = TaskStep(
@@ -170,20 +172,20 @@ extension AppStore {
                             ? "自动修复已生成变更，等待审查批准后将重新验证"
                             : "自动修复尝试完成（第 \(attempt) 次），未产生新的文件变更"
                     )
-                    self.state.threads[ti].steps.append(summaryStep)
-                    self.state.threads[ti].updatedAt = .now
+                    self.state.threads[threadIndex].steps.append(summaryStep)
+                    self.state.threads[threadIndex].updatedAt = .now
                     self.persistThreadsNow()
                 }
             } catch {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    guard let ti = self.state.threads.firstIndex(where: { $0.id == taskID }) else { return }
-                    self.state.threads[ti].steps.append(TaskStep(
+                    guard let threadIndex = self.state.threads.firstIndex(where: { $0.id == taskID }) else { return }
+                    self.state.threads[threadIndex].steps.append(TaskStep(
                         kind: .error,
                         text: "自动修复失败：\(error.localizedDescription)",
                         isFailure: true
                     ))
-                    self.state.threads[ti].updatedAt = .now
+                    self.state.threads[threadIndex].updatedAt = .now
                     self.persistThreadsNow()
                 }
             }

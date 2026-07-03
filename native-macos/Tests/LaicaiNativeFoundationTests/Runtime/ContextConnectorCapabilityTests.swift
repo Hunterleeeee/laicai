@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class ContextConnectorCapabilityTests: LaicaiNativeFoundationTestCase {
@@ -12,13 +13,16 @@ final class ContextConnectorCapabilityTests: LaicaiNativeFoundationTestCase {
     }
 
     func testAppSettingsDecodesLegacyCompatFlagsWithoutError() throws {
-        let json = #"{"workspacePath":"/tmp","defaultConnectorName":"Test","compactComposer":false,"showDebugPanels":false,"usePipeline":true,"leanMode":false}"#
+        let json =
+            #"{"workspacePath":"/tmp","defaultConnectorName":"Test","compactComposer":false,"showDebugPanels":false,"usePipeline":true,"leanMode":false}"#
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8))
         XCTAssertFalse(settings.workspacePath.isEmpty)
     }
 
     func testAppSettingsDecodesKernelModeFieldWithoutError() throws {
-        let json = #"{"workspacePath":"/tmp","defaultConnectorName":"Test","compactComposer":false,"showDebugPanels":false,"kernelMode":"legacy","usePipeline":true,"leanMode":true}"#
+        let json =
+            #"{"workspacePath":"/tmp","defaultConnectorName":"Test","compactComposer":false,"#
+            + #""showDebugPanels":false,"kernelMode":"legacy","usePipeline":true,"leanMode":true}"#
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8))
         XCTAssertFalse(settings.workspacePath.isEmpty)
     }
@@ -206,23 +210,18 @@ final class ContextConnectorCapabilityTests: LaicaiNativeFoundationTestCase {
     func testThreadRecordAdaptsSessionsAndTasks() {
         let turn = ChatTurn(role: .user, text: "hello")
         let session = ChatSession(title: "Chat", preview: "hello", modelName: "m", turns: [turn])
-        let sessionThread = ThreadRecord(thread: Thread(
-            title: "Chat",
-            preview: "hello",
-            steps: [TaskStep(kind: .userInput, text: "hello")],
-            modelName: "m"
-        ))
+        let sessionThread = ThreadRecord(
+            thread: Thread(session: session)
+        )
 
         XCTAssertEqual(sessionThread.events.first?.kind, .user)
         XCTAssertEqual(sessionThread.events.first?.text, "hello")
 
         let step = TaskStep(kind: .toolCall, text: "search", toolName: "web.search")
         let task = AgentTask(title: "Task", status: .running, steps: [step])
-        let taskThread = ThreadRecord(thread: Thread(
-            title: "Task",
-            status: .running,
-            steps: [TaskStep(kind: .toolCall, text: "search", toolName: "web.search")]
-        ))
+        let taskThread = ThreadRecord(
+            thread: Thread(task: task)
+        )
 
         XCTAssertEqual(taskThread.status, .running)
         XCTAssertEqual(taskThread.events.first?.kind, .toolCall)

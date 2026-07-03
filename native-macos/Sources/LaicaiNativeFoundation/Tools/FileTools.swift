@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import LaicaiNativeDomain
 
@@ -38,18 +39,14 @@ public struct ReadFileTool: LaicaiTool {
         }
 
         let path = params.path
-        let fullPath: String
-        if path.hasPrefix("/") {
-            fullPath = path
-        } else {
-            guard !context.workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return ToolResult(output: "请先设置工作区后再读取文件。", success: false, error: "workspace_missing")
-            }
-            fullPath = (context.workspaceRoot as NSString).appendingPathComponent(path)
+        let workspaceRoot = context.workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !workspaceRoot.isEmpty else {
+            return ToolResult(output: "请先设置工作区后再读取文件。", success: false, error: "workspace_missing")
         }
+        let fullPath = Self.fullPath(for: path, workspaceRoot: workspaceRoot)
 
         // Security check - verify path is not sensitive
-        if let securityError = await SecurityManager.shared.checkRead(path: fullPath) {
+        if let securityError = await SecurityManager.shared.checkRead(path: fullPath, workspaceRoot: workspaceRoot) {
             return ToolResult(output: securityError, success: false, error: "security_denied")
         }
 
@@ -59,21 +56,7 @@ public struct ReadFileTool: LaicaiTool {
         }
 
         if isDirectory.boolValue {
-            let maxEntries = max(1, min(params.limit ?? 300, 1_000))
-            let lines = Self.directoryListing(root: fullPath, maxEntries: maxEntries)
-            let output = lines.isEmpty
-                ? "目录为空：\(path)"
-                : "目录：\(path)\n" + lines.joined(separator: "\n")
-                    + (lines.count >= maxEntries ? "\n...（目录较大，已截断；可增大 limit 或读取更具体的子目录）" : "")
-
-            await AuditLog.shared.record(
-                tool: name,
-                input: argumentsJSON,
-                output: "读取目录 \(path)，\(lines.count) 项",
-                success: true
-            )
-
-            return ToolResult(output: output, data: ["path": path, "type": "directory", "count": "\(lines.count)", "recursive": "true"])
+            return await Self.readDirectory(path: path, fullPath: fullPath, limit: params.limit, argumentsJSON: argumentsJSON, toolName: name)
         }
 
         let ext = (fullPath as NSString).pathExtension.lowercased()
@@ -86,52 +69,117 @@ public struct ReadFileTool: LaicaiTool {
             )
         }
 
-        do {
-            let content = try String(contentsOfFile: fullPath, encoding: .utf8)
-            var lines = content.components(separatedBy: "\n")
-
-            // Apply offset and limit
-            if let offset = params.offset, offset > 0 {
-                let startIdx = max(0, offset - 1)
-                lines = Array(lines.dropFirst(startIdx))
-            }
-            if let limit = params.limit, limit > 0 {
-                lines = Array(lines.prefix(limit))
-            }
-
-            let resultText = lines.joined(separator: "\n")
-            let maxChars: Int
-            switch context.contextMode {
-            case .economy: maxChars = 10_000
-            case .balanced: maxChars = 50_000
-            case .deep: maxChars = 200_000
-            }
-            let truncated = resultText.count > maxChars ? String(resultText.prefix(maxChars)) + "\n... (已截断，当前\(context.contextMode.rawValue)模式)" : resultText
-
-            await AuditLog.shared.record(
-                tool: name,
-                input: argumentsJSON,
-                output: "读取 \(path)，\(resultText.count) 字符",
-                success: true
-            )
-
-            return ToolResult(output: truncated, data: ["path": path, "size": "\(resultText.count)"])
-        } catch {
-            return ToolResult(output: "读取文件失败：\(error.localizedDescription)", success: false, error: "read_error")
-        }
+        return await Self.readTextFile(
+            ReadTextFileRequest(
+                path: path,
+                fullPath: fullPath,
+                offset: params.offset,
+                limit: params.limit,
+                argumentsJSON: argumentsJSON,
+                contextMode: context.contextMode,
+                toolName: name
+            ))
     }
 
     private static let extractOnlyExtensions: Set<String> = [
         "xlsx", "xlsm", "xls", "csv", "tsv", "docx", "doc", "pptx", "ppt", "pdf", "numbers", "pages", "key"
     ]
 
+    private struct ReadTextFileRequest {
+        let path: String
+        let fullPath: String
+        let offset: Int?
+        let limit: Int?
+        let argumentsJSON: String
+        let contextMode: ContextMode
+        let toolName: String
+    }
+
+    private static func fullPath(for path: String, workspaceRoot: String) -> String {
+        path.hasPrefix("/") ? path : (workspaceRoot as NSString).appendingPathComponent(path)
+    }
+
+    private static func readDirectory(
+        path: String,
+        fullPath: String,
+        limit: Int?,
+        argumentsJSON: String,
+        toolName: String
+    ) async -> ToolResult {
+        let maxEntries = max(1, min(limit ?? 300, 1_000))
+        let lines = Self.directoryListing(root: fullPath, maxEntries: maxEntries)
+        let output = Self.directoryOutput(path: path, lines: lines, maxEntries: maxEntries)
+
+        await AuditLog.shared.record(
+            tool: toolName,
+            input: argumentsJSON,
+            output: "读取目录 \(path)，\(lines.count) 项",
+            success: true
+        )
+
+        return ToolResult(
+            output: output,
+            data: ["path": path, "type": "directory", "count": "\(lines.count)", "recursive": "true"]
+        )
+    }
+
+    private static func directoryOutput(path: String, lines: [String], maxEntries: Int) -> String {
+        guard !lines.isEmpty else { return "目录为空：\(path)" }
+        let suffix = lines.count >= maxEntries ? "\n...（目录较大，已截断；可增大 limit 或读取更具体的子目录）" : ""
+        return "目录：\(path)\n" + lines.joined(separator: "\n") + suffix
+    }
+
+    private static func readTextFile(_ request: ReadTextFileRequest) async -> ToolResult {
+        do {
+            let content = try String(contentsOfFile: request.fullPath, encoding: .utf8)
+            let resultText = windowedText(content, offset: request.offset, limit: request.limit)
+            let truncated = truncatedText(resultText, contextMode: request.contextMode)
+            await AuditLog.shared.record(
+                tool: request.toolName,
+                input: request.argumentsJSON,
+                output: "读取 \(request.path)，\(resultText.count) 字符",
+                success: true
+            )
+            return ToolResult(output: truncated, data: ["path": request.path, "size": "\(resultText.count)"])
+        } catch {
+            return ToolResult(output: "读取文件失败：\(error.localizedDescription)", success: false, error: "read_error")
+        }
+    }
+
+    private static func windowedText(_ content: String, offset: Int?, limit: Int?) -> String {
+        var lines = content.components(separatedBy: "\n")
+        if let offset, offset > 0 {
+            lines = Array(lines.dropFirst(max(0, offset - 1)))
+        }
+        if let limit, limit > 0 {
+            lines = Array(lines.prefix(limit))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func truncatedText(_ text: String, contextMode: ContextMode) -> String {
+        let maxChars = maxCharacters(for: contextMode)
+        guard text.count > maxChars else { return text }
+        return String(text.prefix(maxChars)) + "\n... (已截断，当前\(contextMode.rawValue)模式)"
+    }
+
+    private static func maxCharacters(for contextMode: ContextMode) -> Int {
+        switch contextMode {
+        case .economy: return 10_000
+        case .balanced: return 50_000
+        case .deep: return 200_000
+        }
+    }
+
     private static func directoryListing(root: String, maxEntries: Int) -> [String] {
-        let fm = FileManager.default
-        guard let enumerator = fm.enumerator(
-            at: URL(fileURLWithPath: root),
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return [] }
+        let fileManager = FileManager.default
+        guard
+            let enumerator = fileManager.enumerator(
+                at: URL(fileURLWithPath: root),
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            )
+        else { return [] }
 
         var lines: [String] = []
         for case let url as URL in enumerator {
@@ -179,17 +227,13 @@ public struct ExtractFileTool: LaicaiTool {
             return ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params")
         }
 
-        let fullPath: String
-        if params.path.hasPrefix("/") {
-            fullPath = params.path
-        } else {
-            guard !context.workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return ToolResult(output: "请先设置工作区后再提取文件。", success: false, error: "workspace_missing")
-            }
-            fullPath = (context.workspaceRoot as NSString).appendingPathComponent(params.path)
+        let workspaceRoot = context.workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !workspaceRoot.isEmpty else {
+            return ToolResult(output: "请先设置工作区后再提取文件。", success: false, error: "workspace_missing")
         }
+        let fullPath = Self.fullPath(for: params.path, workspaceRoot: workspaceRoot)
 
-        if let securityError = await SecurityManager.shared.checkRead(path: fullPath) {
+        if let securityError = await SecurityManager.shared.checkRead(path: fullPath, workspaceRoot: workspaceRoot) {
             return ToolResult(output: securityError, success: false, error: "security_denied")
         }
 
@@ -201,28 +245,10 @@ public struct ExtractFileTool: LaicaiTool {
         let ext = (fullPath as NSString).pathExtension.lowercased()
         let limit = max(1_000, min(params.limit ?? 50_000, 200_000))
         do {
-            let extracted: String
-            switch ext {
-            case "xlsx", "xlsm":
-                extracted = try Self.extractXLSX(path: fullPath, limit: limit)
-            case "pptx":
-                extracted = try Self.extractPPTX(path: fullPath, limit: limit)
-            case "csv", "tsv":
-                extracted = try Self.extractDelimited(path: fullPath, separator: ext == "tsv" ? "\t" : ",", limit: limit)
-            case "txt", "md", "json", "yaml", "yml", "xml", "html", "htm", "log":
-                extracted = try String(contentsOfFile: fullPath, encoding: .utf8)
-            default:
-                return ToolResult(
-                    output: "暂不支持提取 .\(ext.isEmpty ? "unknown" : ext) 文件。可尝试用系统工具转换为 txt/csv/xlsx 后再读取。",
-                    data: ["path": params.path, "extension": ext],
-                    success: false,
-                    error: "unsupported_file_type"
-                )
+            guard let extracted = try Self.extractText(path: fullPath, extensionName: ext, limit: limit) else {
+                return Self.unsupportedExtractResult(path: params.path, extensionName: ext)
             }
-
-            let output = extracted.count > limit
-                ? String(extracted.prefix(limit)) + "\n...（已截断，共 \(extracted.count) 字符）"
-                : extracted
+            let output = Self.truncatedExtractOutput(extracted, limit: limit)
             await AuditLog.shared.record(
                 tool: name,
                 input: argumentsJSON,
@@ -233,6 +259,41 @@ public struct ExtractFileTool: LaicaiTool {
         } catch {
             return ToolResult(output: "提取文件失败：\(error.localizedDescription)", success: false, error: "extract_error")
         }
+    }
+
+    private static let plainTextExtractExtensions: Set<String> = [
+        "txt", "markdown", "json", "yaml", "yml", "xml", "html", "htm", "log"
+    ]
+
+    private static func fullPath(for path: String, workspaceRoot: String) -> String {
+        path.hasPrefix("/") ? path : (workspaceRoot as NSString).appendingPathComponent(path)
+    }
+
+    private static func extractText(path: String, extensionName: String, limit: Int) throws -> String? {
+        switch extensionName {
+        case "xlsx", "xlsm":
+            return try Self.extractXLSX(path: path, limit: limit)
+        case "pptx":
+            return try Self.extractPPTX(path: path, limit: limit)
+        case "csv", "tsv":
+            return try Self.extractDelimited(path: path, separator: extensionName == "tsv" ? "\t" : ",", limit: limit)
+        default:
+            guard plainTextExtractExtensions.contains(extensionName) else { return nil }
+            return try String(contentsOfFile: path, encoding: .utf8)
+        }
+    }
+
+    private static func unsupportedExtractResult(path: String, extensionName: String) -> ToolResult {
+        ToolResult(
+            output: "暂不支持提取 .\(extensionName.isEmpty ? "unknown" : extensionName) 文件。可尝试用系统工具转换为 txt/csv/xlsx 后再读取。",
+            data: ["path": path, "extension": extensionName],
+            success: false,
+            error: "unsupported_file_type"
+        )
+    }
+
+    private static func truncatedExtractOutput(_ text: String, limit: Int) -> String {
+        text.count > limit ? String(text.prefix(limit)) + "\n...（已截断，共 \(text.count) 字符）" : text
     }
 
     private static func extractDelimited(path: String, separator: String, limit: Int) throws -> String {
@@ -247,98 +308,98 @@ public struct ExtractFileTool: LaicaiTool {
 
     private static func extractXLSX(path: String, limit: Int) throws -> String {
         let script = """
-        import sys, zipfile, re, html, xml.etree.ElementTree as ET
-        path = sys.argv[1]
-        ns = {'a': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
-        with zipfile.ZipFile(path) as z:
-            shared = []
-            if 'xl/sharedStrings.xml' in z.namelist():
-                root = ET.fromstring(z.read('xl/sharedStrings.xml'))
-                for si in root.findall('a:si', ns):
-                    texts = [t.text or '' for t in si.findall('.//a:t', ns)]
-                    shared.append(''.join(texts))
-            sheets = sorted([n for n in z.namelist() if re.match(r'xl/worksheets/sheet\\d+\\.xml$', n)])
-            out = []
-            for sheet_index, name in enumerate(sheets[:8], 1):
-                out.append(f'## Sheet {sheet_index}')
-                root = ET.fromstring(z.read(name))
-                for row in root.findall('.//a:sheetData/a:row', ns):
-                    cells = []
-                    for c in row.findall('a:c', ns):
-                        v = c.find('a:v', ns)
-                        if v is None:
-                            cells.append('')
-                            continue
-                        text = v.text or ''
-                        if c.attrib.get('t') == 's':
-                            try:
-                                text = shared[int(text)]
-                            except Exception:
-                                pass
-                        cells.append(html.unescape(text))
-                    if any(cell.strip() for cell in cells):
-                        out.append(' | '.join(cells))
-            print('\\n'.join(out))
-        """
+            import sys, zipfile, re, html, xml.etree.ElementTree as ET
+            path = sys.argv[1]
+            nsString = {'a': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+            with zipfile.ZipFile(path) as z:
+                shared = []
+                if 'xl/sharedStrings.xml' in z.namelist():
+                    root = ET.fromstring(z.read('xl/sharedStrings.xml'))
+                    for si in root.findall('a:si', nsString):
+                        texts = [t.text or '' for t in si.findall('.//a:t', nsString)]
+                        shared.append(''.join(texts))
+                sheets = sorted([n for n in z.namelist() if re.match(r'xl/worksheets/sheet\\d+\\.xml$', n)])
+                out = []
+                for sheet_index, name in enumerate(sheets[:8], 1):
+                    out.append(f'## Sheet {sheet_index}')
+                    root = ET.fromstring(z.read(name))
+                    for row in root.findall('.//a:sheetData/a:row', nsString):
+                        cells = []
+                        for c in row.findall('a:c', nsString):
+                            v = c.find('a:v', nsString)
+                            if v is None:
+                                cells.append('')
+                                continue
+                            text = v.text or ''
+                            if c.attrib.get('t') == 's':
+                                try:
+                                    text = shared[int(text)]
+                                except Exception:
+                                    pass
+                            cells.append(html.unescape(text))
+                        if any(cell.strip() for cell in cells):
+                            out.append(' | '.join(cells))
+                print('\\n'.join(out))
+            """
         return try runPython(script: script, arguments: [path]).prefixString(limit)
     }
 
     private static func extractPPTX(path: String, limit: Int) throws -> String {
         let script = """
-        import sys, zipfile, re, html, xml.etree.ElementTree as ET
-        path = sys.argv[1]
-        limit = int(sys.argv[2])
+            import sys, zipfile, re, html, xml.etree.ElementTree as ET
+            path = sys.argv[1]
+            limit = int(sys.argv[2])
 
-        def index_for(name):
-            m = re.search(r'(?:slide|notesSlide)(\\d+)\\.xml$', name)
-            return int(m.group(1)) if m else 0
+            def index_for(name):
+                m = re.search(r'(?:slide|notesSlide)(\\d+)\\.xml$', name)
+                return int(m.group(1)) if m else 0
 
-        def text_runs(data):
-            try:
-                root = ET.fromstring(data)
-            except Exception:
-                return []
-            runs = []
-            for node in root.iter():
-                if node.tag.endswith('}t') or node.tag == 't':
-                    text = (node.text or '').strip()
-                    if text:
-                        runs.append(html.unescape(text))
-            return runs
+            def text_runs(data):
+                try:
+                    root = ET.fromstring(data)
+                except Exception:
+                    return []
+                runs = []
+                for node in root.iter():
+                    if node.tag.endswith('}t') or node.tag == 't':
+                        text = (node.text or '').strip()
+                        if text:
+                            runs.append(html.unescape(text))
+                return runs
 
-        with zipfile.ZipFile(path) as z:
-            names = z.namelist()
-            slides = sorted(
-                [n for n in names if re.match(r'ppt/slides/slide\\d+\\.xml$', n)],
-                key=index_for
-            )
-            notes = sorted(
-                [n for n in names if re.match(r'ppt/notesSlides/notesSlide\\d+\\.xml$', n)],
-                key=index_for
-            )
-            media = [n for n in names if n.startswith('ppt/media/')]
-            out = [
-                f'PPTX 可编辑文本提取：{len(slides)} 页，{len(media)} 个媒体文件',
-                '注意：本工具提取可编辑文本和备注，不包含图片中文字 OCR。若用户要求处理图片中文字，必须另行使用 OCR/视觉识别，不能声称已完成图片文字处理。',
-                ''
-            ]
-            for name in slides:
-                runs = text_runs(z.read(name))
-                if not runs:
-                    continue
-                out.append(f'## Slide {index_for(name)}')
-                out.extend(runs)
-                out.append('')
-            for name in notes:
-                runs = text_runs(z.read(name))
-                if not runs:
-                    continue
-                out.append(f'## Notes {index_for(name)}')
-                out.extend(runs)
-                out.append('')
-            result = '\\n'.join(out)
-            sys.stdout.write(result[:limit])
-        """
+            with zipfile.ZipFile(path) as z:
+                names = z.namelist()
+                slides = sorted(
+                    [n for n in names if re.match(r'ppt/slides/slide\\d+\\.xml$', n)],
+                    key=index_for
+                )
+                notes = sorted(
+                    [n for n in names if re.match(r'ppt/notesSlides/notesSlide\\d+\\.xml$', n)],
+                    key=index_for
+                )
+                media = [n for n in names if n.startswith('ppt/media/')]
+                out = [
+                    f'PPTX 可编辑文本提取：{len(slides)} 页，{len(media)} 个媒体文件',
+                    '注意：本工具提取可编辑文本和备注，不包含图片中文字 OCR。若用户要求处理图片中文字，必须另行使用 OCR/视觉识别，不能声称已完成图片文字处理。',
+                    ''
+                ]
+                for name in slides:
+                    runs = text_runs(z.read(name))
+                    if not runs:
+                        continue
+                    out.append(f'## Slide {index_for(name)}')
+                    out.extend(runs)
+                    out.append('')
+                for name in notes:
+                    runs = text_runs(z.read(name))
+                    if not runs:
+                        continue
+                    out.append(f'## Notes {index_for(name)}')
+                    out.extend(runs)
+                    out.append('')
+                result = '\\n'.join(out)
+                sys.stdout.write(result[:limit])
+            """
         return try runPython(script: script, arguments: [path, "\(limit)"]).prefixString(limit)
     }
 
@@ -351,18 +412,35 @@ public struct ExtractFileTool: LaicaiTool {
         process.standardOutput = stdout
         process.standardError = stderr
         try process.run()
-        process.waitUntilExit()
+        guard waitForExit(process, timeoutSeconds: 60) else {
+            process.terminate()
+            if !waitForExit(process, timeoutSeconds: 2) {
+                Darwin.kill(process.processIdentifier, SIGKILL)
+                _ = waitForExit(process, timeoutSeconds: 1)
+            }
+            throw NSError(domain: "ExtractFileTool", code: -1, userInfo: [NSLocalizedDescriptionKey: "python3 提取超时"])
+        }
         let out = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         guard process.terminationStatus == 0 else {
-            throw NSError(domain: "ExtractFileTool", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: err.isEmpty ? "python3 提取失败" : err])
+            throw NSError(
+                domain: "ExtractFileTool", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: err.isEmpty ? "python3 提取失败" : err])
         }
         return out
     }
+
+    private static func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) -> Bool {
+        let semaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in semaphore.signal() }
+        if !process.isRunning { return true }
+        let result = semaphore.wait(timeout: .now() + timeoutSeconds)
+        process.terminationHandler = nil
+        return result == .success || !process.isRunning
+    }
 }
 
-private extension String {
-    func prefixString(_ limit: Int) -> String {
+extension String {
+    fileprivate func prefixString(_ limit: Int) -> String {
         count > limit ? String(prefix(limit)) : self
     }
 }
@@ -382,7 +460,9 @@ public struct FileEditTool: LaicaiTool {
                 properties: [
                     "path": FunctionProperty(type: "string", description: "文件路径（相对或绝对路径）"),
                     "edits": FunctionProperty(type: "string", description: "JSON 数组，每项含 oldText 和 newText。例：[{\"oldText\":\"foo\",\"newText\":\"bar\"}]"),
-                    "batchEdits": FunctionProperty(type: "string", description: "可选，批量编辑 JSON 数组，每项含 path 和 edits。例：[{\"path\":\"a.swift\",\"edits\":[{\"oldText\":\"foo\",\"newText\":\"bar\"}]}]"),
+                    "batchEdits": FunctionProperty(
+                        type: "string",
+                        description: "可选，批量编辑 JSON 数组，每项含 path 和 edits。例：[{\"path\":\"a.swift\",\"edits\":[{\"oldText\":\"foo\",\"newText\":\"bar\"}]}]"),
                     "createIfMissing": FunctionProperty(type: "boolean", description: "文件不存在时是否用第一条 edit 的 newText 创建（可选，默认 false）")
                 ],
                 required: []
@@ -400,42 +480,35 @@ public struct FileEditTool: LaicaiTool {
         var edits: [EditOp]
     }
 
-    public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
-        struct Params: Codable {
-            var path: String?
-            var edits: String?
-            var batchEdits: String?
-            var createIfMissing: Bool?
-        }
+    private struct EditResultRequest {
+        let path: String
+        let fullPath: String
+        let oldContent: String
+        let newContent: String
+        let appliedEdits: [EditOp]
+        let appliedCount: Int
+        let totalCount: Int
+        let errors: [String]
+    }
 
+    private struct EditApplicationState {
+        var content: String
+        var appliedCount = 0
+        var errors: [String] = []
+        var appliedEdits: [EditOp] = []
+    }
+
+    private struct Params: Codable {
+        var path: String?
+        var edits: String?
+        var batchEdits: String?
+        var createIfMissing: Bool?
+    }
+
+    public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
         // Models often send edits/batchEdits as native JSON arrays instead of JSON strings.
         // Normalize them to strings before Codable parsing.
-        let normalizedJSON: String
-        if let data = argumentsJSON.data(using: .utf8),
-           var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            // If edits is an array, re-encode as JSON string
-            if let editsArr = dict["edits"] as? [[String: Any]] {
-                if let reEncoded = try? JSONSerialization.data(withJSONObject: editsArr),
-                   let str = String(data: reEncoded, encoding: .utf8) {
-                    dict["edits"] = str
-                }
-            }
-            // If batchEdits is an array, re-encode as JSON string
-            if let batchArr = dict["batchEdits"] as? [[String: Any]] {
-                if let reEncoded = try? JSONSerialization.data(withJSONObject: batchArr),
-                   let str = String(data: reEncoded, encoding: .utf8) {
-                    dict["batchEdits"] = str
-                }
-            }
-            if let normalized = try? JSONSerialization.data(withJSONObject: dict),
-               let str = String(data: normalized, encoding: .utf8) {
-                normalizedJSON = str
-            } else {
-                normalizedJSON = argumentsJSON
-            }
-        } else {
-            normalizedJSON = argumentsJSON
-        }
+        let normalizedJSON = Self.normalizedArgumentsJSON(argumentsJSON)
 
         let params: Params
         do {
@@ -446,7 +519,7 @@ public struct FileEditTool: LaicaiTool {
         }
 
         if let batchEdits = params.batchEdits,
-           !batchEdits.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            !batchEdits.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return try await executeBatch(batchEditsJSON: batchEdits, createIfMissing: params.createIfMissing == true, context: context)
         }
 
@@ -474,6 +547,30 @@ public struct FileEditTool: LaicaiTool {
         return try await executeSingle(path: path, edits: edits, createIfMissing: params.createIfMissing == true, context: context)
     }
 
+    private static func normalizedArgumentsJSON(_ argumentsJSON: String) -> String {
+        guard let data = argumentsJSON.data(using: .utf8),
+            var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return argumentsJSON
+        }
+        normalizeJSONArray(key: "edits", in: &dict)
+        normalizeJSONArray(key: "batchEdits", in: &dict)
+        guard let normalized = try? JSONSerialization.data(withJSONObject: dict),
+            let str = String(data: normalized, encoding: .utf8)
+        else {
+            return argumentsJSON
+        }
+        return str
+    }
+
+    private static func normalizeJSONArray(key: String, in dict: inout [String: Any]) {
+        guard let array = dict[key] as? [[String: Any]],
+            let reEncoded = try? JSONSerialization.data(withJSONObject: array),
+            let str = String(data: reEncoded, encoding: .utf8)
+        else { return }
+        dict[key] = str
+    }
+
     private func executeSingle(path: String, edits: [EditOp], createIfMissing: Bool, context: TaskContext) async throws -> ToolResult {
         let fullPath = try resolveWritePath(path: path, context: context)
         if let securityError = await SecurityManager.shared.checkWrite(path: fullPath) {
@@ -495,82 +592,109 @@ public struct FileEditTool: LaicaiTool {
         let resolvedPath = path.hasPrefix("/") ? path : (context.workspaceRoot as NSString).appendingPathComponent(path)
         var externalChangeWarning: String?
         if let cachedContent = context.memory.fileContentCache[resolvedPath],
-           content != cachedContent {
+            content != cachedContent {
             externalChangeWarning = "⚠️ 文件 \(path) 自上次读取后已被外部修改（磁盘版本与缓存不同）。编辑基于最新磁盘版本。"
             await AuditLog.shared.record(tool: name, input: path, output: externalChangeWarning!, success: true)
         }
 
         let oldContent = content
-        var appliedCount = 0
-        var errors: [String] = []
-        var appliedEdits: [EditOp] = []
+        var editState = EditApplicationState(content: content)
 
-        for (i, edit) in edits.enumerated() {
-            if edit.oldText == edit.newText {
-                errors.append("第\(i+1)条编辑：oldText 和 newText 相同，跳过")
-                continue
-            }
-
-            // Empty oldText = append mode: add newText to end of file
-            if edit.oldText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let separator = content.hasSuffix("\n") ? "" : "\n"
-                content += separator + edit.newText
-                appliedCount += 1
-                appliedEdits.append(edit)
-                continue
-            }
-
-            // Try exact match first
-            if content.contains(edit.oldText) {
-                let occurrences = content.components(separatedBy: edit.oldText).count - 1
-                if occurrences > 1 {
-                    errors.append("第\(i+1)条编辑：oldText 出现 \(occurrences) 次，需提供更多上下文以唯一标识")
-                    continue
-                }
-                content = content.replacingOccurrences(of: edit.oldText, with: edit.newText)
-                appliedCount += 1
-                appliedEdits.append(edit)
-            } else if let fuzzyResult = Self.fuzzyReplace(in: content, oldText: edit.oldText, newText: edit.newText) {
-                // Fuzzy match: whitespace-normalized or indent-aware
-                content = fuzzyResult.content
-                appliedCount += 1
-                appliedEdits.append(edit)
-                errors.append("第\(i+1)条编辑：模糊匹配成功（\(fuzzyResult.matchType)）")
-            } else {
-                let preview = String(edit.oldText.prefix(80))
-                let similar = Self.findSimilarLines(in: content, target: edit.oldText, maxResults: 3)
-                if similar.isEmpty {
-                    errors.append("第\(i+1)条编辑：未找到 oldText（前80字符：\(preview)）。建议先用 file_read 重新读取文件，确认目标内容是否存在。")
-                } else {
-                    let hint = similar.enumerated().map { idx, line in
-                        "    [\(idx+1)] \(line)"
-                    }.joined(separator: "\n")
-                    errors.append("第\(i+1)条编辑：未找到 oldText（前80字符：\(preview)）\n  最相似行：\n\(hint)\n  建议：复制其中一行作为新的 oldText 重试，注意空格和缩进必须完全一致。")
-                }
-                continue
-            }
+        for (index, edit) in edits.enumerated() {
+            Self.apply(edit, index: index, to: &editState)
         }
 
         // Post-edit format hook: normalize trailing newline
-        if appliedCount > 0 && !content.hasSuffix("\n") && oldContent.hasSuffix("\n") {
-            content += "\n"
+        if editState.appliedCount > 0 && !editState.content.hasSuffix("\n") && oldContent.hasSuffix("\n") {
+            editState.content += "\n"
         }
 
-        if appliedCount == 0 {
-            let hint = oldContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if editState.appliedCount == 0 {
+            let hint =
+                oldContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "\n💡 该文件为空，无法查找替换。请改用 file.write 的 content 参数直接写入完整内容。"
                 : ""
             return ToolResult(
-                output: "所有编辑均失败：\n" + errors.joined(separator: "\n") + hint,
+                output: "所有编辑均失败：\n" + editState.errors.joined(separator: "\n") + hint,
                 success: false,
                 error: "all_edits_failed"
             )
         }
 
         if let warning = externalChangeWarning {
-            errors.insert(warning, at: 0)
+            editState.errors.insert(warning, at: 0)
         }
-        return makeEditResult(path: path, fullPath: fullPath, oldContent: oldContent, newContent: content, appliedEdits: appliedEdits, appliedCount: appliedCount, totalCount: edits.count, errors: errors)
+        return makeEditResult(
+            EditResultRequest(
+                path: path,
+                fullPath: fullPath,
+                oldContent: oldContent,
+                newContent: editState.content,
+                appliedEdits: editState.appliedEdits,
+                appliedCount: editState.appliedCount,
+                totalCount: edits.count,
+                errors: editState.errors
+            ))
+    }
+
+    private static func apply(_ edit: EditOp, index: Int, to state: inout EditApplicationState) {
+        if edit.oldText == edit.newText {
+            state.errors.append("第\(index + 1)条编辑：oldText 和 newText 相同，跳过")
+            return
+        }
+        if edit.oldText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            appendEdit(edit, to: &state)
+            return
+        }
+        if applyExactEdit(edit, index: index, to: &state) {
+            return
+        }
+        if let fuzzyResult = Self.fuzzyReplace(in: state.content, oldText: edit.oldText, newText: edit.newText) {
+            state.content = fuzzyResult.content
+            state.appliedCount += 1
+            state.appliedEdits.append(edit)
+            state.errors.append("第\(index + 1)条编辑：模糊匹配成功（\(fuzzyResult.matchType)）")
+            return
+        }
+        appendMissingOldTextError(edit: edit, index: index, content: state.content, errors: &state.errors)
+    }
+
+    private static func appendEdit(_ edit: EditOp, to state: inout EditApplicationState) {
+        let separator = state.content.hasSuffix("\n") ? "" : "\n"
+        state.content += separator + edit.newText
+        state.appliedCount += 1
+        state.appliedEdits.append(edit)
+    }
+
+    private static func applyExactEdit(_ edit: EditOp, index: Int, to state: inout EditApplicationState) -> Bool {
+        guard state.content.contains(edit.oldText) else { return false }
+        let occurrences = state.content.components(separatedBy: edit.oldText).count - 1
+        guard occurrences == 1 else {
+            state.errors.append("第\(index + 1)条编辑：oldText 出现 \(occurrences) 次，需提供更多上下文以唯一标识")
+            return true
+        }
+        state.content = state.content.replacingOccurrences(of: edit.oldText, with: edit.newText)
+        state.appliedCount += 1
+        state.appliedEdits.append(edit)
+        return true
+    }
+
+    private static func appendMissingOldTextError(
+        edit: EditOp,
+        index: Int,
+        content: String,
+        errors: inout [String]
+    ) {
+        let preview = String(edit.oldText.prefix(80))
+        let similar = Self.findSimilarLines(in: content, target: edit.oldText, maxResults: 3)
+        guard !similar.isEmpty else {
+            errors.append("第\(index + 1)条编辑：未找到 oldText（前80字符：\(preview)）。建议先用 file_read 重新读取文件，确认目标内容是否存在。")
+            return
+        }
+        let hint = similar.enumerated().map { idx, line in
+            "    [\(idx+1)] \(line)"
+        }.joined(separator: "\n")
+        errors.append("第\(index + 1)条编辑：未找到 oldText（前80字符：\(preview)）\n  最相似行：\n\(hint)\n  建议：复制其中一行作为新的 oldText 重试，注意空格和缩进必须完全一致。")
     }
 
     private func executeBatch(batchEditsJSON: String, createIfMissing: Bool, context: TaskContext) async throws -> ToolResult {
@@ -579,7 +703,14 @@ public struct FileEditTool: LaicaiTool {
             let data = batchEditsJSON.data(using: .utf8) ?? Data()
             batch = try JSONDecoder().decode([BatchEdit].self, from: data)
         } catch {
-            return ToolResult(output: "batchEdits 参数格式错误：\(error.localizedDescription)\n需要 JSON 数组格式：[{\"path\":\"file.py\",\"edits\":[{\"oldText\":\"旧内容\",\"newText\":\"新内容\"}]}]", success: false, error: "invalid_batch_edits")
+            return ToolResult(
+                output: """
+                    batchEdits 参数格式错误：\(error.localizedDescription)
+                    需要 JSON 数组格式：[{\"path\":\"file.py\",\"edits\":[{\"oldText\":\"旧内容\",\"newText\":\"新内容\"}]}]
+                    """,
+                success: false,
+                error: "invalid_batch_edits"
+            )
         }
         guard !batch.isEmpty else {
             return ToolResult(output: "batchEdits 数组为空", success: false, error: "empty_batch_edits")
@@ -634,7 +765,7 @@ public struct FileEditTool: LaicaiTool {
         if trimmed.hasPrefix("{") && !trimmed.hasPrefix("[") {
             let wrapped = "[\(trimmed)]"
             if let data = wrapped.data(using: .utf8),
-               let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+                let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
                 return ops
             }
         }
@@ -647,7 +778,7 @@ public struct FileEditTool: LaicaiTool {
                 .replacingOccurrences(of: "\\\\", with: "\\")
                 .replacingOccurrences(of: "\\/", with: "/")
             if let data = inner.data(using: .utf8),
-               let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+                let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
                 return ops
             }
         }
@@ -660,31 +791,34 @@ public struct FileEditTool: LaicaiTool {
             let filtered = lines.filter { !$0.hasPrefix("```") }
             stripped = filtered.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             if let data = stripped.data(using: .utf8),
-               let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+                let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
                 return ops
             }
         }
 
         // Strategy 4: Unescaped newlines/tabs inside JSON strings → escape them
-        let escaped = trimmed
+        let escaped =
+            trimmed
             .replacingOccurrences(of: "\t", with: "\\t")
         // Replace actual newlines between quotes (crude but effective)
         if let data = escaped.data(using: .utf8),
-           let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+            let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
             return ops
         }
 
         // Strategy 5: Alternative key names (old_text/new_text, old/new, before/after)
         if let data = trimmed.data(using: .utf8),
-           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             let ops: [EditOp] = arr.compactMap { dict in
-                let old = dict["oldText"] as? String
+                let old =
+                    dict["oldText"] as? String
                     ?? dict["old_text"] as? String
                     ?? dict["old"] as? String
                     ?? dict["before"] as? String
                     ?? dict["search"] as? String
                     ?? ""
-                let new = dict["newText"] as? String
+                let new =
+                    dict["newText"] as? String
                     ?? dict["new_text"] as? String
                     ?? dict["new"] as? String
                     ?? dict["after"] as? String
@@ -701,7 +835,8 @@ public struct FileEditTool: LaicaiTool {
     /// Find lines in content most similar to target's first non-empty line.
     /// Used to give the model recovery hints when its oldText didn't match exactly.
     static func findSimilarLines(in content: String, target: String, maxResults: Int = 3) -> [String] {
-        let firstTargetLine = target.components(separatedBy: "\n")
+        let firstTargetLine =
+            target.components(separatedBy: "\n")
             .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
             .trimmingCharacters(in: .whitespaces) ?? target.trimmingCharacters(in: .whitespaces)
         guard !firstTargetLine.isEmpty else { return [] }
@@ -738,87 +873,145 @@ public struct FileEditTool: LaicaiTool {
         let contentLines = content.components(separatedBy: "\n")
         let oldLines = oldText.components(separatedBy: "\n")
         guard !oldLines.isEmpty else { return nil }
+        return whitespaceTrimmedFuzzyReplace(contentLines: contentLines, oldLines: oldLines, newText: newText)
+            ?? indentStrippedFuzzyReplace(contentLines: contentLines, oldLines: oldLines, newText: newText)
+            ?? widthNormalizedFuzzyReplace(contentLines: contentLines, oldLines: oldLines, newText: newText)
+            ?? anchorFuzzyReplace(contentLines: contentLines, oldLines: oldLines, newText: newText)
+    }
 
-        // Strategy 1: Whitespace-trimmed line matching
+    private static func whitespaceTrimmedFuzzyReplace(
+        contentLines: [String],
+        oldLines: [String],
+        newText: String
+    ) -> FuzzyReplaceResult? {
         let trimmedOld = oldLines.map { $0.trimmingCharacters(in: .whitespaces) }
         for startIdx in 0...(max(0, contentLines.count - oldLines.count)) {
             let slice = contentLines[startIdx..<min(startIdx + oldLines.count, contentLines.count)]
             let trimmedSlice = slice.map { $0.trimmingCharacters(in: .whitespaces) }
             if trimmedSlice == trimmedOld {
-                // Found! Detect indent of matched region and apply to newText
                 let matchedIndent = detectIndent(Array(slice))
                 let oldIndent = detectIndent(oldLines)
                 let adjustedNew = reindent(newText, from: oldIndent, to: matchedIndent)
-                var result = contentLines
-                result.replaceSubrange(startIdx..<(startIdx + oldLines.count), with: adjustedNew.components(separatedBy: "\n"))
-                return FuzzyReplaceResult(content: result.joined(separator: "\n"), matchType: "空白标准化")
+                return replacedLines(
+                    contentLines: contentLines,
+                    startIdx: startIdx,
+                    oldLineCount: oldLines.count,
+                    adjustedNew: adjustedNew,
+                    matchType: "空白标准化"
+                )
             }
         }
+        return nil
+    }
 
-        // Strategy 2: Indent-stripped matching (ignore all leading whitespace)
-        let strippedOld = oldLines.map { $0.trimmingCharacters(in: .init(charactersIn: " \t")) }
+    private static func indentStrippedFuzzyReplace(
+        contentLines: [String],
+        oldLines: [String],
+        newText: String
+    ) -> FuzzyReplaceResult? {
+        let strippedOld = oldLines.map { $0.trimmingCharacters(in: horizontalWhitespace) }
         for startIdx in 0...(max(0, contentLines.count - oldLines.count)) {
             let slice = contentLines[startIdx..<min(startIdx + oldLines.count, contentLines.count)]
-            let strippedSlice = slice.map { $0.trimmingCharacters(in: .init(charactersIn: " \t")) }
+            let strippedSlice = slice.map { $0.trimmingCharacters(in: horizontalWhitespace) }
             if strippedSlice == strippedOld {
                 let matchedIndent = detectIndent(Array(slice))
                 let adjustedNew = reindent(newText, from: 0, to: matchedIndent)
-                var result = contentLines
-                result.replaceSubrange(startIdx..<(startIdx + oldLines.count), with: adjustedNew.components(separatedBy: "\n"))
-                return FuzzyReplaceResult(content: result.joined(separator: "\n"), matchType: "缩进感知")
+                return replacedLines(
+                    contentLines: contentLines,
+                    startIdx: startIdx,
+                    oldLineCount: oldLines.count,
+                    adjustedNew: adjustedNew,
+                    matchType: "缩进感知"
+                )
             }
         }
+        return nil
+    }
 
-        // Strategy 3: Full-width / half-width normalization (Chinese punctuation tolerance)
-        let normalizeWidth: (String) -> String = { str in
-            var s = str
-            let pairs: [(String, String)] = [
-                ("（", "("), ("）", ")"), ("：", ":"), ("；", ";"),
-                ("，", ","), ("。", "."), ("！", "!"), ("？", "?"),
-                ("【", "["), ("】", "]"), ("「", "\""), ("」", "\""),
-                ("\u{3000}", " "), // full-width space
-            ]
-            for (fw, hw) in pairs {
-                s = s.replacingOccurrences(of: fw, with: hw)
-            }
-            return s
-        }
-        let normalizedOld = oldLines.map { normalizeWidth($0.trimmingCharacters(in: .init(charactersIn: " \t"))) }
+    private static func widthNormalizedFuzzyReplace(
+        contentLines: [String],
+        oldLines: [String],
+        newText: String
+    ) -> FuzzyReplaceResult? {
+        let normalizedOld = oldLines.map { normalizeWidth($0.trimmingCharacters(in: horizontalWhitespace)) }
         for startIdx in 0...(max(0, contentLines.count - oldLines.count)) {
             let slice = contentLines[startIdx..<min(startIdx + oldLines.count, contentLines.count)]
-            let normalizedSlice = slice.map { normalizeWidth($0.trimmingCharacters(in: .init(charactersIn: " \t"))) }
+            let normalizedSlice = slice.map { normalizeWidth($0.trimmingCharacters(in: horizontalWhitespace)) }
             if normalizedSlice == normalizedOld {
                 let matchedIndent = detectIndent(Array(slice))
                 let adjustedNew = reindent(newText, from: 0, to: matchedIndent)
-                var result = contentLines
-                result.replaceSubrange(startIdx..<(startIdx + oldLines.count), with: adjustedNew.components(separatedBy: "\n"))
-                return FuzzyReplaceResult(content: result.joined(separator: "\n"), matchType: "全角标准化")
+                return replacedLines(
+                    contentLines: contentLines,
+                    startIdx: startIdx,
+                    oldLineCount: oldLines.count,
+                    adjustedNew: adjustedNew,
+                    matchType: "全角标准化"
+                )
             }
         }
-
-        // Strategy 4: First+last anchor match — if oldText is long (≥5 lines),
-        // match by first 2 and last 2 non-empty lines as anchors
-        let nonEmptyOld = oldLines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        if nonEmptyOld.count >= 5 {
-            let firstAnchor = nonEmptyOld.prefix(2).map { $0.trimmingCharacters(in: .init(charactersIn: " \t")) }
-            let lastAnchor = nonEmptyOld.suffix(2).map { $0.trimmingCharacters(in: .init(charactersIn: " \t")) }
-            for startIdx in 0...(max(0, contentLines.count - oldLines.count)) {
-                let candidateSlice = Array(contentLines[startIdx..<min(startIdx + oldLines.count, contentLines.count)])
-                let nonEmptyCandidate = candidateSlice.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-                guard nonEmptyCandidate.count >= 5 else { continue }
-                let candidateFirst = nonEmptyCandidate.prefix(2).map { $0.trimmingCharacters(in: .init(charactersIn: " \t")) }
-                let candidateLast = nonEmptyCandidate.suffix(2).map { $0.trimmingCharacters(in: .init(charactersIn: " \t")) }
-                if Array(candidateFirst) == Array(firstAnchor) && Array(candidateLast) == Array(lastAnchor) {
-                    let matchedIndent = detectIndent(candidateSlice)
-                    let adjustedNew = reindent(newText, from: 0, to: matchedIndent)
-                    var result = contentLines
-                    result.replaceSubrange(startIdx..<(startIdx + oldLines.count), with: adjustedNew.components(separatedBy: "\n"))
-                    return FuzzyReplaceResult(content: result.joined(separator: "\n"), matchType: "锚点匹配")
-                }
-            }
-        }
-
         return nil
+    }
+
+    private static func anchorFuzzyReplace(
+        contentLines: [String],
+        oldLines: [String],
+        newText: String
+    ) -> FuzzyReplaceResult? {
+        let nonEmptyOld = oldLines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard nonEmptyOld.count >= 5 else { return nil }
+        let firstAnchor = nonEmptyOld.prefix(2).map { $0.trimmingCharacters(in: horizontalWhitespace) }
+        let lastAnchor = nonEmptyOld.suffix(2).map { $0.trimmingCharacters(in: horizontalWhitespace) }
+        for startIdx in 0...(max(0, contentLines.count - oldLines.count)) {
+            let candidateSlice = Array(contentLines[startIdx..<min(startIdx + oldLines.count, contentLines.count)])
+            if matchesAnchors(candidateSlice: candidateSlice, firstAnchor: Array(firstAnchor), lastAnchor: Array(lastAnchor)) {
+                let matchedIndent = detectIndent(candidateSlice)
+                let adjustedNew = reindent(newText, from: 0, to: matchedIndent)
+                return replacedLines(
+                    contentLines: contentLines,
+                    startIdx: startIdx,
+                    oldLineCount: oldLines.count,
+                    adjustedNew: adjustedNew,
+                    matchType: "锚点匹配"
+                )
+            }
+        }
+        return nil
+    }
+
+    private static let horizontalWhitespace = CharacterSet(charactersIn: " \t")
+    private static let widthNormalizationPairs: [(String, String)] = [
+        ("（", "("), ("）", ")"), ("：", ":"), ("；", ";"),
+        ("，", ","), ("。", "."), ("！", "!"), ("？", "?"),
+        ("【", "["), ("】", "]"), ("「", "\""), ("」", "\""),
+        ("\u{3000}", " ")
+    ]
+
+    private static func normalizeWidth(_ string: String) -> String {
+        var normalized = string
+        for (fullWidth, halfWidth) in widthNormalizationPairs {
+            normalized = normalized.replacingOccurrences(of: fullWidth, with: halfWidth)
+        }
+        return normalized
+    }
+
+    private static func matchesAnchors(candidateSlice: [String], firstAnchor: [String], lastAnchor: [String]) -> Bool {
+        let nonEmptyCandidate = candidateSlice.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard nonEmptyCandidate.count >= 5 else { return false }
+        let candidateFirst = nonEmptyCandidate.prefix(2).map { $0.trimmingCharacters(in: horizontalWhitespace) }
+        let candidateLast = nonEmptyCandidate.suffix(2).map { $0.trimmingCharacters(in: horizontalWhitespace) }
+        return Array(candidateFirst) == firstAnchor && Array(candidateLast) == lastAnchor
+    }
+
+    private static func replacedLines(
+        contentLines: [String],
+        startIdx: Int,
+        oldLineCount: Int,
+        adjustedNew: String,
+        matchType: String
+    ) -> FuzzyReplaceResult {
+        var result = contentLines
+        result.replaceSubrange(startIdx..<(startIdx + oldLineCount), with: adjustedNew.components(separatedBy: "\n"))
+        return FuzzyReplaceResult(content: result.joined(separator: "\n"), matchType: matchType)
     }
 
     private static func detectIndent(_ lines: [String]) -> Int {
@@ -826,10 +1019,8 @@ public struct FileEditTool: LaicaiTool {
         guard !nonEmpty.isEmpty else { return 0 }
         return nonEmpty.map { line -> Int in
             var count = 0
-            for ch in line {
-                if ch == " " { count += 1 }
-                else if ch == "\t" { count += 4 }
-                else { break }
+            for character in line {
+                if character == " " { count += 1 } else if character == "\t" { count += 4 } else { break }
             }
             return count
         }.min() ?? 0
@@ -861,7 +1052,15 @@ public struct FileEditTool: LaicaiTool {
         return (context.workspaceRoot as NSString).appendingPathComponent(path)
     }
 
-    private func makeEditResult(path: String, fullPath: String, oldContent: String, newContent: String, appliedEdits: [EditOp], appliedCount: Int, totalCount: Int, errors: [String]) -> ToolResult {
+    private func makeEditResult(_ request: EditResultRequest) -> ToolResult {
+        let path = request.path
+        let fullPath = request.fullPath
+        let oldContent = request.oldContent
+        let newContent = request.newContent
+        let appliedEdits = request.appliedEdits
+        let appliedCount = request.appliedCount
+        let totalCount = request.totalCount
+        let errors = request.errors
         let oldLines = oldContent.components(separatedBy: "\n").count
         let newLines = newContent.components(separatedBy: "\n").count
 
@@ -885,7 +1084,8 @@ public struct FileEditTool: LaicaiTool {
         for (index, edit) in appliedEdits.enumerated() {
             data["hunk\(index).oldText"] = edit.oldText
             data["hunk\(index).newText"] = edit.newText
-            data["hunk\(index).summary"] = "Hunk \(index + 1): \(edit.oldText.components(separatedBy: "\n").count)→\(edit.newText.components(separatedBy: "\n").count) 行"
+            data["hunk\(index).summary"] =
+                "Hunk \(index + 1): \(edit.oldText.components(separatedBy: "\n").count)→\(edit.newText.components(separatedBy: "\n").count) 行"
         }
 
         return ToolResult(

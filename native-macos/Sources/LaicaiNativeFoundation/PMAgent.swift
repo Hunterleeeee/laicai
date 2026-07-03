@@ -108,6 +108,13 @@ public enum PMAgentPrompts {
     }
 
     private static func skillSpecificPrompt(_ skill: PMSkillType) -> String {
+        discoverySkillPrompt(skill)
+            ?? deliverySkillPrompt(skill)
+            ?? reportingSkillPrompt(skill)
+            ?? ""
+    }
+
+    private static func discoverySkillPrompt(_ skill: PMSkillType) -> String? {
         switch skill {
         case .prd:
             return """
@@ -396,6 +403,13 @@ public enum PMAgentPrompts {
             "作为 [角色]，我需要 [功能]，因为 [原因]"
             """
 
+        default:
+            return nil
+        }
+    }
+
+    private static func deliverySkillPrompt(_ skill: PMSkillType) -> String? {
+        switch skill {
         case .jtbdCanvas:
             return """
             ## 当前会话目标：Jobs to Be Done 画布
@@ -557,6 +571,13 @@ public enum PMAgentPrompts {
             - [ ] 复盘排期
             """
 
+        default:
+            return nil
+        }
+    }
+
+    private static func reportingSkillPrompt(_ skill: PMSkillType) -> String? {
+        switch skill {
         case .releaseNotes:
             return """
             ## 当前会话目标：发版说明
@@ -683,6 +704,8 @@ public enum PMAgentPrompts {
             - 执行步骤
             - 验证节点（多久后再评估）
             """
+        default:
+            return nil
         }
     }
 }
@@ -713,77 +736,22 @@ public struct PMAgentTool: LaicaiTool {
     }
 
     public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
-        struct Params: Codable {
-            var skill: String
-            var topic: String
-            var context: String?
-            var save: Bool?
-            var useWeb: Bool?
-        }
+        let paramsResult = decodeParams(argumentsJSON)
+        guard let params = paramsResult.params else { return paramsResult.failure! }
 
-        let params: Params
-        do {
-            let jsonData = argumentsJSON.data(using: .utf8) ?? Data()
-            params = try JSONDecoder().decode(Params.self, from: jsonData)
-        } catch {
-            return ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params")
-        }
-
-        guard let skill = PMSkillType(rawValue: params.skill) else {
-            let available = PMSkillType.allCases.map { "\($0.rawValue) (\($0.displayName))" }.joined(separator: "\n")
-            return ToolResult(
-                output: "未知技能 '\(params.skill)'。可用技能：\n\(available)",
-                success: false,
-                error: "unknown_skill"
-            )
-        }
+        let skillResult = resolveSkill(params.skill)
+        guard let skill = skillResult.skill else { return skillResult.failure! }
 
         let systemPrompt = PMAgentPrompts.systemPrompt(skill: skill)
-        var userPrompt = "主题：\(params.topic)"
-        if let extra = params.context, !extra.isEmpty {
-            userPrompt += "\n\n补充背景：\n\(extra)"
-        }
-
-        // If useWeb, do a web search first and append results
-        var webContext = ""
-        if params.useWeb == true {
-            let searchQuery: String
-            switch skill {
-            case .competitiveAnalysis:
-                searchQuery = "\(params.topic) 竞品 竞争对手 2025"
-            case .experimentDesign:
-                searchQuery = "\(params.topic) A/B test best practices"
-            case .releaseNotes:
-                searchQuery = "\(params.topic) latest release changelog"
-            default:
-                searchQuery = "\(params.topic) product management"
-            }
-            if let searchTool = await ToolRegistry.shared.tool(named: "web.search") {
-                let searchJSON = #"{"query":"\#(searchQuery)","maxResults":5}"#
-                if let searchResult = try? await searchTool.execute(argumentsJSON: searchJSON, context: context),
-                   searchResult.success {
-                    webContext = "\n\n## 网络搜索结果\n\(String(searchResult.output.prefix(3000)))"
-                }
-            }
-        }
-
-        if !webContext.isEmpty {
-            userPrompt += webContext
-        }
+        var userPrompt = baseUserPrompt(params)
+        userPrompt += await webContextIfNeeded(params: params, skill: skill, context: context)
 
         userPrompt += "\n\n请直接输出完整的 \(skill.displayName) 文档，使用 Markdown 格式。"
 
         // Build the generation instruction for the agent loop.
         // The tool result is injected as a system message; the LLM will then generate
         // the full document in its next response.
-        let saveInstruction: String
-        if params.save == true {
-            let docsDir = "docs/pm"
-            let filename = "\(skill.rawValue)-\(sanitize(params.topic)).md"
-            saveInstruction = "\n\n生成完毕后，使用 file_write 将文档保存到 `\(docsDir)/\(filename)`。"
-        } else {
-            saveInstruction = ""
-        }
+        let saveInstruction = saveInstruction(params: params, skill: skill)
 
         let output = """
         PM会话已激活 [\(skill.phase)] \(skill.displayName) 模式。
@@ -803,10 +771,80 @@ public struct PMAgentTool: LaicaiTool {
             data: [
                 "skill": skill.rawValue,
                 "topic": params.topic,
-                "phase": skill.phase,
+                "phase": skill.phase
             ],
             success: true
         )
+    }
+
+    private struct Params: Codable {
+        var skill: String
+        var topic: String
+        var context: String?
+        var save: Bool?
+        var useWeb: Bool?
+    }
+
+    private func decodeParams(_ argumentsJSON: String) -> (params: Params?, failure: ToolResult?) {
+        do {
+            let jsonData = argumentsJSON.data(using: .utf8) ?? Data()
+            return (try JSONDecoder().decode(Params.self, from: jsonData), nil)
+        } catch {
+            return (nil, ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params"))
+        }
+    }
+
+    private func resolveSkill(_ rawSkill: String) -> (skill: PMSkillType?, failure: ToolResult?) {
+        guard let skill = PMSkillType(rawValue: rawSkill) else {
+            let available = PMSkillType.allCases.map { "\($0.rawValue) (\($0.displayName))" }.joined(separator: "\n")
+            return (
+                nil,
+                ToolResult(output: "未知技能 '\(rawSkill)'。可用技能：\n\(available)", success: false, error: "unknown_skill")
+            )
+        }
+        return (skill, nil)
+    }
+
+    private func baseUserPrompt(_ params: Params) -> String {
+        var prompt = "主题：\(params.topic)"
+        if let extra = params.context, !extra.isEmpty {
+            prompt += "\n\n补充背景：\n\(extra)"
+        }
+        return prompt
+    }
+
+    private func webContextIfNeeded(params: Params, skill: PMSkillType, context: TaskContext) async -> String {
+        guard params.useWeb == true,
+              let searchTool = await ToolRegistry.shared.tool(named: "web.search") else {
+            return ""
+        }
+        let searchQuery = searchQuery(topic: params.topic, skill: skill)
+        let searchJSON = #"{"query":"\#(searchQuery)","maxResults":5}"#
+        guard let searchResult = try? await searchTool.execute(argumentsJSON: searchJSON, context: context),
+              searchResult.success else {
+            return ""
+        }
+        return "\n\n## 网络搜索结果\n\(String(searchResult.output.prefix(3000)))"
+    }
+
+    private func searchQuery(topic: String, skill: PMSkillType) -> String {
+        switch skill {
+        case .competitiveAnalysis:
+            return "\(topic) 竞品 竞争对手 2025"
+        case .experimentDesign:
+            return "\(topic) A/B test best practices"
+        case .releaseNotes:
+            return "\(topic) latest release changelog"
+        default:
+            return "\(topic) product management"
+        }
+    }
+
+    private func saveInstruction(params: Params, skill: PMSkillType) -> String {
+        guard params.save == true else { return "" }
+        let docsDir = "docs/pm"
+        let filename = "\(skill.rawValue)-\(sanitize(params.topic)).md"
+        return "\n\n生成完毕后，使用 file_write 将文档保存到 `\(docsDir)/\(filename)`。"
     }
 
     private func sanitize(_ text: String) -> String {

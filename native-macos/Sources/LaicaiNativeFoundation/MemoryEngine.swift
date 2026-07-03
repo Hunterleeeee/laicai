@@ -1,6 +1,6 @@
 import Foundation
-import SQLite3
 import LaicaiNativeDomain
+import SQLite3
 
 // MARK: - Memory Entry
 
@@ -9,19 +9,19 @@ public struct MemoryEntry: Identifiable, Codable, Sendable {
     public var kind: Kind
     public var content: String
     public var summary: String?
-    public var source: String          // e.g. "task:uuid", "chat:uuid", "user"
+    public var source: String  // e.g. "task:uuid", "chat:uuid", "user"
     public var tags: [String]
-    public var score: Double           // relevance boost; user-pinned = high
+    public var score: Double  // relevance boost; user-pinned = high
     public var createdAt: Date
     public var accessedAt: Date
     public var accessCount: Int
 
     public enum Kind: String, Codable, Sendable, CaseIterable {
-        case fact         // extracted knowledge
-        case preference   // user preference
-        case outcome      // task outcome summary
-        case skill        // learned skill pattern
-        case note         // user-pinned note
+        case fact  // extracted knowledge
+        case preference  // user preference
+        case outcome  // task outcome summary
+        case skill  // learned skill pattern
+        case note  // user-pinned note
     }
 
     public init(
@@ -49,6 +49,13 @@ public struct MemoryEntry: Identifiable, Codable, Sendable {
     }
 }
 
+public struct MemoryStats: Sendable {
+    public let total: Int
+    public let facts: Int
+    public let outcomes: Int
+    public let preferences: Int
+}
+
 // MARK: - Memory Engine (FTS5 backed)
 
 @MainActor
@@ -58,7 +65,7 @@ public final class MemoryEngine: ObservableObject {
     @Published public private(set) var entryCount: Int = 0
     @Published public private(set) var lastRecallResults: [MemoryEntry] = []
 
-    private var db: OpaquePointer?
+    private var database: OpaquePointer?
     private var isOpen = false
 
     private init() {}
@@ -67,14 +74,16 @@ public final class MemoryEngine: ObservableObject {
 
     public func open(dataDir: String? = nil) {
         guard !isOpen else { return }
-        let dir = dataDir ?? {
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.path
-            return (appSupport as NSString).appendingPathComponent("Laicai")
-        }()
+        let dir =
+            dataDir
+            ?? {
+                let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory()
+                return (appSupport as NSString).appendingPathComponent("Laicai")
+            }()
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        let dbPath = (dir as NSString).appendingPathComponent("memory.db")
+        let dbPath = (dir as NSString).appendingPathComponent("memory.database")
 
-        guard sqlite3_open(dbPath, &db) == SQLITE_OK else { return }
+        guard sqlite3_open(dbPath, &database) == SQLITE_OK else { return }
         isOpen = true
         createTables()
         refreshCount()
@@ -82,58 +91,63 @@ public final class MemoryEngine: ObservableObject {
 
     public func close() {
         guard isOpen else { return }
-        sqlite3_close(db)
-        db = nil
+        sqlite3_close(database)
+        database = nil
         isOpen = false
     }
 
     private func createTables() {
         // Main table
-        exec("""
-            CREATE TABLE IF NOT EXISTS memories (
-                id TEXT PRIMARY KEY,
-                kind TEXT NOT NULL DEFAULT 'fact',
-                content TEXT NOT NULL,
-                summary TEXT,
-                source TEXT DEFAULT '',
-                tags TEXT DEFAULT '',
-                score REAL DEFAULT 1.0,
-                created_at REAL NOT NULL,
-                accessed_at REAL NOT NULL,
-                access_count INTEGER DEFAULT 0
-            )
-        """)
+        exec(
+            """
+                CREATE TABLE IF NOT EXISTS memories (
+                    id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL DEFAULT 'fact',
+                    content TEXT NOT NULL,
+                    summary TEXT,
+                    source TEXT DEFAULT '',
+                    tags TEXT DEFAULT '',
+                    score REAL DEFAULT 1.0,
+                    created_at REAL NOT NULL,
+                    accessed_at REAL NOT NULL,
+                    access_count INTEGER DEFAULT 0
+                )
+            """)
 
         // FTS5 virtual table for full-text search
-        exec("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-                content, summary, tags,
-                content='memories',
-                content_rowid='rowid'
-            )
-        """)
+        exec(
+            """
+                CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+                    content, summary, tags,
+                    content='memories',
+                    content_rowid='rowid'
+                )
+            """)
 
         // Triggers to keep FTS in sync
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-                INSERT INTO memories_fts(rowid, content, summary, tags)
-                VALUES (new.rowid, new.content, new.summary, new.tags);
-            END
-        """)
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-                INSERT INTO memories_fts(memories_fts, rowid, content, summary, tags)
-                VALUES ('delete', old.rowid, old.content, old.summary, old.tags);
-            END
-        """)
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-                INSERT INTO memories_fts(memories_fts, rowid, content, summary, tags)
-                VALUES ('delete', old.rowid, old.content, old.summary, old.tags);
-                INSERT INTO memories_fts(rowid, content, summary, tags)
-                VALUES (new.rowid, new.content, new.summary, new.tags);
-            END
-        """)
+        exec(
+            """
+                CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+                    INSERT INTO memories_fts(rowid, content, summary, tags)
+                    VALUES (new.rowid, new.content, new.summary, new.tags);
+                END
+            """)
+        exec(
+            """
+                CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+                    INSERT INTO memories_fts(memories_fts, rowid, content, summary, tags)
+                    VALUES ('delete', old.rowid, old.content, old.summary, old.tags);
+                END
+            """)
+        exec(
+            """
+                CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+                    INSERT INTO memories_fts(memories_fts, rowid, content, summary, tags)
+                    VALUES ('delete', old.rowid, old.content, old.summary, old.tags);
+                    INSERT INTO memories_fts(rowid, content, summary, tags)
+                    VALUES (new.rowid, new.content, new.summary, new.tags);
+                END
+            """)
     }
 
     // MARK: - Store
@@ -142,11 +156,11 @@ public final class MemoryEngine: ObservableObject {
     public func store(_ entry: MemoryEntry) -> Bool {
         guard isOpen else { return false }
         let sql = """
-            INSERT OR REPLACE INTO memories (id, kind, content, summary, source, tags, score, created_at, accessed_at, access_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
+                INSERT OR REPLACE INTO memories (id, kind, content, summary, source, tags, score, created_at, accessed_at, access_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_text_safe(stmt, 1, entry.id.uuidString)
@@ -164,9 +178,9 @@ public final class MemoryEngine: ObservableObject {
         sqlite3_bind_double(stmt, 9, entry.accessedAt.timeIntervalSinceReferenceDate)
         sqlite3_bind_int(stmt, 10, Int32(entry.accessCount))
 
-        let ok = sqlite3_step(stmt) == SQLITE_DONE
-        if ok { refreshCount() }
-        return ok
+        let didSave = sqlite3_step(stmt) == SQLITE_DONE
+        if didSave { refreshCount() }
+        return didSave
     }
 
     // MARK: - Recall (FTS5 search)
@@ -175,24 +189,25 @@ public final class MemoryEngine: ObservableObject {
         guard isOpen, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
 
         // Sanitize query for FTS5
-        let sanitized = query
+        let sanitized =
+            query
             .replacingOccurrences(of: "\"", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let terms = sanitized.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
         let ftsQuery = terms.map { "\"\($0)\"" }.joined(separator: " OR ")
 
         let sql = """
-            SELECT m.id, m.kind, m.content, m.summary, m.source, m.tags, m.score,
-                   m.created_at, m.accessed_at, m.access_count,
-                   bm25(memories_fts) as rank
-            FROM memories m
-            JOIN memories_fts f ON f.rowid = m.rowid
-            WHERE memories_fts MATCH ?
-            ORDER BY (rank * m.score) ASC
-            LIMIT ?
-        """
+                SELECT m.id, m.kind, m.content, m.summary, m.source, m.tags, m.score,
+                       m.created_at, m.accessed_at, m.access_count,
+                       bm25(memories_fts) as rank
+                FROM memories m
+                JOIN memories_fts f ON f.rowid = m.rowid
+                WHERE memories_fts MATCH ?
+                ORDER BY (rank * m.score) ASC
+                LIMIT ?
+            """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_text_safe(stmt, 1, ftsQuery)
@@ -218,19 +233,19 @@ public final class MemoryEngine: ObservableObject {
     public func recallByKeyword(_ keyword: String, limit: Int = 10) -> [MemoryEntry] {
         guard isOpen else { return [] }
         let sql = """
-            SELECT id, kind, content, summary, source, tags, score, created_at, accessed_at, access_count
-            FROM memories
-            WHERE content LIKE ? OR summary LIKE ? OR tags LIKE ?
-            ORDER BY score DESC, accessed_at DESC
-            LIMIT ?
-        """
+                SELECT id, kind, content, summary, source, tags, score, created_at, accessed_at, access_count
+                FROM memories
+                WHERE content LIKE ? OR summary LIKE ? OR tags LIKE ?
+                ORDER BY score DESC, accessed_at DESC
+                LIMIT ?
+            """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
         let pattern = "%\(keyword)%"
-        for i: Int32 in 1...3 {
-            sqlite3_bind_text_safe(stmt, i, pattern)
+        for parameterIndex: Int32 in 1...3 {
+            sqlite3_bind_text_safe(stmt, parameterIndex, pattern)
         }
         sqlite3_bind_int(stmt, 4, Int32(limit))
 
@@ -247,11 +262,11 @@ public final class MemoryEngine: ObservableObject {
     public func recent(limit: Int = 20) -> [MemoryEntry] {
         guard isOpen else { return [] }
         let sql = """
-            SELECT id, kind, content, summary, source, tags, score, created_at, accessed_at, access_count
-            FROM memories ORDER BY created_at DESC LIMIT ?
-        """
+                SELECT id, kind, content, summary, source, tags, score, created_at, accessed_at, access_count
+                FROM memories ORDER BY created_at DESC LIMIT ?
+            """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int(stmt, 1, Int32(limit))
 
@@ -268,7 +283,7 @@ public final class MemoryEngine: ObservableObject {
     public func delete(id: UUID) {
         guard isOpen else { return }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "DELETE FROM memories WHERE id = ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(database, "DELETE FROM memories WHERE id = ?", -1, &stmt, nil) == SQLITE_OK else { return }
         sqlite3_bind_text_safe(stmt, 1, id.uuidString)
         sqlite3_step(stmt)
         sqlite3_finalize(stmt)
@@ -279,7 +294,7 @@ public final class MemoryEngine: ObservableObject {
         guard isOpen else { return }
         let cutoff = Date().addingTimeInterval(Double(-days * 86400)).timeIntervalSinceReferenceDate
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "DELETE FROM memories WHERE score < ? AND accessed_at < ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(database, "DELETE FROM memories WHERE score < ? AND accessed_at < ?", -1, &stmt, nil) == SQLITE_OK else { return }
         sqlite3_bind_double(stmt, 1, 5.0)
         sqlite3_bind_double(stmt, 2, cutoff)
         sqlite3_step(stmt)
@@ -300,30 +315,32 @@ public final class MemoryEngine: ObservableObject {
 
         let taskTitle = task.title.isEmpty ? "无标题" : task.title
         let summary = """
-        任务「\(taskTitle)」\(succeeded ? "成功" : "失败")完成，\
-        共 \(stepCount) 步，使用工具：\(uniqueTools.joined(separator: ", "))
-        """
+            任务「\(taskTitle)」\(succeeded ? "成功" : "失败")完成，\
+            共 \(stepCount) 步，使用工具：\(uniqueTools.joined(separator: ", "))
+            """
 
-        store(MemoryEntry(
-            kind: .outcome,
-            content: summary,
-            summary: taskTitle,
-            source: "task:\(task.id)",
-            tags: uniqueTools + [succeeded ? "success" : "failure"],
-            score: succeeded ? 2.0 : 1.0
-        ))
+        store(
+            MemoryEntry(
+                kind: .outcome,
+                content: summary,
+                summary: taskTitle,
+                source: "task:\(task.id)",
+                tags: uniqueTools + [succeeded ? "success" : "failure"],
+                score: succeeded ? 2.0 : 1.0
+            ))
 
         // Extract key decisions / patterns
         let textSteps = task.steps.filter { $0.kind == .textOutput }
         let longTexts = textSteps.filter { $0.text.count > 200 }
         for step in longTexts.prefix(3) {
             let excerpt = String(step.text.prefix(500))
-            store(MemoryEntry(
-                kind: .fact,
-                content: excerpt,
-                source: "task:\(task.id)",
-                tags: uniqueTools
-            ))
+            store(
+                MemoryEntry(
+                    kind: .fact,
+                    content: excerpt,
+                    source: "task:\(task.id)",
+                    tags: uniqueTools
+                ))
         }
 
         // Auto-extract user preferences from conversation
@@ -332,8 +349,10 @@ public final class MemoryEngine: ObservableObject {
 
     /// Extract user preferences/instructions from conversation steps and persist them.
     public func extractPreferences(from steps: [TaskStep], source: String) {
-        let preferenceMarkers = ["以后", "永远", "每次", "都要", "不要", "不用", "一律", "默认",
-                                  "记住", "偏好", "习惯", "规则", "always", "never", "prefer"]
+        let preferenceMarkers = [
+            "以后", "永远", "每次", "都要", "不要", "不用", "一律", "默认",
+            "记住", "偏好", "习惯", "规则", "always", "never", "prefer"
+        ]
         let userInputs = steps.filter { $0.kind == .userInput }
         for input in userInputs {
             let text = input.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -347,13 +366,14 @@ public final class MemoryEngine: ObservableObject {
                 entry.kind == .preference && entry.content.hasPrefix(String(text.prefix(30)))
             }
             guard !isDuplicate else { continue }
-            store(MemoryEntry(
-                kind: .preference,
-                content: text,
-                source: source,
-                tags: ["auto-extracted", "user-preference"],
-                score: 3.0
-            ))
+            store(
+                MemoryEntry(
+                    kind: .preference,
+                    content: text,
+                    source: source,
+                    tags: ["auto-extracted", "user-preference"],
+                    score: 3.0
+                ))
         }
     }
 
@@ -366,7 +386,7 @@ public final class MemoryEngine: ObservableObject {
 
         var parts: [String] = ["## 来财记忆"]
         var totalLen = 0
-        let charBudget = maxTokens * 3 // rough token→char
+        let charBudget = maxTokens * 3  // rough token→char
 
         for entry in results {
             let text = entry.summary ?? String(entry.content.prefix(300))
@@ -394,23 +414,26 @@ public final class MemoryEngine: ObservableObject {
         if let old = existing.first {
             delete(id: old.id)
         }
-        store(MemoryEntry(
-            kind: .preference,
-            content: "偏好:\(key) = \(value)",
-            tags: ["preference", key],
-            score: 10.0 // preferences are high priority
-        ))
+        store(
+            MemoryEntry(
+                kind: .preference,
+                content: "偏好:\(key) = \(value)",
+                tags: ["preference", key],
+                score: 10.0  // preferences are high priority
+            ))
     }
 
     // MARK: - Stats
 
-    public var stats: (total: Int, facts: Int, outcomes: Int, preferences: Int) {
-        guard isOpen else { return (0, 0, 0, 0) }
+    public var stats: MemoryStats {
+        guard isOpen else {
+            return MemoryStats(total: 0, facts: 0, outcomes: 0, preferences: 0)
+        }
         let total = countWhere(nil)
         let facts = countWhere("kind = 'fact'")
         let outcomes = countWhere("kind = 'outcome'")
-        let prefs = countWhere("kind = 'preference'")
-        return (total, facts, outcomes, prefs)
+        let preferences = countWhere("kind = 'preference'")
+        return MemoryStats(total: total, facts: facts, outcomes: outcomes, preferences: preferences)
     }
 
     // MARK: - Internals
@@ -418,10 +441,11 @@ public final class MemoryEngine: ObservableObject {
     private func readEntry(from stmt: OpaquePointer?) -> MemoryEntry? {
         guard let stmt else { return nil }
         guard let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
-              let id = UUID(uuidString: idStr),
-              let kindStr = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
-              let kind = MemoryEntry.Kind(rawValue: kindStr),
-              let content = sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) else { return nil }
+            let id = UUID(uuidString: idStr),
+            let kindStr = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
+            let kind = MemoryEntry.Kind(rawValue: kindStr),
+            let content = sqlite3_column_text(stmt, 2).map({ String(cString: $0) })
+        else { return nil }
 
         let summary = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
         let source = sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? ""
@@ -441,7 +465,8 @@ public final class MemoryEngine: ObservableObject {
 
     private func bumpAccess(id: UUID) {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "UPDATE memories SET accessed_at = ?, access_count = access_count + 1 WHERE id = ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(database, "UPDATE memories SET accessed_at = ?, access_count = access_count + 1 WHERE id = ?", -1, &stmt, nil) == SQLITE_OK
+        else { return }
         sqlite3_bind_double(stmt, 1, Date().timeIntervalSinceReferenceDate)
         sqlite3_bind_text_safe(stmt, 2, id.uuidString)
         sqlite3_step(stmt)
@@ -466,13 +491,13 @@ public final class MemoryEngine: ObservableObject {
             sql = "SELECT COUNT(*) FROM memories"
         }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_finalize(stmt) }
         return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
     }
 
     @discardableResult
     private func exec(_ sql: String) -> Bool {
-        sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK
+        sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK
     }
 }

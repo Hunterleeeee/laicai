@@ -24,9 +24,9 @@ enum SQLiteSupport {
         _ body: (OpaquePointer) -> T
     ) -> T {
         queue.sync {
-            guard let db = openDatabase(at: path, readOnly: readOnly) else { return fallback }
-            defer { sqlite3_close(db) }
-            return body(db)
+            guard let database = openDatabase(at: path, readOnly: readOnly) else { return fallback }
+            defer { sqlite3_close(database) }
+            return body(database)
         }
     }
 
@@ -37,19 +37,19 @@ enum SQLiteSupport {
         _ body: @escaping (OpaquePointer) -> Void
     ) {
         queue.async {
-            guard let db = openDatabase(at: path, readOnly: readOnly) else { return }
-            defer { sqlite3_close(db) }
-            body(db)
+            guard let database = openDatabase(at: path, readOnly: readOnly) else { return }
+            defer { sqlite3_close(database) }
+            body(database)
         }
     }
 
     static func openDatabase(at path: String, readOnly: Bool) -> OpaquePointer? {
-        var db: OpaquePointer?
+        var database: OpaquePointer?
         let flags = readOnly
             ? (SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX)
             : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX)
-        guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK, let opened = db else {
-            if let db { sqlite3_close(db) }
+        guard sqlite3_open_v2(path, &database, flags, nil) == SQLITE_OK, let opened = database else {
+            if let database { sqlite3_close(database) }
             return nil
         }
         sqlite3_busy_timeout(opened, 5_000)
@@ -58,8 +58,8 @@ enum SQLiteSupport {
     }
 
     @discardableResult
-    static func exec(_ sql: String, on db: OpaquePointer) -> Bool {
-        sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK
+    static func exec(_ sql: String, on database: OpaquePointer) -> Bool {
+        sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK
     }
 
     static func columnString(_ stmt: OpaquePointer?, _ index: Int32) -> String {
@@ -67,12 +67,12 @@ enum SQLiteSupport {
         return String(cString: text)
     }
 
-    private static func configure(_ db: OpaquePointer, readOnly: Bool) {
-        exec("PRAGMA busy_timeout = 5000;", on: db)
-        exec("PRAGMA temp_store = MEMORY;", on: db)
+    private static func configure(_ database: OpaquePointer, readOnly: Bool) {
+        exec("PRAGMA busy_timeout = 5000;", on: database)
+        exec("PRAGMA temp_store = MEMORY;", on: database)
         if !readOnly {
-            exec("PRAGMA journal_mode = WAL;", on: db)
-            exec("PRAGMA synchronous = NORMAL;", on: db)
+            exec("PRAGMA journal_mode = WAL;", on: database)
+            exec("PRAGMA synchronous = NORMAL;", on: database)
         }
     }
 }

@@ -16,10 +16,10 @@ public struct BrowserTool: LaicaiTool {
             description: description,
             parameters: FunctionParameters(
                 properties: [
-                    "action": FunctionProperty(type: "string", description: "动作：navigate / extract / screenshot / js / close"),
+                    "action": FunctionProperty(type: "string", description: "动作：navigate / extract / screenshot / script / close"),
                     "url": FunctionProperty(type: "string", description: "目标 URL（navigate 时必填）"),
                     "selector": FunctionProperty(type: "string", description: "CSS 选择器（extract 时用）"),
-                    "script": FunctionProperty(type: "string", description: "JavaScript 代码（js 动作时必填）"),
+                    "script": FunctionProperty(type: "string", description: "JavaScript 代码（script 动作时必填）")
                 ],
                 required: ["action"]
             )
@@ -55,7 +55,7 @@ public struct BrowserTool: LaicaiTool {
         case "screenshot":
             return await BrowserSession.shared.screenshot()
 
-        case "js":
+        case "script":
             guard let script = params.script, !script.isEmpty else {
                 return ToolResult(output: "缺少 script 参数", success: false, error: "missing_script")
             }
@@ -66,7 +66,7 @@ public struct BrowserTool: LaicaiTool {
             return ToolResult(output: "浏览器已关闭")
 
         default:
-            return ToolResult(output: "未知动作 '\(params.action)'，支持：navigate / extract / screenshot / js / close", success: false, error: "unknown_action")
+            return ToolResult(output: "未知动作 '\(params.action)'，支持：navigate / extract / screenshot / script / close", success: false, error: "unknown_action")
         }
     }
 }
@@ -87,26 +87,26 @@ final class BrowserSession: NSObject, WKNavigationDelegate {
     // MARK: - Lazy init
 
     private func ensureWebView() -> WKWebView {
-        if let wv = webView { return wv }
+        if let existingWebView = webView { return existingWebView }
         let config = WKWebViewConfiguration()
         config.preferences.isElementFullscreenEnabled = false
-        let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
-        wv.navigationDelegate = self
-        wv.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        webView = wv
-        return wv
+        let newWebView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
+        newWebView.navigationDelegate = self
+        newWebView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        webView = newWebView
+        return newWebView
     }
 
     // MARK: - Navigate
 
     func navigate(to url: URL) async -> ToolResult {
-        let wv = ensureWebView()
+        let webView = ensureWebView()
         currentURL = url
 
         return await withCheckedContinuation { continuation in
             self.navigationContinuation = continuation
             self.isLoading = true
-            wv.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
+            webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
 
             // Timeout
             Task { @MainActor in
@@ -150,13 +150,13 @@ final class BrowserSession: NSObject, WKNavigationDelegate {
     // MARK: - Extract content
 
     func extractContent(selector: String?) async -> ToolResult {
-        guard let wv = webView else {
+        guard let webView = webView else {
             return ToolResult(output: "浏览器未打开，请先 navigate", success: false, error: "not_open")
         }
 
-        let js: String
+        let script: String
         if let sel = selector, !sel.isEmpty {
-            js = """
+            script = """
             (function() {
                 var els = document.querySelectorAll('\(sel.replacingOccurrences(of: "'", with: "\\'"))');
                 return Array.from(els).map(function(el) {
@@ -166,7 +166,7 @@ final class BrowserSession: NSObject, WKNavigationDelegate {
             """
         } else {
             // Extract main content heuristic
-            js = """
+            script = """
             (function() {
                 var article = document.querySelector('article') || document.querySelector('main') || document.querySelector('[role="main"]') || document.body;
                 // Remove scripts, styles, nav
@@ -184,8 +184,11 @@ final class BrowserSession: NSObject, WKNavigationDelegate {
         }
 
         do {
-            let result = try await wv.evaluateJavaScript(js)
-            let text = "\(result)"
+            let result = try await webView.evaluateJavaScript(script)
+            guard let result else {
+                return ToolResult(output: "（页面内容为空或选择器未匹配）")
+            }
+            let text = String(describing: result)
             if text.isEmpty {
                 return ToolResult(output: "（页面内容为空或选择器未匹配）")
             }
@@ -198,12 +201,12 @@ final class BrowserSession: NSObject, WKNavigationDelegate {
     // MARK: - Execute JavaScript
 
     func executeJS(_ script: String) async -> ToolResult {
-        guard let wv = webView else {
+        guard let webView = webView else {
             return ToolResult(output: "浏览器未打开，请先 navigate", success: false, error: "not_open")
         }
         do {
-            let result = try await wv.evaluateJavaScript(script)
-            return ToolResult(output: "\(result)")
+            let result = try await webView.evaluateJavaScript(script)
+            return ToolResult(output: result.map { String(describing: $0) } ?? "")
         } catch {
             return ToolResult(output: "JS 执行失败：\(error.localizedDescription)", success: false, error: "js_failed")
         }
@@ -212,15 +215,15 @@ final class BrowserSession: NSObject, WKNavigationDelegate {
     // MARK: - Screenshot
 
     func screenshot() async -> ToolResult {
-        guard let wv = webView else {
+        guard let webView = webView else {
             return ToolResult(output: "浏览器未打开，请先 navigate", success: false, error: "not_open")
         }
 
         let config = WKSnapshotConfiguration()
-        config.rect = wv.bounds
+        config.rect = webView.bounds
 
         do {
-            let image = try await wv.takeSnapshot(configuration: config)
+            let image = try await webView.takeSnapshot(configuration: config)
 
             // Save to temp file
             let tempDir = NSTemporaryDirectory()

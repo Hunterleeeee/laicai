@@ -14,6 +14,7 @@ import LaicaiNativeDomain
 @MainActor
 extension AgentLoop {
 
+    // swiftlint:disable:next cyclomatic_complexity
     func runPipeline(
         taskID: UUID? = nil,
         message: String,
@@ -64,11 +65,17 @@ extension AgentLoop {
         }
 
         authorizeUserPathsAndNarrowWorkspace(message: message, intent: intent, taskContext: &taskContext)
-        let needsPlanning = intent != .chat
+        let needsPlanning =
+            intent != .chat
             && priorSteps.isEmpty
             && !Self.isPureContinuationCommand(message)
             && message.count > 10
-        await runPreparationTools(message: message, intent: intent, needsPlanning: needsPlanning, taskContext: &taskContext, task: &task, onStep: onStep)
+        await runPreparationTools(
+            request: PreparationRequest(message: message, intent: intent, needsPlanning: needsPlanning),
+            taskContext: &taskContext,
+            task: &task,
+            onStep: onStep
+        )
 
         // Initialize PipelineState
         var state = PipelineState(
@@ -244,17 +251,17 @@ extension AgentLoop {
                     response = try await runtime.sendMessageStream(request, onChunk: onStreamDelta, onReasoningChunk: onReasoningDelta)
 
                     // Record per-request token usage for analytics
-                    if let m = response.metrics {
+                    if let metrics = response.metrics {
                         let projectName = ProjectManager.shared.activeProject?.name ?? ""
                         UsageTracker.shared.record(
                             modelName: config.modelName,
                             connectorName: state.connector.name,
                             projectName: projectName,
                             threadID: state.task.id.uuidString,
-                            inputTokens: m.inputTokens ?? 0,
-                            outputTokens: m.outputTokens ?? 0,
-                            durationSeconds: m.totalDuration,
-                            tokensPerSecond: m.tokensPerSecond ?? 0,
+                            inputTokens: metrics.inputTokens ?? 0,
+                            outputTokens: metrics.outputTokens ?? 0,
+                            durationSeconds: metrics.totalDuration,
+                            tokensPerSecond: metrics.tokensPerSecond ?? 0,
                             isStreaming: true,
                             intent: state.intentString
                         )
@@ -273,14 +280,16 @@ extension AgentLoop {
                     }
                 } catch {
                     let recovery = Self.resolveErrorRecovery(
-                        error: error,
-                        currentConnector: state.connector,
-                        allConnectors: state.allConnectors,
-                        didConnectorFailover: state.didConnectorFailover,
-                        transientRetryCount: state.transientRetryCount,
-                        maxTransientRetries: state.maxTransientRetries,
-                        iteration: state.iteration,
-                        effectiveMaxIterations: state.effectiveMaxIterations
+                        ErrorRecoveryContext(
+                            error: error,
+                            currentConnector: state.connector,
+                            allConnectors: state.allConnectors,
+                            didConnectorFailover: state.didConnectorFailover,
+                            transientRetryCount: state.transientRetryCount,
+                            maxTransientRetries: state.maxTransientRetries,
+                            iteration: state.iteration,
+                            effectiveMaxIterations: state.effectiveMaxIterations
+                        )
                     )
                     switch recovery {
                     case .connectorFailover(let fallback):
@@ -381,12 +390,13 @@ extension AgentLoop {
                             .joined(separator: ", ")
                         state.messages.append(ChatMessage(role: "assistant", content: "我将调用这些工具：\(toolNames)"))
                     } else {
-                        state.messages.append(ChatMessage(
-                            role: "assistant",
-                            content: assistantThinkingText.isEmpty ? nil : assistantThinkingText,
-                            reasoningContent: response.reasoningContent,
-                            toolCalls: response.toolCalls
-                        ))
+                        state.messages.append(
+                            ChatMessage(
+                                role: "assistant",
+                                content: assistantThinkingText.isEmpty ? nil : assistantThinkingText,
+                                reasoningContent: response.reasoningContent,
+                                toolCalls: response.toolCalls
+                            ))
                     }
                     // Execute tools via engine
                     let execResult = await ToolExecutionEngine.execute(
@@ -407,70 +417,75 @@ extension AgentLoop {
 
                     // Log iteration with tool calls
                     let iterationDuration = Date().timeIntervalSince(iterationStartTime)
-                    let toolLogs = execResult.callSteps.enumerated().map { idx, callEntry in
-                        let result = idx < execResult.toolCallResults.count ? execResult.toolCallResults[idx].1 : nil
+                    let toolLogs = execResult.callSteps.map { callEntry in
+                        let result = execResult.toolCallResults.first {
+                            $0.responseIndex == callEntry.responseIndex
+                        }?.result
                         return AgentIterationLog.ToolCallLog(
-                            toolName: callEntry.2,  // apiToolName is at index 2
+                            toolName: callEntry.apiToolName,
                             success: result?.success ?? false,
                             durationSeconds: result?.data?["durationSeconds"].flatMap(Double.init) ?? 0,
                             errorDetail: result?.error
                         )
                     }
-                    let tokenLog: AgentIterationLog.TokenUsageLog? = response.metrics.map { m in
+                    let tokenLog: AgentIterationLog.TokenUsageLog? = response.metrics.map { metrics in
                         AgentIterationLog.TokenUsageLog(
-                            inputTokens: m.inputTokens ?? 0,
-                            outputTokens: m.outputTokens ?? 0,
-                            tokensPerSecond: m.tokensPerSecond ?? 0
+                            inputTokens: metrics.inputTokens ?? 0,
+                            outputTokens: metrics.outputTokens ?? 0,
+                            tokensPerSecond: metrics.tokensPerSecond ?? 0
                         )
                     }
-                    AgentLogger.shared.logIteration(AgentIterationLog(
-                        timestamp: iterationStartTime,
-                        taskID: state.task.id.uuidString,
-                        iteration: state.iteration,
-                        phase: state.currentPhase.rawValue,
-                        intent: state.intentString,
-                        connectorName: state.connector.name,
-                        toolCalls: toolLogs,
-                        tokenUsage: tokenLog,
-                        error: nil,
-                        durationSeconds: iterationDuration,
-                        messageCount: state.messages.count,
-                        stepCount: state.task.steps.count
-                    ))
+                    AgentLogger.shared.logIteration(
+                        AgentIterationLog(
+                            timestamp: iterationStartTime,
+                            taskID: state.task.id.uuidString,
+                            iteration: state.iteration,
+                            phase: state.currentPhase.rawValue,
+                            intent: state.intentString,
+                            connectorName: state.connector.name,
+                            toolCalls: toolLogs,
+                            tokenUsage: tokenLog,
+                            error: nil,
+                            durationSeconds: iterationDuration,
+                            messageCount: state.messages.count,
+                            stepCount: state.task.steps.count
+                        ))
                 } else {
                     // ── STAGE 3: Text response → Verify + Output ──
                     let action = await ResponseHandler.handle(
-                        response: response,
+                        request: ResponseHandler.HandleRequest(
+                            response: response,
+                            config: config,
+                            runtime: runtime
+                        ),
                         state: &state,
-                        config: config,
-                        runtime: runtime,
-                        toolRegistry: toolRegistry,
                         onStep: onStep
                     )
 
                     // Log iteration with text response
                     let iterationDuration = Date().timeIntervalSince(iterationStartTime)
-                    let tokenLog: AgentIterationLog.TokenUsageLog? = response.metrics.map { m in
+                    let tokenLog: AgentIterationLog.TokenUsageLog? = response.metrics.map { metrics in
                         AgentIterationLog.TokenUsageLog(
-                            inputTokens: m.inputTokens ?? 0,
-                            outputTokens: m.outputTokens ?? 0,
-                            tokensPerSecond: m.tokensPerSecond ?? 0
+                            inputTokens: metrics.inputTokens ?? 0,
+                            outputTokens: metrics.outputTokens ?? 0,
+                            tokensPerSecond: metrics.tokensPerSecond ?? 0
                         )
                     }
-                    AgentLogger.shared.logIteration(AgentIterationLog(
-                        timestamp: iterationStartTime,
-                        taskID: state.task.id.uuidString,
-                        iteration: state.iteration,
-                        phase: state.currentPhase.rawValue,
-                        intent: state.intentString,
-                        connectorName: state.connector.name,
-                        toolCalls: [],
-                        tokenUsage: tokenLog,
-                        error: nil,
-                        durationSeconds: iterationDuration,
-                        messageCount: state.messages.count,
-                        stepCount: state.task.steps.count
-                    ))
+                    AgentLogger.shared.logIteration(
+                        AgentIterationLog(
+                            timestamp: iterationStartTime,
+                            taskID: state.task.id.uuidString,
+                            iteration: state.iteration,
+                            phase: state.currentPhase.rawValue,
+                            intent: state.intentString,
+                            connectorName: state.connector.name,
+                            toolCalls: [],
+                            tokenUsage: tokenLog,
+                            error: nil,
+                            durationSeconds: iterationDuration,
+                            messageCount: state.messages.count,
+                            stepCount: state.task.steps.count
+                        ))
 
                     switch action {
                     case .continueLoop: continue
@@ -496,7 +511,8 @@ extension AgentLoop {
             }
 
             // Auto-continuation with context compression
-            if !state.didComplete && !state.hadFailure && !state.wasTruncated && !Task.isCancelled && state.autoRound < state.maxAutoRounds && state.intent != .chat {
+            if !state.didComplete && !state.hadFailure && !state.wasTruncated && !Task.isCancelled && state.autoRound < state.maxAutoRounds
+                && state.intent != .chat {
                 state.autoRound += 1
                 state.iteration = 0
 
@@ -514,7 +530,8 @@ extension AgentLoop {
                 state.task.steps.append(roundStep)
                 onStep(roundStep)
             }
-        } while !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound > 0 && state.autoRound <= state.maxAutoRounds && state.intent != .chat
+        } while !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound > 0 && state.autoRound <= state.maxAutoRounds
+            && state.intent != .chat
 
         // Fallback wiki build (uses instance method). Run this even when the
         // model produced final text, because Wiki persistence requires a real
@@ -549,7 +566,6 @@ extension AgentLoop {
 
         return state.task
     }
-
 
     // MARK: - Helpers
 

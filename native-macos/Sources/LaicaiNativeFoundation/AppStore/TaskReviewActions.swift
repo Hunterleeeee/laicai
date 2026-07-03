@@ -72,74 +72,74 @@ extension AppStore {
     }
 
     public func approveHunk(taskID: UUID, stepID: UUID, hunkID: UUID) {
-        guard let ti = state.threads.firstIndex(where: { $0.id == taskID }),
-              let si = state.threads[ti].steps.firstIndex(where: { $0.id == stepID }),
-              var hunks = state.threads[ti].steps[si].diffHunks,
-              let hi = hunks.firstIndex(where: { $0.id == hunkID }) else { return }
-        hunks[hi].approved = true
-        state.threads[ti].steps[si].diffHunks = hunks
-        checkAllHunksDecided(threadIndex: ti, stepIndex: si)
-        syncAgentSnapshot(at: ti)
-        state.threads[ti].updatedAt = .now
+        guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }),
+              let stepIndex = state.threads[threadIndex].steps.firstIndex(where: { $0.id == stepID }),
+              var hunks = state.threads[threadIndex].steps[stepIndex].diffHunks,
+              let hunkIndex = hunks.firstIndex(where: { $0.id == hunkID }) else { return }
+        hunks[hunkIndex].approved = true
+        state.threads[threadIndex].steps[stepIndex].diffHunks = hunks
+        checkAllHunksDecided(threadIndex: threadIndex, stepIndex: stepIndex)
+        syncAgentSnapshot(at: threadIndex)
+        state.threads[threadIndex].updatedAt = .now
         persistThreads()
     }
 
     public func rejectHunk(taskID: UUID, stepID: UUID, hunkID: UUID) {
-        guard let ti = state.threads.firstIndex(where: { $0.id == taskID }),
-              let si = state.threads[ti].steps.firstIndex(where: { $0.id == stepID }),
-              var hunks = state.threads[ti].steps[si].diffHunks,
-              let hi = hunks.firstIndex(where: { $0.id == hunkID }) else { return }
-        hunks[hi].approved = false
-        state.threads[ti].steps[si].diffHunks = hunks
-        checkAllHunksDecided(threadIndex: ti, stepIndex: si)
-        syncAgentSnapshot(at: ti)
-        state.threads[ti].updatedAt = .now
+        guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }),
+              let stepIndex = state.threads[threadIndex].steps.firstIndex(where: { $0.id == stepID }),
+              var hunks = state.threads[threadIndex].steps[stepIndex].diffHunks,
+              let hunkIndex = hunks.firstIndex(where: { $0.id == hunkID }) else { return }
+        hunks[hunkIndex].approved = false
+        state.threads[threadIndex].steps[stepIndex].diffHunks = hunks
+        checkAllHunksDecided(threadIndex: threadIndex, stepIndex: stepIndex)
+        syncAgentSnapshot(at: threadIndex)
+        state.threads[threadIndex].updatedAt = .now
         persistThreads()
     }
 
-    private func checkAllHunksDecided(threadIndex ti: Int, stepIndex si: Int) {
-        guard let hunks = state.threads[ti].steps[si].diffHunks,
+    private func checkAllHunksDecided(threadIndex: Int, stepIndex: Int) {
+        guard let hunks = state.threads[threadIndex].steps[stepIndex].diffHunks,
               hunks.allSatisfy({ $0.approved != nil }) else { return }
         let approvedHunks = hunks.filter { $0.approved == true }
         if approvedHunks.isEmpty {
-            state.threads[ti].steps[si].approved = false
-            appendReviewResult(to: ti, approved: false, text: "所有 hunk 均已拒绝")
-            syncAgentSnapshot(at: ti)
+            state.threads[threadIndex].steps[stepIndex].approved = false
+            appendReviewResult(to: threadIndex, approved: false, text: "所有 hunk 均已拒绝")
+            syncAgentSnapshot(at: threadIndex)
             return
         }
-        guard let filePath = state.threads[ti].steps[si].diffFilePath,
-              let oldContent = state.threads[ti].steps[si].diffOldContent else {
-            state.threads[ti].steps[si].approved = false
-            appendReviewResult(to: ti, approved: false, text: "缺少文件信息")
-            syncAgentSnapshot(at: ti)
+        guard let filePath = state.threads[threadIndex].steps[stepIndex].diffFilePath,
+              let oldContent = state.threads[threadIndex].steps[stepIndex].diffOldContent else {
+            state.threads[threadIndex].steps[stepIndex].approved = false
+            appendReviewResult(to: threadIndex, approved: false, text: "缺少文件信息")
+            syncAgentSnapshot(at: threadIndex)
             return
         }
         var result = oldContent
         for hunk in approvedHunks.sorted(by: { $0.index < $1.index }) {
             result = result.replacingOccurrences(of: hunk.oldText, with: hunk.newText)
         }
-        let fullPath = state.threads[ti].steps[si].toolParams?["fullPath"]
-            ?? absolutePath(for: filePath, workspaceRoot: state.threads[ti].context.workspaceRoot)
-        let createDirectories = state.threads[ti].steps[si].toolParams?["createDirectories"] != "false"
+        let fullPath = state.threads[threadIndex].steps[stepIndex].toolParams?["fullPath"]
+            ?? absolutePath(for: filePath, workspaceRoot: state.threads[threadIndex].context.workspaceRoot)
+        let createDirectories = state.threads[threadIndex].steps[stepIndex].toolParams?["createDirectories"] != "false"
         if let securityError = SecurityManager.shared.checkWrite(path: fullPath) {
-            state.threads[ti].steps[si].approved = false
-            appendReviewResult(to: ti, approved: false, text: "安全策略拦截：\(securityError)")
-            syncAgentSnapshot(at: ti)
+            state.threads[threadIndex].steps[stepIndex].approved = false
+            appendReviewResult(to: threadIndex, approved: false, text: "安全策略拦截：\(securityError)")
+            syncAgentSnapshot(at: threadIndex)
             return
         }
         do {
             try WriteFileTool().performWrite(fullPath: fullPath, content: result, createDirectories: createDirectories)
-            state.threads[ti].steps[si].approved = true
+            state.threads[threadIndex].steps[stepIndex].approved = true
             let accepted = approvedHunks.count
             let rejected = hunks.count - accepted
-            appendReviewResult(to: ti, approved: true, text: "已写入 \(filePath)（接受 \(accepted) / 拒绝 \(rejected) 个 hunk）")
+            appendReviewResult(to: threadIndex, approved: true, text: "已写入 \(filePath)（接受 \(accepted) / 拒绝 \(rejected) 个 hunk）")
             refreshSkillsIfNeeded(filePath: filePath)
-            schedulePostWriteVerification(threadIndex: ti, filePath: filePath)
+            schedulePostWriteVerification(threadIndex: threadIndex, filePath: filePath)
         } catch {
-            state.threads[ti].steps[si].approved = false
-            appendReviewResult(to: ti, approved: false, text: "写入失败：\(error.localizedDescription)")
+            state.threads[threadIndex].steps[stepIndex].approved = false
+            appendReviewResult(to: threadIndex, approved: false, text: "写入失败：\(error.localizedDescription)")
         }
-        syncAgentSnapshot(at: ti)
+        syncAgentSnapshot(at: threadIndex)
     }
 
     public func rejectReview(taskID: UUID, stepID: UUID) {

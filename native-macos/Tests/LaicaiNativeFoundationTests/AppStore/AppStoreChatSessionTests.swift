@@ -206,15 +206,15 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         store.updateDraft("我想让Gemini作一首歌，带mv的，但是我不知道怎么描述prompt，你来帮我梳理一下")
         store.sendDraft()
         try await waitUntilIdle(store)
-        _ = try XCTUnwrap(store.state.selectedThreadID)
+        let originalThreadID = try XCTUnwrap(store.state.selectedThreadID)
 
         store.updateDraft("古风故事，男生，古风电子，电影感")
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        // With unified routing, follow-up may create a new thread
-        XCTAssertNotNil(store.state.selectedThreadID)
-        XCTAssertTrue((store.state.selectedThread?.steps.count ?? 0) >= 1)
+        XCTAssertEqual(store.state.selectedThreadID, originalThreadID)
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .userInput }.last?.text, "古风故事，男生，古风电子，电影感")
     }
 
     func testTaskLikeFollowUpsStayInSelectedNonEmptySessionAcrossTurns() async throws {

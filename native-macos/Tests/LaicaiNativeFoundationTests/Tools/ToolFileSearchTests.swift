@@ -172,7 +172,7 @@ final class ToolFileSearchTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(result.content.contains("menu"))
     }
     func testFunctionCallArgumentsDecodeObjectPayloads() throws {
-        let json = #"{"name":"web_search","arguments":{"query":"AI news","maxResults":3}}"#.data(using: .utf8)!
+        let json = Data(#"{"name":"web_search","arguments":{"query":"AI news","maxResults":3}}"#.utf8)
         let detail = try JSONDecoder().decode(FunctionCallDetail.self, from: json)
 
         XCTAssertEqual(detail.name, "web_search")

@@ -154,18 +154,18 @@ extension AppStore {
             "category: custom",
             "steps:"
         ]
-        for (i, step) in toolSteps.enumerated() {
+        for (index, step) in toolSteps.enumerated() {
             let toolName = step.toolName ?? "unknown"
             lines.append("  - name: \"\(step.text.prefix(40).replacingOccurrences(of: "\n", with: " "))\"")
             lines.append("    tool: \(toolName)")
             if let params = step.toolParams, !params.isEmpty {
                 lines.append("    params:")
-                for (k, v) in params.sorted(by: { $0.key < $1.key }) {
-                    let escaped = v.replacingOccurrences(of: "\"", with: "\\\"")
-                    lines.append("      \(k): \"\(escaped)\"")
+                for (key, value) in params.sorted(by: { $0.key < $1.key }) {
+                    let escaped = value.replacingOccurrences(of: "\"", with: "\\\"")
+                    lines.append("      \(key): \"\(escaped)\"")
                 }
             }
-            if i > 0 { lines.append("    on_failure: skip") }
+            if index > 0 { lines.append("    on_failure: skip") }
         }
         return lines.joined(separator: "\n")
     }

@@ -25,12 +25,12 @@ public struct Goal: Identifiable, Codable, Sendable {
     public var threadID: UUID?
 
     public enum Status: String, Codable, Sendable {
-        case pending = "pending"
-        case running = "running"
-        case paused = "paused"
-        case completed = "completed"
-        case failed = "failed"
-        case cancelled = "cancelled"
+        case pending
+        case running
+        case paused
+        case completed
+        case failed
+        case cancelled
 
         public var displayText: String {
             switch self {
@@ -91,7 +91,7 @@ public final class GoalEngine: ObservableObject {
 
     @Published public private(set) var goals: [Goal] = []
 
-    private var db: OpaquePointer?
+    private var database: OpaquePointer?
     private let dbPath: String
 
     /// Callback to execute a goal step through the main app
@@ -108,18 +108,18 @@ public final class GoalEngine: ObservableObject {
     }
 
     deinit {
-        sqlite3_close(db)
+        sqlite3_close(database)
     }
 
     // MARK: - DB
 
     private func open() {
-        if sqlite3_open(dbPath, &db) != SQLITE_OK { db = nil }
+        if sqlite3_open(dbPath, &database) != SQLITE_OK { database = nil }
     }
 
     private func exec(_ sql: String) {
-        guard let db else { return }
-        sqlite3_exec(db, sql, nil, nil, nil)
+        guard let database else { return }
+        sqlite3_exec(database, sql, nil, nil, nil)
     }
 
     private func migrate() {
@@ -190,10 +190,10 @@ public final class GoalEngine: ObservableObject {
 
     public func deleteGoal(id: UUID) {
         goals.removeAll { $0.id == id }
-        guard let db else { return }
+        guard let database else { return }
         let sql = "DELETE FROM goals WHERE id = ?;"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return }
         sqlite3_bind_text_safe(stmt, 1, id.uuidString)
         sqlite3_step(stmt)
         sqlite3_finalize(stmt)
@@ -254,7 +254,7 @@ public final class GoalEngine: ObservableObject {
     // MARK: - Persistence
 
     private func persistGoal(_ goal: Goal) {
-        guard let db else { return }
+        guard let database else { return }
         guard let data = try? JSONEncoder().encode(goal),
               let json = String(data: data, encoding: .utf8) else { return }
 
@@ -263,7 +263,7 @@ public final class GoalEngine: ObservableObject {
         VALUES (?, ?, ?, ?, ?);
         """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return }
         sqlite3_bind_text_safe(stmt, 1, goal.id.uuidString)
         sqlite3_bind_text_safe(stmt, 2, json)
         sqlite3_bind_text_safe(stmt, 3, goal.status.rawValue)
@@ -274,10 +274,10 @@ public final class GoalEngine: ObservableObject {
     }
 
     private func loadGoals() {
-        guard let db else { return }
+        guard let database else { return }
         let sql = "SELECT data FROM goals ORDER BY updated_at DESC LIMIT 100;"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return }
 
         var loaded: [Goal] = []
         while sqlite3_step(stmt) == SQLITE_ROW {

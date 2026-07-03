@@ -1,7 +1,7 @@
 import AppKit
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Task Summary Card
 
@@ -116,7 +116,7 @@ struct ContinuationStrategyBar: View {
     @State private var isExpanded = false
 
     var body: some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             Image(systemName: "arrow.triangle.2.circlepath")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(TextGrade.muted)
@@ -143,10 +143,10 @@ struct ContinuationStrategyBar: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, AppSpace.md)
-        .padding(.vertical, AppSpace.xs)
+        .padding(.horizontal, AppSpace.medium)
+        .padding(.vertical, AppSpace.extraSmall)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                 .fill(SurfaceGrade.sunken.opacity(0.72))
         )
     }
@@ -167,16 +167,16 @@ struct UserInputCard: View {
                 .foregroundStyle(TextGrade.primary)
                 .lineSpacing(3)
                 .multilineTextAlignment(.leading)
-                .padding(.horizontal, AppSpace.md + 2)
-                .padding(.vertical, AppSpace.sm + 2)
+                .padding(.horizontal, AppSpace.medium + 2)
+                .padding(.vertical, AppSpace.small + 2)
                 .frame(maxWidth: 620, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .fill(Semantic.userBubble)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .strokeBorder(SurfaceGrade.hairline, lineWidth: 0.6)
                 )
                 .contextMenu {
@@ -207,11 +207,11 @@ struct ThinkingCard: View {
     private let reasoningPreviewLimit = 800
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+        HStack(alignment: .top, spacing: AppSpace.small) {
             ProgressGlyph(icon: "brain", color: Brand.purple, isActive: isRunning)
 
-            VStack(alignment: .leading, spacing: AppSpace.xs) {
-                HStack(spacing: AppSpace.xs) {
+            VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Text(isRunning ? "思考中" : "已分析")
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.muted)
@@ -235,7 +235,7 @@ struct ThinkingCard: View {
                                     .font(AppFont.tiny)
                             }
                             .foregroundStyle(Brand.purple.opacity(0.72))
-                            .padding(.horizontal, AppSpace.sm)
+                            .padding(.horizontal, AppSpace.small)
                             .padding(.vertical, 2)
                             .background(
                                 Capsule()
@@ -255,7 +255,7 @@ struct ThinkingCard: View {
                 }
 
                 if showReasoning, let reasoning = reasoningContent, !reasoning.isEmpty {
-                    VStack(alignment: .leading, spacing: AppSpace.xs) {
+                    VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                         Divider()
                             .background(Brand.purple.opacity(0.15))
 
@@ -264,14 +264,14 @@ struct ThinkingCard: View {
                             .foregroundStyle(TextGrade.secondary.opacity(0.8))
                             .lineLimit(16)
                             .fixedSize(horizontal: false, vertical: true)
-                            .padding(AppSpace.sm)
+                            .padding(AppSpace.small)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(
-                                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                     .fill(Brand.purple.opacity(0.04))
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                     .strokeBorder(Brand.purple.opacity(0.10), lineWidth: 0.5)
                             )
                     }
@@ -308,8 +308,8 @@ struct ToolCallCard: View {
     let taskID: UUID
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.xs) {
-            HStack(spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
+            HStack(spacing: AppSpace.small) {
                 ProgressGlyph(icon: "wrench.and.screwdriver", color: step.isFailure ? Semantic.error : Semantic.toolCall)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -349,9 +349,9 @@ struct ToolCallCard: View {
             }
 
             if !step.isCollapsed, let params = step.toolParams, !params.isEmpty {
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                     if let toolName = step.toolName {
-                        HStack(spacing: AppSpace.sm) {
+                        HStack(spacing: AppSpace.small) {
                             Text("动作")
                                 .font(AppFont.codeSmall)
                                 .foregroundStyle(TextGrade.muted)
@@ -360,10 +360,10 @@ struct ToolCallCard: View {
                                 .foregroundStyle(TextGrade.primary)
                                 .lineLimit(1)
                         }
-                        .padding(.horizontal, AppSpace.md)
+                        .padding(.horizontal, AppSpace.medium)
                         .padding(.vertical, 2)
                     }
-                    HStack(spacing: AppSpace.sm) {
+                    HStack(spacing: AppSpace.small) {
                         Text("原因")
                             .font(AppFont.codeSmall)
                             .foregroundStyle(TextGrade.muted)
@@ -372,10 +372,10 @@ struct ToolCallCard: View {
                             .foregroundStyle(TextGrade.secondary)
                             .lineLimit(2)
                     }
-                    .padding(.horizontal, AppSpace.md)
+                    .padding(.horizontal, AppSpace.medium)
                     .padding(.vertical, 2)
                     ForEach(Array(params.keys.sorted()), id: \.self) { key in
-                        HStack(spacing: AppSpace.sm) {
+                        HStack(spacing: AppSpace.small) {
                             Text(key)
                                 .font(AppFont.codeSmall)
                                 .foregroundStyle(TextGrade.muted)
@@ -384,7 +384,7 @@ struct ToolCallCard: View {
                                 .foregroundStyle(TextGrade.primary)
                                 .lineLimit(2)
                         }
-                        .padding(.horizontal, AppSpace.md)
+                        .padding(.horizontal, AppSpace.medium)
                         .padding(.vertical, 2)
                     }
                 }
@@ -403,23 +403,24 @@ struct ToolCallCard: View {
         return step.isFailure ? "执行失败" : "处理中"
     }
 
+    private static let friendlyToolNames: [String: String] = [
+        "workspace.index": "项目索引",
+        "file.read": "读取文件",
+        "file.write": "写入文件",
+        "file.edit": "编辑文件",
+        "diff.apply": "应用补丁",
+        "verify.build": "验证构建",
+        "code.search": "搜索代码",
+        "shell.exec": "执行命令",
+        "git": "查看历史",
+        "web.search": "搜索网页",
+        "web.fetch": "读取网页",
+        "wiki.build": "生成知识页",
+        "image.generate": "生成图片"
+    ]
+
     static func friendlyToolName(_ name: String) -> String {
-        switch name {
-        case "workspace.index": return "项目索引"
-        case "file.read": return "读取文件"
-        case "file.write": return "写入文件"
-        case "file.edit": return "编辑文件"
-        case "diff.apply": return "应用补丁"
-        case "verify.build": return "验证构建"
-        case "code.search": return "搜索代码"
-        case "shell.exec": return "执行命令"
-        case "git": return "查看历史"
-        case "web.search": return "搜索网页"
-        case "web.fetch": return "读取网页"
-        case "wiki.build": return "生成知识页"
-        case "image.generate": return "生成图片"
-        default: return name
-        }
+        friendlyToolNames[name] ?? name
     }
 
     private var toolReason: String {
@@ -484,10 +485,10 @@ struct ToolResultCard: View {
         if step.isFailure && !isTerminalOutput {
             FailedCard(step: step, taskID: taskID)
         } else {
-            HStack(alignment: .top, spacing: AppSpace.sm) {
+            HStack(alignment: .top, spacing: AppSpace.small) {
                 ProgressGlyph(icon: step.isFailure ? "xmark" : "checkmark", color: step.isFailure ? Semantic.error : Semantic.success)
 
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                     if isTerminalOutput {
                         TerminalOutputCard(text: step.text, isFailure: step.isFailure)
                     } else if let imagePath {
@@ -508,7 +509,7 @@ struct ToolResultCard: View {
                             Label("重试", systemImage: "arrow.clockwise")
                                 .font(AppFont.tiny)
                                 .foregroundStyle(Brand.primary)
-                                .padding(.horizontal, AppSpace.sm)
+                                .padding(.horizontal, AppSpace.small)
                                 .padding(.vertical, 2)
                                 .background(Capsule().fill(Brand.primary.opacity(0.12)))
                         }
@@ -541,7 +542,8 @@ struct ToolResultCard: View {
         }
         let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
         guard let match = regex.firstMatch(in: text, options: [], range: nsRange),
-              let range = Range(match.range(at: 1), in: text) else {
+            let range = Range(match.range(at: 1), in: text)
+        else {
             return nil
         }
         let raw = String(text[range]).trimmingCharacters(in: CharacterSet(charactersIn: "。.,，)）]】\"'"))
@@ -559,11 +561,11 @@ struct ToolResultCard: View {
             .font(AppFont.codeSmall)
             .foregroundStyle(step.isFailure ? Semantic.error : TextGrade.muted)
             .lineLimit(step.isFailure ? 6 : 4)
-            .padding(.horizontal, AppSpace.sm)
-            .padding(.vertical, AppSpace.xs)
+            .padding(.horizontal, AppSpace.small)
+            .padding(.vertical, AppSpace.extraSmall)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                     .fill(SurfaceGrade.sunken.opacity(0.34))
             )
     }
@@ -584,7 +586,8 @@ struct GeneratedImagePreviewCard: View {
 
     private var fileSizeLabel: String {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-              let size = attrs[.size] as? NSNumber else { return "" }
+            let size = attrs[.size] as? NSNumber
+        else { return "" }
         let value = size.doubleValue
         if value >= 1_048_576 { return String(format: "%.1f MB", value / 1_048_576) }
         if value >= 1024 { return String(format: "%.0f KB", value / 1024) }
@@ -597,8 +600,8 @@ struct GeneratedImagePreviewCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: "photo.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Semantic.success)
@@ -607,7 +610,7 @@ struct GeneratedImagePreviewCard: View {
                     Text("图片已生成")
                         .font(AppFont.captionMedium)
                         .foregroundStyle(TextGrade.primary)
-                    HStack(spacing: AppSpace.sm) {
+                    HStack(spacing: AppSpace.small) {
                         Text(filename)
                             .font(AppFont.codeSmall)
                             .foregroundStyle(TextGrade.secondary)
@@ -624,7 +627,7 @@ struct GeneratedImagePreviewCard: View {
                     .foregroundStyle(TextGrade.ghost)
                 }
 
-                Spacer(minLength: AppSpace.sm)
+                Spacer(minLength: AppSpace.small)
 
                 imageAction(icon: "arrow.clockwise", label: "重新生成") {
                     store.retryLastMessage()
@@ -645,16 +648,16 @@ struct GeneratedImagePreviewCard: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(maxWidth: 640, maxHeight: 420)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                 .strokeBorder(SurfaceGrade.border.opacity(0.25), lineWidth: 0.5)
                         )
                 }
                 .buttonStyle(.plain)
                 .help("打开图片")
             } else {
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                     Text("图片文件暂时无法预览")
                         .font(AppFont.captionMedium)
                         .foregroundStyle(Semantic.warning)
@@ -665,12 +668,12 @@ struct GeneratedImagePreviewCard: View {
                         .truncationMode(.middle)
                         .textSelection(.enabled)
                 }
-                .padding(AppSpace.md)
+                .padding(AppSpace.medium)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).fill(SurfaceGrade.sunken.opacity(0.42)))
+                .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(SurfaceGrade.sunken.opacity(0.42)))
             }
 
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 imageAction(icon: "arrow.up.right.square", label: "打开") {
                     NSWorkspace.shared.open(url)
                 }
@@ -678,7 +681,7 @@ struct GeneratedImagePreviewCard: View {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
 
-                Spacer(minLength: AppSpace.sm)
+                Spacer(minLength: AppSpace.small)
 
                 Text(path)
                     .font(AppFont.codeSmall)
@@ -694,14 +697,14 @@ struct GeneratedImagePreviewCard: View {
                 .lineLimit(3)
                 .textSelection(.enabled)
         }
-        .padding(AppSpace.md)
+        .padding(AppSpace.medium)
         .frame(maxWidth: 680, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.68))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(Semantic.success.opacity(0.22), lineWidth: 0.8)
         )
     }
@@ -715,7 +718,7 @@ struct GeneratedImagePreviewCard: View {
                     .font(AppFont.tiny)
             }
             .foregroundStyle(TextGrade.secondary)
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
             .padding(.vertical, 5)
             .background(Capsule().fill(SurfaceGrade.elevated.opacity(0.72)))
             .overlay(Capsule().strokeBorder(SurfaceGrade.border.opacity(0.28), lineWidth: 0.5))
@@ -731,7 +734,7 @@ struct RecoveryCard: View {
     let step: TaskStep
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+        HStack(alignment: .top, spacing: AppSpace.small) {
             ZStack {
                 Circle()
                     .fill(Semantic.warning.opacity(0.10))
@@ -742,8 +745,8 @@ struct RecoveryCard: View {
             }
             .frame(width: 26)
 
-            VStack(alignment: .leading, spacing: AppSpace.xs) {
-                HStack(spacing: AppSpace.xs) {
+            VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Text("已自动换一种方式继续")
                         .font(AppFont.captionMedium)
                         .foregroundStyle(Semantic.warning)
@@ -765,7 +768,7 @@ struct RecoveryCard: View {
                     }
                 }
 
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     if let original = originalTool, let fallback = fallbackTool {
                         Text(ToolCallCard.friendlyToolName(original))
                             .font(AppFont.codeSmall)
@@ -795,14 +798,14 @@ struct RecoveryCard: View {
 
             Spacer()
         }
-        .padding(.horizontal, AppSpace.md)
-        .padding(.vertical, AppSpace.sm)
+        .padding(.horizontal, AppSpace.medium)
+        .padding(.vertical, AppSpace.small)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(Semantic.warningMuted.opacity(0.20))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(Semantic.warning.opacity(0.12), lineWidth: 0.5)
         )
         .padding(.vertical, 2)
@@ -831,15 +834,15 @@ struct TerminalOutputCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 Circle().fill(isFailure ? Semantic.error : Semantic.success).frame(width: 7, height: 7)
                 Text(isFailure ? "命令执行失败" : "命令已完成")
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.ghost)
                 Spacer()
             }
-            .padding(.horizontal, AppSpace.sm)
-            .padding(.vertical, AppSpace.xs)
+            .padding(.horizontal, AppSpace.small)
+            .padding(.vertical, AppSpace.extraSmall)
             .background(SurfaceGrade.elevated.opacity(0.45))
 
             Text(text.isEmpty ? "命令无输出" : (text.count > 1800 ? String(text.prefix(1800)) + "\n\n… 共 \(text.count) 字，已截断" : text))
@@ -847,16 +850,16 @@ struct TerminalOutputCard: View {
                 .foregroundStyle(isFailure ? Semantic.error : TextGrade.secondary)
                 .lineLimit(isFailure ? 12 : 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(AppSpace.sm)
+                .padding(AppSpace.small)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.card)
         )
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.border.opacity(0.55), lineWidth: 0.6)
         )
     }
@@ -898,15 +901,15 @@ struct TextOutputCard: View {
     private let completedPreviewLimit = 2_200
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+        HStack(alignment: .top, spacing: AppSpace.small) {
             if isRunning || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 ProgressGlyph(icon: "sparkles", color: Brand.primary, isActive: true)
             }
 
             ZStack(alignment: .topTrailing) {
-                VStack(alignment: .leading, spacing: AppSpace.sm) {
+                VStack(alignment: .leading, spacing: AppSpace.small) {
                     if shouldShowHeader {
-                        HStack(spacing: AppSpace.xs) {
+                        HStack(spacing: AppSpace.extraSmall) {
                             if isRunning || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                 Text(statusText)
                                     .font(AppFont.captionMedium)
@@ -929,8 +932,8 @@ struct TextOutputCard: View {
                                 enablesTextSelection: false,
                                 forceFast: true
                             )
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
 
                             if isRunningLong {
                                 Button {
@@ -941,7 +944,7 @@ struct TextOutputCard: View {
                                         .foregroundStyle(Brand.primary)
                                 }
                                 .buttonStyle(.plain)
-                                .padding(.top, AppSpace.xs)
+                                .padding(.top, AppSpace.extraSmall)
                             }
                         } else {
                             AdaptiveMarkdownText(
@@ -949,10 +952,10 @@ struct TextOutputCard: View {
                                 fontSize: 14,
                                 enablesTextSelection: true
                             )
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
                             if isCompletedLong {
-                                HStack(spacing: AppSpace.sm) {
+                                HStack(spacing: AppSpace.small) {
                                     Button {
                                         showFullCompletedOutput.toggle()
                                     } label: {
@@ -972,7 +975,7 @@ struct TextOutputCard: View {
 
                                     Spacer()
                                 }
-                                .padding(.top, AppSpace.sm)
+                                .padding(.top, AppSpace.small)
                             }
                         }
 
@@ -985,15 +988,15 @@ struct TextOutputCard: View {
                         }
                     }
                 }
-                .padding(.horizontal, AppSpace.lg)
-                .padding(.vertical, AppSpace.md)
+                .padding(.horizontal, AppSpace.large)
+                .padding(.vertical, AppSpace.medium)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .fill(SurfaceGrade.card)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .strokeBorder(SurfaceGrade.hairline, lineWidth: 0.6)
                 )
                 .shadow(color: Color.black.opacity(0.018), radius: 2, y: 1)
@@ -1020,8 +1023,9 @@ struct TextOutputCard: View {
                     Divider()
 
                     Button {
-                        let service = NSSharingService(named: .composeEmail)
-                        ?? NSSharingService(named: .composeMessage)
+                        let service =
+                            NSSharingService(named: .composeEmail)
+                            ?? NSSharingService(named: .composeMessage)
                         if let service {
                             service.perform(withItems: [text as NSString])
                         } else {
@@ -1042,7 +1046,8 @@ struct TextOutputCard: View {
                     Divider()
 
                     if let responseMetrics = metrics {
-                        Button {} label: {
+                        Button {
+                        } label: {
                             Label(metricsLine(responseMetrics), systemImage: "gauge.with.dots.needle.33percent")
                         }
                         .disabled(true)
@@ -1141,10 +1146,10 @@ struct PausedCard: View {
     let taskID: UUID
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+        HStack(alignment: .top, spacing: AppSpace.small) {
             AvatarBadge(icon: "pause.circle.fill", color: Semantic.warning)
 
-            VStack(alignment: .leading, spacing: AppSpace.xs) {
+            VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                 Text("已暂停，可继续")
                     .font(AppFont.captionMedium)
                     .foregroundStyle(Semantic.warning)
@@ -1156,29 +1161,29 @@ struct PausedCard: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
 
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Button {
                         store.continueThread(id: taskID)
                     } label: {
                         Label("继续会话", systemImage: "play.fill")
                             .font(AppFont.captionMedium)
                             .foregroundStyle(.white)
-                            .padding(.horizontal, AppSpace.md)
-                            .padding(.vertical, AppSpace.sm)
+                            .padding(.horizontal, AppSpace.medium)
+                            .padding(.vertical, AppSpace.small)
                             .background(Capsule().fill(Brand.primary))
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, AppSpace.lg)
-            .padding(.vertical, AppSpace.md)
+            .padding(.horizontal, AppSpace.large)
+            .padding(.vertical, AppSpace.medium)
             .frame(maxWidth: 560, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .fill(Semantic.warningMuted.opacity(0.45))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .strokeBorder(Semantic.warning.opacity(0.15), lineWidth: 0.5)
             )
 
@@ -1199,11 +1204,11 @@ struct FailedCard: View {
     let taskID: UUID
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+        HStack(alignment: .top, spacing: AppSpace.small) {
             AvatarBadge(icon: "exclamationmark.triangle.fill", color: Semantic.error)
 
-            VStack(alignment: .leading, spacing: AppSpace.sm) {
-                HStack(spacing: AppSpace.sm) {
+            VStack(alignment: .leading, spacing: AppSpace.small) {
+                HStack(spacing: AppSpace.small) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(failureTitle)
                             .font(AppFont.captionMedium)
@@ -1213,11 +1218,11 @@ struct FailedCard: View {
                             .foregroundStyle(TextGrade.ghost)
                             .lineLimit(2)
                     }
-                    Spacer(minLength: AppSpace.sm)
+                    Spacer(minLength: AppSpace.small)
                     Text(failureKindLabel)
                         .font(AppFont.tiny)
                         .foregroundStyle(Semantic.error)
-                        .padding(.horizontal, AppSpace.sm)
+                        .padding(.horizontal, AppSpace.small)
                         .padding(.vertical, 3)
                         .background(Capsule().fill(Semantic.errorMuted.opacity(0.55)))
                 }
@@ -1229,7 +1234,7 @@ struct FailedCard: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
 
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     failureAction(icon: "arrow.clockwise", label: "重试", isPrimary: true) {
                         store.retryLastMessage()
                     }
@@ -1247,15 +1252,15 @@ struct FailedCard: View {
                     }
                 }
             }
-            .padding(.horizontal, AppSpace.lg)
-            .padding(.vertical, AppSpace.md)
+            .padding(.horizontal, AppSpace.large)
+            .padding(.vertical, AppSpace.medium)
             .frame(maxWidth: 560, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .fill(Semantic.errorMuted.opacity(0.55))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .strokeBorder(Semantic.error.opacity(0.15), lineWidth: 0.5)
             )
 
@@ -1305,11 +1310,13 @@ struct FailedCard: View {
     }
 
     private var isNetworkFailure: Bool {
-        step.text.contains("网络") || step.text.contains("连接") || step.text.localizedCaseInsensitiveContains("networkConnectionLost") || step.text.localizedCaseInsensitiveContains("timed out")
+        step.text.contains("网络") || step.text.contains("连接") || step.text.localizedCaseInsensitiveContains("networkConnectionLost")
+            || step.text.localizedCaseInsensitiveContains("timed out")
     }
 
     private var isAuthFailure: Bool {
-        step.text.contains("鉴权") || step.text.contains("401") || step.text.localizedCaseInsensitiveContains("API key") || step.text.localizedCaseInsensitiveContains("unauthorized")
+        step.text.contains("鉴权") || step.text.contains("401") || step.text.localizedCaseInsensitiveContains("API key")
+            || step.text.localizedCaseInsensitiveContains("unauthorized")
     }
 
     private var isWorkspaceFailure: Bool {
@@ -1321,8 +1328,8 @@ struct FailedCard: View {
             Label(label, systemImage: icon)
                 .font(AppFont.captionMedium)
                 .foregroundStyle(isPrimary ? Color.white : TextGrade.secondary)
-                .padding(.horizontal, AppSpace.md)
-                .padding(.vertical, AppSpace.sm)
+                .padding(.horizontal, AppSpace.medium)
+                .padding(.vertical, AppSpace.small)
                 .background(Capsule().fill(isPrimary ? Brand.primary : SurfaceGrade.elevated.opacity(0.62)))
                 .overlay(Capsule().strokeBorder(isPrimary ? Color.clear : SurfaceGrade.border.opacity(0.28), lineWidth: 0.5))
         }
@@ -1377,7 +1384,7 @@ struct OrchestrationDebugCard: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
             .padding(.vertical, 2)
         }
         .buttonStyle(.plain)
@@ -1387,14 +1394,14 @@ struct OrchestrationDebugCard: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(TextGrade.muted.opacity(0.7))
                 .textSelection(.enabled)
-                .padding(.horizontal, AppSpace.md)
-                .padding(.vertical, AppSpace.xs)
+                .padding(.horizontal, AppSpace.medium)
+                .padding(.vertical, AppSpace.extraSmall)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                         .fill(Brand.purple.opacity(0.03))
                 )
-                .padding(.horizontal, AppSpace.sm)
+                .padding(.horizontal, AppSpace.small)
         }
     }
 }

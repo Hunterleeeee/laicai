@@ -1,25 +1,30 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
     func testStartWorkflowCreatesTaskAndRunRecord() {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
-        let store = AppStore(state: .init(
-            workspaceName: "Test",
-            modeLabel: "Build",
-            sessions: [],
-            selectedSessionID: nil,
-            workbenchTab: .workflows,
-            connectors: [connector],
-            activeConnectorID: connector.id,
-            toolActivities: [],
-            workflowRuns: [],
-            draftMessage: "",
-            isGenerating: false,
-            settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false)
-        ))
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let store = AppStore(
+            state: .init(
+                workspaceName: "Test",
+                modeLabel: "Build",
+                sessions: [],
+                selectedSessionID: nil,
+                workbenchTab: .workflows,
+                connectors: [connector],
+                activeConnectorID: connector.id,
+                toolActivities: [],
+                workflowRuns: [],
+                draftMessage: "",
+                isGenerating: false,
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    showDebugPanels: false)
+            ))
 
         store.startWorkflow(named: "code-review")
 
@@ -33,22 +38,22 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
     }
     func testWorkflowParserSupportsFailureStrategyConditionsAndPromptBlocks() {
         let source = """
-        name: custom-review
-        description: 自定义审查
-        steps:
-          - name: 搜索
-            tool: code.search
-            on_failure: skip
-            params:
-              query: AppStore
-              scope: content
-          - name: 总结
-            tool: llm
-            when: previous.success
-            prompt: |
-              请总结：
-              {{previous.output}}
-        """
+            name: custom-review
+            description: 自定义审查
+            steps:
+              - name: 搜索
+                tool: code.search
+                on_failure: skip
+                params:
+                  query: AppStore
+                  scope: content
+              - name: 总结
+                tool: llm
+                when: previous.success
+                prompt: |
+                  请总结：
+                  {{previous.output}}
+            """
 
         let workflow = WorkflowParser.parse(source)
 
@@ -128,7 +133,8 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
         let tool = SkillManageTool()
 
         let created = try await tool.execute(
-            argumentsJSON: #"{"action":"create","name":"通用测试技能","description":"测试本地技能分类","tools":"web.search,file.read","instructions":"按步骤执行。","category":"通用"}"#,
+            argumentsJSON:
+                #"{"action":"create","name":"通用测试技能","description":"测试本地技能分类","tools":"web.search,file.read","instructions":"按步骤执行。","category":"通用"}"#,
             context: TaskContext(workspaceRoot: workspace.path)
         )
         let listed = try await tool.execute(
@@ -140,9 +146,10 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(created.data?["category"], "general")
         XCTAssertTrue(listed.output.contains("自定义"))
         XCTAssertTrue(listed.output.contains("通用测试技能"))
-        XCTAssertTrue(SkillRegistry.loadLocalSkills(workspaceRoot: workspace.path).contains {
-            $0.name == "通用测试技能" && $0.category == "general"
-        })
+        XCTAssertTrue(
+            SkillRegistry.loadLocalSkills(workspaceRoot: workspace.path).contains {
+                $0.name == "通用测试技能" && $0.category == "general"
+            })
     }
     func testBootstrapSelectsLatestThreadAcrossSessionsAndTasks() {
         let olderSession = ChatSession(

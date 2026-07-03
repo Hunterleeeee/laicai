@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - SkillHub UI — 技能市场浏览/安装/评分/统计
 
@@ -15,7 +15,7 @@ public struct SkillHubView: View {
     public init() {}
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             headerCard
             workbenchSearchField(text: $searchText, placeholder: "搜索技能…")
             categoryBar
@@ -24,7 +24,7 @@ public struct SkillHubView: View {
         .onAppear {
             registry.refresh(workspaceRoot: store.state.settings.workspacePath)
         }
-        .onChange(of: store.state.settings.workspacePath) { root in
+        .onChange(of: store.state.settings.workspacePath) { _, root in
             registry.refresh(workspaceRoot: root)
         }
         .sheet(isPresented: $showingCreateSheet) {
@@ -44,7 +44,7 @@ public struct SkillHubView: View {
             subtitle: registry.skills.isEmpty ? "沉淀常用能力，之后直接调用。" : "\(registry.skills.count) 个可用 · 找到技能后点一下带入当前会话",
             tint: Brand.purple
         ) {
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 Button {
                     registry.refresh(workspaceRoot: store.state.settings.workspacePath)
                     ToastCenter.shared.success("已刷新技能")
@@ -55,20 +55,22 @@ public struct SkillHubView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Brand.purple)
-                .padding(.vertical, AppSpace.sm)
-                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.62)))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.8), lineWidth: 0.6))
+                .padding(.vertical, AppSpace.small)
+                .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.62)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.8), lineWidth: 0.6))
 
-                Button { showingCreateSheet = true } label: {
+                Button {
+                    showingCreateSheet = true
+                } label: {
                     Label("新建", systemImage: "plus")
                         .font(AppFont.captionMedium)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Brand.purple)
-                .padding(.vertical, AppSpace.sm)
-                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Brand.purple.opacity(0.10)))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(Brand.purple.opacity(0.18), lineWidth: 0.6))
+                .padding(.vertical, AppSpace.small)
+                .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(Brand.purple.opacity(0.10)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(Brand.purple.opacity(0.18), lineWidth: 0.6))
             }
         }
     }
@@ -90,8 +92,8 @@ public struct SkillHubView: View {
                             .padding(.vertical, 5)
                             .background(
                                 isActive
-                                ? AnyShapeStyle(Brand.purple.opacity(0.10))
-                                : AnyShapeStyle(Color.clear)
+                                    ? AnyShapeStyle(Brand.purple.opacity(0.10))
+                                    : AnyShapeStyle(Color.clear)
                             )
                             .overlay(
                                 Capsule()
@@ -122,7 +124,7 @@ public struct SkillHubView: View {
     }
 
     private var skillList: some View {
-        LazyVStack(alignment: .leading, spacing: AppSpace.sm) {
+        LazyVStack(alignment: .leading, spacing: AppSpace.small) {
             if filteredSkills.isEmpty {
                 workbenchEmptyState(icon: "sparkle.magnifyingglass", title: "暂无匹配技能", hint: "换个关键词或新建一个自己的技能")
             } else {
@@ -232,92 +234,94 @@ struct SkillCard: View {
 
     private var skillIcon: String {
         // Map well-known skills to distinctive icons
-        let n = skill.name
-        if n.contains("演示") || n.contains("PPT") { return "rectangle.on.rectangle.angled" }
-        if n.contains("UI") || n.contains("界面") || n.contains("设计") { return "paintpalette" }
-        if n.contains("审查") && n.contains("代码") { return "checkmark.shield" }
-        if n.contains("测试") { return "testtube.2" }
-        if n.contains("调试") { return "ladybug" }
-        if n.contains("重构") { return "arrow.triangle.2.circlepath" }
-        if n.contains("文档") || n.contains("README") { return "doc.text" }
-        if n.contains("翻译") || n.contains("多语言") { return "globe" }
-        if n.contains("搜索") { return "magnifyingglass" }
-        if n.contains("读取") { return "doc.viewfinder" }
-        if n.contains("项目概览") || n.contains("架构") { return "building.columns" }
-        if n.contains("Git") { return "arrow.triangle.branch" }
-        if n.contains("依赖") { return "link" }
-        if n.contains("性能") { return "gauge.with.dots.needle.67percent" }
-        if n.contains("安全") { return "lock.shield" }
-        if n.contains("修改") || n.contains("编辑") { return "pencil.line" }
-        if n.contains("重命名") { return "textformat" }
-        if n.contains("格式化") { return "text.alignleft" }
-        if n.contains("类型注解") { return "t.square" }
-        if n.contains("API") { return "network" }
-        if n.contains("数据模型") { return "cylinder" }
-        if n.contains("配置") { return "gearshape.2" }
-        if n.contains("错误处理") { return "exclamationmark.triangle" }
-        if n.contains("执行命令") { return "terminal" }
-        if n.contains("构建验证") { return "hammer" }
-        if n.contains("环境") { return "cpu" }
-        if n.contains("网页搜索") { return "safari" }
-        if n.contains("调研") || n.contains("竞品") { return "chart.bar.doc.horizontal" }
-        if n.contains("知识页") || n.contains("Wiki") { return "book" }
-        if n.contains("链接") || n.contains("总结") { return "link.circle" }
-        if n.contains("论文") { return "graduationcap" }
-        if n.contains("解释代码") { return "text.book.closed" }
-        if n.contains("需求") { return "list.clipboard" }
-        if n.contains("代码转换") { return "arrow.left.arrow.right" }
-        if n.contains("正则") { return "textformat.abc.dottedunderline" }
-        if n.contains("SQL") { return "tablecells" }
-        if n.contains("Prompt") { return "sparkles" }
-        if n.contains("Commit") { return "checkmark.message" }
-        if n.contains("PR") { return "arrow.triangle.pull" }
-        if n.contains("Changelog") { return "clock.arrow.circlepath" }
-        if n.contains("CI/CD") { return "arrow.circlepath" }
-        if n.contains("迁移") { return "arrow.right.arrow.left" }
-        if n.contains("代码问答") { return "questionmark.bubble" }
-        if n.contains("学习") { return "map" }
-        if n.contains("面试") { return "person.crop.rectangle" }
-        if n.contains("营销文案") { return "megaphone" }
-        if n.contains("小红书") { return "heart.text.square" }
-        if n.contains("公众号") { return "newspaper" }
-        if n.contains("视频脚本") || n.contains("短视频") { return "video" }
-        if n.contains("SEO") { return "chart.line.uptrend.xyaxis" }
-        if n.contains("广告") { return "rectangle.and.text.magnifyingglass" }
-        if n.contains("评价回复") { return "star.bubble" }
-        if n.contains("PRD") { return "doc.plaintext" }
-        if n.contains("用户故事") { return "person.text.rectangle" }
-        if n.contains("优先级") { return "list.number" }
-        if n.contains("问卷") { return "checklist" }
-        if n.contains("发布计划") { return "calendar.badge.checkmark" }
-        if n.contains("长文") { return "doc.richtext" }
-        if n.contains("周报") || n.contains("日报") { return "note.text" }
-        if n.contains("邮件") { return "envelope" }
-        if n.contains("会议纪要") { return "person.3" }
-        if n.contains("文风改写") { return "textformat.size" }
-        if n.contains("数据分析") { return "chart.bar" }
-        if n.contains("Excel") { return "tablecells" }
-        if n.contains("可视化") { return "chart.pie" }
-        if n.contains("商业计划") { return "briefcase" }
-        if n.contains("合同") { return "doc.text.magnifyingglass" }
-        if n.contains("JD") { return "person.badge.plus" }
-        if n.contains("OKR") { return "target" }
-        if n.contains("方案书") || n.contains("客户方案") { return "doc.badge.gearshape" }
-        if n.contains("SWOT") { return "square.grid.2x2" }
+        let skillName = skill.name
+        if skillName.contains("演示") || skillName.contains("PPT") { return "rectangle.on.rectangle.angled" }
+        if skillName.contains("UI") || skillName.contains("界面") || skillName.contains("设计") { return "paintpalette" }
+        if skillName.contains("审查") && skillName.contains("代码") { return "checkmark.shield" }
+        if skillName.contains("测试") { return "testtube.2" }
+        if skillName.contains("调试") { return "ladybug" }
+        if skillName.contains("重构") { return "arrow.triangle.2.circlepath" }
+        if skillName.contains("文档") || skillName.contains("README") { return "doc.text" }
+        if skillName.contains("翻译") || skillName.contains("多语言") { return "globe" }
+        if skillName.contains("搜索") { return "magnifyingglass" }
+        if skillName.contains("读取") { return "doc.viewfinder" }
+        if skillName.contains("项目概览") || skillName.contains("架构") { return "building.columns" }
+        if skillName.contains("Git") { return "arrow.triangle.branch" }
+        if skillName.contains("依赖") { return "link" }
+        if skillName.contains("性能") { return "gauge.with.dots.needle.67percent" }
+        if skillName.contains("安全") { return "lock.shield" }
+        if skillName.contains("修改") || skillName.contains("编辑") { return "pencil.line" }
+        if skillName.contains("重命名") { return "textformat" }
+        if skillName.contains("格式化") { return "text.alignleft" }
+        if skillName.contains("类型注解") { return "t.square" }
+        if skillName.contains("API") { return "network" }
+        if skillName.contains("数据模型") { return "cylinder" }
+        if skillName.contains("配置") { return "gearshape.2" }
+        if skillName.contains("错误处理") { return "exclamationmark.triangle" }
+        if skillName.contains("执行命令") { return "terminal" }
+        if skillName.contains("构建验证") { return "hammer" }
+        if skillName.contains("环境") { return "cpu" }
+        if skillName.contains("网页搜索") { return "safari" }
+        if skillName.contains("调研") || skillName.contains("竞品") { return "chart.bar.doc.horizontal" }
+        if skillName.contains("知识页") || skillName.contains("Wiki") { return "book" }
+        if skillName.contains("链接") || skillName.contains("总结") { return "link.circle" }
+        if skillName.contains("论文") { return "graduationcap" }
+        if skillName.contains("解释代码") { return "text.book.closed" }
+        if skillName.contains("需求") { return "list.clipboard" }
+        if skillName.contains("代码转换") { return "arrow.left.arrow.right" }
+        if skillName.contains("正则") { return "textformat.abc.dottedunderline" }
+        if skillName.contains("SQL") { return "tablecells" }
+        if skillName.contains("Prompt") { return "sparkles" }
+        if skillName.contains("Commit") { return "checkmark.message" }
+        if skillName.contains("PR") { return "arrow.triangle.pull" }
+        if skillName.contains("Changelog") { return "clock.arrow.circlepath" }
+        if skillName.contains("CI/CD") { return "arrow.circlepath" }
+        if skillName.contains("迁移") { return "arrow.right.arrow.left" }
+        if skillName.contains("代码问答") { return "questionmark.bubble" }
+        if skillName.contains("学习") { return "map" }
+        if skillName.contains("面试") { return "person.crop.rectangle" }
+        if skillName.contains("营销文案") { return "megaphone" }
+        if skillName.contains("小红书") { return "heart.text.square" }
+        if skillName.contains("公众号") { return "newspaper" }
+        if skillName.contains("视频脚本") || skillName.contains("短视频") { return "video" }
+        if skillName.contains("SEO") { return "chart.line.uptrend.xyaxis" }
+        if skillName.contains("广告") { return "rectangle.and.text.magnifyingglass" }
+        if skillName.contains("评价回复") { return "star.bubble" }
+        if skillName.contains("PRD") { return "doc.plaintext" }
+        if skillName.contains("用户故事") { return "person.text.rectangle" }
+        if skillName.contains("优先级") { return "list.number" }
+        if skillName.contains("问卷") { return "checklist" }
+        if skillName.contains("发布计划") { return "calendar.badge.checkmark" }
+        if skillName.contains("长文") { return "doc.richtext" }
+        if skillName.contains("周报") || skillName.contains("日报") { return "note.text" }
+        if skillName.contains("邮件") { return "envelope" }
+        if skillName.contains("会议纪要") { return "person.3" }
+        if skillName.contains("文风改写") { return "textformat.size" }
+        if skillName.contains("数据分析") { return "chart.bar" }
+        if skillName.contains("Excel") { return "tablecells" }
+        if skillName.contains("可视化") { return "chart.pie" }
+        if skillName.contains("商业计划") { return "briefcase" }
+        if skillName.contains("合同") { return "doc.text.magnifyingglass" }
+        if skillName.contains("JD") { return "person.badge.plus" }
+        if skillName.contains("OKR") { return "target" }
+        if skillName.contains("方案书") || skillName.contains("客户方案") { return "doc.badge.gearshape" }
+        if skillName.contains("SWOT") { return "square.grid.2x2" }
         // Fallback: match by description keywords for custom skills
-        let d = skill.description.lowercased()
-        if d.contains("ppt") || d.contains("slide") || d.contains("演示") || d.contains("汇报") { return "rectangle.on.rectangle.angled" }
-        if d.contains("ui") || d.contains("ux") || d.contains("界面") || d.contains("设计") { return "paintpalette" }
-        if d.contains("网站") || d.contains("web") || d.contains("html") { return "globe" }
-        if d.contains("数据") || d.contains("data") || d.contains("报表") { return "chart.bar" }
-        if d.contains("邮件") || d.contains("email") { return "envelope" }
-        if d.contains("视频") || d.contains("video") { return "video" }
-        if d.contains("图片") || d.contains("image") || d.contains("配图") { return "photo" }
-        if d.contains("写作") || d.contains("文章") || d.contains("内容") { return "doc.richtext" }
-        if d.contains("代码") || d.contains("code") { return "chevron.left.forwardslash.chevron.right" }
-        if d.contains("搜索") || d.contains("search") { return "magnifyingglass" }
-        if d.contains("分析") || d.contains("analysis") { return "chart.bar.doc.horizontal" }
-        if d.contains("翻译") || d.contains("translate") { return "globe" }
+        let description = skill.description.lowercased()
+        if description.contains("ppt") || description.contains("slide") || description.contains("演示") || description.contains("汇报") {
+            return "rectangle.on.rectangle.angled"
+        }
+        if description.contains("ui") || description.contains("ux") || description.contains("界面") || description.contains("设计") { return "paintpalette" }
+        if description.contains("网站") || description.contains("web") || description.contains("html") { return "globe" }
+        if description.contains("数据") || description.contains("data") || description.contains("报表") { return "chart.bar" }
+        if description.contains("邮件") || description.contains("email") { return "envelope" }
+        if description.contains("视频") || description.contains("video") { return "video" }
+        if description.contains("图片") || description.contains("image") || description.contains("配图") { return "photo" }
+        if description.contains("写作") || description.contains("文章") || description.contains("内容") { return "doc.richtext" }
+        if description.contains("代码") || description.contains("code") { return "chevron.left.forwardslash.chevron.right" }
+        if description.contains("搜索") || description.contains("search") { return "magnifyingglass" }
+        if description.contains("分析") || description.contains("analysis") { return "chart.bar.doc.horizontal" }
+        if description.contains("翻译") || description.contains("translate") { return "globe" }
         return category.icon
     }
 
@@ -383,7 +387,7 @@ struct SkillCard: View {
                 .strokeBorder(hovered ? accentColor.opacity(0.22) : SurfaceGrade.hairline.opacity(0.58), lineWidth: 0.6)
         )
         .contentShape(Rectangle())
-        .onHover { h in withAnimation(AppAnimation.quick) { hovered = h } }
+        .onHover { hovering in withAnimation(AppAnimation.quick) { hovered = hovering } }
     }
 }
 
@@ -397,7 +401,7 @@ struct SkillDetailSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Header
-            HStack(spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.medium) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Brand.primary.opacity(0.1))
@@ -415,7 +419,9 @@ struct SkillDetailSheet: View {
                         .foregroundStyle(TextGrade.muted)
                 }
                 Spacer()
-                Button { dismiss() } label: {
+                Button {
+                    dismiss()
+                } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(TextGrade.muted)
@@ -429,8 +435,8 @@ struct SkillDetailSheet: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 detailRow("模型偏好", value: skill.modelPreference.title)
-                if let wf = skill.workflowName {
-                    detailRow("流程", value: wf)
+                if let workflow = skill.workflowName {
+                    detailRow("流程", value: workflow)
                 }
                 if !skill.tools.isEmpty {
                     detailRow("工具", value: skill.tools.joined(separator: ", "))
@@ -454,7 +460,7 @@ struct SkillDetailSheet: View {
                             .foregroundStyle(TextGrade.secondary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.elevated))
+                            .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.elevated))
                     }
                     .buttonStyle(.plain)
                 }
@@ -468,7 +474,7 @@ struct SkillDetailSheet: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 7)
-                        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Brand.premiumGradient))
+                        .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(Brand.premiumGradient))
                 }
                 .buttonStyle(.plain)
             }
@@ -479,7 +485,7 @@ struct SkillDetailSheet: View {
     }
 
     private func detailRow(_ label: String, value: String) -> some View {
-        HStack(alignment: .top, spacing: AppSpace.md) {
+        HStack(alignment: .top, spacing: AppSpace.medium) {
             Text(label)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(TextGrade.ghost)
@@ -518,7 +524,9 @@ struct SkillCreateSheet: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(TextGrade.primary)
                 Spacer()
-                Button { dismiss() } label: {
+                Button {
+                    dismiss()
+                } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(TextGrade.muted)
@@ -565,8 +573,8 @@ struct SkillCreateSheet: View {
 
                 createField("模型偏好") {
                     Picker("", selection: $preference) {
-                        ForEach(ModelPreference.allCases, id: \.self) { p in
-                            Text(p.title).tag(p)
+                        ForEach(ModelPreference.allCases, id: \.self) { modelPreference in
+                            Text(modelPreference.title).tag(modelPreference)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -595,7 +603,7 @@ struct SkillCreateSheet: View {
                         .padding(.horizontal, 18)
                         .padding(.vertical, 7)
                         .background(
-                            RoundedRectangle(cornerRadius: AppRadius.md)
+                            RoundedRectangle(cornerRadius: AppRadius.medium)
                                 .fill(name.isEmpty ? AnyShapeStyle(SurfaceGrade.elevated) : AnyShapeStyle(Brand.premiumGradient))
                         )
                 }
@@ -617,9 +625,9 @@ struct SkillCreateSheet: View {
                 .foregroundStyle(TextGrade.ghost)
                 .textCase(.uppercase)
             content()
-                .padding(AppSpace.sm)
-                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.border.opacity(0.15), lineWidth: 0.5))
+                .padding(AppSpace.small)
+                .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.border.opacity(0.15), lineWidth: 0.5))
         }
     }
 
@@ -652,9 +660,9 @@ public struct ModelRegressionPanel: View {
     public init() {}
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             // Header
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(Brand.primary.opacity(0.12))
@@ -704,7 +712,7 @@ public struct ModelRegressionPanel: View {
                     }
                 }
             } else {
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Image(systemName: "info.circle")
                         .font(.system(size: 11))
                         .foregroundStyle(TextGrade.ghost)
@@ -712,16 +720,16 @@ public struct ModelRegressionPanel: View {
                         .font(.system(size: 11))
                         .foregroundStyle(TextGrade.ghost)
                 }
-                .padding(.vertical, AppSpace.sm)
+                .padding(.vertical, AppSpace.small)
             }
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(SurfaceGrade.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(SurfaceGrade.border.opacity(0.2), lineWidth: 0.5)
         )
     }
@@ -736,7 +744,7 @@ public struct ModelRegressionPanel: View {
                     expandedResult = isExpanded ? nil : result.id
                 }
             } label: {
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     // Status badge
                     Circle()
                         .fill(result.overallPassed ? Semantic.success : Semantic.error)
@@ -750,15 +758,15 @@ public struct ModelRegressionPanel: View {
 
                     // Capability pills
                     HStack(spacing: 3) {
-                        ForEach(result.results, id: \.check) { cr in
-                            Text(checkShortLabel(cr.check))
+                        ForEach(result.results, id: \.check) { checkResult in
+                            Text(checkShortLabel(checkResult.check))
                                 .font(.system(size: 8, weight: .semibold))
-                                .foregroundStyle(cr.passed ? Semantic.success : Semantic.error)
+                                .foregroundStyle(checkResult.passed ? Semantic.success : Semantic.error)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 2)
                                 .background(
                                     RoundedRectangle(cornerRadius: 3)
-                                        .fill((cr.passed ? Semantic.success : Semantic.error).opacity(0.1))
+                                        .fill((checkResult.passed ? Semantic.success : Semantic.error).opacity(0.1))
                                 )
                         }
                     }
@@ -776,29 +784,29 @@ public struct ModelRegressionPanel: View {
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
                 .padding(.vertical, 6)
-                .padding(.horizontal, AppSpace.sm)
+                .padding(.horizontal, AppSpace.small)
             }
             .buttonStyle(.plain)
 
             // Expanded detail
             if isExpanded {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(result.results, id: \.check) { cr in
-                        HStack(spacing: AppSpace.sm) {
-                            Image(systemName: cr.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    ForEach(result.results, id: \.check) { checkResult in
+                        HStack(spacing: AppSpace.small) {
+                            Image(systemName: checkResult.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
                                 .font(.system(size: 10))
-                                .foregroundStyle(cr.passed ? Semantic.success : Semantic.error)
-                            Text(checkLabel(cr.check))
+                                .foregroundStyle(checkResult.passed ? Semantic.success : Semantic.error)
+                            Text(checkLabel(checkResult.check))
                                 .font(.system(size: 11))
                                 .foregroundStyle(TextGrade.secondary)
                             Spacer()
-                            if !cr.detail.isEmpty {
-                                Text(cr.detail)
+                            if !checkResult.detail.isEmpty {
+                                Text(checkResult.detail)
                                     .font(.system(size: 9))
                                     .foregroundStyle(TextGrade.ghost)
                                     .lineLimit(1)
                             }
-                            Text("\(cr.latencyMs)ms")
+                            Text("\(checkResult.latencyMs)ms")
                                 .font(.system(size: 9, design: .monospaced))
                                 .foregroundStyle(TextGrade.ghost)
                         }
@@ -811,13 +819,13 @@ public struct ModelRegressionPanel: View {
                             .padding(.top, 2)
                     }
                 }
-                .padding(.horizontal, AppSpace.md)
-                .padding(.bottom, AppSpace.sm)
+                .padding(.horizontal, AppSpace.medium)
+                .padding(.bottom, AppSpace.small)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.elevated.opacity(0.5))
         )
     }
@@ -857,8 +865,8 @@ public struct TeleportPanel: View {
     public init() {}
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(spacing: AppSpace.small) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(Brand.primary.opacity(0.1))
@@ -872,7 +880,7 @@ public struct TeleportPanel: View {
                     .foregroundStyle(TextGrade.primary)
             }
 
-            HStack(spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.medium) {
                 Button {
                     exportSessions()
                 } label: {
@@ -885,7 +893,7 @@ public struct TeleportPanel: View {
                     .foregroundStyle(TextGrade.secondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.elevated))
+                    .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.elevated))
                 }
                 .buttonStyle(.plain)
 
@@ -901,7 +909,7 @@ public struct TeleportPanel: View {
                     .foregroundStyle(TextGrade.secondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.elevated))
+                    .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.elevated))
                 }
                 .buttonStyle(.plain)
             }
@@ -913,13 +921,13 @@ public struct TeleportPanel: View {
                     .transition(.opacity)
             }
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(SurfaceGrade.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(SurfaceGrade.border.opacity(0.12), lineWidth: 0.5)
         )
     }

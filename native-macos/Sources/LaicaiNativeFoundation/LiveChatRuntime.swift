@@ -1,6 +1,50 @@
 import Foundation
 import LaicaiNativeDomain
 
+private enum RawJSONValue: Codable, Sendable {
+    case object([String: RawJSONValue])
+    case array([RawJSONValue])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([RawJSONValue].self) {
+            self = .array(value)
+        } else {
+            self = .object(try container.decode([String: RawJSONValue].self))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
+
+    var jsonString: String {
+        guard let data = try? JSONEncoder().encode(self),
+              let text = String(data: data, encoding: .utf8) else { return "{}" }
+        return text
+    }
+}
+
 // MARK: - Request / Response Types
 
 public struct ChatCompletionRequest: Codable, Sendable, Equatable {
@@ -37,62 +81,64 @@ public struct ChatCompletionRequest: Codable, Sendable, Equatable {
     }
 }
 
-public struct ChatCompletionResponse: Codable, Sendable, Equatable {
-    public struct Choice: Codable, Sendable, Equatable {
-        public struct Message: Codable, Sendable, Equatable {
-            public var role: String?
-            public var content: String?
-            public var reasoningContent: String?
-            public var reasoning: String?
-            public var toolCalls: [FunctionCallResponse]?
+public struct ChatCompletionMessage: Codable, Sendable, Equatable {
+    public var role: String?
+    public var content: String?
+    public var reasoningContent: String?
+    public var reasoning: String?
+    public var toolCalls: [FunctionCallResponse]?
 
-            private enum CodingKeys: String, CodingKey {
-                case role
-                case content
-                case reasoningContent = "reasoning_content"
-                case reasoning
-                case toolCalls = "tool_calls"
-            }
-
-            public init(from decoder: Decoder) throws {
-                let container = try decoder.container(keyedBy: CodingKeys.self)
-                role = try container.decodeIfPresent(String.self, forKey: .role)
-                content = try container.decodeIfPresent(String.self, forKey: .content)
-                reasoningContent = try container.decodeIfPresent(String.self, forKey: .reasoningContent)
-                reasoning = try container.decodeIfPresent(String.self, forKey: .reasoning)
-                toolCalls = try container.decodeIfPresent([FunctionCallResponse].self, forKey: .toolCalls)
-            }
-
-            public func encode(to encoder: Encoder) throws {
-                var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(role, forKey: .role)
-                try container.encodeIfPresent(content, forKey: .content)
-                try container.encodeIfPresent(reasoningContent, forKey: .reasoningContent)
-                try container.encodeIfPresent(reasoning, forKey: .reasoning)
-                try container.encodeIfPresent(toolCalls, forKey: .toolCalls)
-            }
-        }
-        public var message: Message
-        public var finishReason: String?
-
-        private enum CodingKeys: String, CodingKey {
-            case message
-            case finishReason = "finish_reason"
-        }
-
-        public init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            message = try container.decode(Message.self, forKey: .message)
-            finishReason = try container.decodeIfPresent(String.self, forKey: .finishReason)
-        }
-
-        public func encode(to encoder: Encoder) throws {
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(message, forKey: .message)
-            try container.encodeIfPresent(finishReason, forKey: .finishReason)
-        }
+    private enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case reasoningContent = "reasoning_content"
+        case reasoning
+        case toolCalls = "tool_calls"
     }
-    public var choices: [Choice]
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        role = try container.decodeIfPresent(String.self, forKey: .role)
+        content = try container.decodeIfPresent(String.self, forKey: .content)
+        reasoningContent = try container.decodeIfPresent(String.self, forKey: .reasoningContent)
+        reasoning = try container.decodeIfPresent(String.self, forKey: .reasoning)
+        toolCalls = try container.decodeIfPresent([FunctionCallResponse].self, forKey: .toolCalls)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(role, forKey: .role)
+        try container.encodeIfPresent(content, forKey: .content)
+        try container.encodeIfPresent(reasoningContent, forKey: .reasoningContent)
+        try container.encodeIfPresent(reasoning, forKey: .reasoning)
+        try container.encodeIfPresent(toolCalls, forKey: .toolCalls)
+    }
+}
+
+public struct ChatCompletionChoice: Codable, Sendable, Equatable {
+    public var message: ChatCompletionMessage
+    public var finishReason: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case message
+        case finishReason = "finish_reason"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        message = try container.decode(ChatCompletionMessage.self, forKey: .message)
+        finishReason = try container.decodeIfPresent(String.self, forKey: .finishReason)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(message, forKey: .message)
+        try container.encodeIfPresent(finishReason, forKey: .finishReason)
+    }
+}
+
+public struct ChatCompletionResponse: Codable, Sendable, Equatable {
+    public var choices: [ChatCompletionChoice]
     public var usage: TokenUsage?
 }
 
@@ -108,50 +154,52 @@ public struct TokenUsage: Codable, Sendable, Equatable {
     }
 }
 
-public struct StreamChunk: Codable, Sendable, Equatable {
-    public struct Choice: Codable, Sendable, Equatable {
-        public struct Delta: Codable, Sendable, Equatable {
-            public var role: String?
-            public var content: String?
-            public var reasoningContent: String?
-            public var reasoning: String?
-            public var toolCalls: [StreamingToolCall]?
+public struct StreamDelta: Codable, Sendable, Equatable {
+    public var role: String?
+    public var content: String?
+    public var reasoningContent: String?
+    public var reasoning: String?
+    public var toolCalls: [StreamingToolCall]?
 
-            private enum CodingKeys: String, CodingKey {
-                case role
-                case content
-                case reasoningContent = "reasoning_content"
-                case reasoning
-                case toolCalls = "tool_calls"
-            }
-
-            public init(from decoder: Decoder) throws {
-                let container = try decoder.container(keyedBy: CodingKeys.self)
-                role = try container.decodeIfPresent(String.self, forKey: .role)
-                content = try container.decodeIfPresent(String.self, forKey: .content)
-                reasoningContent = try container.decodeIfPresent(String.self, forKey: .reasoningContent)
-                reasoning = try container.decodeIfPresent(String.self, forKey: .reasoning)
-                toolCalls = try container.decodeIfPresent([StreamingToolCall].self, forKey: .toolCalls)
-            }
-
-            public func encode(to encoder: Encoder) throws {
-                var container = encoder.container(keyedBy: CodingKeys.self)
-                try container.encodeIfPresent(role, forKey: .role)
-                try container.encodeIfPresent(content, forKey: .content)
-                try container.encodeIfPresent(reasoningContent, forKey: .reasoningContent)
-                try container.encodeIfPresent(reasoning, forKey: .reasoning)
-                try container.encodeIfPresent(toolCalls, forKey: .toolCalls)
-            }
-        }
-        public var delta: Delta
-        public var finishReason: String?
-
-        private enum CodingKeys: String, CodingKey {
-            case delta
-            case finishReason = "finish_reason"
-        }
+    private enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case reasoningContent = "reasoning_content"
+        case reasoning
+        case toolCalls = "tool_calls"
     }
-    public var choices: [Choice]
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        role = try container.decodeIfPresent(String.self, forKey: .role)
+        content = try container.decodeIfPresent(String.self, forKey: .content)
+        reasoningContent = try container.decodeIfPresent(String.self, forKey: .reasoningContent)
+        reasoning = try container.decodeIfPresent(String.self, forKey: .reasoning)
+        toolCalls = try container.decodeIfPresent([StreamingToolCall].self, forKey: .toolCalls)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(role, forKey: .role)
+        try container.encodeIfPresent(content, forKey: .content)
+        try container.encodeIfPresent(reasoningContent, forKey: .reasoningContent)
+        try container.encodeIfPresent(reasoning, forKey: .reasoning)
+        try container.encodeIfPresent(toolCalls, forKey: .toolCalls)
+    }
+}
+
+public struct StreamChoice: Codable, Sendable, Equatable {
+    public var delta: StreamDelta
+    public var finishReason: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case delta
+        case finishReason = "finish_reason"
+    }
+}
+
+public struct StreamChunk: Codable, Sendable, Equatable {
+    public var choices: [StreamChoice]
     public var usage: TokenUsage?
 }
 
@@ -181,21 +229,22 @@ public struct StreamingFunctionCall: Codable, Sendable, Equatable {
 }
 
 // Ollama native /api/chat response chunk
-public struct OllamaChatChunk: Codable, Sendable, Equatable {
-    public struct Message: Codable, Sendable, Equatable {
-        public var role: String?
-        public var content: String?
-        public var thinking: String?
-        public var toolCalls: [FunctionCallResponse]?
+public struct OllamaChatMessage: Codable, Sendable, Equatable {
+    public var role: String?
+    public var content: String?
+    public var thinking: String?
+    public var toolCalls: [FunctionCallResponse]?
 
-        private enum CodingKeys: String, CodingKey {
-            case role
-            case content
-            case thinking
-            case toolCalls = "tool_calls"
-        }
+    private enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case thinking
+        case toolCalls = "tool_calls"
     }
-    public var message: Message?
+}
+
+public struct OllamaChatChunk: Codable, Sendable, Equatable {
+    public var message: OllamaChatMessage?
     public var done: Bool?
     public var totalDuration: Int?
     public var promptEvalCount: Int?
@@ -212,22 +261,22 @@ public struct OllamaChatChunk: Codable, Sendable, Equatable {
     }
 }
 
-public struct OllamaChatRequest: Codable, Sendable, Equatable {
-    public struct Options: Codable, Sendable, Equatable {
-        public var numPredict: Int?
-        public var numContext: Int?
+public struct OllamaChatOptions: Codable, Sendable, Equatable {
+    public var numPredict: Int?
+    public var numContext: Int?
 
-        private enum CodingKeys: String, CodingKey {
-            case numPredict = "num_predict"
-            case numContext = "num_ctx"
-        }
+    private enum CodingKeys: String, CodingKey {
+        case numPredict = "num_predict"
+        case numContext = "num_ctx"
     }
+}
 
+public struct OllamaChatRequest: Codable, Sendable, Equatable {
     public var model: String
     public var messages: [ChatMessage]
     public var stream: Bool
     public var think: Bool?
-    public var options: Options?
+    public var options: OllamaChatOptions?
     public var tools: [ToolDefinition]?
     public var keepAlive: String?
 
@@ -251,9 +300,9 @@ private struct AnthropicMessagesRequest: Encodable {
     var model: String
     var maxTokens: Int
     var system: String?
-    var messages: [AnthropicMessage]
+    var messages: [AnthropicRequestMessage]
     var stream: Bool
-    var tools: [AnthropicTool]?
+    var tools: [AnthropicRequestTool]?
     var temperature: Double?
 
     private enum CodingKeys: String, CodingKey {
@@ -265,22 +314,22 @@ private struct AnthropicMessagesRequest: Encodable {
         case tools
         case temperature
     }
+}
 
-    struct AnthropicMessage: Encodable {
-        var role: String
-        var content: AnyEncodable
-    }
+private struct AnthropicRequestMessage: Encodable {
+    var role: String
+    var content: AnyEncodable
+}
 
-    struct AnthropicTool: Encodable {
-        var name: String
-        var description: String
-        var inputSchema: AnyEncodable
+private struct AnthropicRequestTool: Encodable {
+    var name: String
+    var description: String
+    var inputSchema: AnyEncodable
 
-        private enum CodingKeys: String, CodingKey {
-            case name
-            case description
-            case inputSchema = "input_schema"
-        }
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case description
+        case inputSchema = "input_schema"
     }
 }
 
@@ -380,9 +429,9 @@ private enum AnthropicContentBlock: Encodable {
 private struct AnthropicStreamEvent: Decodable {
     var type: String
     var index: Int?
-    var delta: Delta?
+    var delta: AnthropicStreamDelta?
     var message: AnthropicMessageResponse?
-    var contentBlock: ContentBlock?
+    var contentBlock: AnthropicStreamContentBlock?
     var usage: AnthropicUsage?
 
     private enum CodingKeys: String, CodingKey {
@@ -393,86 +442,95 @@ private struct AnthropicStreamEvent: Decodable {
         case contentBlock = "content_block"
         case usage
     }
+}
 
-    struct Delta: Decodable {
-        var type: String?
-        var text: String?
-        var thinking: String?
-        var partialJSON: String?
-        var stopReason: String?
+private struct AnthropicStreamDelta: Decodable {
+    var type: String?
+    var text: String?
+    var thinking: String?
+    var partialJSON: String?
+    var stopReason: String?
 
-        private enum CodingKeys: String, CodingKey {
-            case type
-            case text
-            case thinking
-            case partialJSON = "partial_json"
-            case stopReason = "stop_reason"
-        }
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case text
+        case thinking
+        case partialJSON = "partial_json"
+        case stopReason = "stop_reason"
     }
+}
 
-    struct ContentBlock: Decodable {
-        var type: String
-        var id: String?
-        var name: String?
-        var text: String?
-        var thinking: String?
+private struct AnthropicStreamContentBlock: Decodable {
+    var type: String
+    var id: String?
+    var name: String?
+    var text: String?
+    var thinking: String?
+    var input: RawJSONValue?
+}
+
+private struct AnthropicMessageResponse: Decodable {
+    var id: String?
+    var content: [AnthropicStreamContentBlock]?
+    var usage: AnthropicUsage?
+    var stopReason: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case content
+        case usage
+        case stopReason = "stop_reason"
     }
+}
 
-    struct AnthropicMessageResponse: Decodable {
-        var id: String?
-        var content: [ContentBlock]?
-        var usage: AnthropicUsage?
-        var stopReason: String?
+private struct AnthropicUsage: Decodable {
+    var inputTokens: Int?
+    var outputTokens: Int?
 
-        private enum CodingKeys: String, CodingKey {
-            case id
-            case content
-            case usage
-            case stopReason = "stop_reason"
-        }
+    private enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
     }
+}
 
-    struct AnthropicUsage: Decodable {
-        var inputTokens: Int?
-        var outputTokens: Int?
-
-        private enum CodingKeys: String, CodingKey {
-            case inputTokens = "input_tokens"
-            case outputTokens = "output_tokens"
-        }
-    }
+private struct OllamaTagsModel: Codable {
+    var name: String?
+    var model: String?
 }
 
 private struct OllamaTagsResponse: Codable {
-    struct Model: Codable {
-        var name: String?
-        var model: String?
-    }
+    var models: [OllamaTagsModel]
+}
 
-    var models: [Model]
+private struct OpenAIModel: Codable {
+    var id: String?
 }
 
 private struct OpenAIModelsResponse: Codable {
-    struct Model: Codable {
-        var id: String?
-    }
+    var data: [OpenAIModel]
+}
 
-    var data: [Model]
+public struct LiveChatConnectorRequestError: LocalizedError, Sendable {
+    public let connectorName: String
+    public let message: String
+
+    public var errorDescription: String? {
+        "无法连接 \(connectorName)：\(message)"
+    }
 }
 
 // MARK: - Live Chat Runtime
 
 public struct LiveChatRuntime: ChatRuntimeClient {
-    public struct ConnectorRequestError: LocalizedError, Sendable {
-        public let connectorName: String
-        public let message: String
-
-        public var errorDescription: String? {
-            "无法连接 \(connectorName)：\(message)"
-        }
-    }
-
     private static let historyTurnLimit = 40
+
+    private struct ProbeConnectorRequest {
+        let endpoint: String
+        let model: String
+        let apiKey: String
+        let kind: String
+        let probeToolCalling: Bool
+    }
     private static let historyCharacterBudget = 60_000
     private static let probeMessages = [
         ChatMessage(role: "system", content: "你正在执行连接器兼容性自检。直接输出 ok。"),
@@ -539,7 +597,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         let isAnthropic = Self.isAnthropicURL(url)
         let urlRequest = Self.buildURLRequest(
             url: url,
-            body: Self.requestBody(
+            body: Self.requestBody(RequestBodyContext(
                 connector: connector,
                 messages: messages,
                 stream: false,
@@ -547,7 +605,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 maxOutputTokens: request.maxOutputTokens,
                 isOllamaNative: isOllamaNative,
                 isAnthropic: isAnthropic
-            ),
+            )),
             apiKey: connector.note,
             isLocal: isOllamaNative
         )
@@ -582,7 +640,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             let finishReason: String?
             let metrics: ResponseMetrics
             if isAnthropic {
-                let decoded = try JSONDecoder().decode(AnthropicStreamEvent.AnthropicMessageResponse.self, from: data)
+                let decoded = try JSONDecoder().decode(AnthropicMessageResponse.self, from: data)
                 var contentText = ""
                 var thinkingText = ""
                 var parsedToolCalls: [FunctionCallResponse] = []
@@ -592,8 +650,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                     } else if block.type == "thinking", let thinkingBlock = block.thinking {
                         thinkingText += thinkingBlock
                     } else if block.type == "tool_use", let id = block.id, let name = block.name {
-                        // tool_use input is a JSON object in the response
-                        let argsJSON = "{}"
+                        let argsJSON = block.input?.jsonString ?? "{}"
                         parsedToolCalls.append(FunctionCallResponse(
                             id: id, type: "function",
                             function: FunctionCallDetail(name: name, arguments: argsJSON)
@@ -623,14 +680,14 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 )
                 toolCalls = ollama.message?.toolCalls ?? []
                 finishReason = nil
-                metrics = Self.metrics(
+                metrics = Self.metrics(ResponseMetricsContext(
                     startedAt: startedAt,
                     firstVisibleAt: nil,
                     messages: messages,
                     outputText: text,
                     usage: nil,
                     ollama: ollama
-                )
+                ))
             } else {
                 let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
                 let choice = decoded.choices.first
@@ -642,14 +699,14 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 )
                 toolCalls = choice?.message.toolCalls ?? []
                 finishReason = choice?.finishReason
-                metrics = Self.metrics(
+                metrics = Self.metrics(ResponseMetricsContext(
                     startedAt: startedAt,
                     firstVisibleAt: nil,
                     messages: messages,
                     outputText: text,
                     usage: decoded.usage,
                     ollama: nil
-                )
+                ))
             }
 
             return SendMessageResponse(
@@ -712,7 +769,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         let isAnthropic = Self.isAnthropicURL(url)
         let urlRequest = Self.buildURLRequest(
             url: url,
-            body: Self.requestBody(
+            body: Self.requestBody(RequestBodyContext(
                 connector: connector,
                 messages: messages,
                 stream: true,
@@ -720,7 +777,7 @@ public struct LiveChatRuntime: ChatRuntimeClient {
                 maxOutputTokens: request.maxOutputTokens,
                 isOllamaNative: isOllamaNative,
                 isAnthropic: isAnthropic
-            ),
+            )),
             apiKey: connector.note,
             isLocal: isOllamaNative
         )
@@ -762,9 +819,11 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         do {
             for try await line in bytes.lines {
                 let didFinish = await Self.decodeStreamLine(
-                    line,
-                    provider: streamProvider,
-                    decoder: decoder,
+                    request: StreamLineDecodeRequest(
+                        line: line,
+                        provider: streamProvider,
+                        decoder: decoder
+                    ),
                     state: &streamState,
                     onChunk: onChunk,
                     onReasoningChunk: onReasoningChunk
@@ -788,14 +847,14 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             reasoningContent: streamState.reasoningContent,
             fallbackForEmpty: false
         )
-        let metrics = Self.metrics(
+        let metrics = Self.metrics(ResponseMetricsContext(
             startedAt: startedAt,
             firstVisibleAt: streamState.firstVisibleAt,
             messages: messages,
             outputText: finalText,
             usage: streamState.usage,
             ollama: streamState.finalOllamaChunk
-        )
+        ))
 
         let activity = ToolActivity(
             name: "chat.complete",
@@ -815,11 +874,11 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         )
     }
 
-    private static func connectorRequestError(connector: ConnectorProfile, error: Error) -> ConnectorRequestError {
-        if let connectorError = error as? ConnectorRequestError {
+    private static func connectorRequestError(connector: ConnectorProfile, error: Error) -> LiveChatConnectorRequestError {
+        if let connectorError = error as? LiveChatConnectorRequestError {
             return connectorError
         }
-        return ConnectorRequestError(connectorName: connector.name, message: error.localizedDescription)
+        return LiveChatConnectorRequestError(connectorName: connector.name, message: error.localizedDescription)
     }
 
     public func healthCheck(endpoint: String, model: String, apiKey: String, kind: String = "openai-compatible") async throws -> ConnectorHealth {
@@ -833,21 +892,54 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         kind: String = "openai-compatible",
         probeToolCalling: Bool = true
     ) async throws -> ConnectorProbeResult {
+        let probeRequest = ProbeConnectorRequest(
+            endpoint: endpoint,
+            model: model,
+            apiKey: apiKey,
+            kind: kind,
+            probeToolCalling: probeToolCalling
+        )
         let base = Self.serviceBaseEndpoint(from: Self.baseEndpoint(from: endpoint))
         let isOllama = Self.usesOllamaNativeProtocol(endpoint: endpoint, kind: kind)
-        let isAnthropic = Self.usesAnthropicProtocol(endpoint: endpoint, kind: kind)
-
-        // Anthropic: no model listing API; do a minimal messages request to verify key
-        if isAnthropic {
-            let health: ConnectorHealth = apiKey.isEmpty ? .attention : .ready
-            let ctx = await contextWindowProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
-            guard probeToolCalling, health == .ready else {
-                return ConnectorProbeResult(health: health, contextWindow: ctx)
-            }
-            let capability = try await toolCallingCapabilityProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
-            return ConnectorProbeResult(health: health, toolCallingCapability: capability, contextWindow: ctx)
+        if Self.usesAnthropicProtocol(endpoint: endpoint, kind: kind) {
+            return try await anthropicConnectorProbe(probeRequest)
+        }
+        guard let url = Self.modelListURL(base: base, isOllama: isOllama) else {
+            return ConnectorProbeResult(health: .offline)
         }
 
+        do {
+            let request = Self.modelListRequest(url: url, apiKey: apiKey, isOllama: isOllama)
+            let (data, response) = try await session.data(for: request)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200...299).contains(statusCode) else {
+                return ConnectorProbeResult(health: .attention)
+            }
+            let ctxWindow = await contextWindowProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
+            let health = Self.modelListHealth(data: data, model: model, isOllama: isOllama) ?? .attention
+            return try await connectorProbeResult(for: probeRequest, health: health, contextWindow: ctxWindow)
+        } catch {
+            return ConnectorProbeResult(health: .offline)
+        }
+    }
+
+    private func anthropicConnectorProbe(_ request: ProbeConnectorRequest) async throws -> ConnectorProbeResult {
+        let health = await anthropicHealthProbe(
+            endpoint: request.endpoint,
+            model: request.model,
+            apiKey: request.apiKey,
+            kind: request.kind
+        )
+        let ctx = await contextWindowProbe(
+            endpoint: request.endpoint,
+            model: request.model,
+            apiKey: request.apiKey,
+            kind: request.kind
+        )
+        return try await connectorProbeResult(for: request, health: health, contextWindow: ctx)
+    }
+
+    private static func modelListURL(base: String, isOllama: Bool) -> URL? {
         let urlString: String
         if isOllama {
             let ollamaBase = base.hasSuffix("/v1") ? String(base.dropLast(3)) : base
@@ -857,11 +949,10 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             let apiBase = Self.openAICompatibleBase(from: base)
             urlString = apiBase.hasSuffix("/models") ? apiBase : apiBase + "/models"
         }
+        return URL(string: urlString)
+    }
 
-        guard let url = URL(string: urlString) else {
-            return ConnectorProbeResult(health: .offline)
-        }
-
+    private static func modelListRequest(url: URL, apiKey: String, isOllama: Bool) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -869,60 +960,48 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         request.timeoutInterval = NetworkDefaults.modelList
+        return request
+    }
 
-        do {
-            let (data, response) = try await session.data(for: request)
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-            guard (200...299).contains(statusCode) else {
-                return ConnectorProbeResult(health: .attention)
-            }
-            // Probe context window in parallel (non-blocking, best-effort)
-            let ctxWindow = await contextWindowProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
-            let health: ConnectorHealth
-            if isOllama {
-                let requestedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !requestedModel.isEmpty else {
-                    health = .ready
-                    if !probeToolCalling {
-                        return ConnectorProbeResult(health: health, contextWindow: ctxWindow)
-                    }
-                    let capability = try await toolCallingCapabilityProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
-                    return ConnectorProbeResult(health: health, toolCallingCapability: capability, contextWindow: ctxWindow)
-                }
-                guard let tags = try? JSONDecoder().decode(OllamaTagsResponse.self, from: data) else {
-                    return ConnectorProbeResult(health: .attention, contextWindow: ctxWindow)
-                }
-                let exists = tags.models.contains {
-                    $0.name == requestedModel || $0.model == requestedModel
-                }
-                health = exists ? .ready : .attention
-            } else {
-                let requestedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !requestedModel.isEmpty else {
-                    health = .ready
-                    if !probeToolCalling {
-                        return ConnectorProbeResult(health: health, contextWindow: ctxWindow)
-                    }
-                    let capability = try await toolCallingCapabilityProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
-                    return ConnectorProbeResult(health: health, toolCallingCapability: capability, contextWindow: ctxWindow)
-                }
-                if let models = try? JSONDecoder().decode(OpenAIModelsResponse.self, from: data), !models.data.isEmpty {
-                    let exists = models.data.contains {
-                        $0.id?.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(requestedModel) == .orderedSame
-                    }
-                    health = exists ? .ready : .attention
-                } else {
-                    health = .ready
-                }
-            }
-            guard probeToolCalling, health == .ready else {
-                return ConnectorProbeResult(health: health, contextWindow: ctxWindow)
-            }
-            let capability = try await toolCallingCapabilityProbe(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind)
-            return ConnectorProbeResult(health: health, toolCallingCapability: capability, contextWindow: ctxWindow)
-        } catch {
-            return ConnectorProbeResult(health: .offline)
+    private static func modelListHealth(data: Data, model: String, isOllama: Bool) -> ConnectorHealth? {
+        let requestedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !requestedModel.isEmpty else { return .ready }
+        return isOllama
+            ? ollamaModelListHealth(data: data, requestedModel: requestedModel)
+            : openAIModelListHealth(data: data, requestedModel: requestedModel)
+    }
+
+    private static func ollamaModelListHealth(data: Data, requestedModel: String) -> ConnectorHealth? {
+        guard let tags = try? JSONDecoder().decode(OllamaTagsResponse.self, from: data) else { return nil }
+        let exists = tags.models.contains { $0.name == requestedModel || $0.model == requestedModel }
+        return exists ? .ready : .attention
+    }
+
+    private static func openAIModelListHealth(data: Data, requestedModel: String) -> ConnectorHealth {
+        guard let models = try? JSONDecoder().decode(OpenAIModelsResponse.self, from: data), !models.data.isEmpty else {
+            return .ready
         }
+        let exists = models.data.contains {
+            $0.id?.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(requestedModel) == .orderedSame
+        }
+        return exists ? .ready : .attention
+    }
+
+    private func connectorProbeResult(
+        for request: ProbeConnectorRequest,
+        health: ConnectorHealth,
+        contextWindow: Int?
+    ) async throws -> ConnectorProbeResult {
+        guard request.probeToolCalling, health == .ready else {
+            return ConnectorProbeResult(health: health, contextWindow: contextWindow)
+        }
+        let capability = try await toolCallingCapabilityProbe(
+            endpoint: request.endpoint,
+            model: request.model,
+            apiKey: request.apiKey,
+            kind: request.kind
+        )
+        return ConnectorProbeResult(health: health, toolCallingCapability: capability, contextWindow: contextWindow)
     }
 
     private func toolCallingCapabilityProbe(
@@ -996,6 +1075,29 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             return nil
         } catch {
             return nil
+        }
+    }
+
+    private func anthropicHealthProbe(endpoint: String, model: String, apiKey: String, kind: String) async -> ConnectorHealth {
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .attention }
+        let url = Self.buildURL(from: endpoint, kind: kind)
+        let body = Self.buildAnthropicRequest(
+            model: model,
+            messages: Self.probeMessages,
+            stream: false,
+            tools: nil,
+            maxTokens: 1
+        )
+        var request = Self.buildURLRequest(url: url, body: body, apiKey: apiKey, isLocal: false)
+        request.timeoutInterval = NetworkDefaults.quickProbe
+        do {
+            let (_, response) = try await session.data(for: request)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if (200...299).contains(statusCode) { return .ready }
+            if statusCode == 401 || statusCode == 403 { return .attention }
+            return .offline
+        } catch {
+            return .offline
         }
     }
 
@@ -1243,27 +1345,50 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         return .openAICompatible
     }
 
+    private struct StreamLineDecodeRequest {
+        let line: String
+        let provider: StreamProvider
+        let decoder: JSONDecoder
+    }
+
+    private struct RequestBodyContext {
+        let connector: ConnectorProfile
+        let messages: [ChatMessage]
+        let stream: Bool
+        let tools: [ToolDefinition]?
+        let maxOutputTokens: Int?
+        let isOllamaNative: Bool
+        let isAnthropic: Bool
+    }
+
+    private struct ResponseMetricsContext {
+        let startedAt: Date
+        let firstVisibleAt: Date?
+        let messages: [ChatMessage]
+        let outputText: String
+        let usage: TokenUsage?
+        let ollama: OllamaChatChunk?
+    }
+
     private static func decodeStreamLine(
-        _ line: String,
-        provider: StreamProvider,
-        decoder: JSONDecoder,
+        request: StreamLineDecodeRequest,
         state: inout StreamDecodeState,
         onChunk: @Sendable @MainActor (String) -> Void,
         onReasoningChunk: (@Sendable @MainActor (String) -> Void)?
     ) async -> Bool {
-        switch provider {
+        switch request.provider {
         case .anthropic:
             return await decodeAnthropicStreamLine(
-                line,
-                decoder: decoder,
+                request.line,
+                decoder: request.decoder,
                 state: &state,
                 onChunk: onChunk,
                 onReasoningChunk: onReasoningChunk
             )
         case .ollamaNative:
             await decodeOllamaStreamLine(
-                line,
-                decoder: decoder,
+                request.line,
+                decoder: request.decoder,
                 state: &state,
                 onChunk: onChunk,
                 onReasoningChunk: onReasoningChunk
@@ -1271,8 +1396,8 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             return false
         case .openAICompatible:
             return await decodeOpenAIStreamLine(
-                line,
-                decoder: decoder,
+                request.line,
+                decoder: request.decoder,
                 state: &state,
                 onChunk: onChunk,
                 onReasoningChunk: onReasoningChunk
@@ -1483,7 +1608,9 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             let components = path.split(separator: "/").map(String.init)
             let basePath: String
             if components.count >= 3, components.suffix(2) == ["chat", "completions"], components[components.count - 3] == "v1" {
-                basePath = url.host?.localizedCaseInsensitiveContains("deepseek") == true ? "/v1" : ""
+                let host = url.host ?? ""
+                basePath = (host.localizedCaseInsensitiveContains("deepseek")
+                    || host.localizedCaseInsensitiveContains("api.openai.com")) ? "/v1" : ""
             } else {
                 basePath = "/" + components.dropLast(2).joined(separator: "/")
             }
@@ -1769,42 +1896,35 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         return "\(head)\n\n[中间历史已压缩]\n\n\(tail)"
     }
 
-    private static func requestBody(
-        connector: ConnectorProfile,
-        messages: [ChatMessage],
-        stream: Bool,
-        tools: [ToolDefinition]?,
-        maxOutputTokens: Int?,
-        isOllamaNative: Bool,
-        isAnthropic: Bool = false
-    ) -> any Encodable {
-        let outputCap = Self.outputTokenCap(for: connector, requested: maxOutputTokens)
-        if isOllamaNative {
+    private static func requestBody(_ context: RequestBodyContext) -> any Encodable {
+        let connector = context.connector
+        let outputCap = Self.outputTokenCap(for: connector, requested: context.maxOutputTokens)
+        if context.isOllamaNative {
             return OllamaChatRequest(
                 model: connector.modelName,
-                messages: messages,
-                stream: stream,
+                messages: context.messages,
+                stream: context.stream,
                 think: false,
                 options: .init(numPredict: outputCap, numContext: Self.localContextWindow(for: connector)),
-                tools: tools,
+                tools: context.tools,
                 keepAlive: "2m"
             )
         }
-        if isAnthropic {
+        if context.isAnthropic {
             return Self.buildAnthropicRequest(
                 model: connector.modelName,
-                messages: messages,
-                stream: stream,
-                tools: tools,
+                messages: context.messages,
+                stream: context.stream,
+                tools: context.tools,
                 maxTokens: outputCap
             )
         }
         return ChatCompletionRequest(
             model: connector.modelName,
-            messages: messages,
+            messages: context.messages,
             maxTokens: outputCap,
-            stream: stream,
-            tools: tools
+            stream: context.stream,
+            tools: context.tools
         )
     }
 
@@ -1819,57 +1939,15 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         maxTokens: Int
     ) -> AnthropicMessagesRequest {
         var systemParts: [String] = []
-        var anthropicMessages: [AnthropicMessagesRequest.AnthropicMessage] = []
+        var anthropicMessages: [AnthropicRequestMessage] = []
 
         for msg in messages {
-            if msg.role == "system" {
-                if let content = msg.effectiveContent {
-                    systemParts.append(content)
-                }
-            } else if msg.role == "assistant" {
-                // Anthropic assistant messages: text content or tool_use blocks
-                if let toolCalls = msg.toolCalls, !toolCalls.isEmpty {
-                    var blocks: [AnthropicContentBlock] = []
-                    if let content = msg.effectiveContent, !content.isEmpty {
-                        blocks.append(.text(content))
-                    }
-                    for toolCall in toolCalls {
-                        blocks.append(.toolUse(
-                            id: toolCall.id ?? "",
-                            name: toolCall.function.name,
-                            inputJSON: toolCall.function.arguments
-                        ))
-                    }
-                    anthropicMessages.append(.init(role: "assistant", content: AnyEncodable(blocks)))
-                } else if let content = msg.effectiveContent {
-                    anthropicMessages.append(.init(role: "assistant", content: AnyEncodable(content)))
-                }
-            } else if msg.role == "tool" {
-                // Anthropic uses "user" role with tool_result content blocks
-                let resultContent = msg.effectiveContent ?? ""
-                let blocks: [AnthropicContentBlock] = [.toolResult(toolUseId: msg.toolCallId ?? "", content: resultContent)]
-                anthropicMessages.append(.init(role: "user", content: AnyEncodable(blocks)))
-            } else if msg.role == "user" {
-                if let contentParts = msg.contentParts, !contentParts.isEmpty {
-                    // Multimodal: convert to Anthropic content blocks
-                    var blocks: [AnthropicContentBlock] = []
-                    for part in contentParts {
-                        if part.type == "text", let text = part.text {
-                            blocks.append(.text(text))
-                        } else if part.type == "image_url", let imageURL = part.imageURL {
-                            blocks.append(.image(url: imageURL.url))
-                        }
-                    }
-                    anthropicMessages.append(.init(role: "user", content: AnyEncodable(blocks)))
-                } else if let content = msg.effectiveContent {
-                    anthropicMessages.append(.init(role: "user", content: AnyEncodable(content)))
-                }
-            }
+            appendAnthropicMessage(msg, systemParts: &systemParts, anthropicMessages: &anthropicMessages)
         }
 
         // Convert tools to Anthropic format
-        let anthropicTools: [AnthropicMessagesRequest.AnthropicTool]? = tools?.map { tool in
-            AnthropicMessagesRequest.AnthropicTool(
+        let anthropicTools: [AnthropicRequestTool]? = tools?.map { tool in
+            AnthropicRequestTool(
                 name: tool.function.name,
                 description: tool.function.description,
                 inputSchema: AnyEncodable(tool.function.parameters)
@@ -1886,6 +1964,77 @@ public struct LiveChatRuntime: ChatRuntimeClient {
             stream: stream,
             tools: anthropicTools
         )
+    }
+
+    private static func appendAnthropicMessage(
+        _ message: ChatMessage,
+        systemParts: inout [String],
+        anthropicMessages: inout [AnthropicRequestMessage]
+    ) {
+        switch message.role {
+        case "system":
+            if let content = message.effectiveContent {
+                systemParts.append(content)
+            }
+        case "assistant":
+            if let converted = anthropicAssistantMessage(from: message) {
+                anthropicMessages.append(converted)
+            }
+        case "tool":
+            anthropicMessages.append(anthropicToolMessage(from: message))
+        case "user":
+            if let converted = anthropicUserMessage(from: message) {
+                anthropicMessages.append(converted)
+            }
+        default:
+            return
+        }
+    }
+
+    private static func anthropicAssistantMessage(from message: ChatMessage) -> AnthropicRequestMessage? {
+        if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
+            var blocks: [AnthropicContentBlock] = []
+            if let content = message.effectiveContent, !content.isEmpty {
+                blocks.append(.text(content))
+            }
+            for toolCall in toolCalls {
+                blocks.append(.toolUse(
+                    id: toolCall.id ?? "",
+                    name: toolCall.function.name,
+                    inputJSON: toolCall.function.arguments
+                ))
+            }
+            return .init(role: "assistant", content: AnyEncodable(blocks))
+        }
+        guard let content = message.effectiveContent else { return nil }
+        return .init(role: "assistant", content: AnyEncodable(content))
+    }
+
+    private static func anthropicToolMessage(from message: ChatMessage) -> AnthropicRequestMessage {
+        let resultContent = message.effectiveContent ?? ""
+        let blocks: [AnthropicContentBlock] = [
+            .toolResult(toolUseId: message.toolCallId ?? "", content: resultContent)
+        ]
+        return .init(role: "user", content: AnyEncodable(blocks))
+    }
+
+    private static func anthropicUserMessage(from message: ChatMessage) -> AnthropicRequestMessage? {
+        if let contentParts = message.contentParts, !contentParts.isEmpty {
+            let blocks = contentParts.compactMap(anthropicContentBlock(from:))
+            return .init(role: "user", content: AnyEncodable(blocks))
+        }
+        guard let content = message.effectiveContent else { return nil }
+        return .init(role: "user", content: AnyEncodable(content))
+    }
+
+    private static func anthropicContentBlock(from part: ContentPart) -> AnthropicContentBlock? {
+        if part.type == "text", let text = part.text {
+            return .text(text)
+        }
+        if part.type == "image_url", let imageURL = part.imageURL {
+            return .image(url: imageURL.url)
+        }
+        return nil
     }
 
     private static func outputTokenCap(for connector: ConnectorProfile, requested: Int?) -> Int {
@@ -1944,22 +2093,19 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         url.path.hasSuffix("/messages") && !url.path.contains("/chat/completions")
     }
 
-    private static func metrics(
-        startedAt: Date,
-        firstVisibleAt: Date?,
-        messages: [ChatMessage],
-        outputText: String,
-        usage: TokenUsage?,
-        ollama: OllamaChatChunk?
-    ) -> ResponseMetrics {
+    private static func metrics(_ context: ResponseMetricsContext) -> ResponseMetrics {
+        let startedAt = context.startedAt
+        let firstVisibleAt = context.firstVisibleAt
+        let usage = context.usage
+        let ollama = context.ollama
         let finishedAt = Date()
         let totalDuration = max(0.001, finishedAt.timeIntervalSince(startedAt))
         let inputTokens = usage?.promptTokens
             ?? ollama?.promptEvalCount
-            ?? estimatedTokens(messages.compactMap(\.content).joined(separator: "\n"))
+            ?? estimatedTokens(context.messages.compactMap(\.content).joined(separator: "\n"))
         let outputTokens = usage?.completionTokens
             ?? ollama?.evalCount
-            ?? estimatedTokens(outputText)
+            ?? estimatedTokens(context.outputText)
         let thinkingDuration = firstVisibleAt?.timeIntervalSince(startedAt) ?? totalDuration
         let outputWindow: TimeInterval
         if let firstVisibleAt {

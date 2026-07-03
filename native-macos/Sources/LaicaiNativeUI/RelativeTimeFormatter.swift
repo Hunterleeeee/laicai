@@ -4,15 +4,15 @@ import Foundation
 /// 输出：刚刚 / 5分钟前 / 2小时前 / 昨天 / 3天前 / 05-12
 enum RelativeTimeFormatter {
     private static let fullDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return f
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
     }()
 
     private static let shortDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MM-dd"
-        return f
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd"
+        return formatter
     }()
 
     static func string(for date: Date) -> String {

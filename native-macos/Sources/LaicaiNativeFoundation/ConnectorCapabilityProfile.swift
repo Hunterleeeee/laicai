@@ -68,7 +68,7 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
     public var supportsToolCalling: Bool
     public var toolCallingSource: ConnectorToolCallingResolutionSource
     public var learnedToolCallingCapability: ConnectorToolCallingCapability?
-    public var learnedToolCallingSource: ConnectorToolCallingCapabilityObservationSource?
+    public var learnedToolCallingSource: ConnectorToolCallObservationSource?
     public var learnedToolCallingLearnedAt: Date?
     public var toolCallingConflict: ConnectorToolCallingCapability?
     public var maxIterations: Int
@@ -236,44 +236,42 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
 
     private static func inferContextLength(model: String, isLocal: Bool) -> Int {
         if isLocal { return 32768 }
-        // Known model context lengths (keep up-to-date — 2025/2026)
-        // OpenAI
-        if model.contains("gpt-5") || model.contains("gpt5") { return 1_000_000 }  // GPT-5 / 5.5
-        if model.contains("o3") || model.contains("o4") || model.contains("o1") { return 1_000_000 }
-        if model.contains("gpt-4.1") { return 1_000_000 }
-        if model.contains("gpt-4o") || model.contains("gpt-4-turbo") { return 128_000 }
-        if model.contains("gpt-4") { return 128_000 }
-        if model.contains("gpt-3.5-turbo") || model.contains("gpt-35-turbo") { return 16_385 }
-        // Anthropic
-        if model.contains("claude-4") || model.contains("claude-3.7") { return 1_000_000 }
-        if model.contains("claude-3-5") || model.contains("claude-3.5") { return 200_000 }
-        if model.contains("claude-3") { return 200_000 }
-        if model.contains("claude-2") { return 100_000 }
-        // DeepSeek
-        if model.contains("deepseek") || model.contains("deep-seek") {
-            if model.contains("v4") || model.contains("r2") { return 1_000_000 }
-            if model.contains("v3") || model.contains("r1") || model.contains("chat") { return 128_000 }
-            return 128_000
-        }
-        // Qwen
-        if model.contains("qwen") {
-            if model.contains("long") || model.contains("max") || model.contains("3") { return 1_000_000 }
-            if model.contains("plus") || model.contains("72b") || model.contains("turbo") { return 128_000 }
-            return 128_000
-        }
-        // Meta Llama
-        if model.contains("llama-4") || model.contains("llama4") { return 1_000_000 }
-        if model.contains("llama-3") || model.contains("llama3") { return 128_000 }
-        // Google
-        if model.contains("gemini") {
-            return 1_000_000  // All Gemini 1.5+ support 1M
-        }
-        // Mistral
-        if model.contains("mistral") || model.contains("mixtral") {
-            if model.contains("large") || model.contains("medium") { return 256_000 }
-            return 128_000
-        }
+        if let length = contextLengthFromDirectRules(model: model) { return length }
+        if let length = deepSeekContextLength(model: model) { return length }
+        if let length = qwenContextLength(model: model) { return length }
+        if let length = mistralContextLength(model: model) { return length }
         return 256_000  // 2025+ API models generally support 256K+
+    }
+
+    private static func contextLengthFromDirectRules(model: String) -> Int? {
+        let rules: [([String], Int)] = [
+            (["gpt-5", "gpt5", "o3", "o4", "o1", "gpt-4.1"], 1_000_000),
+            (["gpt-4o", "gpt-4-turbo", "gpt-4"], 128_000),
+            (["gpt-3.5-turbo", "gpt-35-turbo"], 16_385),
+            (["claude-4", "claude-3.7"], 1_000_000),
+            (["claude-3-5", "claude-3.5", "claude-3"], 200_000),
+            (["claude-2"], 100_000),
+            (["llama-4", "llama4", "gemini"], 1_000_000),
+            (["llama-3", "llama3"], 128_000)
+        ]
+        return rules.first { tokens, _ in
+            tokens.contains { model.contains($0) }
+        }?.1
+    }
+
+    private static func deepSeekContextLength(model: String) -> Int? {
+        guard model.contains("deepseek") || model.contains("deep-seek") else { return nil }
+        return model.contains("v4") || model.contains("r2") ? 1_000_000 : 128_000
+    }
+
+    private static func qwenContextLength(model: String) -> Int? {
+        guard model.contains("qwen") else { return nil }
+        return model.contains("long") || model.contains("max") || model.contains("3") ? 1_000_000 : 128_000
+    }
+
+    private static func mistralContextLength(model: String) -> Int? {
+        guard model.contains("mistral") || model.contains("mixtral") else { return nil }
+        return model.contains("large") || model.contains("medium") ? 256_000 : 128_000
     }
 
     // MARK: - Speed Tier Inference

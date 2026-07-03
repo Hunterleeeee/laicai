@@ -38,25 +38,25 @@ public struct AutoContextEngine {
         var gitDiff: String?
         var relevantFiles: [FileInfo] = []
 
-        let q = DispatchQueue(label: "laicai.context-build", attributes: .concurrent)
+        let queue = DispatchQueue(label: "laicai.context-build", attributes: .concurrent)
         group.enter()
-        q.async {
+        queue.async {
             claudeMD = loadProjectInstructions(workspaceRoot: safeWorkspaceRoot)
             group.leave()
         }
         group.enter()
-        q.async {
+        queue.async {
             gitBranch = currentGitBranch(workspaceRoot: safeWorkspaceRoot)
             group.leave()
         }
         if !isChatFastPath {
             group.enter()
-            q.async {
+            queue.async {
                 gitDiff = currentGitDiff(workspaceRoot: safeWorkspaceRoot)
                 group.leave()
             }
             group.enter()
-            q.async {
+            queue.async {
                 relevantFiles = findRelevantFiles(workspaceRoot: safeWorkspaceRoot, query: userInput, limit: fileLimit)
                 group.leave()
             }
@@ -120,7 +120,7 @@ public struct AutoContextEngine {
             ("build.gradle", "Gradle Project"),
             ("Gemfile", "Ruby Gems"),
             ("requirements.txt", "Python Requirements"),
-            ("Podfile", "CocoaPods"),
+            ("Podfile", "CocoaPods")
         ]
         let packageSummaries = packageConfigs.compactMap { config -> String? in
             let fullPath = (workspaceRoot as NSString).appendingPathComponent(config.path)
@@ -146,14 +146,14 @@ public struct AutoContextEngine {
     /// Load rule files from top-level subdirectories (one level deep).
     /// This enables per-module instructions like `src/.laicai/CLAUDE.md`.
     private static func loadSubDirectoryRules(workspaceRoot: String) -> String {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(atPath: workspaceRoot) else { return "" }
+        let fileManager = FileManager.default
+        guard let entries = try? fileManager.contentsOfDirectory(atPath: workspaceRoot) else { return "" }
 
         var rules: [String] = []
         for entry in entries.sorted().prefix(20) {
             let subPath = (workspaceRoot as NSString).appendingPathComponent(entry)
             var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: subPath, isDirectory: &isDir), isDir.boolValue else { continue }
+            guard fileManager.fileExists(atPath: subPath, isDirectory: &isDir), isDir.boolValue else { continue }
             // Skip hidden and common non-project dirs
             guard !entry.hasPrefix(".") && !["node_modules", "build", "dist", ".git", "DerivedData"].contains(entry) else { continue }
 
@@ -168,7 +168,8 @@ public struct AutoContextEngine {
 
     private static func loadInstructionDirectory(_ path: String) -> String? {
         guard let entries = try? FileManager.default.contentsOfDirectory(atPath: path) else { return nil }
-        return entries
+        return
+            entries
             .sorted()
             .filter { $0.hasSuffix(".md") || $0.hasSuffix(".mdc") || $0.hasSuffix(".txt") }
             .prefix(6)
@@ -222,7 +223,7 @@ public struct AutoContextEngine {
     }
 
     private static func findRelevantFiles(workspaceRoot: String, query: String, limit: Int) -> [FileInfo] {
-        let fm = FileManager.default
+        let fileManager = FileManager.default
         var files: [FileInfo] = []
         let boundedLimit = max(0, min(limit, 500))
         guard boundedLimit > 0 else { return [] }
@@ -233,9 +234,11 @@ public struct AutoContextEngine {
             "Movies", "Music", "Pictures", "Public"
         ]
         let sensitiveNames: Set<String> = ["auth.json", "credentials", "credentials.json", ".env", ".env.local", "id_rsa", "id_ed25519"]
-        let codeExtensions: Set<String> = ["swift", "py", "js", "ts", "tsx", "jsx", "go", "rs", "rb", "java", "kt", "c", "cpp", "h", "hpp", "css", "html", "yaml", "yml", "json", "toml", "md"]
+        let codeExtensions: Set<String> = [
+            "swift", "py", "js", "ts", "tsx", "jsx", "go", "rs", "rb", "java", "kt", "c", "cpp", "h", "hpp", "css", "html", "yaml", "yml", "json", "toml", "md"
+        ]
 
-        let enumerator = fm.enumerator(atPath: workspaceRoot)
+        let enumerator = fileManager.enumerator(atPath: workspaceRoot)
         while let file = enumerator?.nextObject() as? String {
             let ext = (file as NSString).pathExtension
             let name = (file as NSString).lastPathComponent

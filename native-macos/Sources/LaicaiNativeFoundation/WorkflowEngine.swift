@@ -5,18 +5,18 @@ import LaicaiNativeDomain
 
 public struct WorkflowParam: Identifiable, Equatable, Codable, Sendable {
     public let id: UUID
-    public var key: String        // maps to step param key or template variable
-    public var label: String      // display label
+    public var key: String  // maps to step param key or template variable
+    public var label: String  // display label
     public var placeholder: String
     public var kind: ParamKind
     public var required: Bool
     public var defaultValue: String
 
     public enum ParamKind: String, Codable, Sendable, Equatable {
-        case text          // free text
-        case filePath      // file chooser
-        case directoryPath // directory chooser
-        case choice        // predefined options (comma-sep in defaultValue)
+        case text  // free text
+        case filePath  // file chooser
+        case directoryPath  // directory chooser
+        case choice  // predefined options (comma-sep in defaultValue)
     }
 
     public init(
@@ -41,14 +41,14 @@ public struct WorkflowParam: Identifiable, Equatable, Codable, Sendable {
 // MARK: - Workflow Category
 
 public enum WorkflowCategory: String, Codable, Sendable, Equatable {
-    case review     // code review
-    case generate   // test-gen, doc-gen
-    case debug      // debug
-    case refactor   // refactor
+    case review  // code review
+    case generate  // test-gen, doc-gen
+    case debug  // debug
+    case refactor  // refactor
     case transform  // translate, format
-    case product    // PM: PRD, user stories, competitive analysis
-    case project    // project management: release planning, retrospective
-    case custom     // user-defined
+    case product  // PM: PRD, user stories, competitive analysis
+    case project  // project management: release planning, retrospective
+    case custom  // user-defined
 
     public var icon: String {
         switch self {
@@ -65,14 +65,14 @@ public enum WorkflowCategory: String, Codable, Sendable, Equatable {
 
     public var tintHex: String {
         switch self {
-        case .review: return "3B82F6"    // blue
+        case .review: return "3B82F6"  // blue
         case .generate: return "10B981"  // green
-        case .debug: return "EF4444"     // red
+        case .debug: return "EF4444"  // red
         case .refactor: return "8B5CF6"  // purple
-        case .transform: return "F59E0B" // amber
-        case .product: return "EC4899"   // pink
-        case .project: return "F97316"   // orange
-        case .custom: return "06B6D4"    // teal
+        case .transform: return "F59E0B"  // amber
+        case .product: return "EC4899"  // pink
+        case .project: return "F97316"  // orange
+        case .custom: return "06B6D4"  // teal
         }
     }
 }
@@ -145,135 +145,9 @@ public struct WorkflowParser {
 
     /// Parse with detailed error messages for invalid YAML
     public static func parseWithErrors(_ source: String) -> (definition: WorkflowDefinition?, errors: [String]) {
-        var errors: [String] = []
-        let lines = source.components(separatedBy: "\n")
-        var name = ""
-        var description = ""
-        var steps: [WorkflowStep] = []
-        var currentStep: StepDraft?
-        var promptMode = false
-        var promptLines: [String] = []
-        var stepLineNumbers: [Int] = []
-
-        func flushPrompt() {
-            guard promptMode else { return }
-            currentStep?.prompt = promptLines
-                .joined(separator: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            promptMode = false
-            promptLines = []
-        }
-
-        func flushStep() {
-            flushPrompt()
-            if let step = currentStep, !step.name.isEmpty, !step.tool.isEmpty {
-                steps.append(step.workflowStep)
-            } else if let step = currentStep {
-                if step.name.isEmpty {
-                    errors.append("步骤缺少名称（name 字段）")
-                }
-                if step.tool.isEmpty {
-                    errors.append("步骤「\(step.name)」缺少工具（tool 字段）")
-                }
-            }
-            currentStep = nil
-        }
-
-        for (index, rawLine) in lines.enumerated() {
-            let lineNum = index + 1
-            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
-
-            if promptMode {
-                if rawLine.hasPrefix("    ") || rawLine.hasPrefix("\t") {
-                    promptLines.append(rawLine.replacingOccurrences(of: #"^\s{4}"#, with: "", options: .regularExpression))
-                    continue
-                }
-                flushPrompt()
-            }
-
-            if trimmed.hasPrefix("name:"), currentStep == nil {
-                name = value(after: "name:", in: trimmed)
-                if name.isEmpty {
-                    errors.append("第 \(lineNum) 行：工作流名称为空")
-                }
-            } else if trimmed.hasPrefix("description:") || trimmed.hasPrefix("desc:"), currentStep == nil {
-                let prefix = trimmed.hasPrefix("description:") ? "description:" : "desc:"
-                description = value(after: prefix, in: trimmed)
-            } else if trimmed.hasPrefix("- step:") || trimmed.hasPrefix("- name:") {
-                flushStep()
-                let stepName: String
-                if trimmed.hasPrefix("- step:") {
-                    stepName = value(after: "- step:", in: trimmed)
-                } else {
-                    stepName = value(after: "- name:", in: trimmed)
-                }
-                currentStep = StepDraft(name: stepName)
-                stepLineNumbers.append(lineNum)
-            } else if trimmed.hasPrefix("tool:") {
-                currentStep?.tool = value(after: "tool:", in: trimmed)
-                if currentStep?.tool.isEmpty == true {
-                    errors.append("第 \(lineNum) 行：步骤「\(currentStep?.name ?? "")」的工具名为空")
-                }
-            } else if trimmed.hasPrefix("prompt:") {
-                let prompt = value(after: "prompt:", in: trimmed)
-                if prompt == "|" || prompt == "|-" {
-                    promptMode = true
-                    promptLines = []
-                } else {
-                    currentStep?.prompt = prompt
-                }
-            } else if trimmed.hasPrefix("on_failure:") || trimmed.hasPrefix("onFailure:") {
-                let val = value(after: trimmed.hasPrefix("on_failure:") ? "on_failure:" : "onFailure:", in: trimmed)
-                let valid = ["abort", "skip", "retry", "stop", "continue"]
-                if !valid.contains(val.lowercased()) {
-                    errors.append("第 \(lineNum) 行：on_failure 值「\(val)」无效，应为 abort/skip/retry")
-                }
-                currentStep?.onFailure = val
-            } else if trimmed.hasPrefix("condition:") || trimmed.hasPrefix("when:") {
-                currentStep?.condition = value(after: trimmed.hasPrefix("condition:") ? "condition:" : "when:", in: trimmed)
-            } else if trimmed.hasPrefix("params:") {
-                continue
-            } else if rawLine.hasPrefix("  ") || rawLine.hasPrefix("\t") {
-                let paramLine = trimmed
-                if let eqRange = paramLine.range(of: ":") {
-                    let key = String(paramLine[..<eqRange.lowerBound]).trimmingCharacters(in: .whitespaces)
-                    let value = String(paramLine[eqRange.upperBound...])
-                        .trimmingCharacters(in: .whitespaces)
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-                    if !key.isEmpty {
-                        currentStep?.params[key] = value
-                    }
-                } else {
-                    errors.append("第 \(lineNum) 行：参数格式错误，应为 key: value")
-                }
-            }
-        }
-
-        flushStep()
-
-        if name.isEmpty {
-            errors.insert("工作流缺少名称（name 字段）", at: 0)
-        }
-        if steps.isEmpty && name.isEmpty {
-            errors.insert("工作流内容为空或格式不正确", at: 0)
-        } else if steps.isEmpty {
-            errors.append("工作流「\(name)」没有有效步骤")
-        }
-
-        if let step = currentStep {
-            if step.name.isEmpty {
-                errors.append("最后一个步骤缺少名称")
-            }
-            if step.tool.isEmpty {
-                errors.append("步骤「\(step.name)」缺少工具（tool 字段）")
-            }
-        }
-
-        guard !name.isEmpty, !steps.isEmpty, errors.isEmpty else {
-            return (nil, errors)
-        }
-        return (WorkflowDefinition(name: name, description: description, steps: steps), errors)
+        var state = ParserState()
+        state.parse(source.components(separatedBy: "\n"))
+        return state.result()
     }
 
     private struct StepDraft {
@@ -286,6 +160,174 @@ public struct WorkflowParser {
 
         var workflowStep: WorkflowStep {
             WorkflowStep(name: name, tool: tool, params: params, condition: condition, onFailure: onFailure, prompt: prompt)
+        }
+    }
+
+    private struct ParserState {
+        var errors: [String] = []
+        var name = ""
+        var description = ""
+        var steps: [WorkflowStep] = []
+        var currentStep: StepDraft?
+        var promptMode = false
+        var promptLines: [String] = []
+
+        mutating func parse(_ lines: [String]) {
+            for (index, rawLine) in lines.enumerated() {
+                let lineNum = index + 1
+                let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+                if handlePromptContinuation(rawLine: rawLine) { continue }
+                if handleTopLevel(trimmed: trimmed, lineNum: lineNum) { continue }
+                if handleStepStart(trimmed: trimmed) { continue }
+                if handleStepField(trimmed: trimmed, lineNum: lineNum) { continue }
+                _ = handleParamLine(rawLine: rawLine, trimmed: trimmed, lineNum: lineNum)
+            }
+            flushStep()
+        }
+
+        mutating func result() -> (definition: WorkflowDefinition?, errors: [String]) {
+            validateRequiredFields()
+            guard !name.isEmpty, !steps.isEmpty, errors.isEmpty else {
+                return (nil, errors)
+            }
+            return (WorkflowDefinition(name: name, description: description, steps: steps), errors)
+        }
+
+        private mutating func flushPrompt() {
+            guard promptMode else { return }
+            currentStep?.prompt =
+                promptLines
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            promptMode = false
+            promptLines = []
+        }
+
+        private mutating func flushStep() {
+            flushPrompt()
+            if let step = currentStep, !step.name.isEmpty, !step.tool.isEmpty {
+                steps.append(step.workflowStep)
+            } else if let step = currentStep {
+                appendMissingStepFieldErrors(step)
+            }
+            currentStep = nil
+        }
+
+        private mutating func appendMissingStepFieldErrors(_ step: StepDraft) {
+            if step.name.isEmpty {
+                errors.append("步骤缺少名称（name 字段）")
+            }
+            if step.tool.isEmpty {
+                errors.append("步骤「\(step.name)」缺少工具（tool 字段）")
+            }
+        }
+
+        private mutating func handlePromptContinuation(rawLine: String) -> Bool {
+            guard promptMode else { return false }
+            if rawLine.hasPrefix("    ") || rawLine.hasPrefix("\t") {
+                promptLines.append(rawLine.replacingOccurrences(of: #"^\s{4}"#, with: "", options: .regularExpression))
+                return true
+            }
+            flushPrompt()
+            return false
+        }
+
+        private mutating func handleTopLevel(trimmed: String, lineNum: Int) -> Bool {
+            guard currentStep == nil else { return false }
+            if trimmed.hasPrefix("name:") {
+                name = WorkflowParser.value(after: "name:", in: trimmed)
+                if name.isEmpty { errors.append("第 \(lineNum) 行：工作流名称为空") }
+                return true
+            }
+            guard trimmed.hasPrefix("description:") || trimmed.hasPrefix("desc:") else { return false }
+            let prefix = trimmed.hasPrefix("description:") ? "description:" : "desc:"
+            description = WorkflowParser.value(after: prefix, in: trimmed)
+            return true
+        }
+
+        private mutating func handleStepStart(trimmed: String) -> Bool {
+            guard trimmed.hasPrefix("- step:") || trimmed.hasPrefix("- name:") else { return false }
+            flushStep()
+            let prefix = trimmed.hasPrefix("- step:") ? "- step:" : "- name:"
+            currentStep = StepDraft(name: WorkflowParser.value(after: prefix, in: trimmed))
+            return true
+        }
+
+        private mutating func handleStepField(trimmed: String, lineNum: Int) -> Bool {
+            if handleToolField(trimmed: trimmed, lineNum: lineNum) { return true }
+            if handlePromptField(trimmed: trimmed) { return true }
+            if handleFailureOrConditionField(trimmed: trimmed, lineNum: lineNum) { return true }
+            return trimmed.hasPrefix("params:")
+        }
+
+        private mutating func handleToolField(trimmed: String, lineNum: Int) -> Bool {
+            guard trimmed.hasPrefix("tool:") else { return false }
+            currentStep?.tool = WorkflowParser.value(after: "tool:", in: trimmed)
+            if currentStep?.tool.isEmpty == true {
+                errors.append("第 \(lineNum) 行：步骤「\(currentStep?.name ?? "")」的工具名为空")
+            }
+            return true
+        }
+
+        private mutating func handlePromptField(trimmed: String) -> Bool {
+            guard trimmed.hasPrefix("prompt:") else { return false }
+            let prompt = WorkflowParser.value(after: "prompt:", in: trimmed)
+            if prompt == "|" || prompt == "|-" {
+                promptMode = true
+                promptLines = []
+            } else {
+                currentStep?.prompt = prompt
+            }
+            return true
+        }
+
+        private mutating func handleFailureOrConditionField(trimmed: String, lineNum: Int) -> Bool {
+            if handleFailureField(trimmed: trimmed, lineNum: lineNum) { return true }
+            guard trimmed.hasPrefix("condition:") || trimmed.hasPrefix("when:") else { return false }
+            currentStep?.condition = WorkflowParser.value(
+                after: trimmed.hasPrefix("condition:") ? "condition:" : "when:",
+                in: trimmed
+            )
+            return true
+        }
+
+        private mutating func handleFailureField(trimmed: String, lineNum: Int) -> Bool {
+            guard trimmed.hasPrefix("on_failure:") || trimmed.hasPrefix("onFailure:") else { return false }
+            let prefix = trimmed.hasPrefix("on_failure:") ? "on_failure:" : "onFailure:"
+            let val = WorkflowParser.value(after: prefix, in: trimmed)
+            if !["abort", "skip", "retry", "stop", "continue"].contains(val.lowercased()) {
+                errors.append("第 \(lineNum) 行：on_failure 值「\(val)」无效，应为 abort/skip/retry")
+            }
+            currentStep?.onFailure = val
+            return true
+        }
+
+        private mutating func handleParamLine(rawLine: String, trimmed: String, lineNum: Int) -> Bool {
+            guard rawLine.hasPrefix("  ") || rawLine.hasPrefix("\t") else { return false }
+            guard let eqRange = trimmed.range(of: ":") else {
+                errors.append("第 \(lineNum) 行：参数格式错误，应为 key: value")
+                return true
+            }
+            let key = String(trimmed[..<eqRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+            let value = String(trimmed[eqRange.upperBound...])
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if !key.isEmpty {
+                currentStep?.params[key] = value
+            }
+            return true
+        }
+
+        private mutating func validateRequiredFields() {
+            if name.isEmpty {
+                errors.insert("工作流缺少名称（name 字段）", at: 0)
+            }
+            if steps.isEmpty && name.isEmpty {
+                errors.insert("工作流内容为空或格式不正确", at: 0)
+            } else if steps.isEmpty {
+                errors.append("工作流「\(name)」没有有效步骤")
+            }
         }
     }
 
@@ -333,19 +375,21 @@ public class WorkflowLibrary {
         var workflows: [WorkflowDefinition] = []
 
         for dir in dirs where manager.fileExists(atPath: dir) {
-            guard let urls = try? manager.contentsOfDirectory(
-                at: URL(fileURLWithPath: dir),
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            ) else { continue }
+            guard
+                let urls = try? manager.contentsOfDirectory(
+                    at: URL(fileURLWithPath: dir),
+                    includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                )
+            else { continue }
 
             for url in urls where ["yaml", "yml"].contains(url.pathExtension.lowercased()) {
                 guard let source = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 let (definition, errors) = WorkflowParser.parseWithErrors(source)
                 if let definition {
-                    var wf = definition
-                    wf.isBuiltin = false
-                    workflows.append(wf)
+                    var workflow = definition
+                    workflow.isBuiltin = false
+                    workflows.append(workflow)
                 }
                 if !errors.isEmpty {
                     let fileName = url.lastPathComponent
@@ -364,6 +408,13 @@ public class WorkflowLibrary {
 
 @MainActor
 public struct StepExecutor {
+    private struct LLMStepExecutionContext {
+        let taskContext: TaskContext
+        let runtime: (any ChatRuntimeClient)?
+        let connector: ConnectorProfile?
+        let accumulatedResults: [String]
+    }
+
     /// Execute a single workflow step
     public static func executeStep(
         _ step: WorkflowStep,
@@ -382,10 +433,12 @@ public struct StepExecutor {
         if renderedStep.tool == "llm" {
             return await executeLLMStep(
                 step: renderedStep,
-                context: context,
-                runtime: runtime,
-                connector: connector,
-                accumulatedResults: accumulatedResults,
+                execution: LLMStepExecutionContext(
+                    taskContext: context,
+                    runtime: runtime,
+                    connector: connector,
+                    accumulatedResults: accumulatedResults
+                ),
                 onStreamDelta: onStreamDelta
             )
         }
@@ -445,7 +498,8 @@ public struct StepExecutor {
     }
 
     private static func renderTemplate(_ value: String, context: TaskContext, results: String, previous: String, userParams: [String: String] = [:]) -> String {
-        var out = value
+        var out =
+            value
             .replacingOccurrences(of: "{{results}}", with: results)
             .replacingOccurrences(of: "{{previous.output}}", with: previous)
             .replacingOccurrences(of: "{{workspace}}", with: context.workspaceRoot)
@@ -464,13 +518,10 @@ public struct StepExecutor {
     /// Execute an LLM decision node step
     private static func executeLLMStep(
         step: WorkflowStep,
-        context: TaskContext,
-        runtime: (any ChatRuntimeClient)?,
-        connector: ConnectorProfile?,
-        accumulatedResults: [String],
+        execution: LLMStepExecutionContext,
         onStreamDelta: @Sendable @MainActor (String) -> Void
     ) async -> ToolResult {
-        guard let runtime = runtime, let connector = connector else {
+        guard let runtime = execution.runtime, let connector = execution.connector else {
             return ToolResult(
                 output: "LLM 步骤需要有效的连接器",
                 success: false,
@@ -482,24 +533,25 @@ public struct StepExecutor {
         let prompt: String
         if let stepPrompt = step.prompt {
             // Substitute variables: {{results}}, {{context}}, etc.
-            prompt = stepPrompt
-                .replacingOccurrences(of: "{{results}}", with: accumulatedResults.joined(separator: "\n\n---\n\n"))
-                .replacingOccurrences(of: "{{context}}", with: context.workspaceRoot)
+            prompt =
+                stepPrompt
+                .replacingOccurrences(of: "{{results}}", with: execution.accumulatedResults.joined(separator: "\n\n---\n\n"))
+                .replacingOccurrences(of: "{{context}}", with: execution.taskContext.workspaceRoot)
         } else {
             // Default analysis prompt
             prompt = """
-            基于以下信息，分析代码问题并给出建议：
+                基于以下信息，分析代码问题并给出建议：
 
-            工作区：\(context.workspaceRoot)
+                工作区：\(execution.taskContext.workspaceRoot)
 
-            已收集信息：
-            \(accumulatedResults.joined(separator: "\n\n"))
+                已收集信息：
+                \(execution.accumulatedResults.joined(separator: "\n\n"))
 
-            请：
-            1. 总结发现的问题
-            2. 分析根本原因
-            3. 提出具体的修复建议
-            """
+                请：
+                1. 总结发现的问题
+                2. 分析根本原因
+                3. 提出具体的修复建议
+                """
         }
 
         // Send to LLM
@@ -508,7 +560,7 @@ public struct StepExecutor {
             message: prompt,
             connector: connector,
             modeLabel: "构建",
-            systemPrompt: PromptComposer.composeSystemPrompt(context: context, intent: .workflow("analysis"))
+            systemPrompt: PromptComposer.composeSystemPrompt(context: execution.taskContext, intent: .workflow("analysis"))
         )
 
         do {
@@ -624,12 +676,13 @@ public struct StepExecutor {
             if !result.success && step.onFailure == "abort" {
                 hadFailure = true
                 aborted = true
-                taskSteps.append(TaskStep(
-                    kind: .error,
-                    text: "工作流中止：步骤 \(step.name) 失败",
-                    isFailure: true,
-                    recoverable: false
-                ))
+                taskSteps.append(
+                    TaskStep(
+                        kind: .error,
+                        text: "工作流中止：步骤 \(step.name) 失败",
+                        isFailure: true,
+                        recoverable: false
+                    ))
                 break
             }
             if !result.success {
@@ -638,19 +691,21 @@ public struct StepExecutor {
         }
 
         if !hadFailure {
-            taskSteps.append(TaskStep(
-                kind: .textOutput,
-                text: "工作流 \(workflow.name) 执行完成",
-                isCollapsible: false
-            ))
+            taskSteps.append(
+                TaskStep(
+                    kind: .textOutput,
+                    text: "工作流 \(workflow.name) 执行完成",
+                    isCollapsible: false
+                ))
         } else if !aborted {
-            taskSteps.append(TaskStep(
-                kind: .error,
-                text: "工作流 \(workflow.name) 部分步骤失败，请检查上方失败项后重试。",
-                isFailure: true,
-                recoverable: true,
-                retryAction: "重试"
-            ))
+            taskSteps.append(
+                TaskStep(
+                    kind: .error,
+                    text: "工作流 \(workflow.name) 部分步骤失败，请检查上方失败项后重试。",
+                    isFailure: true,
+                    recoverable: true,
+                    retryAction: "重试"
+                ))
         }
 
         return taskSteps
@@ -658,7 +713,8 @@ public struct StepExecutor {
 
     private static func shouldRun(step: WorkflowStep, previousSuccess: Bool) -> Bool {
         guard let condition = step.condition?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-              !condition.isEmpty else {
+            !condition.isEmpty
+        else {
             return true
         }
         switch condition {
@@ -712,18 +768,18 @@ public struct BuiltinWorkflows {
                 name: "分析代码质量",
                 tool: "llm",
                 prompt: """
-                请审查以下代码变更，关注：
-                1. 潜在 bug 或逻辑错误
-                2. 代码风格和最佳实践
-                3. 性能问题
-                4. 测试覆盖
+                    请审查以下代码变更，关注：
+                    1. 潜在 bug 或逻辑错误
+                    2. 代码风格和最佳实践
+                    3. 性能问题
+                    4. 测试覆盖
 
-                变更信息：
-                {{results}}
+                    变更信息：
+                    {{results}}
 
-                给出具体的改进建议。
-                """
-            ),
+                    给出具体的改进建议。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .review,
@@ -742,19 +798,19 @@ public struct BuiltinWorkflows {
                 name: "生成测试代码",
                 tool: "llm",
                 prompt: """
-                基于以下源代码，生成单元测试：
+                    基于以下源代码，生成单元测试：
 
-                源代码：
-                {{results}}
+                    源代码：
+                    {{results}}
 
-                要求：
-                1. 覆盖主要功能和边界情况
-                2. 使用项目的测试框架
-                3. 测试命名清晰
+                    要求：
+                    1. 覆盖主要功能和边界情况
+                    2. 使用项目的测试框架
+                    3. 测试命名清晰
 
-                输出完整的测试文件内容。
-                """
-            ),
+                    输出完整的测试文件内容。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .generate,
@@ -774,17 +830,17 @@ public struct BuiltinWorkflows {
                 name: "分析错误原因",
                 tool: "llm",
                 prompt: """
-                分析以下错误和代码变更，找出可能的原因：
+                    分析以下错误和代码变更，找出可能的原因：
 
-                收集信息：
-                {{results}}
+                    收集信息：
+                    {{results}}
 
-                请：
-                1. 定位错误源头
-                2. 分析根本原因
-                3. 提出修复方案
-                """
-            ),
+                    请：
+                    1. 定位错误源头
+                    2. 分析根本原因
+                    3. 提出修复方案
+                    """
+            )
         ],
         isBuiltin: true,
         category: .debug,
@@ -804,20 +860,20 @@ public struct BuiltinWorkflows {
                 name: "提出重构方案",
                 tool: "llm",
                 prompt: """
-                分析以下代码，提出重构建议：
+                    分析以下代码，提出重构建议：
 
-                代码：
-                {{results}}
+                    代码：
+                    {{results}}
 
-                关注：
-                1. 减少重复代码
-                2. 提高可读性
-                3. 遵循 SOLID 原则
-                4. 保持向后兼容
+                    关注：
+                    1. 减少重复代码
+                    2. 提高可读性
+                    3. 遵循 SOLID 原则
+                    4. 保持向后兼容
 
-                给出具体的重构步骤和代码示例。
-                """
-            ),
+                    给出具体的重构步骤和代码示例。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .refactor,
@@ -836,20 +892,20 @@ public struct BuiltinWorkflows {
                 name: "生成文档",
                 tool: "llm",
                 prompt: """
-                为以下代码生成文档：
+                    为以下代码生成文档：
 
-                代码：
-                {{results}}
+                    代码：
+                    {{results}}
 
-                要求：
-                1. 生成清晰的文档注释
-                2. 包含使用示例
-                3. 说明参数和返回值
-                4. 符合项目的文档风格
+                    要求：
+                    1. 生成清晰的文档注释
+                    2. 包含使用示例
+                    3. 说明参数和返回值
+                    4. 符合项目的文档风格
 
-                输出文档内容。
-                """
-            ),
+                    输出文档内容。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .generate,
@@ -867,14 +923,14 @@ public struct BuiltinWorkflows {
                 name: "翻译内容",
                 tool: "llm",
                 prompt: """
-                将以下内容翻译为{{target_language}}：
+                    将以下内容翻译为{{target_language}}：
 
-                原文：
-                {{results}}
+                    原文：
+                    {{results}}
 
-                保持原文的格式和结构。
-                """
-            ),
+                    保持原文的格式和结构。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .transform,
@@ -891,27 +947,31 @@ public struct BuiltinWorkflows {
         description: "安全审计：扫描代码中的安全隐患和敏感信息泄露",
         steps: [
             WorkflowStep(name: "搜索硬编码密钥", tool: "code.search", params: ["query": "password|secret|api_key|token|credential", "scope": "content"]),
-            WorkflowStep(name: "搜索不安全函数", tool: "code.search", params: ["query": "eval|exec|innerHTML|dangerouslySetInnerHTML|subprocess", "scope": "content"], onFailure: "skip"),
-            WorkflowStep(name: "检查依赖文件", tool: "code.search", params: ["query": "package.json|Podfile|Gemfile|requirements.txt|Cargo.toml", "scope": "files"], onFailure: "skip"),
+            WorkflowStep(
+                name: "搜索不安全函数", tool: "code.search", params: ["query": "eval|exec|innerHTML|dangerouslySetInnerHTML|subprocess", "scope": "content"],
+                onFailure: "skip"),
+            WorkflowStep(
+                name: "检查依赖文件", tool: "code.search", params: ["query": "package.json|Podfile|Gemfile|requirements.txt|Cargo.toml", "scope": "files"],
+                onFailure: "skip"),
             WorkflowStep(name: "查看 gitignore", tool: "file.read", params: ["path": "{{workspace}}/.gitignore"], onFailure: "skip"),
             WorkflowStep(
                 name: "安全分析",
                 tool: "llm",
                 prompt: """
-                基于以下扫描结果，进行安全审计：
+                    基于以下扫描结果，进行安全审计：
 
-                {{results}}
+                    {{results}}
 
-                请检查：
-                1. 硬编码的密钥、密码、Token
-                2. 不安全的函数调用（eval、exec 等）
-                3. SQL 注入、XSS 风险
-                4. .gitignore 是否遗漏敏感文件
-                5. 依赖项是否有已知漏洞
+                    请检查：
+                    1. 硬编码的密钥、密码、Token
+                    2. 不安全的函数调用（eval、exec 等）
+                    3. SQL 注入、XSS 风险
+                    4. .gitignore 是否遗漏敏感文件
+                    5. 依赖项是否有已知漏洞
 
-                按严重程度（高/中/低）分类列出问题，并给出修复建议。
-                """
-            ),
+                    按严重程度（高/中/低）分类列出问题，并给出修复建议。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .review,
@@ -925,27 +985,30 @@ public struct BuiltinWorkflows {
         description: "性能审计：分析代码性能瓶颈，提出优化建议",
         steps: [
             WorkflowStep(name: "读取目标文件", tool: "file.read", params: ["path": "{{target_file}}"]),
-            WorkflowStep(name: "搜索性能敏感模式", tool: "code.search", params: ["query": "for.*in|while|forEach|map|filter|reduce|async.*await|Promise", "scope": "content"], onFailure: "skip"),
-            WorkflowStep(name: "搜索缓存使用", tool: "code.search", params: ["query": "cache|memoize|lazy|debounce|throttle", "scope": "content"], onFailure: "skip"),
+            WorkflowStep(
+                name: "搜索性能敏感模式", tool: "code.search", params: ["query": "for.*in|while|forEach|map|filter|reduce|async.*await|Promise", "scope": "content"],
+                onFailure: "skip"),
+            WorkflowStep(
+                name: "搜索缓存使用", tool: "code.search", params: ["query": "cache|memoize|lazy|debounce|throttle", "scope": "content"], onFailure: "skip"),
             WorkflowStep(
                 name: "性能分析",
                 tool: "llm",
                 prompt: """
-                分析以下代码的性能：
+                    分析以下代码的性能：
 
-                {{results}}
+                    {{results}}
 
-                请关注：
-                1. 时间复杂度过高的算法（O(n²) 或更差）
-                2. 不必要的重复计算
-                3. 内存泄漏风险
-                4. 可以利用缓存/惰性求值的场景
-                5. 异步操作的并发优化空间
-                6. 大数据量下的性能瓶颈
+                    请关注：
+                    1. 时间复杂度过高的算法（O(n²) 或更差）
+                    2. 不必要的重复计算
+                    3. 内存泄漏风险
+                    4. 可以利用缓存/惰性求值的场景
+                    5. 异步操作的并发优化空间
+                    6. 大数据量下的性能瓶颈
 
-                给出具体的优化建议和代码示例。
-                """
-            ),
+                    给出具体的优化建议和代码示例。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .review,
@@ -967,19 +1030,19 @@ public struct BuiltinWorkflows {
                 name: "生成 CHANGELOG",
                 tool: "llm",
                 prompt: """
-                基于以下 Git 提交历史，生成结构化的 CHANGELOG：
+                    基于以下 Git 提交历史，生成结构化的 CHANGELOG：
 
-                {{results}}
+                    {{results}}
 
-                格式要求：
-                1. 按语义分类：✨ 新功能、🐛 修复、♻️ 重构、📝 文档、🔧 配置
-                2. 每条记录简洁明了
-                3. 如果有现有 CHANGELOG，在其基础上追加
-                4. 遵循 Keep a Changelog 格式
+                    格式要求：
+                    1. 按语义分类：✨ 新功能、🐛 修复、♻️ 重构、📝 文档、🔧 配置
+                    2. 每条记录简洁明了
+                    3. 如果有现有 CHANGELOG，在其基础上追加
+                    4. 遵循 Keep a Changelog 格式
 
-                输出完整的 CHANGELOG 内容。
-                """
-            ),
+                    输出完整的 CHANGELOG 内容。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .generate,
@@ -996,28 +1059,30 @@ public struct BuiltinWorkflows {
         steps: [
             WorkflowStep(name: "查看 README", tool: "file.read", params: ["path": "{{workspace}}/README.md"], onFailure: "skip"),
             WorkflowStep(name: "扫描项目结构", tool: "code.search", params: ["query": "", "scope": "files"]),
-            WorkflowStep(name: "查看构建配置", tool: "code.search", params: ["query": "package.json|Makefile|build.sh|CMakeLists|Cargo.toml|Package.swift|*.gradle", "scope": "files"], onFailure: "skip"),
+            WorkflowStep(
+                name: "查看构建配置", tool: "code.search",
+                params: ["query": "package.json|Makefile|build.sh|CMakeLists|Cargo.toml|Package.swift|*.gradle", "scope": "files"], onFailure: "skip"),
             WorkflowStep(name: "查看 Git 状态", tool: "git", params: ["subcommand": "log", "args": "--oneline -5"], onFailure: "skip"),
             WorkflowStep(
                 name: "生成入门指南",
                 tool: "llm",
                 prompt: """
-                基于以下项目信息，生成开发者入门指南：
+                    基于以下项目信息，生成开发者入门指南：
 
-                {{results}}
+                    {{results}}
 
-                请包含：
-                1. 项目概述（做什么、技术栈）
-                2. 目录结构说明
-                3. 环境搭建步骤
-                4. 构建和运行命令
-                5. 关键模块说明
-                6. 常见问题和注意事项
-                7. 代码规范概要
+                    请包含：
+                    1. 项目概述（做什么、技术栈）
+                    2. 目录结构说明
+                    3. 环境搭建步骤
+                    4. 构建和运行命令
+                    5. 关键模块说明
+                    6. 常见问题和注意事项
+                    7. 代码规范概要
 
-                用简洁清晰的中文撰写。
-                """
-            ),
+                    用简洁清晰的中文撰写。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .generate,
@@ -1036,22 +1101,22 @@ public struct BuiltinWorkflows {
                 name: "分析清理项",
                 tool: "llm",
                 prompt: """
-                分析以下代码，找出可以清理的部分：
+                    分析以下代码，找出可以清理的部分：
 
-                {{results}}
+                    {{results}}
 
-                请检查：
-                1. 未使用的 import/导入
-                2. 死代码（永远不会执行的分支）
-                3. 注释掉的代码块
-                4. 冗余的类型转换或条件判断
-                5. 过时的 TODO/FIXME
-                6. 可以简化的复杂表达式
-                7. 重复的代码片段
+                    请检查：
+                    1. 未使用的 import/导入
+                    2. 死代码（永远不会执行的分支）
+                    3. 注释掉的代码块
+                    4. 冗余的类型转换或条件判断
+                    5. 过时的 TODO/FIXME
+                    6. 可以简化的复杂表达式
+                    7. 重复的代码片段
 
-                列出每个问题的位置和建议的修改方式。
-                """
-            ),
+                    列出每个问题的位置和建议的修改方式。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .refactor,
@@ -1066,30 +1131,33 @@ public struct BuiltinWorkflows {
         name: "api-design",
         description: "API 设计：根据需求生成 RESTful API 接口文档",
         steps: [
-            WorkflowStep(name: "搜索现有接口", tool: "code.search", params: ["query": "router|route|endpoint|@Get|@Post|@Put|@Delete|app.get|app.post", "scope": "content"], onFailure: "skip"),
-            WorkflowStep(name: "搜索数据模型", tool: "code.search", params: ["query": "struct|class|interface|schema|model|entity", "scope": "content"], onFailure: "skip"),
+            WorkflowStep(
+                name: "搜索现有接口", tool: "code.search", params: ["query": "router|route|endpoint|@Get|@Post|@Put|@Delete|app.get|app.post", "scope": "content"],
+                onFailure: "skip"),
+            WorkflowStep(
+                name: "搜索数据模型", tool: "code.search", params: ["query": "struct|class|interface|schema|model|entity", "scope": "content"], onFailure: "skip"),
             WorkflowStep(
                 name: "设计 API",
                 tool: "llm",
                 prompt: """
-                基于以下现有代码和需求，设计 API 接口：
+                    基于以下现有代码和需求，设计 API 接口：
 
-                需求：{{api_requirement}}
+                    需求：{{api_requirement}}
 
-                现有代码参考：
-                {{results}}
+                    现有代码参考：
+                    {{results}}
 
-                请生成：
-                1. 接口列表（方法、路径、描述）
-                2. 每个接口的请求/响应格式（JSON Schema）
-                3. 错误码定义
-                4. 认证方式
-                5. 分页/过滤约定
-                6. 接口版本策略
+                    请生成：
+                    1. 接口列表（方法、路径、描述）
+                    2. 每个接口的请求/响应格式（JSON Schema）
+                    3. 错误码定义
+                    4. 认证方式
+                    5. 分页/过滤约定
+                    6. 接口版本策略
 
-                使用 OpenAPI/Swagger 兼容格式。
-                """
-            ),
+                    使用 OpenAPI/Swagger 兼容格式。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .generate,
@@ -1104,28 +1172,32 @@ public struct BuiltinWorkflows {
         name: "dependency-audit",
         description: "依赖审计：检查项目依赖的健康状况和更新建议",
         steps: [
-            WorkflowStep(name: "搜索依赖文件", tool: "code.search", params: ["query": "package.json|Podfile|Gemfile|requirements.txt|Cargo.toml|Package.swift|go.mod|pom.xml", "scope": "files"]),
+            WorkflowStep(
+                name: "搜索依赖文件", tool: "code.search",
+                params: ["query": "package.json|Podfile|Gemfile|requirements.txt|Cargo.toml|Package.swift|go.mod|pom.xml", "scope": "files"]),
             WorkflowStep(name: "读取主依赖文件", tool: "file.read", params: ["path": "{{dep_file}}"]),
-            WorkflowStep(name: "搜索 lock 文件", tool: "code.search", params: ["query": "package-lock|yarn.lock|Podfile.lock|Gemfile.lock|Cargo.lock|Package.resolved", "scope": "files"], onFailure: "skip"),
+            WorkflowStep(
+                name: "搜索 lock 文件", tool: "code.search",
+                params: ["query": "package-lock|yarn.lock|Podfile.lock|Gemfile.lock|Cargo.lock|Package.resolved", "scope": "files"], onFailure: "skip"),
             WorkflowStep(
                 name: "依赖分析",
                 tool: "llm",
                 prompt: """
-                分析以下项目依赖：
+                    分析以下项目依赖：
 
-                {{results}}
+                    {{results}}
 
-                请检查：
-                1. 是否有已知不安全的依赖版本
-                2. 主要依赖是否过时（超过 1 年未更新）
-                3. 是否有可以合并或替代的重复依赖
-                4. 依赖数量是否合理（是否过度依赖）
-                5. 生产依赖 vs 开发依赖是否正确分类
-                6. 版本锁定策略是否合理
+                    请检查：
+                    1. 是否有已知不安全的依赖版本
+                    2. 主要依赖是否过时（超过 1 年未更新）
+                    3. 是否有可以合并或替代的重复依赖
+                    4. 依赖数量是否合理（是否过度依赖）
+                    5. 生产依赖 vs 开发依赖是否正确分类
+                    6. 版本锁定策略是否合理
 
-                给出具体的更新建议和风险评估。
-                """
-            ),
+                    给出具体的更新建议和风险评估。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .review,
@@ -1141,25 +1213,27 @@ public struct BuiltinWorkflows {
         description: "国际化扫描：查找硬编码字符串，生成翻译清单",
         steps: [
             WorkflowStep(name: "读取目标文件", tool: "file.read", params: ["path": "{{target_file}}"]),
-            WorkflowStep(name: "搜索现有翻译", tool: "code.search", params: ["query": "i18n|locale|intl|translate|NSLocalizedString|LocalizedStringKey|t\\(|\\$t\\(", "scope": "content"], onFailure: "skip"),
+            WorkflowStep(
+                name: "搜索现有翻译", tool: "code.search",
+                params: ["query": "i18n|locale|intl|translate|NSLocalizedString|LocalizedStringKey|t\\(|\\$t\\(", "scope": "content"], onFailure: "skip"),
             WorkflowStep(
                 name: "提取翻译项",
                 tool: "llm",
                 prompt: """
-                分析以下代码，提取需要国际化的内容：
+                    分析以下代码，提取需要国际化的内容：
 
-                {{results}}
+                    {{results}}
 
-                请：
-                1. 列出所有硬编码的用户可见字符串（按钮文字、提示信息、标题等）
-                2. 为每个字符串生成翻译 key（遵循 feature.component.description 命名）
-                3. 生成翻译文件内容（中文 + {{target_language}}）
-                4. 标注哪些字符串不需要翻译（如专有名词、代码标识符）
-                5. 建议项目采用的国际化框架/方案
+                    请：
+                    1. 列出所有硬编码的用户可见字符串（按钮文字、提示信息、标题等）
+                    2. 为每个字符串生成翻译 key（遵循 feature.component.description 命名）
+                    3. 生成翻译文件内容（中文 + {{target_language}}）
+                    4. 标注哪些字符串不需要翻译（如专有名词、代码标识符）
+                    5. 建议项目采用的国际化框架/方案
 
-                输出完整的翻译清单。
-                """
-            ),
+                    输出完整的翻译清单。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .transform,
@@ -1183,23 +1257,24 @@ public struct BuiltinWorkflows {
                 name: "生成摘要",
                 tool: "llm",
                 prompt: """
-                基于以下 Git 信息，生成代码活动摘要：
+                    基于以下 Git 信息，生成代码活动摘要：
 
-                {{results}}
+                    {{results}}
 
-                请生成：
-                1. 活动概览（提交数、活跃贡献者、变更文件数）
-                2. 主要变更分类总结
-                3. 活跃分支及其用途推测
-                4. 代码趋势分析（新增 vs 删除、模块热度）
-                5. 建议关注的事项
-                """
-            ),
+                    请生成：
+                    1. 活动概览（提交数、活跃贡献者、变更文件数）
+                    2. 主要变更分类总结
+                    3. 活跃分支及其用途推测
+                    4. 代码趋势分析（新增 vs 删除、模块热度）
+                    5. 建议关注的事项
+                    """
+            )
         ],
         isBuiltin: true,
         category: .review,
         inputParams: [
-            WorkflowParam(key: "since_days", label: "时间范围", placeholder: "例如：7.days.ago", kind: .choice, defaultValue: "1.day.ago,3.days.ago,7.days.ago,30.days.ago")
+            WorkflowParam(
+                key: "since_days", label: "时间范围", placeholder: "例如：7.days.ago", kind: .choice, defaultValue: "1.day.ago,3.days.ago,7.days.ago,30.days.ago")
         ]
     )
 
@@ -1217,25 +1292,25 @@ public struct BuiltinWorkflows {
                 name: "生成迁移方案",
                 tool: "llm",
                 prompt: """
-                基于以下项目信息，生成迁移方案：
+                    基于以下项目信息，生成迁移方案：
 
-                迁移目标：{{migration_goal}}
+                    迁移目标：{{migration_goal}}
 
-                项目现状：
-                {{results}}
+                    项目现状：
+                    {{results}}
 
-                请制定：
-                1. 现状评估（技术栈、架构、代码量）
-                2. 迁移范围和影响分析
-                3. 分阶段实施计划（每阶段目标、预估工时）
-                4. 风险点和缓解策略
-                5. 兼容性保障措施（旧版本并行、回滚方案）
-                6. 测试验证策略
-                7. 数据迁移方案（如适用）
+                    请制定：
+                    1. 现状评估（技术栈、架构、代码量）
+                    2. 迁移范围和影响分析
+                    3. 分阶段实施计划（每阶段目标、预估工时）
+                    4. 风险点和缓解策略
+                    5. 兼容性保障措施（旧版本并行、回滚方案）
+                    6. 测试验证策略
+                    7. 数据迁移方案（如适用）
 
-                确保方案可执行，不丢失现有功能。
-                """
-            ),
+                    确保方案可执行，不丢失现有功能。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .refactor,
@@ -1257,47 +1332,47 @@ public struct BuiltinWorkflows {
                 name: "生成 PRD",
                 tool: "llm",
                 prompt: """
-                根据以下产品需求，生成完整的 PRD（产品需求文档）：
+                    根据以下产品需求，生成完整的 PRD（产品需求文档）：
 
-                **产品需求**：{{product_idea}}
+                    **产品需求**：{{product_idea}}
 
-                项目现有信息：
-                {{results}}
+                    项目现有信息：
+                    {{results}}
 
-                请按以下结构输出：
+                    请按以下结构输出：
 
-                ## 1. 概述
-                - 产品背景和目标
-                - 目标用户群体
-                - 核心价值主张
+                    ## 1. 概述
+                    - 产品背景和目标
+                    - 目标用户群体
+                    - 核心价值主张
 
-                ## 2. 功能需求
-                - P0（必须有）：核心功能清单
-                - P1（应该有）：重要功能
-                - P2（可以有）：锦上添花
+                    ## 2. 功能需求
+                    - P0（必须有）：核心功能清单
+                    - P1（应该有）：重要功能
+                    - P2（可以有）：锦上添花
 
-                ## 3. 用户场景
-                - 每个核心功能对应 1-2 个用户故事
-                - 格式：作为 [角色]，我希望 [行为]，以便 [价值]
+                    ## 3. 用户场景
+                    - 每个核心功能对应 1-2 个用户故事
+                    - 格式：作为 [角色]，我希望 [行为]，以便 [价值]
 
-                ## 4. 交互设计要点
-                - 关键页面/流程描述
-                - 信息架构建议
+                    ## 4. 交互设计要点
+                    - 关键页面/流程描述
+                    - 信息架构建议
 
-                ## 5. 非功能性需求
-                - 性能要求
-                - 安全要求
-                - 兼容性要求
+                    ## 5. 非功能性需求
+                    - 性能要求
+                    - 安全要求
+                    - 兼容性要求
 
-                ## 6. 验收标准
-                - 每个 P0 功能的验收条件
+                    ## 6. 验收标准
+                    - 每个 P0 功能的验收条件
 
-                ## 7. 里程碑建议
-                - MVP → V1.0 → V1.1 的功能分配
+                    ## 7. 里程碑建议
+                    - MVP → V1.0 → V1.1 的功能分配
 
-                用专业但易读的中文撰写。
-                """
-            ),
+                    用专业但易读的中文撰写。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .product,
@@ -1317,42 +1392,42 @@ public struct BuiltinWorkflows {
                 name: "拆解用户故事",
                 tool: "llm",
                 prompt: """
-                将以下需求拆解为用户故事和开发任务：
+                    将以下需求拆解为用户故事和开发任务：
 
-                **需求描述**：{{requirement}}
+                    **需求描述**：{{requirement}}
 
-                {{results}}
+                    {{results}}
 
-                请按以下格式输出：
+                    请按以下格式输出：
 
-                ## Epic: [需求名称]
+                    ## Epic: [需求名称]
 
-                ### 用户故事 1: [故事标题]
-                **描述**：作为 [角色]，我希望 [行为]，以便 [价值]
-                **验收标准**：
-                - [ ] 条件 1
-                - [ ] 条件 2
-                **估时**：[S/M/L/XL]
-                **优先级**：[P0/P1/P2]
-                **开发任务**：
-                1. 前端：...
-                2. 后端：...
-                3. 测试：...
+                    ### 用户故事 1: [故事标题]
+                    **描述**：作为 [角色]，我希望 [行为]，以便 [价值]
+                    **验收标准**：
+                    - [ ] 条件 1
+                    - [ ] 条件 2
+                    **估时**：[S/M/L/XL]
+                    **优先级**：[P0/P1/P2]
+                    **开发任务**：
+                    1. 前端：...
+                    2. 后端：...
+                    3. 测试：...
 
-                ### 用户故事 2: ...
+                    ### 用户故事 2: ...
 
-                ---
+                    ---
 
-                ## 依赖关系
-                - 故事 X 依赖 故事 Y
+                    ## 依赖关系
+                    - 故事 X 依赖 故事 Y
 
-                ## 建议排期
-                - Sprint 1: 故事 1, 2
-                - Sprint 2: 故事 3, 4
+                    ## 建议排期
+                    - Sprint 1: 故事 1, 2
+                    - Sprint 2: 故事 3, 4
 
-                确保故事足够小（可在 1-3 天内完成），且相互独立。
-                """
-            ),
+                    确保故事足够小（可在 1-3 天内完成），且相互独立。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .product,
@@ -1372,44 +1447,44 @@ public struct BuiltinWorkflows {
                 name: "竞品分析",
                 tool: "llm",
                 prompt: """
-                进行竞品分析：
+                    进行竞品分析：
 
-                **我们的产品**：{{our_product}}
-                **竞品列表**：{{competitors}}
+                    **我们的产品**：{{our_product}}
+                    **竞品列表**：{{competitors}}
 
-                项目信息：
-                {{results}}
+                    项目信息：
+                    {{results}}
 
-                请按以下结构输出：
+                    请按以下结构输出：
 
-                ## 1. 竞品概览
-                | 维度 | 我们 | 竞品A | 竞品B | ... |
-                |------|------|-------|-------|-----|
-                | 定位 | | | | |
-                | 核心功能 | | | | |
-                | 定价 | | | | |
-                | 技术栈 | | | | |
-                | 用户群 | | | | |
+                    ## 1. 竞品概览
+                    | 维度 | 我们 | 竞品A | 竞品B | ... |
+                    |------|------|-------|-------|-----|
+                    | 定位 | | | | |
+                    | 核心功能 | | | | |
+                    | 定价 | | | | |
+                    | 技术栈 | | | | |
+                    | 用户群 | | | | |
 
-                ## 2. 功能对比矩阵
-                - 详细功能点对比（✅ 有 / ❌ 无 / 🔶 部分）
+                    ## 2. 功能对比矩阵
+                    - 详细功能点对比（✅ 有 / ❌ 无 / 🔶 部分）
 
-                ## 3. 竞品优劣分析
-                - 每个竞品的 3 个优点 + 3 个缺点
+                    ## 3. 竞品优劣分析
+                    - 每个竞品的 3 个优点 + 3 个缺点
 
-                ## 4. 差异化机会
-                - 竞品都没做好的领域
-                - 我们的独特优势
-                - 建议的差异化方向
+                    ## 4. 差异化机会
+                    - 竞品都没做好的领域
+                    - 我们的独特优势
+                    - 建议的差异化方向
 
-                ## 5. 行动建议
-                - 短期（1个月）：快速补齐的功能
-                - 中期（3个月）：差异化功能
-                - 长期（6个月）：护城河建设
+                    ## 5. 行动建议
+                    - 短期（1个月）：快速补齐的功能
+                    - 中期（3个月）：差异化功能
+                    - 长期（6个月）：护城河建设
 
-                基于公开信息和行业认知进行分析。
-                """
-            ),
+                    基于公开信息和行业认知进行分析。
+                    """
+            )
         ],
         isBuiltin: true,
         category: .product,
@@ -1428,49 +1503,50 @@ public struct BuiltinWorkflows {
             WorkflowStep(name: "查看未合并提交", tool: "git", params: ["subcommand": "log", "args": "--oneline -20"]),
             WorkflowStep(name: "查看变更文件", tool: "git", params: ["subcommand": "diff", "args": "--stat"], onFailure: "skip"),
             WorkflowStep(name: "查看分支", tool: "git", params: ["subcommand": "branch", "args": "-a"], onFailure: "skip"),
-            WorkflowStep(name: "搜索 TODO/FIXME", tool: "code.search", params: ["query": "TODO|FIXME|HACK|WORKAROUND|XXX", "scope": "content"], onFailure: "skip"),
+            WorkflowStep(
+                name: "搜索 TODO/FIXME", tool: "code.search", params: ["query": "TODO|FIXME|HACK|WORKAROUND|XXX", "scope": "content"], onFailure: "skip"),
             WorkflowStep(name: "查看 CHANGELOG", tool: "file.read", params: ["path": "{{workspace}}/CHANGELOG.md"], onFailure: "skip"),
             WorkflowStep(
                 name: "生成发版计划",
                 tool: "llm",
                 prompt: """
-                基于以下信息，生成发版计划：
+                    基于以下信息，生成发版计划：
 
-                **版本号**：{{version}}
+                    **版本号**：{{version}}
 
-                {{results}}
+                    {{results}}
 
-                请输出：
+                    请输出：
 
-                ## 发版概要
-                - 版本号、预计发布日期
-                - 本次发版的主题/重点
+                    ## 发版概要
+                    - 版本号、预计发布日期
+                    - 本次发版的主题/重点
 
-                ## 变更内容
-                - 新功能
-                - Bug 修复
-                - 改进优化
-                - 破坏性变更（如有）
+                    ## 变更内容
+                    - 新功能
+                    - Bug 修复
+                    - 改进优化
+                    - 破坏性变更（如有）
 
-                ## 发版 Checklist
-                - [ ] 代码冻结
-                - [ ] 全量回归测试
-                - [ ] 性能基准测试
-                - [ ] 文档更新
-                - [ ] CHANGELOG 更新
-                - [ ] 灰度发布
-                - [ ] 监控告警配置
-                - [ ] 回滚方案确认
+                    ## 发版 Checklist
+                    - [ ] 代码冻结
+                    - [ ] 全量回归测试
+                    - [ ] 性能基准测试
+                    - [ ] 文档更新
+                    - [ ] CHANGELOG 更新
+                    - [ ] 灰度发布
+                    - [ ] 监控告警配置
+                    - [ ] 回滚方案确认
 
-                ## 风险评估
-                - 高风险变更及缓解措施
-                - 未解决的 TODO/FIXME 评估
+                    ## 风险评估
+                    - 高风险变更及缓解措施
+                    - 未解决的 TODO/FIXME 评估
 
-                ## 发布后关注
-                - 关键监控指标
-                - 第一小时观察要点
-                """
-            ),
+                    ## 发布后关注
+                    - 关键监控指标
+                    - 第一小时观察要点
+                    """
+            )
         ],
         isBuiltin: true,
         category: .project,
@@ -1490,46 +1566,46 @@ public struct BuiltinWorkflows {
                 name: "分析反馈",
                 tool: "llm",
                 prompt: """
-                整理和分析以下用户反馈：
+                    整理和分析以下用户反馈：
 
-                **反馈内容**：
-                {{user_feedback}}
+                    **反馈内容**：
+                    {{user_feedback}}
 
-                已有数据：
-                {{results}}
+                    已有数据：
+                    {{results}}
 
-                请输出：
+                    请输出：
 
-                ## 1. 反馈分类统计
-                | 类型 | 数量 | 情感倾向 |
-                |------|------|----------|
-                | Bug 报告 | | |
-                | 功能需求 | | |
-                | 使用困惑 | | |
-                | 正面评价 | | |
+                    ## 1. 反馈分类统计
+                    | 类型 | 数量 | 情感倾向 |
+                    |------|------|----------|
+                    | Bug 报告 | | |
+                    | 功能需求 | | |
+                    | 使用困惑 | | |
+                    | 正面评价 | | |
 
-                ## 2. 高频问题 TOP 5
-                - 问题描述 + 出现频次 + 影响范围
+                    ## 2. 高频问题 TOP 5
+                    - 问题描述 + 出现频次 + 影响范围
 
-                ## 3. 需求提取
-                - P0 需求（用户强烈要求，影响留存）
-                - P1 需求（多人提到，提升体验）
-                - P2 需求（个别用户，锦上添花）
+                    ## 3. 需求提取
+                    - P0 需求（用户强烈要求，影响留存）
+                    - P1 需求（多人提到，提升体验）
+                    - P2 需求（个别用户，锦上添花）
 
-                ## 4. 体验优化建议
-                - 当前的 UX 痛点
-                - 具体改进方案
+                    ## 4. 体验优化建议
+                    - 当前的 UX 痛点
+                    - 具体改进方案
 
-                ## 5. 积极反馈总结
-                - 用户认可的功能和亮点
-                - 可强化的产品优势
+                    ## 5. 积极反馈总结
+                    - 用户认可的功能和亮点
+                    - 可强化的产品优势
 
-                ## 6. 行动项
-                - 本周应修复的问题
-                - 下一迭代应规划的功能
-                - 需要进一步调研的方向
-                """
-            ),
+                    ## 6. 行动项
+                    - 本周应修复的问题
+                    - 下一迭代应规划的功能
+                    - 需要进一步调研的方向
+                    """
+            )
         ],
         isBuiltin: true,
         category: .product,
@@ -1552,44 +1628,44 @@ public struct BuiltinWorkflows {
                 name: "生成复盘报告",
                 tool: "llm",
                 prompt: """
-                基于以下项目活动，生成迭代复盘报告：
+                    基于以下项目活动，生成迭代复盘报告：
 
-                **复盘周期**：{{period}}
+                    **复盘周期**：{{period}}
 
-                {{results}}
+                    {{results}}
 
-                请按以下结构输出：
+                    请按以下结构输出：
 
-                ## 迭代概要
-                - 时间范围、提交数、涉及文件数
-                - 本迭代目标回顾
+                    ## 迭代概要
+                    - 时间范围、提交数、涉及文件数
+                    - 本迭代目标回顾
 
-                ## ✅ 做得好的
-                - 完成的功能和改进
-                - 值得延续的实践
-                - 团队协作亮点
+                    ## ✅ 做得好的
+                    - 完成的功能和改进
+                    - 值得延续的实践
+                    - 团队协作亮点
 
-                ## ❌ 需改进的
-                - 遇到的问题和阻塞
-                - 技术债务累积
-                - 流程中的低效环节
+                    ## ❌ 需改进的
+                    - 遇到的问题和阻塞
+                    - 技术债务累积
+                    - 流程中的低效环节
 
-                ## 💡 改进行动
-                - 下一迭代具体改进措施
-                - 流程优化建议
-                - 工具/自动化建议
+                    ## 💡 改进行动
+                    - 下一迭代具体改进措施
+                    - 流程优化建议
+                    - 工具/自动化建议
 
-                ## 📊 关键指标
-                - 代码变更量
-                - 功能交付数
-                - Bug 修复数
-                - 未解决的 TODO/FIXME 数
+                    ## 📊 关键指标
+                    - 代码变更量
+                    - 功能交付数
+                    - Bug 修复数
+                    - 未解决的 TODO/FIXME 数
 
-                ## 下一迭代展望
-                - 优先级最高的 3 件事
-                - 风险预警
-                """
-            ),
+                    ## 下一迭代展望
+                    - 优先级最高的 3 件事
+                    - 风险预警
+                    """
+            )
         ],
         isBuiltin: true,
         category: .project,

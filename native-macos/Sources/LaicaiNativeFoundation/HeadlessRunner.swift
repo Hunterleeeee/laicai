@@ -51,11 +51,11 @@ public final class HeadlessRunner {
     public func runIfNeeded(store: AppStore) -> Bool {
         guard isHeadless, let prompt = taskPrompt, !prompt.isEmpty else { return false }
 
-        if let ws = workspace, !ws.isEmpty {
-            store.updateWorkspacePath(ws)
+        if let workspacePath = workspace, !workspacePath.isEmpty {
+            store.updateWorkspacePath(workspacePath)
         }
-        if let cn = connectorName, !cn.isEmpty {
-            if let connector = store.state.connectors.first(where: { $0.name == cn }) {
+        if let connectorName, !connectorName.isEmpty {
+            if let connector = store.state.connectors.first(where: { $0.name == connectorName }) {
                 store.selectConnector(id: connector.id)
             }
         }

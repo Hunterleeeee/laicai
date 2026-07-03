@@ -22,7 +22,7 @@ final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(SandboxConfig.default.networkEnabled)
         XCTAssertTrue(SandboxConfig.default.mountWorkspace)
     }
-    func testShellWhitelistAllowsPwdAndRejectsSudoAndProjectTraversal() async throws {
+    func testShellAllowlistAllowsPwdAndRejectsSudoAndProjectTraversal() async throws {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let previousSandboxConfig = SecurityManager.shared.sandboxConfig

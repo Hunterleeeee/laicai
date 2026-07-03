@@ -58,35 +58,35 @@ public final class ToolRegistry {
 }
 
 public enum ToolNameCodec {
+    private static let canonicalNames: [String: String] = [
+        "file_read": "file.read",
+        "file_extract": "file.extract",
+        "document_transform": "document.transform",
+        "file_edit": "file.edit",
+        "file_write": "file.write",
+        "code_search": "code.search",
+        "workspace_index": "workspace.index",
+        "verify_build": "verify.build",
+        "shell_exec": "shell.exec",
+        "web_search": "web.search",
+        "web_fetch": "web.fetch",
+        "wiki_build": "wiki.build",
+        "image_generate": "image.generate",
+        "skill_manage": "skill.manage",
+        "lsp_query": "lsp.query",
+        "diff_apply": "diff.apply",
+        "pm_agent": "pm.agent",
+        "browser_real": "browser.real",
+        "computer_tool": "computer"
+    ]
+
     public static func apiName(_ name: String) -> String {
         name.replacingOccurrences(of: ".", with: "_")
     }
 
     public static func canonicalName(_ name: String) -> String {
-        switch name {
-        case "file_read": return "file.read"
-        case "file_extract": return "file.extract"
-        case "document_transform": return "document.transform"
-        case "file_edit": return "file.edit"
-        case "file_write": return "file.write"
-        case "code_search": return "code.search"
-        case "workspace_index": return "workspace.index"
-        case "verify_build": return "verify.build"
-        case "shell_exec": return "shell.exec"
-        case "web_search": return "web.search"
-        case "web_fetch": return "web.fetch"
-        case "wiki_build": return "wiki.build"
-        case "image_generate": return "image.generate"
-        case "skill_manage": return "skill.manage"
-        case "lsp_query": return "lsp.query"
-        case "diff_apply": return "diff.apply"
-        case "pm_agent": return "pm.agent"
-        case "browser_real": return "browser.real"
-        case "computer_tool": return "computer"
-        default: return name
-        }
+        canonicalNames[name] ?? name
     }
 }
-
 
 // Tool implementations live under Tools/.

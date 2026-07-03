@@ -22,102 +22,130 @@ extension AgentLoop {
         var result = SpeculativeResult()
         let recentSteps = task.steps.suffix(10)
 
-        // After code.search → pre-read top 2 result files
-        if let lastSearch = recentSteps.last(where: { $0.toolName == "code.search" && $0.kind == .toolResult }),
-           !lastSearch.text.hasPrefix("未找到") {
-            let paths = Self.extractReadablePaths(fromSearchOutput: lastSearch.text, workspaceRoot: taskContext.workspaceRoot, limit: 2)
-            for path in paths where !taskContext.memory.readFiles.contains(path) {
-                guard !Task.isCancelled else { return result }
-                if let content = try? String(contentsOfFile: path, encoding: .utf8), content.count < 100_000 {
-                    result.cachedFiles[path] = content
-                    let sigPatterns = ["func ", "class ", "struct ", "enum ", "protocol ", "extension ", "def ", "interface ", "export "]
-                    let sigs = content.components(separatedBy: "\n")
-                        .map { $0.trimmingCharacters(in: .whitespaces) }
-                        .filter { line in sigPatterns.contains(where: { line.hasPrefix($0) }) }
-                        .prefix(8).joined(separator: "; ")
-                    if !sigs.isEmpty { result.summaries[path] = String(sigs.prefix(300)) }
-                }
-            }
-        }
-
-        // After file.read → pre-read sibling files in same directory
-        if let lastRead = recentSteps.last(where: { $0.toolName == "file.read" && $0.kind == .toolCall }),
-           let path = lastRead.toolParams?["path"] {
-            let dir = (path as NSString).deletingLastPathComponent
-            guard !dir.isEmpty, !Task.isCancelled else { return result }
-            let ext = (path as NSString).pathExtension.lowercased()
-            if let siblings = try? FileManager.default.contentsOfDirectory(atPath: dir) {
-                let sameType = siblings.filter { (($0 as NSString).pathExtension.lowercased()) == ext }.prefix(3)
-                for sibling in sameType {
-                    guard !Task.isCancelled else { return result }
-                    let sibPath = (dir as NSString).appendingPathComponent(sibling)
-                    if !taskContext.memory.readFiles.contains(sibPath),
-                       taskContext.memory.fileContentCache[sibPath] == nil,
-                       let content = try? String(contentsOfFile: sibPath, encoding: .utf8),
-                       content.count < 50_000 {
-                        result.cachedFiles[sibPath] = content
-                    }
-                }
-            }
-        }
-
-        // After file.write/edit failure → pre-read the target file
-        if let lastFail = recentSteps.last(where: { $0.isFailure == true && isFileChangeTool($0.toolName ?? "") }) {
-            let path = pathForFileChange(callStep: lastFail)
-            if !path.isEmpty,
-               !taskContext.memory.readFiles.contains(path),
-               !Task.isCancelled,
-               let content = try? String(contentsOfFile: path, encoding: .utf8),
-               content.count < 100_000 {
-                result.cachedFiles[path] = content
-            }
-        }
-
-        // After verify.build failure → pre-read files mentioned in error output
-        if let lastVerify = recentSteps.last(where: { $0.toolName == "verify.build" && $0.isFailure == true && $0.kind == .toolResult }) {
-            let errorPaths = lastVerify.text.components(separatedBy: .newlines)
-                .compactMap { line -> String? in
-                    let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    // Match "file.swift:123: error:" pattern
-                    guard let colonIdx = trimmed.firstIndex(of: ":") else { return nil }
-                    let candidate = String(trimmed[..<colonIdx])
-                    if candidate.hasPrefix("/") && FileManager.default.fileExists(atPath: candidate) { return candidate }
-                    let absolute = (taskContext.workspaceRoot as NSString).appendingPathComponent(candidate)
-                    if FileManager.default.fileExists(atPath: absolute) { return absolute }
-                    return nil
-                }
-            for path in Set(errorPaths).prefix(3) {
-                guard !Task.isCancelled else { return result }
-                if !taskContext.memory.readFiles.contains(path) && result.cachedFiles[path] == nil {
-                    if let content = try? String(contentsOfFile: path, encoding: .utf8), content.count < 100_000 {
-                        result.cachedFiles[path] = content
-                    }
-                }
-            }
-        }
-
-        // After file.edit success → pre-read nearby import/header files for verify context
-        if recentSteps.contains(where: { $0.toolName == "file.edit" && $0.kind == .toolResult && !$0.isFailure }),
-           let path = recentSteps.last(where: { $0.toolName == "file.edit" && $0.kind == .toolCall })?.toolParams?["path"] {
-            let ext = (path as NSString).pathExtension.lowercased()
-            let headerExts: [String: String] = ["swift": "swift", "c": "h", "cpp": "h", "m": "h", "mm": "h"]
-            if let headerExt = headerExts[ext], headerExt != ext {
-                let dir = (path as NSString).deletingLastPathComponent
-                if let siblings = try? FileManager.default.contentsOfDirectory(atPath: dir) {
-                    for sibling in siblings.filter({ ($0 as NSString).pathExtension == headerExt }).prefix(2) {
-                        guard !Task.isCancelled else { return result }
-                        let sibPath = (dir as NSString).appendingPathComponent(sibling)
-                        if !taskContext.memory.readFiles.contains(sibPath) && result.cachedFiles[sibPath] == nil {
-                            if let content = try? String(contentsOfFile: sibPath, encoding: .utf8), content.count < 50_000 {
-                                result.cachedFiles[sibPath] = content
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        prefetchSearchResults(recentSteps: recentSteps, taskContext: taskContext, result: &result)
+        prefetchSiblingFiles(recentSteps: recentSteps, taskContext: taskContext, result: &result)
+        prefetchFailedWriteTarget(recentSteps: recentSteps, taskContext: taskContext, result: &result)
+        prefetchVerifyErrorFiles(recentSteps: recentSteps, taskContext: taskContext, result: &result)
+        prefetchHeaderFiles(recentSteps: recentSteps, taskContext: taskContext, result: &result)
 
         return result
+    }
+
+    private static func prefetchSearchResults(
+        recentSteps: ArraySlice<TaskStep>,
+        taskContext: TaskContext,
+        result: inout SpeculativeResult
+    ) {
+        guard let lastSearch = recentSteps.last(where: { $0.toolName == "code.search" && $0.kind == .toolResult }),
+              !lastSearch.text.hasPrefix("未找到") else { return }
+        let paths = extractReadablePaths(fromSearchOutput: lastSearch.text, workspaceRoot: taskContext.workspaceRoot, limit: 2)
+        for path in paths where !taskContext.memory.readFiles.contains(path) {
+            guard !Task.isCancelled else { return }
+            guard let content = try? String(contentsOfFile: path, encoding: .utf8), content.count < 100_000 else { continue }
+            result.cachedFiles[path] = content
+            let signatures = signatureSummary(from: content)
+            if !signatures.isEmpty { result.summaries[path] = String(signatures.prefix(300)) }
+        }
+    }
+
+    private static func signatureSummary(from content: String) -> String {
+        let sigPatterns = ["func ", "class ", "struct ", "enum ", "protocol ", "extension ", "def ", "interface ", "export "]
+        return content.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { line in sigPatterns.contains(where: { line.hasPrefix($0) }) }
+            .prefix(8)
+            .joined(separator: "; ")
+    }
+
+    private static func prefetchSiblingFiles(
+        recentSteps: ArraySlice<TaskStep>,
+        taskContext: TaskContext,
+        result: inout SpeculativeResult
+    ) {
+        guard let lastRead = recentSteps.last(where: { $0.toolName == "file.read" && $0.kind == .toolCall }),
+              let path = lastRead.toolParams?["path"] else { return }
+        let dir = (path as NSString).deletingLastPathComponent
+        guard !dir.isEmpty, !Task.isCancelled else { return }
+        let ext = (path as NSString).pathExtension.lowercased()
+        let siblings = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
+        let sameType = siblings.filter { (($0 as NSString).pathExtension.lowercased()) == ext }.prefix(3)
+        for sibling in sameType {
+            guard !Task.isCancelled else { return }
+            let siblingPath = (dir as NSString).appendingPathComponent(sibling)
+            cacheSmallFile(path: siblingPath, limit: 50_000, taskContext: taskContext, result: &result)
+        }
+    }
+
+    private static func prefetchFailedWriteTarget(
+        recentSteps: ArraySlice<TaskStep>,
+        taskContext: TaskContext,
+        result: inout SpeculativeResult
+    ) {
+        guard let lastFail = recentSteps.last(where: { $0.isFailure == true && isFileChangeTool($0.toolName ?? "") }) else {
+            return
+        }
+        let path = pathForFileChange(callStep: lastFail)
+        cacheSmallFile(path: path, limit: 100_000, taskContext: taskContext, result: &result)
+    }
+
+    private static func prefetchVerifyErrorFiles(
+        recentSteps: ArraySlice<TaskStep>,
+        taskContext: TaskContext,
+        result: inout SpeculativeResult
+    ) {
+        guard let lastVerify = recentSteps.last(where: {
+            $0.toolName == "verify.build" && $0.isFailure == true && $0.kind == .toolResult
+        }) else { return }
+        let errorPaths = lastVerify.text.components(separatedBy: .newlines)
+            .compactMap { pathFromErrorLine($0, workspaceRoot: taskContext.workspaceRoot) }
+        for path in Set(errorPaths).prefix(3) {
+            guard !Task.isCancelled else { return }
+            cacheSmallFile(path: path, limit: 100_000, taskContext: taskContext, result: &result)
+        }
+    }
+
+    private static func pathFromErrorLine(_ line: String, workspaceRoot: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard let colonIdx = trimmed.firstIndex(of: ":") else { return nil }
+        let candidate = String(trimmed[..<colonIdx])
+        if candidate.hasPrefix("/") && FileManager.default.fileExists(atPath: candidate) { return candidate }
+        let absolute = (workspaceRoot as NSString).appendingPathComponent(candidate)
+        return FileManager.default.fileExists(atPath: absolute) ? absolute : nil
+    }
+
+    private static func prefetchHeaderFiles(
+        recentSteps: ArraySlice<TaskStep>,
+        taskContext: TaskContext,
+        result: inout SpeculativeResult
+    ) {
+        guard recentSteps.contains(where: { $0.toolName == "file.edit" && $0.kind == .toolResult && !$0.isFailure }),
+              let path = recentSteps.last(where: { $0.toolName == "file.edit" && $0.kind == .toolCall })?.toolParams?["path"] else {
+            return
+        }
+        let ext = (path as NSString).pathExtension.lowercased()
+        let headerExts: [String: String] = ["swift": "swift", "c": "h", "cpp": "h", "m": "h", "mm": "h"]
+        guard let headerExt = headerExts[ext], headerExt != ext else { return }
+        let dir = (path as NSString).deletingLastPathComponent
+        let siblings = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
+        for sibling in siblings.filter({ ($0 as NSString).pathExtension == headerExt }).prefix(2) {
+            guard !Task.isCancelled else { return }
+            let siblingPath = (dir as NSString).appendingPathComponent(sibling)
+            cacheSmallFile(path: siblingPath, limit: 50_000, taskContext: taskContext, result: &result)
+        }
+    }
+
+    private static func cacheSmallFile(
+        path: String,
+        limit: Int,
+        taskContext: TaskContext,
+        result: inout SpeculativeResult
+    ) {
+        guard !path.isEmpty,
+              !taskContext.memory.readFiles.contains(path),
+              result.cachedFiles[path] == nil,
+              let content = try? String(contentsOfFile: path, encoding: .utf8),
+              content.count < limit else { return }
+        result.cachedFiles[path] = content
     }
 
     /// Extract multiple readable paths from search output
@@ -136,8 +164,10 @@ extension AgentLoop {
                     candidate = (workspaceRoot as NSString).appendingPathComponent(first.components(separatedBy: ":").first ?? first)
                 }
             }
-            if let c = candidate, FileManager.default.fileExists(atPath: c), !paths.contains(c) {
-                paths.append(c)
+            if let candidatePath = candidate,
+               FileManager.default.fileExists(atPath: candidatePath),
+               !paths.contains(candidatePath) {
+                paths.append(candidatePath)
             }
         }
         return paths

@@ -3,6 +3,28 @@ import LaicaiNativeDomain
 
 @MainActor
 extension AgentLoop {
+    private struct CompletionCheck {
+        let task: AgentTask
+        let intent: UserIntent
+        let successfulResults: [TaskStep]
+        let failedResults: [TaskStep]
+        let hasFinalOutput: Bool
+        let message: String
+        let hasWrite: Bool
+        let hasSavedWiki: Bool
+        let expectsWikiOutput: Bool
+        let riskPolicy: AgentRiskPolicy?
+        let hasEvidence: Bool
+        let missingDeliverables: [String]
+        let hasUnrecoveredFailure: Bool
+        let hasVerificationFailure: Bool
+        let requiresUIEvidence: Bool
+        let hasUIEvidence: Bool
+        let requiresEvidence: Bool
+        let hadFailure: Bool
+        let isReadOnlyRun: Bool
+    }
+
     static func meetsCompletionCriteria(
         task: AgentTask,
         intent: UserIntent,
@@ -12,6 +34,25 @@ extension AgentLoop {
         isReadOnlyRun: Bool = false
     ) -> Bool {
         guard didComplete, !wasTruncated else { return false }
+        let check = completionCheck(task: task, intent: intent, hadFailure: hadFailure, isReadOnlyRun: isReadOnlyRun)
+        if Self.hasSatisfiedImageGenerationRequest(task) {
+            return !check.hasVerificationFailure
+        }
+        if hasBlockingCompletionCondition(check) {
+            return false
+        }
+        if check.expectsWikiOutput {
+            return check.hasFinalOutput && check.hasSavedWiki && !check.hasUnrecoveredFailure
+        }
+        return meetsIntentCompletionCriteria(check)
+    }
+
+    private static func completionCheck(
+        task: AgentTask,
+        intent: UserIntent,
+        hadFailure: Bool,
+        isReadOnlyRun: Bool
+    ) -> CompletionCheck {
         let successfulResults = task.steps.filter { $0.kind == .toolResult && !$0.isFailure }
         let failedResults = task.steps.filter { $0.kind == .toolResult && $0.isFailure }
         let hasFinalOutput = task.steps.contains { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -32,61 +73,88 @@ extension AgentLoop {
         let hasUIEvidence = Self.hasUIEvidence(in: task)
         let requiresEvidence = intent != .chat
             && configRequiresEvidence(task: task, isReadOnlyRun: isReadOnlyRun)
+        return CompletionCheck(
+            task: task,
+            intent: intent,
+            successfulResults: successfulResults,
+            failedResults: failedResults,
+            hasFinalOutput: hasFinalOutput,
+            message: message,
+            hasWrite: hasWrite,
+            hasSavedWiki: hasSavedWiki,
+            expectsWikiOutput: expectsWikiOutput,
+            riskPolicy: riskPolicy,
+            hasEvidence: hasEvidence,
+            missingDeliverables: missingDeliverables,
+            hasUnrecoveredFailure: hasUnrecoveredFailure,
+            hasVerificationFailure: hasVerificationFailure,
+            requiresUIEvidence: requiresUIEvidence,
+            hasUIEvidence: hasUIEvidence,
+            requiresEvidence: requiresEvidence,
+            hadFailure: hadFailure,
+            isReadOnlyRun: isReadOnlyRun
+        )
+    }
 
-        if riskPolicy == .dangerous {
-            return false
+    private static func hasBlockingCompletionCondition(_ check: CompletionCheck) -> Bool {
+        if check.riskPolicy == .dangerous {
+            return true
         }
-        if Self.hasSatisfiedImageGenerationRequest(task) {
-            return !hasVerificationFailure
+        if !check.missingDeliverables.isEmpty && !check.isReadOnlyRun {
+            return true
         }
-        if !missingDeliverables.isEmpty && !isReadOnlyRun {
-            return false
+        if check.requiresEvidence && !check.hasEvidence {
+            return true
         }
-        if requiresEvidence && !hasEvidence {
-            return false
+        if check.requiresUIEvidence && !check.hasUIEvidence {
+            return true
         }
-        if requiresUIEvidence && !hasUIEvidence {
-            return false
+        if check.riskPolicy == .inspect && check.hasWrite {
+            return true
         }
-        if riskPolicy == .inspect && hasWrite {
-            return false
+        if check.task.taskProtocol != nil && check.task.taskProtocol?.isExecutable != true {
+            return true
         }
-        if task.taskProtocol != nil && task.taskProtocol?.isExecutable != true {
-            return false
+        if check.hasUnrecoveredFailure && !check.isReadOnlyRun {
+            return true
         }
-        if expectsWikiOutput {
-            return hasFinalOutput && hasSavedWiki && !hasUnrecoveredFailure
-        }
-        if hasUnrecoveredFailure && !isReadOnlyRun {
-            return false
-        }
+        return false
+    }
 
-        switch intent {
+    private static func meetsIntentCompletionCriteria(_ check: CompletionCheck) -> Bool {
+        switch check.intent {
         case .chat:
-            // Chat: text output is sufficient
-            return hasFinalOutput
+            return check.hasFinalOutput
         case .research:
-            // Research: text output + any evidence of research activity
-            let hasSearch = task.steps.contains { $0.kind == .toolCall && $0.toolName == "web.search" }
-            let hasFetch = task.steps.contains { $0.kind == .toolCall && $0.toolName == "web.fetch" }
-            return hasFinalOutput && (hasSearch || hasFetch || hasEvidence)
+            return meetsResearchCompletionCriteria(check)
         case .task, .workflow:
-            if isReadOnlyRun {
-                // Read-only task: text output is sufficient
-                return hasFinalOutput
-            }
-            if hasVerificationFailure { return false }
-            if expectsOfficeDocumentDelivery(message), hasSuccessfulDocumentWrite(in: task) {
-                return hasFinalOutput && hasSatisfiedDocumentDelivery(in: task, originalMessage: message)
-            }
-            if hadFailure && failedResults.count >= successfulResults.count && !hasRecoveryAfterLastFailure(task) { return false }
-            if hasWrite {
-                // Write task: either final output or successful file changes
-                return hasFinalOutput || successfulResults.contains { isFileChangeTool($0.toolName ?? "") }
-            }
-            // Default: text output + some evidence
-            return hasFinalOutput && (hasEvidence || !requiresEvidence)
+            return meetsTaskCompletionCriteria(check)
         }
+    }
+
+    private static func meetsResearchCompletionCriteria(_ check: CompletionCheck) -> Bool {
+        let hasSearch = check.task.steps.contains { $0.kind == .toolCall && $0.toolName == "web.search" }
+        let hasFetch = check.task.steps.contains { $0.kind == .toolCall && $0.toolName == "web.fetch" }
+        return check.hasFinalOutput && (hasSearch || hasFetch || check.hasEvidence)
+    }
+
+    private static func meetsTaskCompletionCriteria(_ check: CompletionCheck) -> Bool {
+        if check.isReadOnlyRun {
+            return check.hasFinalOutput
+        }
+        if check.hasVerificationFailure { return false }
+        if expectsOfficeDocumentDelivery(check.message), hasSuccessfulDocumentWrite(in: check.task) {
+            return check.hasFinalOutput && hasSatisfiedDocumentDelivery(in: check.task, originalMessage: check.message)
+        }
+        if check.hadFailure,
+           check.failedResults.count >= check.successfulResults.count,
+           !hasRecoveryAfterLastFailure(check.task) {
+            return false
+        }
+        if check.hasWrite {
+            return check.hasFinalOutput || check.successfulResults.contains { isFileChangeTool($0.toolName ?? "") }
+        }
+        return check.hasFinalOutput && (check.hasEvidence || !check.requiresEvidence)
     }
 
     private static func hasActionableEvidence(task: AgentTask, successfulResults: [TaskStep]) -> Bool {
@@ -141,7 +209,10 @@ extension AgentLoop {
         let later = task.steps.dropFirst(lastFailureIndex + 1)
         return later.contains { step in
             if step.kind == .toolResult, !step.isFailure {
-                let recoveryTools: Set<String> = ["file.extract", "document.transform", "file.read", "wiki.build", "file.write", "file.edit", "diff.apply", "workspace.index", "code.search", "shell.exec", "web.fetch", "web.search"]
+                let recoveryTools: Set<String> = [
+                    "file.extract", "document.transform", "file.read", "wiki.build", "file.write", "file.edit",
+                    "diff.apply", "workspace.index", "code.search", "shell.exec", "web.fetch", "web.search"
+                ]
                 return recoveryTools.contains(step.toolName ?? "")
             }
             if step.kind == .reviewRequest, step.approved == true {
@@ -397,7 +468,7 @@ extension AgentLoop {
             }
         }
 
-        guard (message.contains("英文") || message.localizedCaseInsensitiveContains("english")),
+        guard message.contains("英文") || message.localizedCaseInsensitiveContains("english"),
               let sourcePath = extractAbsolutePaths(from: message).first(where: { likelyDeliverablePath($0) }) else {
             return []
         }

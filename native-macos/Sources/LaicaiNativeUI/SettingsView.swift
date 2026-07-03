@@ -62,7 +62,7 @@ public struct SettingsView: View {
                     Button {
                         withAnimation(AppAnimation.quick) { selectedTab = tab }
                     } label: {
-                        HStack(spacing: AppSpace.sm) {
+                        HStack(spacing: AppSpace.small) {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                                     .fill(isActive ? Brand.primary.opacity(0.15) : Color.clear)
@@ -76,10 +76,10 @@ public struct SettingsView: View {
                                 .foregroundStyle(isActive ? TextGrade.primary : TextGrade.secondary)
                             Spacer()
                         }
-                        .padding(.horizontal, AppSpace.sm)
+                        .padding(.horizontal, AppSpace.small)
                         .padding(.vertical, 6)
                         .background(
-                            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                 .fill(isActive ? SurfaceGrade.hover : Color.clear)
                         )
                     }
@@ -87,8 +87,8 @@ public struct SettingsView: View {
                 }
                 Spacer()
             }
-            .padding(.vertical, AppSpace.lg)
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.vertical, AppSpace.large)
+            .padding(.horizontal, AppSpace.small)
             .frame(width: 136)
             .background(SurfaceGrade.panel)
 
@@ -97,7 +97,7 @@ public struct SettingsView: View {
             // Content
             VStack(spacing: 0) {
                 // Header
-                HStack(spacing: AppSpace.md) {
+                HStack(spacing: AppSpace.medium) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(Brand.primary.opacity(0.1))
@@ -122,7 +122,7 @@ public struct SettingsView: View {
                     .buttonStyle(.plain)
                     .help("关闭")
                 }
-                .padding(.horizontal, AppSpace.xl)
+                .padding(.horizontal, AppSpace.extraLarge)
                 .padding(.vertical, 14)
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(SurfaceGrade.divider).frame(height: 1)
@@ -154,7 +154,7 @@ private struct GeneralSettingsTab: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AppSpace.lg) {
+            VStack(alignment: .leading, spacing: AppSpace.large) {
                 // About card
                 aboutCard
 
@@ -217,13 +217,13 @@ private struct GeneralSettingsTab: View {
                 // Data stats
                 dataCard
             }
-            .padding(AppSpace.xl)
+            .padding(AppSpace.extraLarge)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private var aboutCard: some View {
-        HStack(spacing: AppSpace.lg) {
+        HStack(spacing: AppSpace.large) {
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Brand.subtleGradient)
@@ -245,13 +245,13 @@ private struct GeneralSettingsTab: View {
             }
             Spacer()
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(SurfaceGrade.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(Brand.primary.opacity(0.15), lineWidth: 0.5)
         )
     }
@@ -262,7 +262,7 @@ private struct GeneralSettingsTab: View {
         let projectCount = ProjectManager.shared.projects.count
 
         return settingsCard(title: "数据概览") {
-            HStack(spacing: AppSpace.xl) {
+            HStack(spacing: AppSpace.extraLarge) {
                 statPill(value: "\(projectCount)", label: "项目")
                 statPill(value: "\(threadCount)", label: "对话")
                 statPill(value: "\(totals.requestCount)", label: "请求")
@@ -312,14 +312,14 @@ private struct ConnectorsSettingsTab: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, AppSpace.xl)
-            .padding(.vertical, AppSpace.md)
+            .padding(.horizontal, AppSpace.extraLarge)
+            .padding(.vertical, AppSpace.medium)
 
             Divider()
 
             if store.state.connectors.isEmpty {
                 Spacer()
-                VStack(spacing: AppSpace.md) {
+                VStack(spacing: AppSpace.medium) {
                     Image(systemName: "link.badge.plus")
                         .font(.system(size: 36, weight: .ultraLight))
                         .foregroundStyle(TextGrade.ghost)
@@ -335,8 +335,8 @@ private struct ConnectorsSettingsTab: View {
                         Label("添加连接器", systemImage: "plus.circle")
                             .font(AppFont.captionMedium)
                             .foregroundStyle(.white)
-                            .padding(.horizontal, AppSpace.lg)
-                            .padding(.vertical, AppSpace.sm)
+                            .padding(.horizontal, AppSpace.large)
+                            .padding(.vertical, AppSpace.small)
                             .background(Capsule().fill(Brand.primary))
                     }
                     .buttonStyle(.plain)
@@ -409,7 +409,7 @@ private struct ConnectorSettingsRow: View {
 
     var body: some View {
         let capability = ConnectorCapabilityProfile.infer(for: conn, mode: store.state.settings.contextMode)
-        HStack(spacing: AppSpace.md) {
+        HStack(spacing: AppSpace.medium) {
             // Health indicator
             ZStack {
                 Circle()
@@ -490,8 +490,8 @@ private struct ConnectorSettingsRow: View {
             }
             .opacity(hovered ? 1 : 0.4)
         }
-        .padding(.horizontal, AppSpace.xl)
-        .padding(.vertical, AppSpace.md)
+        .padding(.horizontal, AppSpace.extraLarge)
+        .padding(.vertical, AppSpace.medium)
         .background(hovered ? SurfaceGrade.hover.opacity(0.4) : Color.clear)
         .onHover { hovered = $0 }
     }
@@ -506,7 +506,7 @@ private struct ToolsSettingsTab: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AppSpace.lg) {
+            VStack(alignment: .leading, spacing: AppSpace.large) {
                 geminiBridgeCard
 
                 settingsCard(title: "ComfyUI 图片生成") {
@@ -519,11 +519,15 @@ private struct ToolsSettingsTab: View {
 
                         Button("测试连接") {
                             Task {
-                                let url = store.state.settings.comfyUIServerURL.isEmpty
-                                    ? "http://127.0.0.1:8188" : store.state.settings.comfyUIServerURL
-                                serverStatus = "连接中…"
-                                do {
-                                    var request = URLRequest(url: URL(string: "\(url)/system_stats")!)
+                                 let url = store.state.settings.comfyUIServerURL.isEmpty
+                                     ? "http://127.0.0.1:8188" : store.state.settings.comfyUIServerURL
+                                 serverStatus = "连接中…"
+                                 do {
+                                      guard let statsURL = URL(string: "\(url)/system_stats") else {
+                                          serverStatus = "❌ URL 无效"
+                                          return
+                                      }
+                                      var request = URLRequest(url: statsURL)
                                     request.timeoutInterval = NetworkDefaults.quickProbe
                                     let (_, response) = try await NetworkDefaults.ephemeralSession.data(for: request)
                                     if (response as? HTTPURLResponse)?.statusCode == 200 {
@@ -560,7 +564,7 @@ private struct ToolsSettingsTab: View {
                         .padding(.leading, 80)
                 }
             }
-            .padding(AppSpace.xl)
+            .padding(AppSpace.extraLarge)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { refreshBridgeStatus() }
@@ -568,8 +572,8 @@ private struct ToolsSettingsTab: View {
 
     private var geminiBridgeCard: some View {
         settingsCard(title: "Gemini / Antigravity 桥") {
-            VStack(alignment: .leading, spacing: AppSpace.md) {
-                HStack(alignment: .center, spacing: AppSpace.md) {
+            VStack(alignment: .leading, spacing: AppSpace.medium) {
+                HStack(alignment: .center, spacing: AppSpace.medium) {
                     ZStack {
                         Circle()
                             .fill(bridgeTone.opacity(0.14))
@@ -621,7 +625,7 @@ private struct ToolsSettingsTab: View {
 
                 Divider()
 
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                     Text(geminiBridgeDescription)
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.secondary)
@@ -633,7 +637,7 @@ private struct ToolsSettingsTab: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Button("打开脚本位置") {
                         GeminiOAuthBridgeManager.shared.revealHelperInFinder()
                     }
@@ -684,26 +688,26 @@ private struct ToolsSettingsTab: View {
 // MARK: - Shared Settings Helpers
 
 private func settingsCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-    VStack(alignment: .leading, spacing: AppSpace.md) {
+    VStack(alignment: .leading, spacing: AppSpace.medium) {
         Text(title)
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(TextGrade.ghost)
             .textCase(.uppercase)
         content()
     }
-    .padding(AppSpace.lg)
+    .padding(AppSpace.large)
     .background(
-        RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+        RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
             .fill(SurfaceGrade.card)
     )
     .overlay(
-        RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+        RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
             .strokeBorder(SurfaceGrade.border.opacity(0.12), lineWidth: 0.5)
     )
 }
 
 private func settingsRow<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
-    HStack(spacing: AppSpace.md) {
+    HStack(spacing: AppSpace.medium) {
         Text(label)
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(TextGrade.secondary)
@@ -717,7 +721,7 @@ private struct InputSettingsTab: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AppSpace.lg) {
+            VStack(alignment: .leading, spacing: AppSpace.large) {
                 settingsCard(title: "上下文") {
                     settingsRow(label: "模式") {
                         Picker("", selection: Binding(
@@ -759,7 +763,7 @@ private struct InputSettingsTab: View {
 
                 }
             }
-            .padding(AppSpace.xl)
+            .padding(AppSpace.extraLarge)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -775,10 +779,10 @@ private struct GatewaySettingsTab: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AppSpace.lg) {
+            VStack(alignment: .leading, spacing: AppSpace.large) {
                 // Status
                 settingsCard(title: "网关状态") {
-                    HStack(spacing: AppSpace.sm) {
+                    HStack(spacing: AppSpace.small) {
                         Circle()
                             .fill(gateway.isRunning ? Semantic.success : TextGrade.ghost)
                             .frame(width: 8, height: 8)
@@ -809,9 +813,9 @@ private struct GatewaySettingsTab: View {
                         Text("暂无消息通道，点击下方按钮添加飞书、Telegram 等平台接入。")
                             .font(AppFont.caption)
                             .foregroundStyle(TextGrade.muted)
-                            .padding(.vertical, AppSpace.sm)
+                            .padding(.vertical, AppSpace.small)
                     } else {
-                        VStack(spacing: AppSpace.sm) {
+                        VStack(spacing: AppSpace.small) {
                             ForEach(gateway.channels, id: \.id) { config in
                                 channelRow(config)
                             }
@@ -821,7 +825,7 @@ private struct GatewaySettingsTab: View {
                     Button {
                         showingAddChannel = true
                     } label: {
-                        HStack(spacing: AppSpace.xs) {
+                        HStack(spacing: AppSpace.extraSmall) {
                             Image(systemName: "plus.circle.fill")
                                 .font(.system(size: 12))
                             Text("添加通道")
@@ -830,10 +834,10 @@ private struct GatewaySettingsTab: View {
                         .foregroundStyle(Brand.primary)
                     }
                     .buttonStyle(.plain)
-                    .padding(.top, AppSpace.sm)
+                    .padding(.top, AppSpace.small)
                 }
             }
-            .padding(AppSpace.xl)
+            .padding(AppSpace.extraLarge)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .sheet(isPresented: $showingAddChannel) {
@@ -845,7 +849,7 @@ private struct GatewaySettingsTab: View {
     }
 
     private func channelRow(_ config: ChannelConfig) -> some View {
-        HStack(spacing: AppSpace.md) {
+        HStack(spacing: AppSpace.medium) {
             Image(systemName: config.type.icon)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(gateway.connectedChannels.contains(config.id) ? Semantic.success : TextGrade.ghost)
@@ -887,9 +891,9 @@ private struct GatewaySettingsTab: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.elevated)
         )
     }
@@ -950,17 +954,17 @@ private struct ChannelEditSheet: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding(AppSpace.lg)
+            .padding(AppSpace.large)
 
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: AppSpace.lg) {
+                VStack(alignment: .leading, spacing: AppSpace.large) {
                     // Type picker (only for new)
                     if channel == nil {
-                        VStack(alignment: .leading, spacing: AppSpace.xs) {
+                        VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                             Text("平台").font(AppFont.caption.bold()).foregroundStyle(TextGrade.secondary)
-                            HStack(spacing: AppSpace.sm) {
+                            HStack(spacing: AppSpace.small) {
                                 ForEach(ChannelType.allCases, id: \.rawValue) { type in
                                     Button {
                                         selectedType = type
@@ -974,7 +978,7 @@ private struct ChannelEditSheet: View {
                                             Text(type.displayName)
                                                 .font(AppFont.tiny)
                                         }
-                                        .padding(.horizontal, AppSpace.sm)
+                                        .padding(.horizontal, AppSpace.small)
                                         .padding(.vertical, 5)
                                         .background(
                                             Capsule().fill(selectedType == type ? Brand.primary.opacity(0.15) : SurfaceGrade.elevated)
@@ -988,7 +992,7 @@ private struct ChannelEditSheet: View {
                     }
 
                     // Name
-                    VStack(alignment: .leading, spacing: AppSpace.xs) {
+                    VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                         Text("名称").font(AppFont.caption.bold()).foregroundStyle(TextGrade.secondary)
                         TextField("通道名称", text: $name)
                             .textFieldStyle(.roundedBorder)
@@ -1021,7 +1025,7 @@ private struct ChannelEditSheet: View {
                     }
 
                     // Allowed senders
-                    VStack(alignment: .leading, spacing: AppSpace.xs) {
+                    VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                         Text("允许的发送者").font(AppFont.caption.bold()).foregroundStyle(TextGrade.secondary)
                         TextField("逗号分隔的用户 ID（留空=所有人）", text: $allowedSenders)
                             .textFieldStyle(.roundedBorder)
@@ -1031,7 +1035,7 @@ private struct ChannelEditSheet: View {
                             .foregroundStyle(TextGrade.ghost)
                     }
                 }
-                .padding(AppSpace.lg)
+                .padding(AppSpace.large)
             }
 
             Divider()
@@ -1050,14 +1054,14 @@ private struct ChannelEditSheet: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Brand.primary)
             }
-            .padding(AppSpace.lg)
+            .padding(AppSpace.large)
         }
         .frame(width: 480, height: 520)
         .background(SurfaceGrade.base)
     }
 
     private func configField(_ label: String, text: Binding<String>, placeholder: String, isSecure: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: AppSpace.xs) {
+        VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
             Text(label).font(AppFont.caption.bold()).foregroundStyle(TextGrade.secondary)
             if isSecure {
                 SecureField(placeholder, text: text)
@@ -1129,11 +1133,11 @@ private struct AdvancedSettingsTab: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AppSpace.lg) {
+            VStack(alignment: .leading, spacing: AppSpace.large) {
                 TeleportPanel()
                 ModelRegressionPanel()
             }
-            .padding(AppSpace.xl)
+            .padding(AppSpace.extraLarge)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

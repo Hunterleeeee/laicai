@@ -3,6 +3,12 @@ import LaicaiNativeDomain
 
 @MainActor
 extension AgentLoop {
+    struct PreparationRequest {
+        let message: String
+        let intent: UserIntent
+        let needsPlanning: Bool
+    }
+
     func prepareTaskContext(_ context: TaskContext?, intent: UserIntent, message: String) -> TaskContext {
         var taskContext: TaskContext
         if let context {
@@ -32,7 +38,14 @@ extension AgentLoop {
         if let ledgerJSON = taskContext.metadata["executionLedgerJSON"],
            let data = ledgerJSON.data(using: .utf8),
            let ledger = try? JSONDecoder().decode(AgentExecutionLedger.self, from: data) {
-            taskContext.memory.appendDecision("[execution-ledger] state=\(ledger.state.rawValue); next=\(ledger.nextAction ?? "无"); read=\(ledger.readFiles.prefix(8).joined(separator: "、")); modified=\(ledger.modifiedFiles.prefix(8).joined(separator: "、")); failed=\(ledger.failedTools.prefix(5).joined(separator: "、"))")
+            let ledgerSummary = [
+                "state=\(ledger.state.rawValue)",
+                "next=\(ledger.nextAction ?? "无")",
+                "read=\(ledger.readFiles.prefix(8).joined(separator: "、"))",
+                "modified=\(ledger.modifiedFiles.prefix(8).joined(separator: "、"))",
+                "failed=\(ledger.failedTools.prefix(5).joined(separator: "、"))"
+            ].joined(separator: "; ")
+            taskContext.memory.appendDecision("[execution-ledger] \(ledgerSummary)")
         }
 
         if let vault = taskContext.vaultRoot, !vault.isEmpty, !WorkspaceSandbox.isOverlyBroadWorkspace(vault) {
@@ -118,30 +131,26 @@ extension AgentLoop {
     }
 
     func runPreparationTools(
-        message: String,
-        intent: UserIntent,
-        needsPlanning: Bool,
+        request: PreparationRequest,
         taskContext: inout TaskContext,
         task: inout AgentTask,
         onStep: @MainActor (TaskStep) -> Void
     ) async {
-        await autoIndexWorkspaceIfNeeded(message: message, intent: intent, needsPlanning: needsPlanning, taskContext: &taskContext, task: &task, onStep: onStep)
-        prefetchMentionedFilesIfNeeded(message: message, intent: intent, needsPlanning: needsPlanning, taskContext: &taskContext, task: &task, onStep: onStep)
+        await autoIndexWorkspaceIfNeeded(request: request, taskContext: &taskContext, task: &task, onStep: onStep)
+        prefetchMentionedFilesIfNeeded(request: request, taskContext: &taskContext, task: &task, onStep: onStep)
     }
 
     private func autoIndexWorkspaceIfNeeded(
-        message: String,
-        intent: UserIntent,
-        needsPlanning: Bool,
+        request: PreparationRequest,
         taskContext: inout TaskContext,
         task: inout AgentTask,
         onStep: @MainActor (TaskStep) -> Void
     ) async {
-        guard needsPlanning, !taskContext.workspaceRoot.isEmpty, taskContext.memory.readFiles.isEmpty else {
+        guard request.needsPlanning, !taskContext.workspaceRoot.isEmpty, taskContext.memory.readFiles.isEmpty else {
             return
         }
-        guard !Self.shouldBootstrapWorkspaceIndex(for: message, intent: intent),
-              !Self.shouldBootstrapWorkspaceSearch(for: message, intent: intent, context: taskContext) else {
+        guard !Self.shouldBootstrapWorkspaceIndex(for: request.message, intent: request.intent),
+              !Self.shouldBootstrapWorkspaceSearch(for: request.message, intent: request.intent, context: taskContext) else {
             return
         }
         guard let indexTool = toolRegistry.tool(named: "workspace_index") ?? toolRegistry.tool(named: "workspace.index") else {
@@ -178,16 +187,14 @@ extension AgentLoop {
     }
 
     private func prefetchMentionedFilesIfNeeded(
-        message: String,
-        intent: UserIntent,
-        needsPlanning: Bool,
+        request: PreparationRequest,
         taskContext: inout TaskContext,
         task: inout AgentTask,
         onStep: @MainActor (TaskStep) -> Void
     ) {
-        guard intent != .chat && needsPlanning else { return }
+        guard request.intent != .chat && request.needsPlanning else { return }
 
-        let readablePaths = Self.extractAbsolutePaths(from: message).compactMap { path -> String? in
+        let readablePaths = Self.extractAbsolutePaths(from: request.message).compactMap { path -> String? in
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return nil }
             return isDir.boolValue ? nil : path

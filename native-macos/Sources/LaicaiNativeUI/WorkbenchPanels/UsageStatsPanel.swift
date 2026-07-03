@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Usage Stats Panel
 
@@ -18,7 +18,7 @@ struct UsageStatsPanel: View {
     @State private var intentData: [IntentUsageRow] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.lg) {
+        VStack(alignment: .leading, spacing: AppSpace.large) {
             statsOverview
 
             Group {
@@ -60,7 +60,7 @@ struct UsageStatsPanel: View {
             }
         }
         .onAppear { refresh() }
-        .onChange(of: period) { _ in refresh() }
+        .onChange(of: period) { _, _ in refresh() }
     }
 
     private var statsOverview: some View {
@@ -78,38 +78,38 @@ struct UsageStatsPanel: View {
 
     private var periodPicker: some View {
         HStack(spacing: 2) {
-            ForEach(StatsPeriod.allCases) { p in
+            ForEach(StatsPeriod.allCases) { statsPeriod in
                 Button {
-                    withAnimation(AppAnimation.quick) { period = p }
+                    withAnimation(AppAnimation.quick) { period = statsPeriod }
                 } label: {
-                    Text(p.label)
-                        .font(.system(size: 11, weight: period == p ? .semibold : .regular))
-                        .foregroundStyle(period == p ? Brand.teal : TextGrade.muted)
+                    Text(statsPeriod.label)
+                        .font(.system(size: 11, weight: period == statsPeriod ? .semibold : .regular))
+                        .foregroundStyle(period == statsPeriod ? Brand.teal : TextGrade.muted)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .frame(maxWidth: .infinity)
                         .background(
-                            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                                .fill(period == p ? Brand.teal.opacity(0.11) : Color.clear)
+                            RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
+                                .fill(period == statsPeriod ? Brand.teal.opacity(0.11) : Color.clear)
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
-                                .strokeBorder(period == p ? Brand.teal.opacity(0.16) : Color.clear, lineWidth: 0.6)
+                            RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
+                                .strokeBorder(period == statsPeriod ? Brand.teal.opacity(0.16) : Color.clear, lineWidth: 0.6)
                         )
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(AppSpace.xs)
-        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.58)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.74), lineWidth: 0.6))
+        .padding(AppSpace.extraSmall)
+        .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.58)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.74), lineWidth: 0.6))
     }
 
     // MARK: - Summary Row
 
     private var summaryRow: some View {
         let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
-        return LazyVGrid(columns: columns, spacing: AppSpace.sm) {
+        return LazyVGrid(columns: columns, spacing: AppSpace.small) {
             summaryCard(
                 icon: "arrow.down.left",
                 label: "输入",
@@ -166,8 +166,8 @@ struct UsageStatsPanel: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
-        .padding(.horizontal, AppSpace.sm)
-        .padding(.vertical, AppSpace.sm - 1)
+        .padding(.horizontal, AppSpace.small)
+        .padding(.vertical, AppSpace.small - 1)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -182,7 +182,7 @@ struct UsageStatsPanel: View {
     // MARK: - Daily Chart
 
     private var dailyChart: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             Text("每日用量")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(TextGrade.secondary)
@@ -220,13 +220,13 @@ struct UsageStatsPanel: View {
                 .frame(height: 100)
 
                 // Legend
-                HStack(spacing: AppSpace.md) {
+                HStack(spacing: AppSpace.medium) {
                     legendDot(color: Brand.primary, label: "输入")
                     legendDot(color: Brand.purple, label: "输出")
                 }
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.72))
@@ -237,7 +237,7 @@ struct UsageStatsPanel: View {
     // MARK: - Hourly Chart
 
     private var hourlyChart: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             Text("今日活跃时段")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(TextGrade.secondary)
@@ -263,7 +263,7 @@ struct UsageStatsPanel: View {
             }
             .frame(height: 55)
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.72))
@@ -274,13 +274,13 @@ struct UsageStatsPanel: View {
     // MARK: - Model Breakdown
 
     private var modelBreakdownSection: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             Text("模型用量分布")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(TextGrade.secondary)
 
             ForEach(modelData) { row in
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Text(row.modelName.isEmpty ? "未知" : row.modelName)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(TextGrade.primary)
@@ -314,7 +314,7 @@ struct UsageStatsPanel: View {
                 }
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.72))
@@ -325,13 +325,13 @@ struct UsageStatsPanel: View {
     // MARK: - Project Breakdown
 
     private var projectBreakdownSection: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             Text("项目消耗")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(TextGrade.secondary)
 
             ForEach(projectData) { row in
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Image(systemName: "folder.fill")
                         .font(.system(size: 9))
                         .foregroundStyle(Brand.primaryLight)
@@ -349,7 +349,7 @@ struct UsageStatsPanel: View {
                 }
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.72))
@@ -360,13 +360,13 @@ struct UsageStatsPanel: View {
     // MARK: - Agent Stats
 
     private var taskStatsSection: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             Text("会话 完成率")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(TextGrade.secondary)
 
             ForEach(Array(taskStats.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Text(row.intent.isEmpty ? "通用" : row.intent)
                         .font(.system(size: 11))
                         .foregroundStyle(TextGrade.primary)
@@ -397,7 +397,7 @@ struct UsageStatsPanel: View {
                 }
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(SurfaceGrade.card)
@@ -407,13 +407,13 @@ struct UsageStatsPanel: View {
     // MARK: - Tool Stats
 
     private var toolStatsSection: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             Text("工具稳定性")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(TextGrade.secondary)
 
             ForEach(Array(toolStats.prefix(10).enumerated()), id: \.offset) { _, row in
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Text(row.toolName)
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(TextGrade.primary)
@@ -450,7 +450,7 @@ struct UsageStatsPanel: View {
                 }
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.72))
@@ -461,14 +461,14 @@ struct UsageStatsPanel: View {
     // MARK: - Intent Breakdown
 
     private var intentBreakdownSection: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             Text("模式分布")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(TextGrade.secondary)
 
             let totalAll = intentData.reduce(0) { $0 + $1.totalTokens }
             ForEach(intentData) { row in
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Image(systemName: intentIcon(row.intent))
                         .font(.system(size: 9))
                         .foregroundStyle(intentColor(row.intent))
@@ -504,7 +504,7 @@ struct UsageStatsPanel: View {
                 }
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(SurfaceGrade.card)
@@ -532,13 +532,13 @@ struct UsageStatsPanel: View {
     // MARK: - Agent Ranking
 
     private var threadRankingSection: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             Text("会话 消耗排行")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(TextGrade.secondary)
 
             ForEach(Array(threadRanking.enumerated()), id: \.element.id) { idx, row in
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     // Rank number
                     Text("\(idx + 1)")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
@@ -570,7 +570,7 @@ struct UsageStatsPanel: View {
                 }
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(SurfaceGrade.card)
@@ -643,8 +643,9 @@ struct OrchestrationHealthSection: View {
 
     private var currentTask: AgentTask? {
         guard let id = store.state.selectedThreadID,
-              let thread = store.state.threads.first(where: { $0.id == id }),
-              thread.isExecution else { return nil }
+            let thread = store.state.threads.first(where: { $0.id == id }),
+            thread.isExecution
+        else { return nil }
         return AgentTask(thread: thread)
     }
 
@@ -652,18 +653,26 @@ struct OrchestrationHealthSection: View {
         if let task = currentTask {
             let stats = computeStats(task)
             contextSectionCard(title: "当前会话状态", tint: Semantic.warning) {
-                VStack(alignment: .leading, spacing: AppSpace.sm) {
+                VStack(alignment: .leading, spacing: AppSpace.small) {
                     Group {
                         statRow(icon: "wrench.and.screwdriver", label: "工具调用", value: "\(stats.toolCalls) 次", color: Brand.primary)
                         statRow(icon: "checkmark.circle", label: "成功", value: "\(stats.toolSuccesses) 次", color: Semantic.success)
-                        statRow(icon: "xmark.circle", label: "失败", value: "\(stats.toolFailures) 次", color: stats.toolFailures > 0 ? Semantic.error : TextGrade.ghost)
-                        statRow(icon: "arrow.triangle.2.circlepath", label: "自动恢复", value: "\(stats.recoveries) 次", color: stats.recoveries > 0 ? Semantic.warning : TextGrade.ghost)
-                        statRow(icon: "checkmark.seal", label: "恢复成功", value: "\(stats.recoverySuccesses) 次", color: stats.recoverySuccesses > 0 ? Semantic.success : TextGrade.ghost)
+                        statRow(
+                            icon: "xmark.circle", label: "失败", value: "\(stats.toolFailures) 次",
+                            color: stats.toolFailures > 0 ? Semantic.error : TextGrade.ghost)
+                        statRow(
+                            icon: "arrow.triangle.2.circlepath", label: "自动恢复", value: "\(stats.recoveries) 次",
+                            color: stats.recoveries > 0 ? Semantic.warning : TextGrade.ghost)
+                        statRow(
+                            icon: "checkmark.seal", label: "恢复成功", value: "\(stats.recoverySuccesses) 次",
+                            color: stats.recoverySuccesses > 0 ? Semantic.success : TextGrade.ghost)
                     }
                     Group {
                         Divider().opacity(0.3)
                         statRow(icon: "doc.text", label: "消息数", value: "\(stats.messageCount)", color: Brand.primary)
-                        statRow(icon: "arrow.down.right.and.arrow.up.left", label: "上下文整理", value: stats.compressionActive ? "已启用" : "未触发", color: stats.compressionActive ? Semantic.warning : TextGrade.ghost)
+                        statRow(
+                            icon: "arrow.down.right.and.arrow.up.left", label: "上下文整理", value: stats.compressionActive ? "已启用" : "未触发",
+                            color: stats.compressionActive ? Semantic.warning : TextGrade.ghost)
                         statRow(icon: "cpu", label: "模型适配", value: stats.modelAdaptation, color: Brand.primary)
                     }
                     if stats.circuitBroken > 0 {
@@ -679,7 +688,7 @@ struct OrchestrationHealthSection: View {
     }
 
     private func statRow(icon: String, label: String, value: String, color: Color) -> some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             Image(systemName: icon)
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(color)
@@ -732,20 +741,20 @@ struct OrchestrationHealthSection: View {
     }
 
     private func computeStats(_ task: AgentTask) -> OrcStats {
-        var s = OrcStats()
+        var stats = OrcStats()
         for step in task.steps {
             let isRecovery = (step.toolCallId ?? "").hasPrefix("call_recovery_") || step.text.hasPrefix("自动恢复")
             if step.kind == .toolCall && !isRecovery {
-                s.toolCalls += 1
+                stats.toolCalls += 1
             }
             if step.kind == .toolResult && !isRecovery {
-                if step.isFailure { s.toolFailures += 1 } else { s.toolSuccesses += 1 }
+                if step.isFailure { stats.toolFailures += 1 } else { stats.toolSuccesses += 1 }
             }
             if isRecovery && step.kind == .toolCall {
-                s.recoveries += 1
+                stats.recoveries += 1
             }
             if isRecovery && step.kind == .toolResult && !step.isFailure {
-                s.recoverySuccesses += 1
+                stats.recoverySuccesses += 1
             }
         }
 
@@ -754,28 +763,28 @@ struct OrchestrationHealthSection: View {
             "\($0.toolName ?? ""):\(($0.toolParams?["path"] ?? $0.toolParams?["query"] ?? "").prefix(40))"
         }
         let sigCounts = Dictionary(grouping: failedSigs, by: { $0 }).mapValues(\.count)
-        s.circuitBroken = sigCounts.filter { $0.value >= 3 }.count
+        stats.circuitBroken = sigCounts.filter { $0.value >= 3 }.count
 
         // Message count estimate (toolCalls * 2 for call+result + user inputs + system messages)
-        s.messageCount = task.steps.count
+        stats.messageCount = task.steps.count
 
         // Compression heuristic: if messages > 30, compression likely active
         let totalContentLength = task.steps.reduce(0) { $0 + $1.text.count }
-        s.compressionActive = s.messageCount > 30 || totalContentLength > 50_000
+        stats.compressionActive = stats.messageCount > 30 || totalContentLength > 50_000
 
         // Model adaptation
         if let connector = store.state.activeConnector {
             let model = connector.modelName.lowercased()
             if model.contains("ollama") || model.contains("local") {
-                s.modelAdaptation = "本地精简"
+                stats.modelAdaptation = "本地精简"
             } else if model.contains("deepseek") {
-                s.modelAdaptation = "DeepSeek 优化"
+                stats.modelAdaptation = "DeepSeek 优化"
             } else if model.contains("qwen") {
-                s.modelAdaptation = "Qwen 适配"
+                stats.modelAdaptation = "Qwen 适配"
             }
         }
 
-        return s
+        return stats
     }
 }
 

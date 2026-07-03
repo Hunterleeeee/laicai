@@ -79,22 +79,22 @@ public final class PromptRegistry {
     /// Get version string for a tag (e.g. "bootstrap_web_fetch:v3")
     public func versionTag(for tag: String) -> String {
         queue.sync {
-            let v = versions[tag, default: 0]
-            return v > 0 ? "\(tag):v\(v)" : tag
+            let version = versions[tag, default: 0]
+            return version > 0 ? "\(tag):v\(version)" : tag
         }
     }
 
     /// Compare effectiveness of two prompt tags using outcome stats.
     public func compare(tagA: String, tagB: String, days: Int = 7) -> PromptComparison? {
         let stats = TaskOutcomeRecorder.shared.promptTagStats(days: days)
-        guard let a = stats.first(where: { $0.tag == tagA }),
-              let b = stats.first(where: { $0.tag == tagB }),
-              a.total >= 3, b.total >= 3 else { return nil }
-        let winner = a.score > b.score ? tagA : tagB
-        let diff = abs(a.score - b.score)
+        guard let firstStats = stats.first(where: { $0.tag == tagA }),
+              let secondStats = stats.first(where: { $0.tag == tagB }),
+              firstStats.total >= 3, secondStats.total >= 3 else { return nil }
+        let winner = firstStats.score > secondStats.score ? tagA : tagB
+        let diff = abs(firstStats.score - secondStats.score)
         return PromptComparison(
-            tagA: tagA, scoreA: a.score,
-            tagB: tagB, scoreB: b.score,
+            tagA: tagA, scoreA: firstStats.score,
+            tagB: tagB, scoreB: secondStats.score,
             winner: winner,
             recommendation: diff > 10 ? "\(winner) 效果显著更好（分差 \(Int(diff))），建议采用该版本。" : "两者效果接近，可继续观察。"
         )

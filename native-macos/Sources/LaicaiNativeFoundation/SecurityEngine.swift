@@ -1,7 +1,8 @@
 import Foundation
 import LaicaiNativeDomain
+
 #if canImport(SQLite3)
-import SQLite3
+    import SQLite3
 #endif
 
 // MARK: - Audit Log
@@ -44,7 +45,7 @@ public final class AuditLog: ObservableObject {
     @Published public private(set) var entries: [AuditEntry] = []
 
     private let maxEntries = 500
-    private var db: OpaquePointer?
+    private var database: OpaquePointer?
 
     private init() {
         openDB()
@@ -58,8 +59,13 @@ public final class AuditLog: ObservableObject {
         let dir = (base as NSString).appendingPathComponent("Laicai")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let path = (dir as NSString).appendingPathComponent("audit.sqlite3")
-        if sqlite3_open(path, &db) != SQLITE_OK { db = nil; return }
-        sqlite3_exec(db, """
+        if sqlite3_open(path, &database) != SQLITE_OK {
+            database = nil
+            return
+        }
+        sqlite3_exec(
+            database,
+            """
             CREATE TABLE IF NOT EXISTS audit_log (
                 id TEXT PRIMARY KEY,
                 timestamp REAL NOT NULL,
@@ -74,9 +80,13 @@ public final class AuditLog: ObservableObject {
     }
 
     private func loadFromDB() {
-        guard let db else { return }
+        guard let database else { return }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT id, timestamp, action, tool, input, output, success, user_id FROM audit_log ORDER BY timestamp DESC LIMIT ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        guard
+            sqlite3_prepare_v2(
+                database, "SELECT id, timestamp, action, tool, input, output, success, user_id FROM audit_log ORDER BY timestamp DESC LIMIT ?", -1, &stmt, nil)
+                == SQLITE_OK
+        else { return }
         sqlite3_bind_int(stmt, 1, Int32(maxEntries))
         var loaded: [AuditEntry] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -95,9 +105,14 @@ public final class AuditLog: ObservableObject {
     }
 
     private func persistEntry(_ entry: AuditEntry) {
-        guard let db else { return }
+        guard let database else { return }
+        let insertSQL = """
+            INSERT OR REPLACE INTO audit_log
+            (id, timestamp, action, tool, input, output, success, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """
         var insertStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO audit_log (id, timestamp, action, tool, input, output, success, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", -1, &insertStmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(database, insertSQL, -1, &insertStmt, nil) == SQLITE_OK else { return }
         sqlite3_bind_text_safe(insertStmt, 1, entry.id.uuidString)
         sqlite3_bind_double(insertStmt, 2, entry.timestamp.timeIntervalSince1970)
         sqlite3_bind_text_safe(insertStmt, 3, entry.action)
@@ -108,13 +123,14 @@ public final class AuditLog: ObservableObject {
         sqlite3_bind_text_safe(insertStmt, 8, entry.userID)
         let stepResult = sqlite3_step(insertStmt)
         if stepResult != SQLITE_DONE && stepResult != SQLITE_ROW {
-            let errMsg = String(cString: sqlite3_errmsg(db))
+            let errMsg = String(cString: sqlite3_errmsg(database))
             NSLog("[AuditLog] persistEntry failed: \(errMsg) (code \(stepResult))")
         }
         sqlite3_finalize(insertStmt)
         // Prune old entries
         var pruneStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "DELETE FROM audit_log WHERE id NOT IN (SELECT id FROM audit_log ORDER BY timestamp DESC LIMIT ?)", -1, &pruneStmt, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(database, "DELETE FROM audit_log WHERE id NOT IN (SELECT id FROM audit_log ORDER BY timestamp DESC LIMIT ?)", -1, &pruneStmt, nil)
+            == SQLITE_OK {
             sqlite3_bind_int(pruneStmt, 1, Int32(maxEntries))
             sqlite3_step(pruneStmt)
         }
@@ -122,8 +138,8 @@ public final class AuditLog: ObservableObject {
     }
 
     private func clearDB() {
-        guard let db else { return }
-        sqlite3_exec(db, "DELETE FROM audit_log", nil, nil, nil)
+        guard let database else { return }
+        sqlite3_exec(database, "DELETE FROM audit_log", nil, nil, nil)
     }
 
     // MARK: - Public API
@@ -194,10 +210,8 @@ public struct SandboxPolicy: Sendable {
 
     public func isPathAllowed(_ path: String) -> Bool {
         let normalizedPath = path.lowercased()
-        for denied in deniedPaths {
-            if normalizedPath.contains(denied.lowercased()) {
-                return false
-            }
+        for denied in deniedPaths where normalizedPath.contains(denied.lowercased()) {
+            return false
         }
         if allowedWritePaths.isEmpty { return true }
         return allowedWritePaths.contains { path.hasPrefix($0) }
@@ -208,7 +222,14 @@ public struct SandboxPolicy: Sendable {
         if deniedShellPatterns.contains(where: { normalized.contains($0.lowercased()) }) {
             return false
         }
-        return true
+        guard !allowedShellCommands.isEmpty else { return true }
+        return allowedShellCommands.contains { prefix in
+            let allowed = prefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !allowed.isEmpty else { return false }
+            return normalized == allowed
+                || normalized.hasPrefix(allowed + " ")
+                || normalized.hasPrefix(allowed + "\t")
+        }
     }
 
     public func isFileSizeAllowed(_ size: Int) -> Bool {
@@ -228,13 +249,25 @@ public final class SecurityManager: ObservableObject {
     private init() {}
 
     /// Check if a path can be read. Returns nil if allowed, or an error message if denied.
-    /// Reads are unrestricted — only sensitive keyword paths are blocked.
     public func checkRead(path: String) -> String? {
+        if let boundaryError = WorkspaceSandbox.shared.enforceWorkspaceBoundary(path: path) {
+            return boundaryError
+        }
+        return checkSensitiveRead(path: path)
+    }
+
+    /// Check if a path can be read within the task's current workspace.
+    public func checkRead(path: String, workspaceRoot: String) -> String? {
+        if let boundaryError = WorkspaceSandbox.shared.enforceWorkspaceBoundary(path: path, workspaceRoot: workspaceRoot) {
+            return boundaryError
+        }
+        return checkSensitiveRead(path: path)
+    }
+
+    private func checkSensitiveRead(path: String) -> String? {
         let normalizedPath = path.lowercased()
-        for denied in policy.deniedPaths {
-            if normalizedPath.contains(denied.lowercased()) {
-                return "路径包含敏感关键词：\(denied)"
-            }
+        for denied in policy.deniedPaths where normalizedPath.contains(denied.lowercased()) {
+            return "路径包含敏感关键词：\(denied)"
         }
         return nil
     }
@@ -256,14 +289,15 @@ public final class SecurityManager: ObservableObject {
 
     /// Check if a shell command can be executed. Returns nil if allowed, or an error message if denied.
     public func checkShell(command: String) -> String? {
-        return ShellSecurityCheck(command: command, policy: policy)
+        return shellSecurityCheck(command: command, policy: policy)
     }
 
     /// Snapshot policy for use in non-MainActor contexts
     public var policySnapshot: SandboxPolicy { policy }
 
     private static func toolPolicyViolation(forShellCommand command: String) -> String? {
-        let normalized = command
+        let normalized =
+            command
             .replacingOccurrences(of: #"\\\s*\n"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -272,9 +306,9 @@ public final class SecurityManager: ObservableObject {
         // Only block unbounded traversals. Allow find with -maxdepth or find -type d.
         let hasBoundedFind = normalized.contains("-maxdepth")
         let projectTraversalPatterns = [
-            #"(^|[;&|]\s*)find\s+\.($|\s)"#,             // find . (unbounded from cwd)
-            #"(^|[;&|]\s*)ls\s+(-[a-z]*r[a-z]*|-r)"#,    // ls -R
-            #"(^|[;&|]\s*)tree(\s|$)"#                     // tree
+            #"(^|[;&|]\s*)find\s+\.($|\s)"#,  // find . (unbounded from cwd)
+            #"(^|[;&|]\s*)ls\s+(-[a-z]*r[a-z]*|-r)"#,  // ls -R
+            #"(^|[;&|]\s*)tree(\s|$)"#  // tree
         ]
         if !hasBoundedFind && projectTraversalPatterns.contains(where: { normalized.range(of: $0, options: .regularExpression) != nil }) {
             return "工具策略拦截：不要用 shell 遍历项目结构。请先使用 workspace.index 建立项目地图，再用 file.read 或 code.search 精确读取。"
@@ -322,11 +356,11 @@ public final class SecurityManager: ObservableObject {
 
 public enum PermissionLevel: String, Codable, Sendable, CaseIterable {
     /// Auto-approved: reads, searches, indexing
-    case automatic = "automatic"
+    case automatic
     /// Requires review: file writes, shell commands
-    case review = "review"
+    case review
     /// Always denied: destructive operations
-    case denied = "denied"
+    case denied
 
     public var title: String {
         switch self {
@@ -347,9 +381,9 @@ public final class WorkspaceSandbox: ObservableObject {
     @Published public var permissionOverrides: [String: PermissionLevel] = [:]
     /// Additional paths allowed for the current task (e.g. user-specified target directories)
     @Published public var allowedPaths: Set<String> = []
-    
+
     private init() {}
-    
+
     /// Grant write access to a specific path for the current task
     public func addAllowedPath(_ path: String) {
         let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
@@ -372,7 +406,7 @@ public final class WorkspaceSandbox: ObservableObject {
             return .denied
         }
     }
-    
+
     /// Effective permission considering overrides
     public func effectivePermission(for action: SandboxAction) -> PermissionLevel {
         if let override = permissionOverrides[action.rawValue] {
@@ -380,7 +414,7 @@ public final class WorkspaceSandbox: ObservableObject {
         }
         return defaultPermission(for: action)
     }
-    
+
     /// Check if a path is within the workspace sandbox or in allowed paths
     public func isWithinWorkspace(_ path: String) -> Bool {
         guard !workspaceRoot.isEmpty else { return true }
@@ -403,7 +437,7 @@ public final class WorkspaceSandbox: ObservableObject {
         }
         return false
     }
-    
+
     /// Enforce workspace boundary: returns error if path is outside workspace
     public func enforceWorkspaceBoundary(path: String) -> String? {
         guard !workspaceRoot.isEmpty else { return nil }
@@ -411,6 +445,27 @@ public final class WorkspaceSandbox: ObservableObject {
             return "路径超出工作区范围：\(path) 不在 \(workspaceRoot) 内"
         }
         return nil
+    }
+
+    /// Enforce a specific task workspace boundary without mutating global sandbox state.
+    public func enforceWorkspaceBoundary(path: String, workspaceRoot root: String) -> String? {
+        let cleanedRoot = root.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanedRoot.isEmpty else { return nil }
+        let absolute =
+            path.hasPrefix("/")
+            ? path
+            : (cleanedRoot as NSString).appendingPathComponent(path)
+        let standardized = URL(fileURLWithPath: absolute).standardizedFileURL.path
+        let rootStandardized = URL(fileURLWithPath: cleanedRoot).standardizedFileURL.path
+        if standardized.hasPrefix(rootStandardized + "/") || standardized == rootStandardized {
+            return nil
+        }
+        for allowed in allowedPaths {
+            if standardized.hasPrefix(allowed + "/") || standardized == allowed {
+                return nil
+            }
+        }
+        return "路径超出工作区范围：\(path) 不在 \(cleanedRoot) 内"
     }
 
     /// Check if a workspace root is dangerously broad (home dir, /Users, / etc.)
@@ -452,12 +507,12 @@ public final class WorkspaceSandbox: ObservableObject {
         }
         return false
     }
-    
+
     /// Set permission override for a specific action
     public func setPermissionOverride(for action: SandboxAction, level: PermissionLevel) {
         permissionOverrides[action.rawValue] = level
     }
-    
+
     public enum SandboxAction: String, Sendable {
         case read = "read"
         case search = "search"
@@ -473,7 +528,7 @@ public final class WorkspaceSandbox: ObservableObject {
 
 /// Free function for checking shell commands without MainActor requirement.
 /// Use with a `SandboxPolicy` snapshot obtained from `SecurityManager.shared.policySnapshot`.
-public func ShellSecurityCheck(command: String, policy: SandboxPolicy) -> String? {
+public func shellSecurityCheck(command: String, policy: SandboxPolicy) -> String? {
     let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
     let normalized = trimmed.lowercased()
     if let dangerous = DangerousOperationGuard.shellViolation(command: trimmed) {
@@ -486,7 +541,8 @@ public func ShellSecurityCheck(command: String, policy: SandboxPolicy) -> String
         return "命令不在白名单中：\(command.split(separator: " ").first ?? "")"
     }
     // Tool policy violation check
-    let normalizedCmd = trimmed
+    let normalizedCmd =
+        trimmed
         .replacingOccurrences(of: #"\\\s*\n"#, with: " ", options: .regularExpression)
         .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -510,7 +566,8 @@ public func ShellSecurityCheck(command: String, policy: SandboxPolicy) -> String
 
 public enum DangerousOperationGuard {
     public static func shellViolation(command: String) -> String? {
-        let normalized = command
+        let normalized =
+            command
             .replacingOccurrences(of: #"\\\s*\n"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -546,10 +603,10 @@ public enum DangerousOperationGuard {
         }
         let systemPrefixes = ["/etc/", "/usr/", "/bin/", "/sbin/", "/var/", "/private/etc/"]
         if systemPrefixes.contains(where: { standardized.hasPrefix($0) }),
-           !standardized.hasPrefix("/var/folders/"),
-           !standardized.hasPrefix("/var/tmp/"),
-           !standardized.hasPrefix("/private/var/folders/"),
-           !standardized.hasPrefix("/private/var/tmp/") {
+            !standardized.hasPrefix("/var/folders/"),
+            !standardized.hasPrefix("/var/tmp/"),
+            !standardized.hasPrefix("/private/var/folders/"),
+            !standardized.hasPrefix("/private/var/tmp/") {
             return "危险写入已拦截：目标位于系统目录，必须由用户手动确认处理。"
         }
         let fileExists = FileManager.default.fileExists(atPath: standardized)
@@ -557,7 +614,8 @@ public enum DangerousOperationGuard {
             let readKeys = [standardized, path, relativePath(standardized, workspaceRoot: context.workspaceRoot)]
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-            let hasCurrentRead = !oldContent.isEmpty
+            let hasCurrentRead =
+                !oldContent.isEmpty
                 ? readKeys.contains { key in
                     context.memory.fileContentCache[key] == oldContent || context.memory.readFiles.contains(key)
                 }
@@ -575,9 +633,10 @@ public enum DangerousOperationGuard {
 
     private static func existingContentIfText(_ path: String) -> String {
         guard FileManager.default.fileExists(atPath: path),
-              let data = FileManager.default.contents(atPath: path),
-              data.count <= 1_000_000,
-              let text = String(data: data, encoding: .utf8) else { return "" }
+            let data = FileManager.default.contents(atPath: path),
+            data.count <= 1_000_000,
+            let text = String(data: data, encoding: .utf8)
+        else { return "" }
         return text
     }
 

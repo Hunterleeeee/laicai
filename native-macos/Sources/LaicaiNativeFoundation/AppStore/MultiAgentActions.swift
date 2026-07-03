@@ -1,6 +1,37 @@
 import Foundation
 import LaicaiNativeDomain
 
+struct MultiAgentExecutionRequest {
+    let message: String
+    let context: TaskContext
+    let connector: ConnectorProfile
+    let plan: MultiAgentPlan
+    let intent: UserIntent
+    let decision: PlannerDecision
+    let projectID: UUID?
+    let reuseThreadID: UUID?
+
+    init(
+        message: String,
+        context: TaskContext,
+        connector: ConnectorProfile,
+        plan: MultiAgentPlan,
+        decision: PlannerDecision,
+        intent: UserIntent = .task,
+        projectID: UUID? = nil,
+        reuseThreadID: UUID? = nil
+    ) {
+        self.message = message
+        self.context = context
+        self.connector = connector
+        self.plan = plan
+        self.intent = intent
+        self.decision = decision
+        self.projectID = projectID
+        self.reuseThreadID = reuseThreadID
+    }
+}
+
 extension AppStore {
     func createMultiAgentPlanDraft(
         message: String,
@@ -79,16 +110,15 @@ extension AppStore {
         persistThreads()
     }
 
-    func executeMultiAgent(
-        message: String,
-        context: TaskContext,
-        connector: ConnectorProfile,
-        plan: MultiAgentPlan,
-        intent: UserIntent,
-        decision: PlannerDecision,
-        projectID: UUID? = nil,
-        reuseThreadID: UUID? = nil
-    ) {
+    func executeMultiAgent(_ request: MultiAgentExecutionRequest) {
+        let message = request.message
+        let context = request.context
+        let connector = request.connector
+        let plan = request.plan
+        let intent = request.intent
+        let decision = request.decision
+        let projectID = request.projectID
+        let reuseThreadID = request.reuseThreadID
         let planLines = Self.agentPlanLines(for: plan, message: message)
         let initialSteps = Self.initialMultiAgentSteps(message: message, plan: plan)
         let threadID = reuseThreadID ?? UUID()
@@ -168,13 +198,14 @@ extension AppStore {
             guard let self else { return }
             do {
                 let completedTask = try await orchestrator.run(
-                    taskID: maThreadID,
-                    message: message,
-                    intent: intent,
-                    connector: connector,
-                    allConnectors: self.state.connectors,
-                    context: context,
-                    plan: plan,
+                    MultiAgentOrchestrator.RunRequest(
+                        taskID: maThreadID,
+                        message: message,
+                        intent: intent,
+                        connectorSelection: .init(connector: connector, allConnectors: self.state.connectors),
+                        plan: plan,
+                        context: context
+                    ),
                     onStep: { [weak self] step in
                         guard let self, self.shouldAcceptGenerationCallback(for: maThreadID, runID: generationRunID) else { return }
                         self.appendTaskStep(step, to: maThreadID)

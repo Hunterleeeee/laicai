@@ -102,7 +102,7 @@ extension AppStore {
     func rememberToolCallingCapability(
         _ capability: ConnectorToolCallingCapability?,
         connectorID: UUID,
-        activitySource: ConnectorToolCallingCapabilityObservationSource?
+        activitySource: ConnectorToolCallObservationSource?
     ) -> Bool {
         guard let capability,
               let index = state.connectors.firstIndex(where: { $0.id == connectorID }) else { return false }

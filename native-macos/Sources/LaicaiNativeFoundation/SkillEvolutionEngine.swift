@@ -2,7 +2,7 @@ import Foundation
 import LaicaiNativeDomain
 
 #if canImport(SQLite3)
-import SQLite3
+    import SQLite3
 #endif
 
 // MARK: - Learned Skill (DB-backed, evolvable)
@@ -28,6 +28,38 @@ public struct LearnedSkill: Identifiable, Sendable {
     }
 }
 
+public struct SkillExtractionRequest: Sendable {
+    public let taskTitle: String
+    public let intent: String
+    public let toolsUsed: [String]
+    public let modelName: String
+    public let outcomeScore: Int
+    public let strategy: String
+
+    public init(
+        taskTitle: String,
+        intent: String,
+        toolsUsed: [String],
+        modelName: String,
+        outcomeScore: Int,
+        strategy: String = ""
+    ) {
+        self.taskTitle = taskTitle
+        self.intent = intent
+        self.toolsUsed = toolsUsed
+        self.modelName = modelName
+        self.outcomeScore = outcomeScore
+        self.strategy = strategy
+    }
+}
+
+private struct SkillMatchCandidate {
+    let skill: LearnedSkill
+    let score: Double
+    let overlap: Int
+    let toolBonus: Double
+}
+
 // MARK: - Skill Evolution Engine
 
 /// Automatically extracts reusable skills from successful task outcomes,
@@ -36,7 +68,7 @@ public struct LearnedSkill: Identifiable, Sendable {
 public final class SkillEvolutionEngine {
     public static let shared = SkillEvolutionEngine()
 
-    private var db: OpaquePointer?
+    private var database: OpaquePointer?
     private let queue = DispatchQueue(label: "laicai.skill-evolution", qos: .utility)
     private let path: String
 
@@ -59,36 +91,37 @@ public final class SkillEvolutionEngine {
     }
 
     deinit {
-        sqlite3_close(db)
+        sqlite3_close(database)
     }
 
     private func open() {
-        if sqlite3_open(path, &db) != SQLITE_OK {
-            db = nil
+        if sqlite3_open(path, &database) != SQLITE_OK {
+            database = nil
         }
     }
 
     private func exec(_ sql: String) {
-        guard let db else { return }
-        sqlite3_exec(db, sql, nil, nil, nil)
+        guard let database else { return }
+        sqlite3_exec(database, sql, nil, nil, nil)
     }
 
     private func migrate() {
-        exec("""
-        CREATE TABLE IF NOT EXISTS learned_skills (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            intent_pattern TEXT NOT NULL,
-            tool_sequence TEXT NOT NULL DEFAULT '',
-            strategy TEXT NOT NULL DEFAULT '',
-            model_name TEXT NOT NULL DEFAULT '',
-            q_value REAL NOT NULL DEFAULT 0.5,
-            usage_count INTEGER NOT NULL DEFAULT 0,
-            success_count INTEGER NOT NULL DEFAULT 0,
-            last_used REAL NOT NULL,
-            created_at REAL NOT NULL
-        );
-        """)
+        exec(
+            """
+            CREATE TABLE IF NOT EXISTS learned_skills (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                intent_pattern TEXT NOT NULL,
+                tool_sequence TEXT NOT NULL DEFAULT '',
+                strategy TEXT NOT NULL DEFAULT '',
+                model_name TEXT NOT NULL DEFAULT '',
+                q_value REAL NOT NULL DEFAULT 0.5,
+                usage_count INTEGER NOT NULL DEFAULT 0,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                last_used REAL NOT NULL,
+                created_at REAL NOT NULL
+            );
+            """)
         exec("CREATE INDEX IF NOT EXISTS idx_skill_intent ON learned_skills(intent_pattern);")
         exec("CREATE INDEX IF NOT EXISTS idx_skill_qvalue ON learned_skills(q_value);")
         exec("CREATE INDEX IF NOT EXISTS idx_skill_model ON learned_skills(model_name);")
@@ -98,39 +131,32 @@ public final class SkillEvolutionEngine {
 
     /// Extract a reusable skill from a successful task.
     /// Only called when outcome score exceeds extractionThreshold.
-    public func extractSkill(
-        taskTitle: String,
-        intent: String,
-        toolsUsed: [String],
-        modelName: String,
-        outcomeScore: Int,
-        strategy: String
-    ) {
-        guard outcomeScore >= extractionThreshold else { return }
-        guard !toolsUsed.isEmpty else { return }
+    public func extractSkill(_ request: SkillExtractionRequest) {
+        guard request.outcomeScore >= extractionThreshold else { return }
+        guard !request.toolsUsed.isEmpty else { return }
 
         queue.async { [weak self] in
-            guard let self, let db else { return }
+            guard let self, let database else { return }
             let now = Date().timeIntervalSince1970
 
             // Check if a similar skill already exists (same intent + overlapping tools)
             let checkSQL = """
-            SELECT id, tool_sequence, q_value, usage_count, success_count FROM learned_skills
-            WHERE intent_pattern = ? AND model_name = ?
-            ORDER BY q_value DESC LIMIT 5;
-            """
+                SELECT id, tool_sequence, q_value, usage_count, success_count FROM learned_skills
+                WHERE intent_pattern = ? AND model_name = ?
+                ORDER BY q_value DESC LIMIT 5;
+                """
             var checkStmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, checkSQL, -1, &checkStmt, nil) == SQLITE_OK else { return }
-            sqlite3_bind_text_safe(checkStmt, 1, intent)
-            sqlite3_bind_text_safe(checkStmt, 2, modelName)
+            guard sqlite3_prepare_v2(database, checkSQL, -1, &checkStmt, nil) == SQLITE_OK else { return }
+            sqlite3_bind_text_safe(checkStmt, 1, request.intent)
+            sqlite3_bind_text_safe(checkStmt, 2, request.modelName)
 
             var existingID: Int?
             while sqlite3_step(checkStmt) == SQLITE_ROW {
                 let existingTools = String(cString: sqlite3_column_text(checkStmt, 1))
                     .components(separatedBy: ",")
                     .filter { !$0.isEmpty }
-                let overlap = Set(toolsUsed).intersection(existingTools)
-                if Double(overlap.count) / Double(max(toolsUsed.count, 1)) > 0.6 {
+                let overlap = Set(request.toolsUsed).intersection(existingTools)
+                if Double(overlap.count) / Double(max(request.toolsUsed.count, 1)) > 0.6 {
                     existingID = Int(sqlite3_column_int(checkStmt, 0))
                     break
                 }
@@ -139,17 +165,17 @@ public final class SkillEvolutionEngine {
 
             if let existingID {
                 // Reinforce existing skill — update Q-value and counts
-                let reward = Double(outcomeScore) / 100.0
+                let reward = Double(request.outcomeScore) / 100.0
                 let updateSQL = """
-                UPDATE learned_skills SET
-                    q_value = q_value + ? * (? + ? * q_value - q_value),
-                    usage_count = usage_count + 1,
-                    success_count = success_count + 1,
-                    last_used = ?
-                WHERE id = ?;
-                """
+                    UPDATE learned_skills SET
+                        q_value = q_value + ? * (? + ? * q_value - q_value),
+                        usage_count = usage_count + 1,
+                        success_count = success_count + 1,
+                        last_used = ?
+                    WHERE id = ?;
+                    """
                 var updateStmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, updateSQL, -1, &updateStmt, nil) == SQLITE_OK else { return }
+                guard sqlite3_prepare_v2(database, updateSQL, -1, &updateStmt, nil) == SQLITE_OK else { return }
                 sqlite3_bind_double(updateStmt, 1, self.alpha)
                 sqlite3_bind_double(updateStmt, 2, reward)
                 sqlite3_bind_double(updateStmt, 3, self.gamma)
@@ -159,20 +185,23 @@ public final class SkillEvolutionEngine {
                 sqlite3_finalize(updateStmt)
             } else {
                 // Create new learned skill
-                let toolStr = toolsUsed.joined(separator: ",")
-                let skillName = self.generateSkillName(title: taskTitle, tools: toolsUsed)
+                let toolStr = request.toolsUsed.joined(separator: ",")
+                let skillName = self.generateSkillName(title: request.taskTitle, tools: request.toolsUsed)
                 let insertSQL = """
-                INSERT INTO learned_skills (name, intent_pattern, tool_sequence, strategy, model_name, q_value, usage_count, success_count, last_used, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?);
-                """
+                    INSERT INTO learned_skills (
+                        name, intent_pattern, tool_sequence, strategy, model_name, q_value,
+                        usage_count, success_count, last_used, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?);
+                    """
                 var insertStmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, insertSQL, -1, &insertStmt, nil) == SQLITE_OK else { return }
+                guard sqlite3_prepare_v2(database, insertSQL, -1, &insertStmt, nil) == SQLITE_OK else { return }
                 sqlite3_bind_text_safe(insertStmt, 1, skillName)
-                sqlite3_bind_text_safe(insertStmt, 2, intent)
+                sqlite3_bind_text_safe(insertStmt, 2, request.intent)
                 sqlite3_bind_text_safe(insertStmt, 3, toolStr)
-                sqlite3_bind_text_safe(insertStmt, 4, strategy)
-                sqlite3_bind_text_safe(insertStmt, 5, modelName)
-                sqlite3_bind_double(insertStmt, 6, Double(outcomeScore) / 100.0)
+                sqlite3_bind_text_safe(insertStmt, 4, request.strategy)
+                sqlite3_bind_text_safe(insertStmt, 5, request.modelName)
+                sqlite3_bind_double(insertStmt, 6, Double(request.outcomeScore) / 100.0)
                 sqlite3_bind_double(insertStmt, 7, now)
                 sqlite3_bind_double(insertStmt, 8, now)
                 sqlite3_step(insertStmt)
@@ -189,18 +218,18 @@ public final class SkillEvolutionEngine {
     /// Find the best matching learned skill for a given intent and model.
     /// Uses exact intent match plus token similarity for fuzzy matching.
     public func bestSkill(intent: String, modelName: String = "", message: String = "", minQ: Double = 0.3) -> LearnedSkill? {
-        guard let db else { return nil }
+        guard let database else { return nil }
         let sql = """
-        SELECT id, name, intent_pattern, tool_sequence, strategy, model_name,
-               q_value, usage_count, success_count, last_used, created_at
-        FROM learned_skills
-        WHERE intent_pattern = ? AND q_value >= ?
-              AND (model_name = '' OR model_name = ?)
-        ORDER BY CASE WHEN model_name = ? THEN 0 ELSE 1 END, q_value DESC
-        LIMIT 20;
-        """
+            SELECT id, name, intent_pattern, tool_sequence, strategy, model_name,
+                   q_value, usage_count, success_count, last_used, created_at
+            FROM learned_skills
+            WHERE intent_pattern = ? AND q_value >= ?
+                  AND (model_name = '' OR model_name = ?)
+            ORDER BY CASE WHEN model_name = ? THEN 0 ELSE 1 END, q_value DESC
+            LIMIT 20;
+            """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         sqlite3_bind_text_safe(stmt, 1, intent)
         sqlite3_bind_double(stmt, 2, minQ)
         sqlite3_bind_text_safe(stmt, 3, modelName)
@@ -208,19 +237,20 @@ public final class SkillEvolutionEngine {
 
         var candidates: [LearnedSkill] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            candidates.append(LearnedSkill(
-                id: Int(sqlite3_column_int(stmt, 0)),
-                name: String(cString: sqlite3_column_text(stmt, 1)),
-                intentPattern: String(cString: sqlite3_column_text(stmt, 2)),
-                toolSequence: String(cString: sqlite3_column_text(stmt, 3)).components(separatedBy: ",").filter { !$0.isEmpty },
-                strategy: String(cString: sqlite3_column_text(stmt, 4)),
-                modelName: String(cString: sqlite3_column_text(stmt, 5)),
-                qValue: sqlite3_column_double(stmt, 6),
-                usageCount: Int(sqlite3_column_int(stmt, 7)),
-                successCount: Int(sqlite3_column_int(stmt, 8)),
-                lastUsed: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 9)),
-                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 10))
-            ))
+            candidates.append(
+                LearnedSkill(
+                    id: Int(sqlite3_column_int(stmt, 0)),
+                    name: String(cString: sqlite3_column_text(stmt, 1)),
+                    intentPattern: String(cString: sqlite3_column_text(stmt, 2)),
+                    toolSequence: String(cString: sqlite3_column_text(stmt, 3)).components(separatedBy: ",").filter { !$0.isEmpty },
+                    strategy: String(cString: sqlite3_column_text(stmt, 4)),
+                    modelName: String(cString: sqlite3_column_text(stmt, 5)),
+                    qValue: sqlite3_column_double(stmt, 6),
+                    usageCount: Int(sqlite3_column_int(stmt, 7)),
+                    successCount: Int(sqlite3_column_int(stmt, 8)),
+                    lastUsed: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 9)),
+                    createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 10))
+                ))
         }
         sqlite3_finalize(stmt)
         guard !candidates.isEmpty else { return nil }
@@ -237,15 +267,21 @@ public final class SkillEvolutionEngine {
         if messageTokens.isEmpty {
             return pool.first { $0.successRate >= 0.65 && $0.usageCount >= 2 }
         }
-        return pool
-            .map { skill -> (skill: LearnedSkill, score: Double, overlap: Int, toolBonus: Double) in
+        return
+            pool
+            .map { skill -> SkillMatchCandidate in
                 let skillTokens = Self.matchTokens(in: [skill.name, skill.strategy, skill.toolSequence.joined(separator: " ")].joined(separator: " "))
                 let overlapCount = messageTokens.intersection(skillTokens).count
                 let denominator = Double(max(1, min(messageTokens.count, 8)))
                 let semanticScore = Double(overlapCount) / denominator
                 let toolBonus = Self.toolIntentBonus(skill: skill, message: message)
                 let score = semanticScore + toolBonus + min(skill.qValue, 2.0) * 0.05
-                return (skill, score, overlapCount, toolBonus)
+                return SkillMatchCandidate(
+                    skill: skill,
+                    score: score,
+                    overlap: overlapCount,
+                    toolBonus: toolBonus
+                )
             }
             .filter { entry in
                 // Stricter gates:
@@ -267,19 +303,19 @@ public final class SkillEvolutionEngine {
     /// Called after a task that used a learned skill completes.
     public func updateQ(skillID: Int, outcomeScore: Int, succeeded: Bool) {
         queue.async { [weak self] in
-            guard let self, let db else { return }
+            guard let self, let database else { return }
             let reward = Double(outcomeScore) / 100.0
             let now = Date().timeIntervalSince1970
             let sql = """
-            UPDATE learned_skills SET
-                q_value = q_value + ? * (? + ? * q_value - q_value),
-                usage_count = usage_count + 1,
-                success_count = success_count + CASE WHEN ? THEN 1 ELSE 0 END,
-                last_used = ?
-            WHERE id = ?;
-            """
+                UPDATE learned_skills SET
+                    q_value = q_value + ? * (? + ? * q_value - q_value),
+                    usage_count = usage_count + 1,
+                    success_count = success_count + CASE WHEN ? THEN 1 ELSE 0 END,
+                    last_used = ?
+                WHERE id = ?;
+                """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return }
             sqlite3_bind_double(stmt, 1, self.alpha)
             sqlite3_bind_double(stmt, 2, reward)
             sqlite3_bind_double(stmt, 3, self.gamma)
@@ -294,16 +330,16 @@ public final class SkillEvolutionEngine {
     /// Penalize a skill when a task using it fails.
     public func penalize(skillID: Int) {
         queue.async { [weak self] in
-            guard let self, let db else { return }
+            guard let self, let database else { return }
             let sql = """
-            UPDATE learned_skills SET
-                q_value = MAX(0, q_value - ?),
-                usage_count = usage_count + 1,
-                last_used = ?
-            WHERE id = ?;
-            """
+                UPDATE learned_skills SET
+                    q_value = MAX(0, q_value - ?),
+                    usage_count = usage_count + 1,
+                    last_used = ?
+                WHERE id = ?;
+                """
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return }
             sqlite3_bind_double(stmt, 1, self.alpha * 0.5)
             sqlite3_bind_double(stmt, 2, Date().timeIntervalSince1970)
             sqlite3_bind_int(stmt, 3, Int32(skillID))
@@ -316,32 +352,33 @@ public final class SkillEvolutionEngine {
 
     /// Returns all learned skills, sorted by Q-value.
     public func allSkills(limit: Int = 50) -> [LearnedSkill] {
-        guard let db else { return [] }
+        guard let database else { return [] }
         let sql = """
-        SELECT id, name, intent_pattern, tool_sequence, strategy, model_name,
-               q_value, usage_count, success_count, last_used, created_at
-        FROM learned_skills
-        ORDER BY q_value DESC
-        LIMIT ?;
-        """
+            SELECT id, name, intent_pattern, tool_sequence, strategy, model_name,
+                   q_value, usage_count, success_count, last_used, created_at
+            FROM learned_skills
+            ORDER BY q_value DESC
+            LIMIT ?;
+            """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         sqlite3_bind_int(stmt, 1, Int32(limit))
         var rows: [LearnedSkill] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            rows.append(LearnedSkill(
-                id: Int(sqlite3_column_int(stmt, 0)),
-                name: String(cString: sqlite3_column_text(stmt, 1)),
-                intentPattern: String(cString: sqlite3_column_text(stmt, 2)),
-                toolSequence: String(cString: sqlite3_column_text(stmt, 3)).components(separatedBy: ",").filter { !$0.isEmpty },
-                strategy: String(cString: sqlite3_column_text(stmt, 4)),
-                modelName: String(cString: sqlite3_column_text(stmt, 5)),
-                qValue: sqlite3_column_double(stmt, 6),
-                usageCount: Int(sqlite3_column_int(stmt, 7)),
-                successCount: Int(sqlite3_column_int(stmt, 8)),
-                lastUsed: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 9)),
-                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 10))
-            ))
+            rows.append(
+                LearnedSkill(
+                    id: Int(sqlite3_column_int(stmt, 0)),
+                    name: String(cString: sqlite3_column_text(stmt, 1)),
+                    intentPattern: String(cString: sqlite3_column_text(stmt, 2)),
+                    toolSequence: String(cString: sqlite3_column_text(stmt, 3)).components(separatedBy: ",").filter { !$0.isEmpty },
+                    strategy: String(cString: sqlite3_column_text(stmt, 4)),
+                    modelName: String(cString: sqlite3_column_text(stmt, 5)),
+                    qValue: sqlite3_column_double(stmt, 6),
+                    usageCount: Int(sqlite3_column_int(stmt, 7)),
+                    successCount: Int(sqlite3_column_int(stmt, 8)),
+                    lastUsed: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 9)),
+                    createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 10))
+                ))
         }
         sqlite3_finalize(stmt)
         return rows
@@ -389,25 +426,32 @@ public final class SkillEvolutionEngine {
     }
 
     private func pruneIfNeeded() {
-        guard let db else { return }
+        guard let database else { return }
         // Count total
         var countStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM learned_skills;", -1, &countStmt, nil) == SQLITE_OK else { return }
-        guard sqlite3_step(countStmt) == SQLITE_ROW else { sqlite3_finalize(countStmt); return }
+        guard sqlite3_prepare_v2(database, "SELECT COUNT(*) FROM learned_skills;", -1, &countStmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_step(countStmt) == SQLITE_ROW else {
+            sqlite3_finalize(countStmt)
+            return
+        }
         let count = Int(sqlite3_column_int(countStmt, 0))
         sqlite3_finalize(countStmt)
 
         if count > maxSkills {
             // Delete the weakest (low Q, old, unused) skills
-            let toDelete = count - maxSkills + 10 // delete a small buffer
+            let toDelete = count - maxSkills + 10  // delete a small buffer
             var deleteStmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, """
-            DELETE FROM learned_skills WHERE id IN (
-                SELECT id FROM learned_skills
-                ORDER BY q_value ASC, last_used ASC
-                LIMIT ?
-            );
-            """, -1, &deleteStmt, nil) == SQLITE_OK else { return }
+            guard
+                sqlite3_prepare_v2(
+                    database,
+                    """
+                    DELETE FROM learned_skills WHERE id IN (
+                        SELECT id FROM learned_skills
+                        ORDER BY q_value ASC, last_used ASC
+                        LIMIT ?
+                    );
+                    """, -1, &deleteStmt, nil) == SQLITE_OK
+            else { return }
             sqlite3_bind_int(deleteStmt, 1, Int32(toDelete))
             sqlite3_step(deleteStmt)
             sqlite3_finalize(deleteStmt)

@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
@@ -24,22 +25,25 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
     func testSelectingSessionClearsSelectedTask() {
         let session = ChatSession(title: "会话", preview: "", modelName: "test")
         let task = AgentTask(title: "任务")
-        let store = AppStore(state: .init(
-            workspaceName: "Test",
-            modeLabel: "Build",
-            sessions: [session],
-            selectedSessionID: nil,
-            workbenchTab: .tools,
-            connectors: [],
-            activeConnectorID: nil,
-            toolActivities: [],
-            workflowRuns: [],
-            draftMessage: "",
-            isGenerating: false,
-            settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None", compactComposer: false, showDebugPanels: false),
-            tasks: [task],
-            selectedTaskID: task.id
-        ))
+        let store = AppStore(
+            state: .init(
+                workspaceName: "Test",
+                modeLabel: "Build",
+                sessions: [session],
+                selectedSessionID: nil,
+                workbenchTab: .tools,
+                connectors: [],
+                activeConnectorID: nil,
+                toolActivities: [],
+                workflowRuns: [],
+                draftMessage: "",
+                isGenerating: false,
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None", compactComposer: false,
+                    showDebugPanels: false),
+                tasks: [task],
+                selectedTaskID: task.id
+            ))
 
         store.selectThread(id: session.id)
 
@@ -58,10 +62,12 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
     }
     func testUnifiedThreadSearchMatchesTaskStepsAndTools() {
         let session = ChatSession(title: "普通聊天", preview: "你好", modelName: "test")
-        let task = AgentTask(title: "任务", steps: [
-            TaskStep(kind: .toolCall, text: "正在读取文件", toolName: "file.read"),
-            TaskStep(kind: .toolResult, text: "发现 selectedThreadID 双轨状态")
-        ])
+        let task = AgentTask(
+            title: "任务",
+            steps: [
+                TaskStep(kind: .toolCall, text: "正在读取文件", toolName: "file.read"),
+                TaskStep(kind: .toolResult, text: "发现 selectedThreadID 双轨状态")
+            ])
         var state = testState(sessions: [session], tasks: [task])
         state.searchText = "selectedThreadID"
 
@@ -72,9 +78,11 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
     }
     func testSidebarSummarySearchUsesDebouncedQuery() {
         let session = ChatSession(title: "普通聊天", preview: "你好", modelName: "test")
-        let task = AgentTask(title: "性能优化任务", steps: [
-            TaskStep(kind: .userInput, text: "优化侧栏卡顿")
-        ])
+        let task = AgentTask(
+            title: "性能优化任务",
+            steps: [
+                TaskStep(kind: .userInput, text: "优化侧栏卡顿")
+            ])
         var state = testState(sessions: [session], tasks: [task])
         state.searchText = "性能"
 
@@ -111,20 +119,23 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
         let first = ChatTurn(role: .user, text: "第一条")
         let second = ChatTurn(role: .assistant, text: "第二条")
         let session = ChatSession(title: "会话", preview: second.text, modelName: "test", turns: [first, second])
-        let store = AppStore(state: .init(
-            workspaceName: "Test",
-            modeLabel: "Build",
-            sessions: [session],
-            selectedSessionID: session.id,
-            workbenchTab: .tools,
-            connectors: [],
-            activeConnectorID: nil,
-            toolActivities: [],
-            workflowRuns: [],
-            draftMessage: "",
-            isGenerating: false,
-            settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None", compactComposer: false, showDebugPanels: false)
-        ))
+        let store = AppStore(
+            state: .init(
+                workspaceName: "Test",
+                modeLabel: "Build",
+                sessions: [session],
+                selectedSessionID: session.id,
+                workbenchTab: .tools,
+                connectors: [],
+                activeConnectorID: nil,
+                toolActivities: [],
+                workflowRuns: [],
+                draftMessage: "",
+                isGenerating: false,
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None", compactComposer: false,
+                    showDebugPanels: false)
+            ))
 
         store.deleteTurn(sessionID: session.id, turnID: second.id)
 

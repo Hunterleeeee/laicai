@@ -125,30 +125,31 @@ struct ComposerTextView: NSViewRepresentable {
         var lastUserEditAt = Date.distantPast
 
         func textDidChange(_ notification: Notification) {
-            guard let tv = notification.object as? ComposerNSTextView else { return }
+            guard let textView = notification.object as? ComposerNSTextView else { return }
             lastUserEditAt = Date()
-            text.wrappedValue = tv.string
+            text.wrappedValue = textView.string
             remeasure(force: true)
-            tv.needsDisplay = true
+            textView.needsDisplay = true
         }
 
         func remeasure(force: Bool = false) {
-            guard let tv = textView else { return }
-            let width = max(1, wrapper?.bounds.width ?? tv.bounds.width)
+            guard let textView = textView else { return }
+            let width = max(1, wrapper?.bounds.width ?? textView.bounds.width)
             if !force,
-               lastMeasuredText == tv.string,
+               lastMeasuredText == textView.string,
                abs(lastMeasuredWidth - width) < 0.5 {
                 return
             }
-            lastMeasuredText = tv.string
+            lastMeasuredText = textView.string
             lastMeasuredWidth = width
-            tv.textContainer?.containerSize = NSSize(
-                width: max(1, width - tv.textContainerInset.width * 2),
+            guard let textContainer = textView.textContainer else { return }
+            textContainer.containerSize = NSSize(
+                width: max(1, width - textView.textContainerInset.width * 2),
                 height: CGFloat.greatestFiniteMagnitude
             )
-            tv.layoutManager?.ensureLayout(for: tv.textContainer!)
-            let used = tv.layoutManager?.usedRect(for: tv.textContainer!).height ?? 0
-            let height = min(84, max(28, ceil(used + tv.textContainerInset.height * 2)))
+            textView.layoutManager?.ensureLayout(for: textContainer)
+            let used = textView.layoutManager?.usedRect(for: textContainer).height ?? 0
+            let height = min(84, max(28, ceil(used + textView.textContainerInset.height * 2)))
             DispatchQueue.main.async {
                 if abs(self.measuredHeight.wrappedValue - height) > 0.5 {
                     self.measuredHeight.wrappedValue = height
@@ -182,8 +183,8 @@ struct ComposerTextView: NSViewRepresentable {
 final class ComposerWrapperView: NSView {
     var textView: ComposerNSTextView? {
         didSet {
-            if let tv = textView, tv.superview == nil {
-                addSubview(tv)
+            if let textView = textView, textView.superview == nil {
+                addSubview(textView)
             }
         }
     }
@@ -196,20 +197,20 @@ final class ComposerWrapperView: NSView {
 
     override func layout() {
         super.layout()
-        guard let tv = textView else { return }
-        tv.frame = bounds
-        tv.textContainer?.containerSize = NSSize(
-            width: max(0, bounds.width - tv.textContainerInset.width * 2),
+        guard let textView = textView else { return }
+        textView.frame = bounds
+        textView.textContainer?.containerSize = NSSize(
+            width: max(0, bounds.width - textView.textContainerInset.width * 2),
             height: CGFloat.greatestFiniteMagnitude
         )
-        (tv.delegate as? ComposerTextView.Coordinator)?.remeasure()
+        (textView.delegate as? ComposerTextView.Coordinator)?.remeasure()
     }
 
     override var acceptsFirstResponder: Bool { textView?.acceptsFirstResponder ?? false }
 
     override func becomeFirstResponder() -> Bool {
-        guard let tv = textView else { return false }
-        window?.makeFirstResponder(tv)
+        guard let textView = textView else { return false }
+        window?.makeFirstResponder(textView)
         return true
     }
 }
@@ -240,8 +241,8 @@ final class ComposerNSTextView: NSTextView {
     }
 
     private func pasteAsImage(sender: Any?) {
-        let pb = NSPasteboard.general
-        let types = pb.types ?? []
+        let pasteboard = NSPasteboard.general
+        let types = pasteboard.types ?? []
         let hasImageType = Self.hasImageDataType(types)
         let hasFileURL = types.contains(.fileURL)
         let hasString = types.contains(.string)
@@ -252,7 +253,7 @@ final class ComposerNSTextView: NSTextView {
         }
 
         // Try to extract image from pasteboard
-        if hasImageType, let pngData = Self.extractPNG(from: pb) {
+        if hasImageType, let pngData = Self.extractPNG(from: pasteboard) {
             if let callback = onImagePaste {
                 callback(pngData, "image/png")
                 return
@@ -261,7 +262,7 @@ final class ComposerNSTextView: NSTextView {
 
         // Image file URL
         if hasFileURL,
-           let urlData = pb.data(forType: .fileURL),
+           let urlData = pasteboard.data(forType: .fileURL),
            let url = URL(dataRepresentation: urlData, relativeTo: nil),
            let uti = try? url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier,
            uti.hasPrefix("public.image"),
@@ -277,15 +278,15 @@ final class ComposerNSTextView: NSTextView {
     }
 
     /// Extract PNG data from pasteboard, trying multiple strategies
-    private static func extractPNG(from pb: NSPasteboard) -> Data? {
+    private static func extractPNG(from pasteboard: NSPasteboard) -> Data? {
         // 1) Raw PNG
-        if let data = pb.data(forType: .png), !data.isEmpty { return data }
+        if let data = pasteboard.data(forType: .png), !data.isEmpty { return data }
         // 2) TIFF → PNG
-        if let tiffData = pb.data(forType: .tiff), !tiffData.isEmpty,
+        if let tiffData = pasteboard.data(forType: .tiff), !tiffData.isEmpty,
            let rep = NSBitmapImageRep(data: tiffData),
            let png = rep.representation(using: .png, properties: [:]) { return png }
         // 3) NSImage(pasteboard:) — catches ALL image formats (JPEG, HEIC, WebP, etc.)
-        if let image = NSImage(pasteboard: pb),
+        if let image = NSImage(pasteboard: pasteboard),
            let tiffData = image.tiffRepresentation,
            let rep = NSBitmapImageRep(data: tiffData),
            let png = rep.representation(using: .png, properties: [:]) { return png }
@@ -307,14 +308,14 @@ final class ComposerNSTextView: NSTextView {
 
     // Support drag-and-drop of images
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let pb = sender.draggingPasteboard
-        if let pngData = Self.extractPNG(from: pb) {
+        let pasteboard = sender.draggingPasteboard
+        if let pngData = Self.extractPNG(from: pasteboard) {
             onImagePaste?(pngData, "image/png")
             return true
         }
         // Image file URL
-        if let types = pb.types, types.contains(.fileURL),
-           let urlData = pb.data(forType: .fileURL),
+        if let types = pasteboard.types, types.contains(.fileURL),
+           let urlData = pasteboard.data(forType: .fileURL),
            let url = URL(dataRepresentation: urlData, relativeTo: nil),
            let uti = try? url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier,
            uti.hasPrefix("public.image"),

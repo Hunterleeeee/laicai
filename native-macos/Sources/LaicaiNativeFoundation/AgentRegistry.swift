@@ -40,6 +40,31 @@ public struct CustomAgentDefinition: Identifiable, Equatable, Codable, Sendable 
     }
 }
 
+public struct CustomAgentCreateRequest: Sendable {
+    public let name: String
+    public let role: AgentRole
+    public let systemPrompt: String
+    public let tools: [String]
+    public let preferredConnectorID: UUID?
+    public let workspaceRoot: String
+
+    public init(
+        name: String,
+        role: AgentRole,
+        systemPrompt: String,
+        tools: [String],
+        preferredConnectorID: UUID? = nil,
+        workspaceRoot: String = ""
+    ) {
+        self.name = name
+        self.role = role
+        self.systemPrompt = systemPrompt
+        self.tools = tools
+        self.preferredConnectorID = preferredConnectorID
+        self.workspaceRoot = workspaceRoot
+    }
+}
+
 @MainActor
 public final class AgentRegistry: ObservableObject {
     public static let shared = AgentRegistry()
@@ -53,26 +78,19 @@ public final class AgentRegistry: ObservableObject {
     }
 
     @discardableResult
-    public func create(
-        name: String,
-        role: AgentRole,
-        systemPrompt: String,
-        tools: [String],
-        preferredConnectorID: UUID?,
-        workspaceRoot: String
-    ) throws -> CustomAgentDefinition {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    public func create(_ request: CustomAgentCreateRequest) throws -> CustomAgentDefinition {
+        let trimmedName = request.name.trimmingCharacters(in: .whitespacesAndNewlines)
         var agent = CustomAgentDefinition(
-            name: trimmedName.isEmpty ? role.title : trimmedName,
-            role: role,
-            systemPrompt: systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines),
-            tools: tools,
-            preferredConnectorID: preferredConnectorID
+            name: trimmedName.isEmpty ? request.role.title : trimmedName,
+            role: request.role,
+            systemPrompt: request.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines),
+            tools: request.tools,
+            preferredConnectorID: request.preferredConnectorID
         )
         if agent.systemPrompt.isEmpty {
-            agent.systemPrompt = "你是\(agent.name)，角色是\(role.title)。请按该角色推进当前会话目标。"
+            agent.systemPrompt = "你是\(agent.name)，角色是\(request.role.title)。请按该角色推进当前会话目标。"
         }
-        try save(agent, workspaceRoot: workspaceRoot)
+        try save(agent, workspaceRoot: request.workspaceRoot)
         agents.append(agent)
         agents.sort { $0.updatedAt > $1.updatedAt }
         return agent

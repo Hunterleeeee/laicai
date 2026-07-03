@@ -76,9 +76,9 @@ public final class SessionTeleport: ObservableObject {
             switch self {
             case .noThreads: return "没有可导出的会话"
             case .encodingFailed: return "序列化失败"
-            case .decodingFailed(let d): return "反序列化失败：\(d)"
-            case .versionMismatch(let v): return "格式版本不兼容：\(v)"
-            case .writeFailed(let p): return "写入失败：\(p)"
+            case .decodingFailed(let details): return "反序列化失败：\(details)"
+            case .versionMismatch(let version): return "格式版本不兼容：\(version)"
+            case .writeFailed(let path): return "写入失败：\(path)"
             }
         }
     }
@@ -176,10 +176,8 @@ public final class SessionTeleport: ObservableObject {
 
         // Suggest connectors (don't auto-add since they need API keys)
         let existingEndpoints = Set(connectors.map { $0.endpoint.lowercased() })
-        for snap in bundle.connectorProfiles {
-            if !existingEndpoints.contains(snap.endpoint.lowercased()) {
-                connectorHints.append("\(snap.name) (\(snap.endpoint))")
-            }
+        for snap in bundle.connectorProfiles where !existingEndpoints.contains(snap.endpoint.lowercased()) {
+            connectorHints.append("\(snap.name) (\(snap.endpoint))")
         }
 
         return MergeResult(

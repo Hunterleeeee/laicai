@@ -1,6 +1,45 @@
 import Foundation
 import LaicaiNativeDomain
 
+private struct ImagesAPIRequest: Encodable {
+    var model: String
+    var prompt: String
+    var count: Int
+    var size: String
+    var responseFormat: String?
+    var returnBase64: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case prompt
+        case count = "n"
+        case size
+        case responseFormat = "response_format"
+        case returnBase64 = "return_base64"
+    }
+}
+
+private struct ImagesAPIResponseItem: Decodable {
+    var base64JSON: String?
+    var url: String?
+
+    enum CodingKeys: String, CodingKey {
+        case base64JSON = "b64_json"
+        case url
+    }
+}
+
+private struct ImagesAPIResponse: Decodable {
+    var data: [ImagesAPIResponseItem]
+}
+
+private struct PullRequestFileGroups {
+    var sourceFiles: [String] = []
+    var testFiles: [String] = []
+    var configFiles: [String] = []
+    var otherFiles: [String] = []
+}
+
 // MARK: - Git Tool
 
 public struct GitTool: LaicaiTool {
@@ -8,7 +47,7 @@ public struct GitTool: LaicaiTool {
     public var description: String { "执行 git 操作（diff, status, log, branch, add, commit 等）" }
 
     private static let readOnlySubcommands = ["diff", "status", "log", "branch", "show", "stash list", "remote", "tag"]
-    private static let safeWriteSubcommands = ["add", "commit", "commit-auto", "checkout", "switch", "branch-create", "pr-desc"]
+    private static let safeWriteSubcommands = ["add", "commit", "commit-auto", "branch-create", "pr-desc"]
     private static let dangerousPatterns = ["push --force", "reset --hard", "clean -fd", "clean -xdf", "rebase", "push -f"]
 
     public var functionDefinition: FunctionDefinition {
@@ -51,7 +90,8 @@ public struct GitTool: LaicaiTool {
         let root = context.workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if Self.requiresRepository(subcommand), !Self.isGitRepository(root) {
-            let message = root.isEmpty
+            let message =
+                root.isEmpty
                 ? "当前没有设置工作区，无法执行 git \(subcommand)。"
                 : "当前工作区不是 git 仓库：\(root)。可以继续用文件搜索和读取工具完成任务。"
             await AuditLog.shared.record(
@@ -131,7 +171,8 @@ public struct GitTool: LaicaiTool {
         guard !statusLines.isEmpty else {
             return ToolResult(output: "没有可提交的变更。", data: ["exitCode": "0"], success: true)
         }
-        let message = messageHint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let message =
+            messageHint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? Self.generateCommitMessage(fromStatusLines: statusLines)
             : messageHint.trimmingCharacters(in: .whitespacesAndNewlines)
         let escapedMessage = message.replacingOccurrences(of: "\"", with: "\\\"")
@@ -215,88 +256,20 @@ public struct GitTool: LaicaiTool {
         let filesResult = try await ShellTool().execute(params: ["command": "git diff \(base)..HEAD --name-only", "timeout": "15"], context: context)
         let changedFiles = filesResult.output.trimmingCharacters(in: .whitespacesAndNewlines)
             .components(separatedBy: "\n").filter { !$0.isEmpty }
-
-        // Categorize changed files
-        var sourceFiles: [String] = []
-        var testFiles: [String] = []
-        var configFiles: [String] = []
-        var otherFiles: [String] = []
-        for file in changedFiles {
-            let lower = file.lowercased()
-            let isTestFile = lower.contains("/test")
-                || lower.contains("/tests/")
-                || lower.hasSuffix("test.swift")
-                || lower.hasSuffix(".test.ts")
-                || lower.hasSuffix(".spec.ts")
-                || lower.hasSuffix("_test.go")
-                || lower.hasSuffix("_test.py")
-            let isSourceFile = lower.hasSuffix(".swift")
-                || lower.hasSuffix(".py")
-                || lower.hasSuffix(".ts")
-                || lower.hasSuffix(".js")
-                || lower.hasSuffix(".go")
-                || lower.hasSuffix(".rs")
-            let isConfigFile = lower.hasSuffix(".json")
-                || lower.hasSuffix(".toml")
-                || lower.hasSuffix(".yaml")
-                || lower.hasSuffix(".yml")
-                || lower.hasSuffix(".xml")
-                || (lower.hasSuffix(".swift") && lower.contains("package"))
-                || lower.contains("package.")
-                || lower.contains("tsconfig")
-                || lower.contains(".env")
-                || lower.contains("dockerfile")
-                || lower.contains("makefile")
-            if isTestFile {
-                testFiles.append(file)
-            } else if isSourceFile {
-                sourceFiles.append(file)
-            } else if isConfigFile {
-                configFiles.append(file)
-            } else {
-                otherFiles.append(file)
-            }
-        }
+        let fileGroups = Self.categorizePRFiles(changedFiles)
 
         // Detect potential breaking changes
-        var breakingChangeHints: [String] = []
-        let diffContentResult = try await ShellTool().execute(params: ["command": "git diff \(base)..HEAD -- '*.swift' '*.py' '*.ts' '*.js' '*.go' | head -200", "timeout": "15"], context: context)
-        let diffContent = diffContentResult.output
-        if diffContent.contains("-public ") && !diffContent.contains("+public ") {
-            breakingChangeHints.append("移除了 public API")
-        }
-        if diffContent.contains("-protocol ") || diffContent.contains("-interface ") {
-            breakingChangeHints.append("移除了协议/接口定义")
-        }
-        if diffContent.contains("-func ") && diffContent.contains("+func ") {
-            breakingChangeHints.append("函数签名可能变更")
-        }
+        let diffContentResult = try await ShellTool().execute(
+            params: ["command": "git diff \(base)..HEAD -- '*.swift' '*.py' '*.ts' '*.js' '*.go' | head -200", "timeout": "15"], context: context)
+        let breakingChangeHints = Self.breakingChangeHints(from: diffContentResult.output)
 
         let title = currentBranch.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
         var description = "## \(title)\n\n"
         description += "### 变更概览\n\(stat)\n\n"
-
-        if !sourceFiles.isEmpty {
-            description += "### 源文件变更（\(sourceFiles.count)）\n"
-            for file in sourceFiles.prefix(20) { description += "- `\(file)`\n" }
-            description += "\n"
-        }
-        if !testFiles.isEmpty {
-            description += "### 测试文件变更（\(testFiles.count)）\n"
-            for file in testFiles.prefix(10) { description += "- `\(file)`\n" }
-            description += "\n"
-        }
-        if !configFiles.isEmpty {
-            description += "### 配置文件变更（\(configFiles.count)）\n"
-            for file in configFiles.prefix(10) { description += "- `\(file)`\n" }
-            description += "\n"
-        }
-
-        if !breakingChangeHints.isEmpty {
-            description += "### ⚠️ 潜在破坏性变更\n"
-            for hint in breakingChangeHints { description += "- \(hint)\n" }
-            description += "\n"
-        }
+        Self.appendPRFileSection(title: "源文件变更", files: fileGroups.sourceFiles, limit: 20, to: &description)
+        Self.appendPRFileSection(title: "测试文件变更", files: fileGroups.testFiles, limit: 10, to: &description)
+        Self.appendPRFileSection(title: "配置文件变更", files: fileGroups.configFiles, limit: 10, to: &description)
+        Self.appendBreakingChangeSection(breakingChangeHints, to: &description)
 
         description += "### 提交记录\n\(commits)\n"
         let commitCount = commits.components(separatedBy: "\n").filter { !$0.isEmpty }.count
@@ -307,13 +280,83 @@ public struct GitTool: LaicaiTool {
                 "branch": currentBranch,
                 "base": base,
                 "commitCount": "\(commitCount)",
-                "sourceFileCount": "\(sourceFiles.count)",
-                "testFileCount": "\(testFiles.count)",
-                "configFileCount": "\(configFiles.count)",
+                "sourceFileCount": "\(fileGroups.sourceFiles.count)",
+                "testFileCount": "\(fileGroups.testFiles.count)",
+                "configFileCount": "\(fileGroups.configFiles.count)",
                 "hasBreakingChanges": "\(breakingChangeHints.isEmpty ? "false" : "true")"
             ],
             success: true
         )
+    }
+
+    private static let prTestSuffixes = ["test.swift", ".test.ts", ".spec.ts", "_test.go", "_test.py"]
+    private static let prSourceSuffixes = [".swift", ".py", ".ts", ".js", ".go", ".rs"]
+    private static let prConfigSuffixes = [".json", ".toml", ".yaml", ".yml", ".xml"]
+    private static let prConfigTerms = ["package.", "tsconfig", ".env", "dockerfile", "makefile"]
+
+    private static func categorizePRFiles(_ files: [String]) -> PullRequestFileGroups {
+        var groups = PullRequestFileGroups()
+        for file in files {
+            let lower = file.lowercased()
+            if isPRTestFile(lower) {
+                groups.testFiles.append(file)
+            } else if isPRSourceFile(lower) {
+                groups.sourceFiles.append(file)
+            } else if isPRConfigFile(lower) {
+                groups.configFiles.append(file)
+            } else {
+                groups.otherFiles.append(file)
+            }
+        }
+        return groups
+    }
+
+    private static func isPRTestFile(_ lower: String) -> Bool {
+        lower.contains("/test")
+            || lower.contains("/tests/")
+            || prTestSuffixes.contains { lower.hasSuffix($0) }
+    }
+
+    private static func isPRSourceFile(_ lower: String) -> Bool {
+        prSourceSuffixes.contains { lower.hasSuffix($0) }
+    }
+
+    private static func isPRConfigFile(_ lower: String) -> Bool {
+        prConfigSuffixes.contains { lower.hasSuffix($0) }
+            || (lower.hasSuffix(".swift") && lower.contains("package"))
+            || prConfigTerms.contains { lower.contains($0) }
+    }
+
+    private static func breakingChangeHints(from diffContent: String) -> [String] {
+        var hints: [String] = []
+        if diffContent.contains("-public ") && !diffContent.contains("+public ") {
+            hints.append("移除了 public API")
+        }
+        if diffContent.contains("-protocol ") || diffContent.contains("-interface ") {
+            hints.append("移除了协议/接口定义")
+        }
+        if diffContent.contains("-func ") && diffContent.contains("+func ") {
+            hints.append("函数签名可能变更")
+        }
+        return hints
+    }
+
+    private static func appendPRFileSection(title: String, files: [String], limit: Int, to description: inout String) {
+        guard !files.isEmpty else { return }
+        description += "### \(title)（\(files.count)）\n"
+        for file in files.prefix(limit) {
+            description += "- `\(file)`\n"
+        }
+        description += "\n"
+    }
+
+    private static func appendBreakingChangeSection(_ hints: [String], to description: inout String) {
+        guard !hints.isEmpty else { return }
+        description += "### ⚠️ 潜在破坏性变更\n"
+        for hint in hints {
+            description += "- \(hint)\n"
+        }
+        description += "\n"
     }
 
     public static func isGitRepository(_ workspaceRoot: String) -> Bool {
@@ -383,13 +426,14 @@ public struct ComfyUITool: LaicaiTool {
         if ConnectorCapabilityProfile.isImageOnlyModel(imageModel), !imageEndpoint.isEmpty {
             do {
                 let imagePath = try await generateOpenAICompatibleImage(
-                    endpoint: imageEndpoint,
-                    apiKey: context.imageGenerationAPIKey ?? "",
-                    modelName: imageModel,
-                    prompt: params.prompt,
-                    size: params.size ?? Self.openAIImageSize(width: width, height: height),
-                    outputDir: context.workspaceRoot
-                )
+                    OpenAICompatibleImageRequest(
+                        endpoint: imageEndpoint,
+                        apiKey: context.imageGenerationAPIKey ?? "",
+                        modelName: imageModel,
+                        prompt: params.prompt,
+                        size: params.size ?? Self.openAIImageSize(width: width, height: height),
+                        outputDir: context.workspaceRoot
+                    ))
 
                 await AuditLog.shared.record(
                     tool: name,
@@ -477,37 +521,6 @@ public struct ComfyUITool: LaicaiTool {
         }
     }
 
-    private struct ImagesAPIRequest: Encodable {
-        var model: String
-        var prompt: String
-        var count: Int
-        var size: String
-        var responseFormat: String?
-        var returnBase64: Bool?
-
-        enum CodingKeys: String, CodingKey {
-            case model
-            case prompt
-            case count = "n"
-            case size
-            case responseFormat = "response_format"
-            case returnBase64 = "return_base64"
-        }
-    }
-
-    private struct ImagesAPIResponse: Decodable {
-        struct Item: Decodable {
-            var base64JSON: String?
-            var url: String?
-
-            enum CodingKeys: String, CodingKey {
-                case base64JSON = "b64_json"
-                case url
-            }
-        }
-        var data: [Item]
-    }
-
     private struct ImageGenerationParams {
         var prompt: String
         var negativePrompt: String?
@@ -518,6 +531,15 @@ public struct ComfyUITool: LaicaiTool {
         var size: String?
     }
 
+    private struct OpenAICompatibleImageRequest {
+        let endpoint: String
+        let apiKey: String
+        let modelName: String
+        let prompt: String
+        let size: String
+        let outputDir: String
+    }
+
     private static func decodeImageGenerationParams(_ argumentsJSON: String) throws -> ImageGenerationParams {
         let data = argumentsJSON.data(using: .utf8) ?? Data()
         let object = try JSONSerialization.jsonObject(with: data)
@@ -525,7 +547,8 @@ public struct ComfyUITool: LaicaiTool {
             throw NSError(domain: "ImageGenerateParams", code: 1, userInfo: [NSLocalizedDescriptionKey: "参数必须是 JSON 对象"])
         }
         guard let prompt = stringValue(dict["prompt"])?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !prompt.isEmpty else {
+            !prompt.isEmpty
+        else {
             throw NSError(domain: "ImageGenerateParams", code: 2, userInfo: [NSLocalizedDescriptionKey: "缺少 prompt"])
         }
         return ImageGenerationParams(
@@ -556,27 +579,20 @@ public struct ComfyUITool: LaicaiTool {
         }
     }
 
-    private func generateOpenAICompatibleImage(
-        endpoint: String,
-        apiKey: String,
-        modelName: String,
-        prompt: String,
-        size: String,
-        outputDir: String
-    ) async throws -> String {
-        let url = try Self.imagesGenerationURL(from: endpoint)
+    private func generateOpenAICompatibleImage(_ imageRequest: OpenAICompatibleImageRequest) async throws -> String {
+        let url = try Self.imagesGenerationURL(from: imageRequest.endpoint)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if !imageRequest.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            request.setValue("Bearer \(imageRequest.apiKey)", forHTTPHeaderField: "Authorization")
         }
-        let usesAgnesImageAPI = Self.usesAgnesImageAPI(modelName: modelName)
+        let usesAgnesImageAPI = Self.usesAgnesImageAPI(modelName: imageRequest.modelName)
         let body = ImagesAPIRequest(
-            model: modelName,
-            prompt: prompt,
+            model: imageRequest.modelName,
+            prompt: imageRequest.prompt,
             count: 1,
-            size: size,
+            size: imageRequest.size,
             responseFormat: usesAgnesImageAPI ? nil : "b64_json",
             returnBase64: usesAgnesImageAPI ? true : nil
         )
@@ -587,15 +603,16 @@ public struct ComfyUITool: LaicaiTool {
         if prefersCurlTransport, Self.canUseCurlTransport(for: url) {
             data = try await performImagesAPICurlRequest(
                 url: url,
-                apiKey: apiKey,
+                apiKey: imageRequest.apiKey,
                 body: request.httpBody ?? Data()
             )
-            response = HTTPURLResponse(
-                url: url,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: ["X-Laicai-Transport": "curl"]
-            ) ?? URLResponse(url: url, mimeType: "application/json", expectedContentLength: data.count, textEncodingName: "utf-8")
+            response =
+                HTTPURLResponse(
+                    url: url,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["X-Laicai-Transport": "curl"]
+                ) ?? URLResponse(url: url, mimeType: "application/json", expectedContentLength: data.count, textEncodingName: "utf-8")
         } else {
             (data, response) = try await performImagesAPIRequest(request)
         }
@@ -620,7 +637,7 @@ public struct ComfyUITool: LaicaiTool {
         } else if let urlString = first.url, let url = URL(string: urlString) {
             let (downloaded, downloadResponse) = try await session.data(from: url)
             if let status = (downloadResponse as? HTTPURLResponse)?.statusCode,
-               !(200...299).contains(status) {
+                !(200...299).contains(status) {
                 throw NSError(domain: "ImagesAPI", code: 2, userInfo: [NSLocalizedDescriptionKey: "图片下载失败"])
             }
             imageData = downloaded
@@ -628,7 +645,7 @@ public struct ComfyUITool: LaicaiTool {
             throw NSError(domain: "ImagesAPI", code: 3, userInfo: [NSLocalizedDescriptionKey: "图片服务返回格式不兼容"])
         }
 
-        return try Self.saveImageData(imageData, outputDir: outputDir, prefix: "laicai_image_api")
+        return try Self.saveImageData(imageData, outputDir: imageRequest.outputDir, prefix: "laicai_image_api")
     }
 
     private static func imagesGenerationURL(from endpoint: String) throws -> URL {
@@ -753,13 +770,15 @@ public struct ComfyUITool: LaicaiTool {
         }
 
         let outputData = output.fileHandleForReading.readDataToEndOfFile()
-        let stderr = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+        let stderr =
+            String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if timedOut {
             throw NSError(domain: "ImagesAPICurl", code: Int(NSURLErrorTimedOut), userInfo: [NSLocalizedDescriptionKey: "curl 图片请求超时"])
         }
 
-        let codeText = String(data: outputData, encoding: .utf8)?
+        let codeText =
+            String(data: outputData, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let responseData = (try? Data(contentsOf: responseURL)) ?? Data()
         return CurlImagesResponse(
@@ -846,7 +865,8 @@ public struct ComfyUITool: LaicaiTool {
 
     private static func serverMessage(from body: String, fallback: String) -> String {
         guard let data = body.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             return body.isEmpty ? fallback : "\(fallback)：\(String(body.prefix(300)))"
         }
         if let error = json["error"] as? [String: Any], let message = error["message"] as? String {
@@ -900,19 +920,19 @@ public struct ComfyUITool: LaicaiTool {
     }
 
     private func generateImage(_ request: ComfyImageGenerationRequest) async throws -> String {
-        let serverURL = request.serverURL
-        let modelName = request.modelName
-        let prompt = request.prompt
-        let negativePrompt = request.negativePrompt
-        let width = request.width
-        let height = request.height
-        let steps = request.steps
-        let seed = request.seed
-        let outputDir = request.outputDir
         let clientId = "laicai-\(UUID().uuidString.prefix(8))"
+        let workflow = Self.comfyWorkflow(from: request)
+        let promptId = try await submitComfyPrompt(
+            serverURL: request.serverURL,
+            workflow: workflow,
+            clientId: clientId
+        )
+        let filename = try await pollComfyImageFilename(serverURL: request.serverURL, promptId: promptId)
+        return try await downloadComfyImage(serverURL: request.serverURL, filename: filename, outputDir: request.outputDir)
+    }
 
-        // Build a basic text-to-image workflow
-        let workflow: [String: [String: Any]] = [
+    private static func comfyWorkflow(from request: ComfyImageGenerationRequest) -> [String: [String: Any]] {
+        [
             "3": [
                 "class_type": "KSampler",
                 "inputs": [
@@ -924,30 +944,30 @@ public struct ComfyUITool: LaicaiTool {
                     "positive": ["6", 0] as [Any],
                     "sampler_name": "euler",
                     "scheduler": "normal",
-                    "seed": seed == -1 ? Int.random(in: 0...Int.max) : seed,
-                    "steps": steps
+                    "seed": request.seed == -1 ? Int.random(in: 0...Int.max) : request.seed,
+                    "steps": request.steps
                 ] as [String: Any]
             ],
             "4": [
                 "class_type": "CheckpointLoaderSimple",
-                "inputs": ["ckpt_name": modelName] as [String: Any]
+                "inputs": ["ckpt_name": request.modelName] as [String: Any]
             ],
             "5": [
                 "class_type": "EmptyLatentImage",
-                "inputs": ["batch_size": 1, "height": height, "width": width] as [String: Any]
+                "inputs": ["batch_size": 1, "height": request.height, "width": request.width] as [String: Any]
             ],
             "6": [
                 "class_type": "CLIPTextEncode",
                 "inputs": [
                     "clip": ["4", 1] as [Any],
-                    "text": prompt
+                    "text": request.prompt
                 ] as [String: Any]
             ],
             "7": [
                 "class_type": "CLIPTextEncode",
                 "inputs": [
                     "clip": ["4", 1] as [Any],
-                    "text": negativePrompt
+                    "text": request.negativePrompt
                 ] as [String: Any]
             ],
             "8": [
@@ -965,79 +985,93 @@ public struct ComfyUITool: LaicaiTool {
                 ] as [String: Any]
             ]
         ]
+    }
 
-        // Submit prompt
-        let promptData = try JSONSerialization.data(withJSONObject: [
-            "prompt": workflow,
-            "client_id": clientId
-        ] as [String: Any])
+    private func submitComfyPrompt(
+        serverURL: String,
+        workflow: [String: [String: Any]],
+        clientId: String
+    ) async throws -> String {
+        let promptData = try JSONSerialization.data(
+            withJSONObject: [
+                "prompt": workflow,
+                "client_id": clientId
+            ] as [String: Any])
         guard let promptURL = URL(string: "\(serverURL)/prompt") else {
             throw URLError(.badURL)
         }
-        var submitRequest = URLRequest(url: promptURL)
-        submitRequest.httpMethod = "POST"
-        submitRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        submitRequest.httpBody = promptData
-        submitRequest.timeoutInterval = NetworkDefaults.imageRequest
+        var request = URLRequest(url: promptURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = promptData
+        request.timeoutInterval = NetworkDefaults.imageRequest
 
-        let (submitData, submitResponse) = try await session.data(for: submitRequest)
+        let (submitData, submitResponse) = try await session.data(for: request)
         guard (submitResponse as? HTTPURLResponse)?.statusCode == 200 else {
             throw NSError(domain: "ComfyUI", code: 1, userInfo: [NSLocalizedDescriptionKey: "提交失败"])
         }
         guard let submitJSON = try JSONSerialization.jsonObject(with: submitData) as? [String: Any],
-              let promptId = submitJSON["prompt_id"] as? String else {
+            let promptId = submitJSON["prompt_id"] as? String
+        else {
             throw NSError(domain: "ComfyUI", code: 2, userInfo: [NSLocalizedDescriptionKey: "未获取到 prompt_id"])
         }
+        return promptId
+    }
 
-        // Poll for completion
-        var imageFilename: String?
-        let historyURL = URL(string: "\(serverURL)/history/\(promptId)")!
+    private func pollComfyImageFilename(serverURL: String, promptId: String) async throws -> String {
+        guard let historyURL = URL(string: "\(serverURL)/history/\(promptId)") else {
+            throw NSError(domain: "ComfyUI", code: 2, userInfo: [NSLocalizedDescriptionKey: "ComfyUI history URL 无效"])
+        }
         let start = Date()
         while Date().timeIntervalSince(start) < 300 {
             try await Task.sleep(nanoseconds: 1_000_000_000)
-            var pollRequest = URLRequest(url: historyURL)
-            pollRequest.timeoutInterval = 10
-            let historyResult: (Data, URLResponse)?
-            do {
-                historyResult = try await session.data(for: pollRequest)
-            } catch {
-                continue
+            guard let entry = await comfyHistoryEntry(historyURL: historyURL, promptId: promptId) else { continue }
+            if let filename = Self.comfyImageFilename(from: entry) {
+                return filename
             }
-            guard let (historyData, _) = historyResult,
-                  let historyJSON = try? JSONSerialization.jsonObject(with: historyData) as? [String: Any],
-                  let entry = historyJSON[promptId] as? [String: Any] else { continue }
-
-            if let outputs = entry["outputs"] as? [String: Any],
-               let saveImage = outputs["9"] as? [String: Any],
-               let images = saveImage["images"] as? [[String: Any]],
-               let first = images.first,
-               let filename = first["filename"] as? String {
-                imageFilename = filename
-                break
-            }
-
-            if let status = entry["status"] as? [String: Any],
-               let completed = status["completed"] as? Bool,
-               completed,
-               status["execution_error"] != nil {
+            if Self.hasComfyExecutionError(entry) {
                 throw NSError(domain: "ComfyUI", code: 3, userInfo: [NSLocalizedDescriptionKey: "生成过程中发生错误"])
             }
         }
+        throw NSError(domain: "ComfyUI", code: 4, userInfo: [NSLocalizedDescriptionKey: "生成超时或失败"])
+    }
 
-        guard let filename = imageFilename else {
-            throw NSError(domain: "ComfyUI", code: 4, userInfo: [NSLocalizedDescriptionKey: "生成超时或失败"])
+    private func comfyHistoryEntry(historyURL: URL, promptId: String) async -> [String: Any]? {
+        var request = URLRequest(url: historyURL)
+        request.timeoutInterval = 10
+        guard let (historyData, _) = try? await session.data(for: request),
+            let historyJSON = try? JSONSerialization.jsonObject(with: historyData) as? [String: Any]
+        else { return nil }
+        return historyJSON[promptId] as? [String: Any]
+    }
+
+    private static func comfyImageFilename(from entry: [String: Any]) -> String? {
+        guard let outputs = entry["outputs"] as? [String: Any],
+            let saveImage = outputs["9"] as? [String: Any],
+            let images = saveImage["images"] as? [[String: Any]],
+            let first = images.first
+        else { return nil }
+        return first["filename"] as? String
+    }
+
+    private static func hasComfyExecutionError(_ entry: [String: Any]) -> Bool {
+        guard let status = entry["status"] as? [String: Any],
+            let completed = status["completed"] as? Bool
+        else { return false }
+        return completed && status["execution_error"] != nil
+    }
+
+    private func downloadComfyImage(serverURL: String, filename: String, outputDir: String) async throws -> String {
+        let escapedFilename = filename.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? filename
+        guard let viewURL = URL(string: "\(serverURL)/view?filename=\(escapedFilename)&type=output") else {
+            throw NSError(domain: "ComfyUI", code: 5, userInfo: [NSLocalizedDescriptionKey: "ComfyUI view URL 无效"])
         }
-
-        // Download image
-        let viewURL = URL(string: "\(serverURL)/view?filename=\(filename.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? filename)&type=output")!
-        var viewRequest = URLRequest(url: viewURL)
-        viewRequest.timeoutInterval = NetworkDefaults.imageRequest
-        let (imageData, viewResponse) = try await session.data(for: viewRequest)
+        var request = URLRequest(url: viewURL)
+        request.timeoutInterval = NetworkDefaults.imageRequest
+        let (imageData, viewResponse) = try await session.data(for: request)
         guard (viewResponse as? HTTPURLResponse)?.statusCode == 200 else {
             throw NSError(domain: "ComfyUI", code: 5, userInfo: [NSLocalizedDescriptionKey: "下载图片失败"])
         }
-
-        // Save to workspace
         let outputPath = (outputDir as NSString).appendingPathComponent("laicai_generated_\(filename)")
         try imageData.write(to: URL(fileURLWithPath: outputPath))
         return outputPath

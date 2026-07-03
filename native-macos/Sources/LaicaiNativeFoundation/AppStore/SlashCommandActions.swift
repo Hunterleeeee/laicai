@@ -5,18 +5,22 @@ extension AppStore {
     /// Handle /goal, /background, /schedule, /gateway commands. Returns true if handled.
     func handleSlashCommand(_ message: String) -> Bool {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if trimmed.hasPrefix("/goal ") {
-            let body = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespaces)
-            guard !body.isEmpty else {
-                notify("用法：/goal <目标描述>", style: .error)
-                return true
-            }
-            state.draftMessage = ""
-            createGoal(title: body, message: body)
+        let handlers: [(String) -> Bool] = [
+            handleGoalSlash,
+            handleBackgroundSlash,
+            handleScheduleSlash,
+            handleGatewaySlash,
+            handlePipelineSlash,
+            handleExportSlash,
+            handleRegressionSlash
+        ]
+        for handler in handlers where handler(trimmed) {
             return true
         }
+        return false
+    }
 
+    private func handleGoalSlash(_ trimmed: String) -> Bool {
         if trimmed == "/goal list" {
             let goals = GoalEngine.shared.activeGoals
             let text = goals.isEmpty ? "暂无活跃目标" : goals.map { "- [\($0.status.displayText)] \($0.title)" }.joined(separator: "\n")
@@ -38,49 +42,66 @@ extension AppStore {
             state.draftMessage = ""
             return true
         }
-
-        if trimmed == "/background" || trimmed == "/bg" {
-            if let threadID = state.selectedThreadID {
-                sendToBackground(threadID: threadID)
-            } else {
-                notify("没有选中的会话可以转到后台", style: .error)
-            }
-            state.draftMessage = ""
-            return true
-        }
-
-        if trimmed.hasPrefix("/schedule ") {
-            let body = String(trimmed.dropFirst(10)).trimmingCharacters(in: .whitespaces)
-            let parts = body.components(separatedBy: " ")
-            guard parts.count >= 2 else {
-                notify("用法：/schedule <间隔分钟数> <会话 消息>", style: .error)
+        if trimmed.hasPrefix("/goal ") {
+            let body = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            guard !body.isEmpty else {
+                notify("用法：/goal <目标描述>", style: .error)
                 return true
             }
-            if let minutes = Int(parts[0]) {
-                let taskMessage = parts.dropFirst().joined(separator: " ")
-                let task = ScheduledTask(
-                    name: String(taskMessage.prefix(30)),
-                    message: taskMessage,
-                    schedule: .interval(seconds: minutes * 60)
-                )
-                SchedulerEngine.shared.addTask(task)
-                notify("定时会话已创建：每 \(minutes) 分钟执行「\(taskMessage)」", style: .success)
-            }
+            state.draftMessage = ""
+            createGoal(title: body, message: body)
+            return true
+        }
+        return false
+    }
+
+    private func handleBackgroundSlash(_ trimmed: String) -> Bool {
+        guard trimmed == "/background" || trimmed == "/bg" else { return false }
+        if let threadID = state.selectedThreadID {
+            sendToBackground(threadID: threadID)
+        } else {
+            notify("没有选中的会话可以转到后台", style: .error)
+        }
+        state.draftMessage = ""
+        return true
+    }
+
+    private func handleScheduleSlash(_ trimmed: String) -> Bool {
+        guard trimmed.hasPrefix("/schedule ") else { return false }
+        let body = String(trimmed.dropFirst(10)).trimmingCharacters(in: .whitespaces)
+        let parts = body.components(separatedBy: " ")
+        guard parts.count >= 2 else {
+            notify("用法：/schedule <间隔分钟数> <会话 消息>", style: .error)
             state.draftMessage = ""
             return true
         }
+        if let minutes = Int(parts[0]) {
+            let taskMessage = parts.dropFirst().joined(separator: " ")
+            let task = ScheduledTask(
+                name: String(taskMessage.prefix(30)),
+                message: taskMessage,
+                schedule: .interval(seconds: minutes * 60)
+            )
+            SchedulerEngine.shared.addTask(task)
+            notify("定时会话已创建：每 \(minutes) 分钟执行「\(taskMessage)」", style: .success)
+        }
+        state.draftMessage = ""
+        return true
+    }
 
+    private func handleGatewaySlash(_ trimmed: String) -> Bool {
         if trimmed == "/gateway start" {
             startGateway()
-            state.draftMessage = ""
-            return true
-        }
-        if trimmed == "/gateway stop" {
+        } else if trimmed == "/gateway stop" {
             stopGateway()
-            state.draftMessage = ""
-            return true
+        } else {
+            return false
         }
+        state.draftMessage = ""
+        return true
+    }
 
+    private func handlePipelineSlash(_ trimmed: String) -> Bool {
         if trimmed.hasPrefix("/pipe ") {
             let body = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespaces)
             if let pipeline = PipelineParser.parse(body) {
@@ -104,31 +125,32 @@ extension AppStore {
             }
             return true
         }
-
-        if trimmed == "/export" {
-            let url = SessionTeleport.suggestedExportURL(workspaceName: state.workspaceName)
-            do {
-                try SessionTeleport.shared.exportBundle(
-                    threads: state.threads,
-                    connectors: state.connectors,
-                    settings: state.settings,
-                    to: url
-                )
-                notify("已导出到 \(url.lastPathComponent)", style: .success)
-            } catch {
-                notify("导出失败：\(error.localizedDescription)", style: .error)
-            }
-            state.draftMessage = ""
-            return true
-        }
-
-        if trimmed == "/regression" {
-            state.draftMessage = ""
-            Task { await ModelRegressionRunner.shared.runAll() }
-            notify("模型回归测试已启动", style: .info)
-            return true
-        }
-
         return false
+    }
+
+    private func handleExportSlash(_ trimmed: String) -> Bool {
+        guard trimmed == "/export" else { return false }
+        let url = SessionTeleport.suggestedExportURL(workspaceName: state.workspaceName)
+        do {
+            try SessionTeleport.shared.exportBundle(
+                threads: state.threads,
+                connectors: state.connectors,
+                settings: state.settings,
+                to: url
+            )
+            notify("已导出到 \(url.lastPathComponent)", style: .success)
+        } catch {
+            notify("导出失败：\(error.localizedDescription)", style: .error)
+        }
+        state.draftMessage = ""
+        return true
+    }
+
+    private func handleRegressionSlash(_ trimmed: String) -> Bool {
+        guard trimmed == "/regression" else { return false }
+        state.draftMessage = ""
+        Task { await ModelRegressionRunner.shared.runAll() }
+        notify("模型回归测试已启动", style: .info)
+        return true
     }
 }

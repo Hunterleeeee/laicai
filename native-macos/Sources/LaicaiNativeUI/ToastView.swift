@@ -79,7 +79,7 @@ struct ToastOverlay: View {
 
     var body: some View {
         if let toast = center.current {
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 RoundedRectangle(cornerRadius: 1)
                     .fill(toast.style.color)
                     .frame(width: 3, height: 16)
@@ -93,14 +93,14 @@ struct ToastOverlay: View {
                     .foregroundStyle(TextGrade.primary)
                     .lineLimit(2)
             }
-            .padding(.horizontal, AppSpace.lg)
-            .padding(.vertical, AppSpace.sm + 2)
+            .padding(.horizontal, AppSpace.large)
+            .padding(.vertical, AppSpace.small + 2)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .fill(.ultraThinMaterial)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .strokeBorder(SurfaceGrade.border.opacity(0.4), lineWidth: 0.5)
             )
             .shadow(color: .black.opacity(0.3), radius: 16, y: 6)

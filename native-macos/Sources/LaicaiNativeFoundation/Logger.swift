@@ -55,7 +55,9 @@ public final class AgentLogger: Sendable {
     private let encoder: JSONEncoder
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport =
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         logsDirectory = appSupport.appendingPathComponent("Laicai/AgentLogs", isDirectory: true)
         try? FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
 

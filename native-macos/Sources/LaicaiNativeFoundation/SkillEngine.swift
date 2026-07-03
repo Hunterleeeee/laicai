@@ -85,7 +85,7 @@ public final class SkillRegistry: ObservableObject {
         let all = builtinSkills
         guard !all.isEmpty else { return "" }
         var catCounts: [String: Int] = [:]
-        for s in all { catCounts[s.category ?? "通用/开发", default: 0] += 1 }
+        for skill in all { catCounts[skill.category ?? "通用/开发", default: 0] += 1 }
         let breakdown = catCounts.sorted(by: { $0.value > $1.value }).map { "\($0.key) \($0.value)" }.joined(separator: "、")
         return "共 \(all.count) 个技能（\(breakdown)）"
     }
@@ -185,7 +185,8 @@ public final class SkillRegistry: ObservableObject {
             )) ?? []
         }
 
-        return urls
+        return
+            urls
             .flatMap { url -> [URL] in
                 if url.pathExtension.lowercased() == "json" { return [url] }
                 if url.pathExtension.lowercased() == "md" { return [url] }
@@ -200,7 +201,7 @@ public final class SkillRegistry: ObservableObject {
                 if let decoded = try? JSONDecoder().decode(SkillDefinition.self, from: data) {
                     skill = decoded
                 } else if let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let name = raw["name"] as? String {
+                    let name = raw["name"] as? String {
                     let description = raw["description"] as? String ?? "本地 skill：\(name)"
                     let tools = Self.normalizedTools(from: raw)
                     let prompt = Self.loadPromptHint(for: url)
@@ -213,8 +214,8 @@ public final class SkillRegistry: ObservableObject {
                         systemHint: prompt
                     )
                 } else if url.pathExtension.lowercased() == "md",
-                          let markdown = String(data: data, encoding: .utf8),
-                          let parsed = Self.skillFromMarkdown(markdown, url: url) {
+                    let markdown = String(data: data, encoding: .utf8),
+                    let parsed = Self.skillFromMarkdown(markdown, url: url) {
                     skill = parsed
                 } else {
                     return nil
@@ -229,12 +230,12 @@ public final class SkillRegistry: ObservableObject {
     private nonisolated static func normalizedTools(from raw: [String: Any]) -> [String] {
         var values = raw["tools"] as? [String] ?? []
         if values.isEmpty,
-           let requires = raw["requires"] as? [String: Any],
-           let requiredTools = requires["tools"] as? [String] {
+            let requires = raw["requires"] as? [String: Any],
+            let requiredTools = requires["tools"] as? [String] {
             values = requiredTools
         }
         if values.isEmpty,
-           let steps = raw["steps"] as? [[String: Any]] {
+            let steps = raw["steps"] as? [[String: Any]] {
             values = steps.compactMap { step in
                 switch step["kind"] as? String {
                 case "web_fetch": return "web.fetch"
@@ -293,10 +294,12 @@ public final class SkillRegistry: ObservableObject {
 
     private nonisolated static func normalizedTools(fromFrontmatterValue value: String?) -> [String] {
         guard let value else { return [] }
-        let cleaned = value
+        let cleaned =
+            value
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        let tools = cleaned
+        let tools =
+            cleaned
             .components(separatedBy: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) }
             .filter { !$0.isEmpty }
@@ -374,14 +377,14 @@ public enum SkillRegistryError: LocalizedError {
     }
 }
 
-private extension String {
-    var nilIfEmpty: String? {
+extension String {
+    fileprivate var nilIfEmpty: String? {
         isEmpty ? nil : self
     }
 }
 
-private extension JSONEncoder {
-    static var pretty: JSONEncoder {
+extension JSONEncoder {
+    fileprivate static var pretty: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
@@ -465,7 +468,9 @@ public struct ModelRouter {
         case .code:
             return connectors.first(where: { $0.modelName.contains("code") || $0.modelName.contains("coder") || $0.modelName.contains("deepseek") })
         case .strong:
-            return connectors.first(where: { $0.modelName.contains("gpt-4") || $0.modelName.contains("claude") || $0.modelName.contains("opus") || $0.modelName.contains("max") })
+            return connectors.first(where: {
+                $0.modelName.contains("gpt-4") || $0.modelName.contains("claude") || $0.modelName.contains("opus") || $0.modelName.contains("max")
+            })
         }
     }
 
@@ -496,6 +501,18 @@ public struct SkillMatchResult: Sendable {
     public let reason: String
 }
 
+private struct SkillCandidate {
+    let skill: SkillDefinition
+    let score: Double
+    let reason: String
+}
+
+private struct SkillKeywordPattern {
+    let keywords: [String]
+    let skillName: String
+    let boost: Double
+}
+
 public struct SkillMatcher {
     /// Minimum score threshold to consider a skill match valid
     private static let threshold: Double = 0.50
@@ -510,13 +527,13 @@ public struct SkillMatcher {
             .map(String.init)
             .filter { $0.count > 1 }
 
-        var best: (skill: SkillDefinition, score: Double, reason: String)?
+        var best: SkillCandidate?
 
         for skill in skills {
             let score = computeScore(input: lower, tokens: tokens, skill: skill, intent: intent)
             if score > (best?.score ?? 0) {
                 let reason = describeMatch(skill: skill, score: score)
-                best = (skill, score, reason)
+                best = SkillCandidate(skill: skill, score: score, reason: reason)
             }
         }
 
@@ -541,12 +558,15 @@ public struct SkillMatcher {
         }
 
         // 3. Token overlap — minor signal only, avoid matching on common words
-        let stopWords: Set<String> = ["的", "是", "在", "了", "和", "与", "用", "为", "一", "个", "不", "有", "这", "到", "上", "中", "大", "可以", "请", "帮", "我", "你", "把",
+        let stopWords: Set<String> = [
+            "的", "是", "在", "了", "和", "与", "用", "为", "一", "个", "不", "有", "这", "到", "上", "中", "大", "可以", "请", "帮", "我", "你", "把",
             "the", "a", "an", "is", "in", "to", "of", "for", "and", "or", "with", "by", "from", "on", "at",
-            "文件", "内容", "数据", "工具", "使用", "生成", "创建", "写", "读", "分析", "文档", "格式", "方案", "设计", "管理"]
-        let skillNameTokens = Set(skill.name.lowercased().split { !$0.isLetter && !$0.isNumber }
-            .map(String.init)
-            .filter { $0.count > 1 && !stopWords.contains($0) })
+            "文件", "内容", "数据", "工具", "使用", "生成", "创建", "写", "读", "分析", "文档", "格式", "方案", "设计", "管理"
+        ]
+        let skillNameTokens = Set(
+            skill.name.lowercased().split { !$0.isLetter && !$0.isNumber }
+                .map(String.init)
+                .filter { $0.count > 1 && !stopWords.contains($0) })
         let inputTokenSet = Set(tokens.filter { !stopWords.contains($0) })
         let overlap = inputTokenSet.intersection(skillNameTokens)
         if !skillNameTokens.isEmpty && overlap.count >= 2 {
@@ -563,64 +583,64 @@ public struct SkillMatcher {
 
     /// Boost score for common synonyms and patterns that map to specific skills
     private static func keywordBoost(input: String, skill: SkillDefinition) -> Double {
-        let patterns: [(keywords: [String], skillName: String, boost: Double)] = [
+        let patterns: [SkillKeywordPattern] = [
             // Marketing
-            (["小红书", "种草", "笔记"], "小红书笔记", 0.5),
-            (["公众号", "微信文章"], "公众号文章", 0.5),
-            (["短视频", "抖音", "脚本", "视频号"], "短视频脚本", 0.5),
-            (["seo", "搜索优化"], "SEO 优化", 0.4),
-            (["广告文案", "投放文案", "信息流"], "广告投放文案", 0.4),
-            (["营销", "推广", "宣传"], "营销文案", 0.3),
-            (["评价回复", "好评回复", "差评回复"], "用户评价回复", 0.4),
+            SkillKeywordPattern(keywords: ["小红书", "种草", "笔记"], skillName: "小红书笔记", boost: 0.5),
+            SkillKeywordPattern(keywords: ["公众号", "微信文章"], skillName: "公众号文章", boost: 0.5),
+            SkillKeywordPattern(keywords: ["短视频", "抖音", "脚本", "视频号"], skillName: "短视频脚本", boost: 0.5),
+            SkillKeywordPattern(keywords: ["seo", "搜索优化"], skillName: "SEO 优化", boost: 0.4),
+            SkillKeywordPattern(keywords: ["广告文案", "投放文案", "信息流"], skillName: "广告投放文案", boost: 0.4),
+            SkillKeywordPattern(keywords: ["营销", "推广", "宣传"], skillName: "营销文案", boost: 0.3),
+            SkillKeywordPattern(keywords: ["评价回复", "好评回复", "差评回复"], skillName: "用户评价回复", boost: 0.4),
             // Product
-            (["prd", "需求文档", "产品需求"], "PRD 编写", 0.5),
-            (["用户故事", "user story"], "用户故事", 0.4),
-            (["okr", "目标管理"], "OKR 制定", 0.4),
-            (["排期", "优先级"], "功能优先级排序", 0.3),
-            (["发布计划", "上线"], "产品发布计划", 0.3),
+            SkillKeywordPattern(keywords: ["prd", "需求文档", "产品需求"], skillName: "PRD 编写", boost: 0.5),
+            SkillKeywordPattern(keywords: ["用户故事", "user story"], skillName: "用户故事", boost: 0.4),
+            SkillKeywordPattern(keywords: ["okr", "目标管理"], skillName: "OKR 制定", boost: 0.4),
+            SkillKeywordPattern(keywords: ["排期", "优先级"], skillName: "功能优先级排序", boost: 0.3),
+            SkillKeywordPattern(keywords: ["发布计划", "上线"], skillName: "产品发布计划", boost: 0.3),
             // Content
-            (["周报", "日报"], "周报/日报", 0.5),
-            (["邮件", "email"], "邮件撰写", 0.4),
-            (["会议纪要", "会议记录"], "会议纪要", 0.5),
-            (["长文", "深度文章"], "长文写作", 0.3),
-            (["改写", "文风"], "文风改写", 0.4),
-            (["翻译", "translate"], "多语言翻译", 0.4),
+            SkillKeywordPattern(keywords: ["周报", "日报"], skillName: "周报/日报", boost: 0.5),
+            SkillKeywordPattern(keywords: ["邮件", "email"], skillName: "邮件撰写", boost: 0.4),
+            SkillKeywordPattern(keywords: ["会议纪要", "会议记录"], skillName: "会议纪要", boost: 0.5),
+            SkillKeywordPattern(keywords: ["长文", "深度文章"], skillName: "长文写作", boost: 0.3),
+            SkillKeywordPattern(keywords: ["改写", "文风"], skillName: "文风改写", boost: 0.4),
+            SkillKeywordPattern(keywords: ["翻译", "translate"], skillName: "多语言翻译", boost: 0.4),
             // Design
-            (["ppt", "演示", "汇报", "presentation", "slide"], "演示文稿制作", 0.5),
-            (["ui设计", "ui方案", "界面设计", "ux"], "UI 设计方案", 0.5),
-            (["品牌", "logo", "vi", "视觉识别"], "品牌视觉设计", 0.5),
+            SkillKeywordPattern(keywords: ["ppt", "演示", "汇报", "presentation", "slide"], skillName: "演示文稿制作", boost: 0.5),
+            SkillKeywordPattern(keywords: ["ui设计", "ui方案", "界面设计", "ux"], skillName: "UI 设计方案", boost: 0.5),
+            SkillKeywordPattern(keywords: ["品牌", "logo", "vi", "视觉识别"], skillName: "品牌视觉设计", boost: 0.5),
             // Data
-            (["excel", "公式", "表格"], "Excel 公式", 0.4),
-            (["数据分析", "指标"], "数据分析报告", 0.3),
-            (["图表", "可视化"], "数据可视化建议", 0.3),
+            SkillKeywordPattern(keywords: ["excel", "公式", "表格"], skillName: "Excel 公式", boost: 0.4),
+            SkillKeywordPattern(keywords: ["数据分析", "指标"], skillName: "数据分析报告", boost: 0.3),
+            SkillKeywordPattern(keywords: ["图表", "可视化"], skillName: "数据可视化建议", boost: 0.3),
             // Business
-            (["bp", "商业计划", "融资"], "商业计划书", 0.4),
-            (["合同", "条款审查"], "合同审查", 0.5),
-            (["jd", "招聘", "岗位描述"], "JD 编写", 0.4),
-            (["swot"], "SWOT 分析", 0.5),
-            (["方案书", "客户提案", "报价"], "客户方案书", 0.4),
+            SkillKeywordPattern(keywords: ["bp", "商业计划", "融资"], skillName: "商业计划书", boost: 0.4),
+            SkillKeywordPattern(keywords: ["合同", "条款审查"], skillName: "合同审查", boost: 0.5),
+            SkillKeywordPattern(keywords: ["jd", "招聘", "岗位描述"], skillName: "JD 编写", boost: 0.4),
+            SkillKeywordPattern(keywords: ["swot"], skillName: "SWOT 分析", boost: 0.5),
+            SkillKeywordPattern(keywords: ["方案书", "客户提案", "报价"], skillName: "客户方案书", boost: 0.4),
             // Dev
-            (["commit message", "提交信息"], "Commit Message 生成", 0.5),
-            (["pr描述", "merge request"], "PR 描述生成", 0.4),
-            (["changelog", "变更日志"], "Changelog 生成", 0.5),
-            (["正则", "regex"], "正则编写", 0.5),
-            (["sql", "查询语句"], "SQL 编写", 0.4),
-            (["prompt", "提示词"], "Prompt 优化", 0.4),
-            (["代码审查", "code review", "review"], "代码审查", 0.4),
-            (["单元测试", "写测试"], "生成测试", 0.4),
-            (["重构"], "重构", 0.4),
-            (["readme"], "README 生成", 0.5),
-            (["ci", "cd", "流水线"], "CI/CD 调试", 0.3),
-            (["迁移", "升级"], "迁移指南生成", 0.3),
+            SkillKeywordPattern(keywords: ["commit message", "提交信息"], skillName: "Commit Message 生成", boost: 0.5),
+            SkillKeywordPattern(keywords: ["pr描述", "merge request"], skillName: "PR 描述生成", boost: 0.4),
+            SkillKeywordPattern(keywords: ["changelog", "变更日志"], skillName: "Changelog 生成", boost: 0.5),
+            SkillKeywordPattern(keywords: ["正则", "regex"], skillName: "正则编写", boost: 0.5),
+            SkillKeywordPattern(keywords: ["sql", "查询语句"], skillName: "SQL 编写", boost: 0.4),
+            SkillKeywordPattern(keywords: ["prompt", "提示词"], skillName: "Prompt 优化", boost: 0.4),
+            SkillKeywordPattern(keywords: ["代码审查", "code review", "review"], skillName: "代码审查", boost: 0.4),
+            SkillKeywordPattern(keywords: ["单元测试", "写测试"], skillName: "生成测试", boost: 0.4),
+            SkillKeywordPattern(keywords: ["重构"], skillName: "重构", boost: 0.4),
+            SkillKeywordPattern(keywords: ["readme"], skillName: "README 生成", boost: 0.5),
+            SkillKeywordPattern(keywords: ["ci", "cd", "流水线"], skillName: "CI/CD 调试", boost: 0.3),
+            SkillKeywordPattern(keywords: ["迁移", "升级"], skillName: "迁移指南生成", boost: 0.3),
             // Research
-            (["竞品", "竞争对手"], "竞品分析", 0.4),
-            (["论文", "paper"], "论文速读", 0.4),
-            (["调研", "技术选型"], "技术调研", 0.3),
-            (["链接", "总结链接", "文章总结"], "链接内容总结", 0.3),
+            SkillKeywordPattern(keywords: ["竞品", "竞争对手"], skillName: "竞品分析", boost: 0.4),
+            SkillKeywordPattern(keywords: ["论文", "paper"], skillName: "论文速读", boost: 0.4),
+            SkillKeywordPattern(keywords: ["调研", "技术选型"], skillName: "技术调研", boost: 0.3),
+            SkillKeywordPattern(keywords: ["链接", "总结链接", "文章总结"], skillName: "链接内容总结", boost: 0.3),
             // Knowledge
-            (["知识图谱", "wiki", "整理笔记", "知识库"], "知识图谱构建", 0.4),
+            SkillKeywordPattern(keywords: ["知识图谱", "wiki", "整理笔记", "知识库"], skillName: "知识图谱构建", boost: 0.4),
             // Meta
-            (["创建技能", "新技能", "封装技能"], "技能创建", 0.5),
+            SkillKeywordPattern(keywords: ["创建技能", "新技能", "封装技能"], skillName: "技能创建", boost: 0.5)
         ]
 
         let nameLower = skill.name.lowercased()
@@ -632,9 +652,9 @@ public struct SkillMatcher {
                 return pattern.boost  // Strong match: 2+ keywords
             } else if hits.count == 1 {
                 // Single keyword match: only boost if keyword is specific enough (≥ 3 chars)
-                let kw = hits[0]
-                if kw.count >= 3 {
-                    return min(pattern.boost, 0.35) // Capped: single keyword can't exceed threshold alone
+                guard let keyword = hits.first else { continue }
+                if keyword.count >= 3 {
+                    return min(pattern.boost, 0.35)  // Capped: single keyword can't exceed threshold alone
                 }
             }
         }
@@ -874,28 +894,28 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .strong,
         isBuiltin: true,
         systemHint: """
-        你是知识图谱构建专家。用户会提供资料来源（文件夹、链接、文本），你需要将其整理为 Obsidian 知识图谱。
+            你是知识图谱构建专家。用户会提供资料来源（文件夹、链接、文本），你需要将其整理为 Obsidian 知识图谱。
 
-        ## 工作流程
-        1. **分析来源**：读取用户提供的资料，提取所有独立概念/实体/产品
-        2. **拆分概念**：每个概念必须独立成一个原子笔记，不要把多个概念塞进一个文件
-           - 例："万旅会员CRM与营销体系" → 拆为 "会员CRM体系"、"万旅CRM实施方案"、"竞盛SCRM平台" 三个原子笔记
-        3. **逐个创建**：对每个概念调用 wiki_build(topic="概念名", mode="atomic", save=true)
-           - 系统会自动在已有相关页面添加 [[反向链接]]
-        4. **创建索引**：所有原子笔记创建完后，调用 wiki_build(topic="领域名", mode="moc", save=true) 创建索引页
-        5. **验证覆盖率**：确保源资料中的所有重要概念都被覆盖
+            ## 工作流程
+            1. **分析来源**：读取用户提供的资料，提取所有独立概念/实体/产品
+            2. **拆分概念**：每个概念必须独立成一个原子笔记，不要把多个概念塞进一个文件
+               - 例："万旅会员CRM与营销体系" → 拆为 "会员CRM体系"、"万旅CRM实施方案"、"竞盛SCRM平台" 三个原子笔记
+            3. **逐个创建**：对每个概念调用 wiki_build(topic="概念名", mode="atomic", save=true)
+               - 系统会自动在已有相关页面添加 [[反向链接]]
+            4. **创建索引**：所有原子笔记创建完后，调用 wiki_build(topic="领域名", mode="moc", save=true) 创建索引页
+            5. **验证覆盖率**：确保源资料中的所有重要概念都被覆盖
 
-        ## 命名规范
-        - 用概念本身命名，不用来源命名：✅ "会员CRM体系" ❌ "万旅会员CRM与营销体系文档"
-        - 通用概念和特定实施分开：✅ "酒店直销平台" + "万旅直销平台方案" ❌ "万旅酒店直销平台"
-        - 中文命名，简洁明确
+            ## 命名规范
+            - 用概念本身命名，不用来源命名：✅ "会员CRM体系" ❌ "万旅会员CRM与营销体系文档"
+            - 通用概念和特定实施分开：✅ "酒店直销平台" + "万旅直销平台方案" ❌ "万旅酒店直销平台"
+            - 中文命名，简洁明确
 
-        ## 质量标准
-        - 每个原子笔记只讲一个概念
-        - 必须包含 [[双链]] 指向相关概念
-        - 内容精炼，信息密度高
-        - MOC 索引页按子主题分组，每个条目一句话概括
-        """,
+            ## 质量标准
+            - 每个原子笔记只讲一个概念
+            - 必须包含 [[双链]] 指向相关概念
+            - 内容精炼，信息密度高
+            - MOC 索引页按子主题分组，每个条目一句话概括
+            """,
         category: "knowledge"
     ),
     SkillDefinition(
@@ -915,21 +935,21 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .strong,
         isBuiltin: true,
         systemHint: """
-        用户会提供一个或多个链接（微信公众号、小红书、抖音、B站、知乎、微博等）。
-        执行步骤：
-        1. 用 web.fetch 抓取链接内容
-        2. 如果页面需要动态渲染导致内容为空，尝试用 web.search 搜索该链接标题获取缓存/摘要
-        3. 提取正文，忽略广告、导航、推荐等无关内容
-        4. 输出结构化总结：
-           📌 标题：
-           👤 作者/来源：
-           📅 发布时间（如果可获取）：
-           📝 核心内容（3-5个要点）：
-           💡 关键观点/结论：
-           🏷️ 标签/话题：
-        5. 如果是视频类内容（抖音/B站），尽量提取描述、评论摘要
-        6. 多个链接时逐一总结，最后给出对比或综合分析
-        """
+            用户会提供一个或多个链接（微信公众号、小红书、抖音、B站、知乎、微博等）。
+            执行步骤：
+            1. 用 web.fetch 抓取链接内容
+            2. 如果页面需要动态渲染导致内容为空，尝试用 web.search 搜索该链接标题获取缓存/摘要
+            3. 提取正文，忽略广告、导航、推荐等无关内容
+            4. 输出结构化总结：
+               📌 标题：
+               👤 作者/来源：
+               📅 发布时间（如果可获取）：
+               📝 核心内容（3-5个要点）：
+               💡 关键观点/结论：
+               🏷️ 标签/话题：
+            5. 如果是视频类内容（抖音/B站），尽量提取描述、评论摘要
+            6. 多个链接时逐一总结，最后给出对比或综合分析
+            """
     ),
     SkillDefinition(
         name: "竞品分析",
@@ -1084,13 +1104,13 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .strong,
         isBuiltin: true,
         systemHint: """
-        生成小红书风格笔记，要求：
-        1. 标题：用数字+emoji+痛点/解决方案，如「❗️5个被忽略的XXX技巧」
-        2. 正文：口语化、分段短句、多emoji、穿插个人体验
-        3. 标签：5-10个相关话题标签
-        4. 封面文案建议：适合做图片封面的关键词
-        5. 语气自然真诚，避免过度营销感
-        """,
+            生成小红书风格笔记，要求：
+            1. 标题：用数字+emoji+痛点/解决方案，如「❗️5个被忽略的XXX技巧」
+            2. 正文：口语化、分段短句、多emoji、穿插个人体验
+            3. 标签：5-10个相关话题标签
+            4. 封面文案建议：适合做图片封面的关键词
+            5. 语气自然真诚，避免过度营销感
+            """,
         category: "marketing"
     ),
     SkillDefinition(
@@ -1100,14 +1120,14 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .strong,
         isBuiltin: true,
         systemHint: """
-        生成微信公众号文章，要求：
-        1. 标题：吸引点击但不标题党，可提供2-3个备选
-        2. 摘要：30字以内，激发阅读欲望
-        3. 正文：结构清晰，段落分明，适当使用小标题
-        4. 金句：在关键位置插入可被转发的金句
-        5. 结尾：引导关注/转发/留言互动
-        6. 排版建议：推荐字号、颜色、配图位置
-        """,
+            生成微信公众号文章，要求：
+            1. 标题：吸引点击但不标题党，可提供2-3个备选
+            2. 摘要：30字以内，激发阅读欲望
+            3. 正文：结构清晰，段落分明，适当使用小标题
+            4. 金句：在关键位置插入可被转发的金句
+            5. 结尾：引导关注/转发/留言互动
+            6. 排版建议：推荐字号、颜色、配图位置
+            """,
         category: "marketing"
     ),
     SkillDefinition(
@@ -1117,15 +1137,15 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .strong,
         isBuiltin: true,
         systemHint: """
-        生成短视频脚本，格式：
-        时间 | 画面 | 台词/旁白 | 字幕/特效
-        要求：
-        - 前3秒抓眼球（hook）
-        - 总时长控制在15-60秒
-        - 节奏紧凑，信息密度高
-        - 适合竖屏拍摄
-        - 结尾设置互动引导（点赞/评论/关注）
-        """,
+            生成短视频脚本，格式：
+            时间 | 画面 | 台词/旁白 | 字幕/特效
+            要求：
+            - 前3秒抓眼球（hook）
+            - 总时长控制在15-60秒
+            - 节奏紧凑，信息密度高
+            - 适合竖屏拍摄
+            - 结尾设置互动引导（点赞/评论/关注）
+            """,
         category: "marketing"
     ),
     SkillDefinition(
@@ -1213,17 +1233,17 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .fast,
         isBuiltin: true,
         systemHint: """
-        生成工作周报/日报，格式：
-        一、本周完成
-        - 【项目名】完成内容（量化成果）
-        二、进行中
-        - 【项目名】进展说明（完成百分比）
-        三、下周计划
-        - 计划事项和预期产出
-        四、需要协助
-        - 阻塞项和需要的支持
-        要求：语言专业简练，突出数据和结果
-        """,
+            生成工作周报/日报，格式：
+            一、本周完成
+            - 【项目名】完成内容（量化成果）
+            二、进行中
+            - 【项目名】进展说明（完成百分比）
+            三、下周计划
+            - 计划事项和预期产出
+            四、需要协助
+            - 阻塞项和需要的支持
+            要求：语言专业简练，突出数据和结果
+            """,
         category: "content"
     ),
     SkillDefinition(
@@ -1249,43 +1269,43 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .strong,
         isBuiltin: true,
         systemHint: """
-        你是一位顶尖演示文稿设计顾问，精通 McKinsey/BCG 风格的专业 PPT 制作。
+            你是一位顶尖演示文稿设计顾问，精通 McKinsey/BCG 风格的专业 PPT 制作。
 
-        收到用户主题后，输出完整的演示文稿方案：
+            收到用户主题后，输出完整的演示文稿方案：
 
-        ## 1. 整体策略
-        - 核心叙事线：问题 → 洞察 → 方案 → 价值 → 行动
-        - 受众分析：谁在看、关心什么、决策因素
-        - 时长建议和节奏控制
+            ## 1. 整体策略
+            - 核心叙事线：问题 → 洞察 → 方案 → 价值 → 行动
+            - 受众分析：谁在看、关心什么、决策因素
+            - 时长建议和节奏控制
 
-        ## 2. 每页内容（逐页输出）
-        每一页包含：
-        - 【页标题】简洁有力，一句话传递核心信息
-        - 【布局类型】全出血/左右分栏/三栏/数据卡片/时间线/对比图/引用页
-        - 【核心观点】这一页要传递的唯一核心信息
-        - 【要素布局】具体包含哪些元素（标题/副标题/正文/图表/图片/图标/数据卡片）
-        - 【视觉建议】配色、字体大小、图表类型、配图建议
-        - 【演讲者备注】讲到这页说什么，用什么过渡，健谈时间
-        - 【动画建议】元素出现顺序和动画效果
+            ## 2. 每页内容（逐页输出）
+            每一页包含：
+            - 【页标题】简洁有力，一句话传递核心信息
+            - 【布局类型】全出血/左右分栏/三栏/数据卡片/时间线/对比图/引用页
+            - 【核心观点】这一页要传递的唯一核心信息
+            - 【要素布局】具体包含哪些元素（标题/副标题/正文/图表/图片/图标/数据卡片）
+            - 【视觉建议】配色、字体大小、图表类型、配图建议
+            - 【演讲者备注】讲到这页说什么，用什么过渡，健谈时间
+            - 【动画建议】元素出现顺序和动画效果
 
-        ## 3. 视觉设计规范
-        - 主色/辅助色/强调色 Hex 值
-        - 字体树：标题/副标题/正文/数据的字体字号
-        - 图表风格统一规范
-        - 留白和对齐原则
+            ## 3. 视觉设计规范
+            - 主色/辅助色/强调色 Hex 值
+            - 字体树：标题/副标题/正文/数据的字体字号
+            - 图表风格统一规范
+            - 留白和对齐原则
 
-        ## 4. 输出格式要求
-        - 使用 Markdown 表格展示每页结构
-        - 如果用户要求，可生成 Marp/Slidev/reveal.js 格式的 Markdown PPT
-        - 可提供可复制的设计关键词（用于配图搜索）
+            ## 4. 输出格式要求
+            - 使用 Markdown 表格展示每页结构
+            - 如果用户要求，可生成 Marp/Slidev/reveal.js 格式的 Markdown PPT
+            - 可提供可复制的设计关键词（用于配图搜索）
 
-        ## 5. 质量标准
-        - 每页只传递一个核心信息（one message per slide）
-        - 文字精炼，绝不堆砌文字墙
-        - 数据可视化优先于文字描述
-        - 每个图表都有清晰的 insight 标注
-        - 开头抽眼尾记得住，中间节奏紧凑
-        """,
+            ## 5. 质量标准
+            - 每页只传递一个核心信息（one message per slide）
+            - 文字精炼，绝不堆砌文字墙
+            - 数据可视化优先于文字描述
+            - 每个图表都有清晰的 insight 标注
+            - 开头抽眼尾记得住，中间节奏紧凑
+            """,
         category: "design"
     ),
     SkillDefinition(
@@ -1314,50 +1334,50 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .strong,
         isBuiltin: true,
         systemHint: """
-        你是一位资深 UI/UX 设计师，精通 Apple HIG、Material Design、以及现代 Web 设计系统。
+            你是一位资深 UI/UX 设计师，精通 Apple HIG、Material Design、以及现代 Web 设计系统。
 
-        收到设计需求后，输出专业的 UI 设计方案：
+            收到设计需求后，输出专业的 UI 设计方案：
 
-        ## 1. 设计策略
-        - 目标用户画像和使用场景
-        - 设计原则：简洁/高效/可访问/一致性
-        - 参考竞品和设计趋势
+            ## 1. 设计策略
+            - 目标用户画像和使用场景
+            - 设计原则：简洁/高效/可访问/一致性
+            - 参考竞品和设计趋势
 
-        ## 2. 设计系统 Tokens
-        - 色彩体系：主色/辅色/语义色/中性色（含 Hex、亮暗主题变体）
-        - 字体树：字体家族/字号梯度/字重/行高
-        - 间距系统：4px 基数的间距梯度
-        - 圆角梯度：小/中/大/全圆
-        - 阴影梯度：浅/中/深
-        - 动画规范：时长/缓动曲线
+            ## 2. 设计系统 Tokens
+            - 色彩体系：主色/辅色/语义色/中性色（含 Hex、亮暗主题变体）
+            - 字体树：字体家族/字号梯度/字重/行高
+            - 间距系统：4px 基数的间距梯度
+            - 圆角梯度：小/中/大/全圆
+            - 阴影梯度：浅/中/深
+            - 动画规范：时长/缓动曲线
 
-        ## 3. 组件库设计
-        每个组件包含：
-        - 【组件名称】和用途
-        - 【变体】尺寸(sm/md/lg)、状态(default/hover/active/disabled/focus)
-        - 【结构】包含哪些子元素
-        - 【尺寸规范】宽高/内边距/外边距
-        - 【代码示例】SwiftUI/React/CSS 示例（根据用户技术栈）
+            ## 3. 组件库设计
+            每个组件包含：
+            - 【组件名称】和用途
+            - 【变体】尺寸(sm/md/lg)、状态(default/hover/active/disabled/focus)
+            - 【结构】包含哪些子元素
+            - 【尺寸规范】宽高/内边距/外边距
+            - 【代码示例】SwiftUI/React/CSS 示例（根据用户技术栈）
 
-        核心组件清单：
-        Button, Input, Card, Modal, Toast, Badge, Avatar, Tab, Sidebar, NavBar,
-        Table, Dropdown, Toggle, Slider, Progress, Tooltip, Alert
+            核心组件清单：
+            Button, Input, Card, Modal, Toast, Badge, Avatar, Tab, Sidebar, NavBar,
+            Table, Dropdown, Toggle, Slider, Progress, Tooltip, Alert
 
-        ## 4. 页面设计
-        每个页面包含：
-        - 【页面名】和核心任务
-        - 【布局结构】栅格系统、模块划分
-        - 【线框图】用 ASCII art 或结构化描述展示布局
-        - 【交互流程】用户操作 → 反馈 → 状态转换
-        - 【响应式适配】桌面/平板/手机的布局差异
-        - 【动效设计】转场/进入/反馈动效
+            ## 4. 页面设计
+            每个页面包含：
+            - 【页面名】和核心任务
+            - 【布局结构】栅格系统、模块划分
+            - 【线框图】用 ASCII art 或结构化描述展示布局
+            - 【交互流程】用户操作 → 反馈 → 状态转换
+            - 【响应式适配】桌面/平板/手机的布局差异
+            - 【动效设计】转场/进入/反馈动效
 
-        ## 5. 输出标准
-        - 可以直接交付给开发团队实现的精确规范
-        - 含尺寸、颜色、间距的确切数值
-        - 可复制的 CSS 变量 / SwiftUI 扩展 / Tailwind 配置
-        - 若用户指定框架，直接输出可运行的组件代码
-        """,
+            ## 5. 输出标准
+            - 可以直接交付给开发团队实现的精确规范
+            - 含尺寸、颜色、间距的确切数值
+            - 可复制的 CSS 变量 / SwiftUI 扩展 / Tailwind 配置
+            - 若用户指定框架，直接输出可运行的组件代码
+            """,
         category: "design"
     ),
     SkillDefinition(
@@ -1367,37 +1387,37 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .strong,
         isBuiltin: true,
         systemHint: """
-        你是一位品牌视觉设计顾问，精通品牌识别系统和视觉传达。
+            你是一位品牌视觉设计顾问，精通品牌识别系统和视觉传达。
 
-        ## 1. 品牌分析
-        - 品牌定位、受众、价值观
-        - 竞品视觉语言分析
-        - 情绪版关键词：专业/活泼/科技/温暖…
+            ## 1. 品牌分析
+            - 品牌定位、受众、价值观
+            - 竞品视觉语言分析
+            - 情绪版关键词：专业/活泼/科技/温暖…
 
-        ## 2. Logo 概念
-        - 提供 3-5 个方向，每个包含：
-          - 创意说明和含义
-          - 结构描述（几何/文字/图形组合）
-          - AI 生图提示词（可直接喜用 Midjourney/DALL-E）
-          - 适用场景和尺寸变体
+            ## 2. Logo 概念
+            - 提供 3-5 个方向，每个包含：
+              - 创意说明和含义
+              - 结构描述（几何/文字/图形组合）
+              - AI 生图提示词（可直接喜用 Midjourney/DALL-E）
+              - 适用场景和尺寸变体
 
-        ## 3. 色彩方案
-        - 主色 + 辅助色 + 点缀色（含 Hex/RGB/HSL）
-        - 亮/暗主题变体
-        - 渐变色规范
-        - 无障碍对比度检查
+            ## 3. 色彩方案
+            - 主色 + 辅助色 + 点缀色（含 Hex/RGB/HSL）
+            - 亮/暗主题变体
+            - 渐变色规范
+            - 无障碍对比度检查
 
-        ## 4. 字体组合
-        - 主字体/辅助字体推荐（含中英文搭配）
-        - 字体梯度规范
-        - 使用场景示例
+            ## 4. 字体组合
+            - 主字体/辅助字体推荐（含中英文搭配）
+            - 字体梯度规范
+            - 使用场景示例
 
-        ## 5. 应用场景示例
-        - 名片、信纸抬头、邮件签名
-        - 社交媒体头像、封面模板
-        - 网站/App 方案概览
-        - 周边/印刷品建议
-        """,
+            ## 5. 应用场景示例
+            - 名片、信纸抬头、邮件签名
+            - 社交媒体头像、封面模板
+            - 网站/App 方案概览
+            - 周边/印刷品建议
+            """,
         category: "design"
     ),
 
@@ -1453,14 +1473,14 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .strong,
         isBuiltin: true,
         systemHint: """
-        审查合同时注意：
-        1. 标注每个风险条款的风险等级（高/中/低）
-        2. 说明不合理之处和可能后果
-        3. 给出修改建议和替代条款
-        4. 检查：违约责任、知识产权、竞业限制、保密义务、管辖法院
-        5. 输出格式：逐条分析 + 整体风险评估
-        注意：仅供参考，不构成法律意见
-        """,
+            审查合同时注意：
+            1. 标注每个风险条款的风险等级（高/中/低）
+            2. 说明不合理之处和可能后果
+            3. 给出修改建议和替代条款
+            4. 检查：违约责任、知识产权、竞业限制、保密义务、管辖法院
+            5. 输出格式：逐条分析 + 整体风险评估
+            注意：仅供参考，不构成法律意见
+            """,
         category: "business"
     ),
     SkillDefinition(
@@ -1505,34 +1525,35 @@ private let builtinSkills: [SkillDefinition] = [
         modelPreference: .strong,
         isBuiltin: true,
         systemHint: """
-        你是技能工厂。用户会描述一个需要反复使用的工作流程，你要将其封装为一个可复用的技能。
+            你是技能工厂。用户会描述一个需要反复使用的工作流程，你要将其封装为一个可复用的技能。
 
-        ## 创建流程
-        1. **理解需求**：明确技能要解决什么问题、输入是什么、输出是什么
-        2. **设计技能**：
-           - name：简洁中文名（2-6字），如 "代码审查"、"知识图谱构建"
-           - description：一句话说明（30字内）
-           - tools：需要用到的工具（从 file.read, file.write, file.edit, code.search, web.search, web.fetch, wiki.build, shell.exec, git, verify.build, workspace.index 中选）
-           - instructions：详细的分步执行说明，写清楚每一步做什么、用什么工具、注意什么
-           - trigger：可选，自动触发的关键词
-        3. **调用创建**：用 skill.manage(action="create", ...) 保存技能
-        4. **确认结果**：告知用户技能已创建，说明如何触发使用
+            ## 创建流程
+            1. **理解需求**：明确技能要解决什么问题、输入是什么、输出是什么
+            2. **设计技能**：
+               - name：简洁中文名（2-6字），如 "代码审查"、"知识图谱构建"
+               - description：一句话说明（30字内）
+               - tools：需要用到的工具（从 file.read, file.write, file.edit, code.search, web.search,
+                 web.fetch, wiki.build, shell.exec, git, verify.build, workspace.index 中选）
+               - instructions：详细的分步执行说明，写清楚每一步做什么、用什么工具、注意什么
+               - trigger：可选，自动触发的关键词
+            3. **调用创建**：用 skill.manage(action="create", ...) 保存技能
+            4. **确认结果**：告知用户技能已创建，说明如何触发使用
 
-        ## 质量标准
-        - instructions 必须足够具体，让任何模型都能按步骤执行
-        - 工具列表只包含真正需要的工具，不要多选
-        - 触发词要具体，避免误触发
-        - 如果用户描述模糊，先追问再创建
+            ## 质量标准
+            - instructions 必须足够具体，让任何模型都能按步骤执行
+            - 工具列表只包含真正需要的工具，不要多选
+            - 触发词要具体，避免误触发
+            - 如果用户描述模糊，先追问再创建
 
-        ## 示例
-        用户说："帮我做一个能自动整理会议纪要的技能"
-        你应该创建：
-        - name: "会议纪要整理"
-        - description: "将会议录音/笔记整理为结构化纪要，含决议和待办"
-        - tools: "file.read,file.write"
-        - instructions: "1. 读取用户提供的会议记录文件...2. 提取关键信息...3. 输出标准格式..."
-        - trigger: "会议纪要,整理会议,meeting notes"
-        """,
+            ## 示例
+            用户说："帮我做一个能自动整理会议纪要的技能"
+            你应该创建：
+            - name: "会议纪要整理"
+            - description: "将会议录音/笔记整理为结构化纪要，含决议和待办"
+            - tools: "file.read,file.write"
+            - instructions: "1. 读取用户提供的会议记录文件...2. 提取关键信息...3. 输出标准格式..."
+            - trigger: "会议纪要,整理会议,meeting notes"
+            """,
         category: "meta"
-    ),
+    )
 ]

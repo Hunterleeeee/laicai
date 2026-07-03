@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AppStoreConnectorCrudTests: LaicaiNativeFoundationTestCase {
@@ -14,23 +15,27 @@ final class AppStoreConnectorCrudTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.settings.defaultConnectorName, target.name)
     }
     func testAddConnector() {
-        let store = AppStore(state: .init(
-            workspaceName: "Test",
-            modeLabel: "Build",
-            searchText: "",
-            sessions: [],
-            selectedSessionID: nil,
-            workbenchTab: .tools,
-            connectors: [],
-            activeConnectorID: nil,
-            toolActivities: [],
-            workflowRuns: [],
-            draftMessage: "",
-            isGenerating: false,
-            settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None", compactComposer: false, showDebugPanels: false)
-        ))
+        let store = AppStore(
+            state: .init(
+                workspaceName: "Test",
+                modeLabel: "Build",
+                searchText: "",
+                sessions: [],
+                selectedSessionID: nil,
+                workbenchTab: .tools,
+                connectors: [],
+                activeConnectorID: nil,
+                toolActivities: [],
+                workflowRuns: [],
+                draftMessage: "",
+                isGenerating: false,
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None", compactComposer: false,
+                    showDebugPanels: false)
+            ))
 
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .ready)
         store.addConnector(connector)
 
         XCTAssertEqual(store.state.connectors.count, 1)
@@ -43,7 +48,7 @@ final class AppStoreConnectorCrudTests: LaicaiNativeFoundationTestCase {
         store.deleteConnector(id: activeID)
 
         XCTAssertNotEqual(store.state.activeConnectorID, activeID)
-        if let newActive = store.state.activeConnectorID {
+        if store.state.activeConnectorID != nil {
             XCTAssertEqual(store.state.activeConnectorID, store.state.connectors.first?.id)
         }
     }
@@ -71,20 +76,21 @@ final class AppStoreConnectorCrudTests: LaicaiNativeFoundationTestCase {
             )
         )
 
-        store.updateConnector(ConnectorProfile(
-            id: connector.id,
-            name: connector.name,
-            kind: connector.kind,
-            endpoint: "https://example.com/v2",
-            modelName: connector.modelName,
-            note: connector.note,
-            toolCallingPolicy: connector.toolCallingPolicy,
-            toolCallingCapability: connector.toolCallingCapability,
-            toolCallingCapabilitySource: connector.toolCallingCapabilitySource,
-            toolCallingCapabilityLearnedAt: connector.toolCallingCapabilityLearnedAt,
-            health: connector.health,
-            lastCheckedAt: connector.lastCheckedAt
-        ))
+        store.updateConnector(
+            ConnectorProfile(
+                id: connector.id,
+                name: connector.name,
+                kind: connector.kind,
+                endpoint: "https://example.com/v2",
+                modelName: connector.modelName,
+                note: connector.note,
+                toolCallingPolicy: connector.toolCallingPolicy,
+                toolCallingCapability: connector.toolCallingCapability,
+                toolCallingCapabilitySource: connector.toolCallingCapabilitySource,
+                toolCallingCapabilityLearnedAt: connector.toolCallingCapabilityLearnedAt,
+                health: connector.health,
+                lastCheckedAt: connector.lastCheckedAt
+            ))
 
         XCTAssertNil(store.state.connectors.first?.toolCallingCapability)
         XCTAssertNil(store.state.connectors.first?.toolCallingCapabilitySource)
@@ -104,16 +110,17 @@ final class AppStoreConnectorCrudTests: LaicaiNativeFoundationTestCase {
         )
         let store = AppStore(state: testState(connectors: [connector], activeConnectorID: connector.id))
 
-        store.updateConnector(ConnectorProfile(
-            id: connector.id,
-            name: connector.name,
-            kind: connector.kind,
-            endpoint: "https://example.com/v2",
-            modelName: connector.modelName,
-            note: connector.note,
-            health: connector.health,
-            lastCheckedAt: connector.lastCheckedAt
-        ))
+        store.updateConnector(
+            ConnectorProfile(
+                id: connector.id,
+                name: connector.name,
+                kind: connector.kind,
+                endpoint: "https://example.com/v2",
+                modelName: connector.modelName,
+                note: connector.note,
+                health: connector.health,
+                lastCheckedAt: connector.lastCheckedAt
+            ))
 
         XCTAssertEqual(store.state.connectors.first?.health, .attention)
         XCTAssertEqual(store.state.connectors.first?.lastCheckedAt, checkedAt)
@@ -131,18 +138,19 @@ final class AppStoreConnectorCrudTests: LaicaiNativeFoundationTestCase {
         )
         let store = AppStore(state: testState(connectors: [connector], activeConnectorID: connector.id))
 
-        store.updateConnector(ConnectorProfile(
-            id: connector.id,
-            name: connector.name,
-            kind: connector.kind,
-            endpoint: connector.endpoint,
-            modelName: "new-model",
-            note: connector.note,
-            toolCallingPolicy: connector.toolCallingPolicy,
-            toolCallingCapability: connector.toolCallingCapability,
-            health: connector.health,
-            lastCheckedAt: connector.lastCheckedAt
-        ))
+        store.updateConnector(
+            ConnectorProfile(
+                id: connector.id,
+                name: connector.name,
+                kind: connector.kind,
+                endpoint: connector.endpoint,
+                modelName: "new-model",
+                note: connector.note,
+                toolCallingPolicy: connector.toolCallingPolicy,
+                toolCallingCapability: connector.toolCallingCapability,
+                health: connector.health,
+                lastCheckedAt: connector.lastCheckedAt
+            ))
 
         XCTAssertNil(store.state.connectors.first?.toolCallingCapability)
     }

@@ -17,14 +17,14 @@ struct WorkflowLaunchSheet: View {
         VStack(spacing: 0) {
             // Header
             header
-                .padding(.horizontal, AppSpace.lg)
-                .padding(.top, AppSpace.lg)
-                .padding(.bottom, AppSpace.md)
+                .padding(.horizontal, AppSpace.large)
+                .padding(.top, AppSpace.large)
+                .padding(.bottom, AppSpace.medium)
 
             Divider().opacity(0.2)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: AppSpace.lg) {
+                VStack(alignment: .leading, spacing: AppSpace.large) {
                     // Step preview
                     stepPreview
 
@@ -36,14 +36,14 @@ struct WorkflowLaunchSheet: View {
                     // Goal / note
                     goalInput
                 }
-                .padding(AppSpace.lg)
+                .padding(AppSpace.large)
             }
 
             Divider().opacity(0.2)
 
             // Footer actions
             footer
-                .padding(AppSpace.lg)
+                .padding(AppSpace.large)
         }
         .frame(width: 480)
         .frame(minHeight: 400, maxHeight: 600)
@@ -61,10 +61,10 @@ struct WorkflowLaunchSheet: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: AppSpace.md) {
+        HStack(spacing: AppSpace.medium) {
             // Category icon
             ZStack {
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .fill(categoryColor.opacity(0.15))
                     .frame(width: 40, height: 40)
                 Image(systemName: workflow.category.icon)
@@ -98,11 +98,11 @@ struct WorkflowLaunchSheet: View {
     // MARK: - Step Preview
 
     private var stepPreview: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             Button {
                 withAnimation(AppAnimation.quick) { showSteps.toggle() }
             } label: {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: showSteps ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9, weight: .bold))
                     Text("执行步骤")
@@ -119,7 +119,7 @@ struct WorkflowLaunchSheet: View {
             if showSteps {
                 VStack(spacing: 0) {
                     ForEach(Array(workflow.steps.enumerated()), id: \.element.id) { index, step in
-                        HStack(spacing: AppSpace.sm) {
+                        HStack(spacing: AppSpace.small) {
                             // Step number
                             ZStack {
                                 Circle()
@@ -134,7 +134,7 @@ struct WorkflowLaunchSheet: View {
                                 Text(step.name)
                                     .font(AppFont.captionMedium)
                                     .foregroundStyle(TextGrade.primary)
-                                HStack(spacing: AppSpace.xs) {
+                                HStack(spacing: AppSpace.extraSmall) {
                                     Text(step.tool)
                                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                                         .foregroundStyle(TextGrade.ghost)
@@ -153,7 +153,7 @@ struct WorkflowLaunchSheet: View {
 
                             Spacer()
                         }
-                        .padding(.vertical, AppSpace.xs + 1)
+                        .padding(.vertical, AppSpace.extraSmall + 1)
 
                         if index < workflow.steps.count - 1 {
                             // Connector line
@@ -167,13 +167,13 @@ struct WorkflowLaunchSheet: View {
                         }
                     }
                 }
-                .padding(AppSpace.sm)
+                .padding(AppSpace.small)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .fill(SurfaceGrade.base.opacity(0.5))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .strokeBorder(SurfaceGrade.border.opacity(0.2), lineWidth: 0.5)
                 )
             }
@@ -183,14 +183,14 @@ struct WorkflowLaunchSheet: View {
     // MARK: - Parameter Inputs
 
     private var paramInputs: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             Text("参数配置")
                 .font(AppFont.captionMedium)
                 .foregroundStyle(TextGrade.secondary)
 
             ForEach(workflow.inputParams) { param in
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
-                    HStack(spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
+                    HStack(spacing: AppSpace.extraSmall) {
                         Text(param.label)
                             .font(AppFont.captionMedium)
                             .foregroundStyle(TextGrade.primary)
@@ -211,13 +211,13 @@ struct WorkflowLaunchSheet: View {
                         TextField(param.placeholder, text: bindingFor(param))
                             .textFieldStyle(.plain)
                             .font(AppFont.body)
-                            .padding(AppSpace.sm)
+                            .padding(AppSpace.small)
                             .background(
-                                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                     .fill(SurfaceGrade.base)
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                     .strokeBorder(SurfaceGrade.border.opacity(0.3), lineWidth: 0.5)
                             )
 
@@ -236,14 +236,14 @@ struct WorkflowLaunchSheet: View {
     }
 
     private func filePathPicker(param: WorkflowParam) -> some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             let value = paramValues[param.key] ?? ""
             if value.isEmpty {
                 Text(param.placeholder)
                     .font(AppFont.body)
                     .foregroundStyle(TextGrade.ghost)
             } else {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: "doc.fill")
                         .font(.system(size: 10))
                         .foregroundStyle(Brand.primary)
@@ -274,26 +274,26 @@ struct WorkflowLaunchSheet: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.base)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.border.opacity(0.3), lineWidth: 0.5)
         )
     }
 
     private func directoryPathPicker(param: WorkflowParam) -> some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             let value = paramValues[param.key] ?? ""
             if value.isEmpty {
                 Text(param.placeholder)
                     .font(AppFont.body)
                     .foregroundStyle(TextGrade.ghost)
             } else {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: "folder.fill")
                         .font(.system(size: 10))
                         .foregroundStyle(Brand.primary)
@@ -321,13 +321,13 @@ struct WorkflowLaunchSheet: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.base)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.border.opacity(0.3), lineWidth: 0.5)
         )
     }
@@ -350,13 +350,13 @@ struct WorkflowLaunchSheet: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(TextGrade.ghost)
             }
-            .padding(AppSpace.sm)
+            .padding(AppSpace.small)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .fill(SurfaceGrade.base)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .strokeBorder(SurfaceGrade.border.opacity(0.3), lineWidth: 0.5)
             )
         }
@@ -367,20 +367,20 @@ struct WorkflowLaunchSheet: View {
     // MARK: - Goal Input
 
     private var goalInput: some View {
-        VStack(alignment: .leading, spacing: AppSpace.xs) {
+        VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
             Text("补充说明")
                 .font(AppFont.captionMedium)
                 .foregroundStyle(TextGrade.secondary)
             TextField("可选：描述具体目标或约束…", text: $goalText)
                 .textFieldStyle(.plain)
                 .font(AppFont.body)
-                .padding(AppSpace.sm)
+                .padding(AppSpace.small)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .fill(SurfaceGrade.base)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .strokeBorder(SurfaceGrade.border.opacity(0.3), lineWidth: 0.5)
                 )
         }
@@ -392,7 +392,7 @@ struct WorkflowLaunchSheet: View {
         HStack {
             // Missing params warning
             if !missingRequiredParams.isEmpty {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 10))
                     Text("请填写：\(missingRequiredParams.joined(separator: "、"))")
@@ -407,21 +407,21 @@ struct WorkflowLaunchSheet: View {
                 Text("取消")
                     .font(AppFont.captionMedium)
                     .foregroundStyle(TextGrade.muted)
-                    .padding(.horizontal, AppSpace.lg)
-                    .padding(.vertical, AppSpace.sm)
+                    .padding(.horizontal, AppSpace.large)
+                    .padding(.vertical, AppSpace.small)
             }
             .buttonStyle(.plain)
 
             Button { launch() } label: {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 10, weight: .bold))
                     Text("运行")
                         .font(AppFont.captionMedium)
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, AppSpace.lg)
-                .padding(.vertical, AppSpace.sm)
+                .padding(.horizontal, AppSpace.large)
+                .padding(.vertical, AppSpace.small)
                 .background(
                     Capsule()
                         .fill(canLaunch ? Brand.premiumGradient : LinearGradient(colors: [TextGrade.ghost], startPoint: .leading, endPoint: .trailing))

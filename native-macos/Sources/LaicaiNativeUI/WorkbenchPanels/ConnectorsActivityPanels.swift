@@ -1,7 +1,7 @@
 import Foundation
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Connectors Panel
 
@@ -13,7 +13,7 @@ struct ConnectorsPanel: View {
     @State private var isCheckingAll = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             connectorOverview
 
             if store.state.connectors.isEmpty {
@@ -23,24 +23,32 @@ struct ConnectorsPanel: View {
                     hint: "添加模型 API 或本地 Ollama"
                 )
             } else {
-                VStack(spacing: AppSpace.sm) {
+                VStack(spacing: AppSpace.small) {
                     ForEach(store.state.connectors) { conn in
                         ConnectorRow(conn: conn)
                             .onTapGesture { store.selectConnector(id: conn.id) }
                             .contextMenu {
-                                Button { store.checkConnectorHealth(id: conn.id) } label: {
+                                Button {
+                                    store.checkConnectorHealth(id: conn.id)
+                                } label: {
                                     Label("健康检查", systemImage: "heart")
                                 }
                                 if conn.toolCallingCapability != nil {
-                                    Button { store.clearLearnedToolCallingCapability(id: conn.id) } label: {
+                                    Button {
+                                        store.clearLearnedToolCallingCapability(id: conn.id)
+                                    } label: {
                                         Label("清除已学习兼容性", systemImage: "arrow.counterclockwise.circle")
                                     }
                                 }
-                                Button { editingConnector = conn } label: {
+                                Button {
+                                    editingConnector = conn
+                                } label: {
                                     Label("编辑", systemImage: "pencil")
                                 }
                                 Divider()
-                                Button(role: .destructive) { deletingConnector = conn } label: {
+                                Button(role: .destructive) {
+                                    deletingConnector = conn
+                                } label: {
                                     Label("删除", systemImage: "trash")
                                 }
                             }
@@ -69,10 +77,13 @@ struct ConnectorsPanel: View {
                 ToastCenter.shared.show("正在测试 \(updated.name)")
             }
         }
-        .alert("删除连接器", isPresented: Binding(
-            get: { deletingConnector != nil },
-            set: { if !$0 { deletingConnector = nil } }
-        )) {
+        .alert(
+            "删除连接器",
+            isPresented: Binding(
+                get: { deletingConnector != nil },
+                set: { if !$0 { deletingConnector = nil } }
+            )
+        ) {
             Button("取消", role: .cancel) { deletingConnector = nil }
             Button("删除", role: .destructive) {
                 if let conn = deletingConnector { store.deleteConnector(id: conn.id) }
@@ -88,15 +99,15 @@ struct ConnectorsPanel: View {
         let total = store.state.connectors.count
         let active = store.state.activeConnector
 
-        return VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(alignment: .top, spacing: AppSpace.sm) {
+        return VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(alignment: .top, spacing: AppSpace.small) {
                 Image(systemName: active?.health == .ready ? "checkmark.seal.fill" : "link")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(active?.health == .ready ? Semantic.success : Brand.primary)
                     .frame(width: 34, height: 34)
                     .background(Circle().fill((active?.health == .ready ? Semantic.success : Brand.primary).opacity(0.10)))
 
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                     Text(active == nil ? "模型连接" : (active?.modelName.isEmpty == false ? active?.modelName ?? "模型连接" : active?.name ?? "模型连接"))
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(TextGrade.primary)
@@ -110,7 +121,7 @@ struct ConnectorsPanel: View {
                 Spacer()
             }
 
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 Button {
                     isCheckingAll = true
                     store.checkAllConnectorsHealth()
@@ -125,43 +136,45 @@ struct ConnectorsPanel: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(total == 0 ? TextGrade.ghost : Brand.primary)
-                .padding(.vertical, AppSpace.sm)
-                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.60)))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.8), lineWidth: 0.6))
+                .padding(.vertical, AppSpace.small)
+                .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.60)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.8), lineWidth: 0.6))
                 .disabled(total == 0)
 
-                Button { showingAddSheet = true } label: {
+                Button {
+                    showingAddSheet = true
+                } label: {
                     Label("添加", systemImage: "plus")
                         .font(AppFont.captionMedium)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Brand.primary)
-                .padding(.vertical, AppSpace.sm)
-                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Brand.primary.opacity(0.10)))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(Brand.primary.opacity(0.18), lineWidth: 0.6))
+                .padding(.vertical, AppSpace.small)
+                .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(Brand.primary.opacity(0.10)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(Brand.primary.opacity(0.18), lineWidth: 0.6))
             }
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(LinearGradient(colors: [SurfaceGrade.card, SurfaceGrade.elevated.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.9), lineWidth: 0.7)
         )
-        .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
+        .shadow(color: AppShadow.small.color, radius: AppShadow.small.radius, y: AppShadow.small.verticalOffset)
     }
 
     private func emptyHint(icon: String, title: String, hint: String) -> some View {
-        VStack(spacing: AppSpace.md) {
+        VStack(spacing: AppSpace.medium) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(Brand.primary)
                 .frame(width: 36, height: 36)
                 .background(Circle().fill(Brand.primary.opacity(0.10)))
-            VStack(spacing: AppSpace.xs) {
+            VStack(spacing: AppSpace.extraSmall) {
                 Text(title)
                     .font(AppFont.captionMedium)
                     .foregroundStyle(TextGrade.secondary)
@@ -172,13 +185,13 @@ struct ConnectorsPanel: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, AppSpace.lg)
+        .padding(.vertical, AppSpace.large)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.62))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6)
         )
     }
@@ -190,7 +203,7 @@ struct ConnectorRow: View {
 
     var body: some View {
         let capability = ConnectorCapabilityProfile.infer(for: conn, mode: store.state.settings.contextMode)
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             // Status dot with glow
             Circle()
                 .fill(conn.health.color)
@@ -198,7 +211,7 @@ struct ConnectorRow: View {
                 .shadow(color: conn.health.color.opacity(0.5), radius: 3)
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Text(conn.name)
                         .font(AppFont.captionMedium)
                         .foregroundStyle(TextGrade.primary)
@@ -221,27 +234,30 @@ struct ConnectorRow: View {
             Text(conn.health.title)
                 .font(AppFont.tiny)
                 .foregroundStyle(conn.health == .ready ? Semantic.success : conn.health.color)
-                .padding(.horizontal, AppSpace.xs + 2)
+                .padding(.horizontal, AppSpace.extraSmall + 2)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(conn.health.color.opacity(0.10)))
         }
-        .padding(AppSpace.md)
+        .padding(AppSpace.medium)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(
                     conn.id == store.state.activeConnectorID
-                        ? AnyShapeStyle(LinearGradient(colors: [Brand.primary.opacity(0.12), SurfaceGrade.card.opacity(0.86)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        ? AnyShapeStyle(
+                            LinearGradient(
+                                colors: [Brand.primary.opacity(0.12), SurfaceGrade.card.opacity(0.86)], startPoint: .topLeading, endPoint: .bottomTrailing))
                         : AnyShapeStyle(SurfaceGrade.card.opacity(0.72))
                 )
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(
                     conn.id == store.state.activeConnectorID ? Brand.primary.opacity(0.24) : SurfaceGrade.hairline.opacity(0.75),
                     lineWidth: 0.7
                 )
         )
-        .shadow(color: conn.id == store.state.activeConnectorID ? AppShadow.sm.color : .clear, radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
+        .shadow(
+            color: conn.id == store.state.activeConnectorID ? AppShadow.small.color : .clear, radius: AppShadow.small.radius, y: AppShadow.small.verticalOffset)
     }
 }
 
@@ -253,7 +269,7 @@ struct ActivityPanel: View {
     @ObservedObject private var projectManager = ProjectManager.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             currentThreadSection
             modelSection
             recentActivitySection
@@ -266,7 +282,7 @@ struct ActivityPanel: View {
         let profile = ConnectorCapabilityProfile.infer(for: active, mode: store.state.settings.contextMode)
 
         return InspectorBlock(title: "模型", trailing: AnyView(modelHealthBadge(active))) {
-            VStack(alignment: .leading, spacing: AppSpace.sm) {
+            VStack(alignment: .leading, spacing: AppSpace.small) {
                 Menu {
                     ForEach(store.state.connectors) { connector in
                         Button {
@@ -295,7 +311,7 @@ struct ActivityPanel: View {
                         Label("管理连接器", systemImage: "gearshape")
                     }
                 } label: {
-                    HStack(alignment: .center, spacing: AppSpace.sm) {
+                    HStack(alignment: .center, spacing: AppSpace.small) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(activeModelTitle)
                                 .font(.system(size: 14, weight: .semibold))
@@ -307,19 +323,19 @@ struct ActivityPanel: View {
                                 .lineLimit(1)
                         }
 
-                        Spacer(minLength: AppSpace.sm)
+                        Spacer(minLength: AppSpace.small)
 
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.system(size: 8, weight: .bold))
                             .foregroundStyle(TextGrade.ghost)
                     }
-                    .padding(AppSpace.sm)
+                    .padding(AppSpace.small)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .fill(SurfaceGrade.elevated.opacity(0.72))
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .strokeBorder(SurfaceGrade.border.opacity(0.58), lineWidth: 0.7)
                     )
                     .contentShape(Rectangle())
@@ -327,9 +343,14 @@ struct ActivityPanel: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
 
-                LazyVGrid(columns: twoColumns, spacing: AppSpace.xs) {
+                LazyVGrid(columns: twoColumns, spacing: AppSpace.extraSmall) {
                     InspectorMetricTile(icon: "rectangle.compress.vertical", label: "窗口", value: compactTokenCount(profile.contextWindow), tint: Brand.primary)
-                    InspectorMetricTile(icon: profile.supportsToolCalling ? "checkmark.seal" : "slash.circle", label: "工具", value: profile.supportsToolCalling ? "可用" : "关闭", tint: profile.supportsToolCalling ? Semantic.success : TextGrade.ghost)
+                    InspectorMetricTile(
+                        icon: profile.supportsToolCalling ? "checkmark.seal" : "slash.circle",
+                        label: "工具",
+                        value: profile.supportsToolCalling ? "可用" : "关闭",
+                        tint: profile.supportsToolCalling ? Semantic.success : TextGrade.ghost
+                    )
                 }
             }
         }
@@ -339,10 +360,10 @@ struct ActivityPanel: View {
         Group {
             if let thread = store.state.selectedThread {
                 InspectorBlock(title: "线程", trailing: AnyView(statusBadge(for: thread))) {
-                    VStack(alignment: .leading, spacing: AppSpace.md) {
-                        HStack(alignment: .top, spacing: AppSpace.md) {
+                    VStack(alignment: .leading, spacing: AppSpace.medium) {
+                        HStack(alignment: .top, spacing: AppSpace.medium) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                     .fill(statusTint(for: thread).opacity(0.12))
                                     .frame(width: 38, height: 38)
                                 Image(systemName: pulseIcon(for: thread))
@@ -364,7 +385,7 @@ struct ActivityPanel: View {
                             }
                         }
 
-                        LazyVGrid(columns: twoColumns, spacing: AppSpace.sm) {
+                        LazyVGrid(columns: twoColumns, spacing: AppSpace.small) {
                             ForEach(threadFacts(for: thread)) { fact in
                                 InspectorMetricTile(icon: fact.icon, label: fact.title, value: fact.value, tint: fact.tint)
                             }
@@ -386,7 +407,7 @@ struct ActivityPanel: View {
 
     private var commandSection: some View {
         InspectorBlock(title: "操作") {
-            LazyVGrid(columns: twoColumns, spacing: AppSpace.sm) {
+            LazyVGrid(columns: twoColumns, spacing: AppSpace.small) {
                 InspectorCommandTile(icon: "arrow.down.to.line.compact", title: "最新", tint: Brand.primary, isEnabled: store.state.selectedThread != nil) {
                     NotificationCenter.default.post(name: .laicaiScrollToBottom, object: nil)
                 }
@@ -449,7 +470,7 @@ struct ActivityPanel: View {
 
     private func goalCard(for thread: Thread) -> some View {
         let goal = thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return VStack(alignment: .leading, spacing: AppSpace.xs) {
+        return VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
             Text("目标")
                 .font(AppFont.tiny)
                 .foregroundStyle(TextGrade.muted)
@@ -459,15 +480,15 @@ struct ActivityPanel: View {
                 .lineLimit(4)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).fill(SurfaceGrade.elevated.opacity(0.62)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6))
+        .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(SurfaceGrade.elevated.opacity(0.62)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6))
     }
 
     private func agentPlanCard(for thread: Thread) -> some View {
         let plan = thread.currentPlan.isEmpty ? inferredAgentPlan(for: thread) : thread.currentPlan
-        return VStack(alignment: .leading, spacing: AppSpace.xs) {
+        return VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
             HStack {
                 Text("当前计划")
                     .font(AppFont.tiny)
@@ -479,7 +500,7 @@ struct ActivityPanel: View {
             }
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(Array(plan.prefix(4).enumerated()), id: \.offset) { index, item in
-                    HStack(alignment: .top, spacing: AppSpace.xs) {
+                    HStack(alignment: .top, spacing: AppSpace.extraSmall) {
                         Text("\(index + 1)")
                             .font(AppFont.tiny)
                             .foregroundStyle(statusTint(for: thread))
@@ -492,15 +513,15 @@ struct ActivityPanel: View {
                 }
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).fill(SurfaceGrade.card.opacity(0.64)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6))
+        .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(SurfaceGrade.card.opacity(0.64)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6))
     }
 
     private func agentArtifactCard(for thread: Thread) -> some View {
         let artifacts = thread.artifacts.isEmpty ? inferredArtifacts(for: thread) : thread.artifacts
-        return VStack(alignment: .leading, spacing: AppSpace.xs) {
+        return VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
             Text("证据与产物")
                 .font(AppFont.tiny)
                 .foregroundStyle(TextGrade.muted)
@@ -514,10 +535,10 @@ struct ActivityPanel: View {
                 }
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).fill(SurfaceGrade.card.opacity(0.54)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.65), lineWidth: 0.6))
+        .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(SurfaceGrade.card.opacity(0.54)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.65), lineWidth: 0.6))
     }
 
     private func agentLedgerCard(for thread: Thread) -> some View {
@@ -533,7 +554,7 @@ struct ActivityPanel: View {
         let ledgerStateTitle = ledger?.state.title ?? "未建立"
         let nextAction = ledger?.nextAction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let pendingFollowUp = ledger?.pendingFollowUp?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return VStack(alignment: .leading, spacing: AppSpace.xs) {
+        return VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
             HStack {
                 Text("执行账本")
                     .font(AppFont.tiny)
@@ -544,11 +565,12 @@ struct ActivityPanel: View {
                     .foregroundStyle(ledger == nil ? TextGrade.ghost : statusTint(for: thread))
             }
 
-            LazyVGrid(columns: twoColumns, spacing: AppSpace.xs) {
+            LazyVGrid(columns: twoColumns, spacing: AppSpace.extraSmall) {
                 InspectorMetricTile(icon: "doc.text.magnifyingglass", label: "证据", value: "\(evidenceCount)", tint: Brand.primary)
                 InspectorMetricTile(icon: "square.and.pencil", label: "改动", value: "\(modifiedCount)", tint: Brand.teal)
                 InspectorMetricTile(icon: "checkmark.seal", label: "验证", value: "\(verificationCount)", tint: Semantic.success)
-                InspectorMetricTile(icon: "exclamationmark.triangle", label: "失败", value: "\(failedCount)", tint: failedCount > 0 ? Semantic.error : TextGrade.ghost)
+                InspectorMetricTile(
+                    icon: "exclamationmark.triangle", label: "失败", value: "\(failedCount)", tint: failedCount > 0 ? Semantic.error : TextGrade.ghost)
             }
 
             if !nextAction.isEmpty {
@@ -569,10 +591,10 @@ struct ActivityPanel: View {
                     .foregroundStyle(TextGrade.ghost)
             }
         }
-        .padding(AppSpace.sm)
+        .padding(AppSpace.small)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).fill(SurfaceGrade.card.opacity(0.58)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.65), lineWidth: 0.6))
+        .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(SurfaceGrade.card.opacity(0.58)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.65), lineWidth: 0.6))
     }
 
     private var canRetry: Bool {
@@ -619,7 +641,7 @@ struct ActivityPanel: View {
         return Text(label)
             .font(AppFont.tiny)
             .foregroundStyle(tint)
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
             .padding(.vertical, 3)
             .background(Capsule().fill(tint.opacity(0.12)))
     }
@@ -635,7 +657,7 @@ struct ActivityPanel: View {
                 .font(AppFont.tiny)
         }
         .foregroundStyle(tint)
-        .padding(.horizontal, AppSpace.sm)
+        .padding(.horizontal, AppSpace.small)
         .padding(.vertical, 3)
         .background(Capsule().fill(tint.opacity(0.11)))
     }
@@ -646,7 +668,7 @@ struct ActivityPanel: View {
             return live
         }
         if let followUp = thread.executionLedger?.pendingFollowUp?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !followUp.isEmpty {
+            !followUp.isEmpty {
             return "已收到补充：\(followUp)"
         }
         if thread.isExecution && thread.status == .failed {
@@ -663,7 +685,7 @@ struct ActivityPanel: View {
 
     private func fallbackAgentGoal(for thread: Thread) -> String {
         if let firstUser = thread.steps.first(where: { $0.kind == .userInput })?.text.trimmingCharacters(in: .whitespacesAndNewlines),
-           !firstUser.isEmpty {
+            !firstUser.isEmpty {
             return firstUser
         }
         return thread.title.isEmpty ? "等待用户输入目标。" : thread.title
@@ -719,7 +741,9 @@ struct ActivityPanel: View {
         var facts: [WorkbenchContextFact] = [
             .init(icon: "person.crop.circle.badge.gearshape", title: "类型", value: "线程", tint: statusTint(for: thread)),
             .init(icon: "number", title: "记录", value: "\(thread.steps.count)", tint: Brand.purple),
-            .init(icon: thread.projectID == nil ? "tray" : "folder", title: "空间", value: projectLabel(for: thread), tint: thread.projectID == nil ? TextGrade.muted : Brand.teal),
+            .init(
+                icon: thread.projectID == nil ? "tray" : "folder", title: "空间", value: projectLabel(for: thread),
+                tint: thread.projectID == nil ? TextGrade.muted : Brand.teal),
             .init(icon: "clock", title: "更新", value: RelativeTimeFormatter.string(for: thread.updatedAt), tint: TextGrade.muted)
         ]
         if thread.isExecution {
@@ -733,7 +757,7 @@ struct ActivityPanel: View {
 
     private func projectLabel(for thread: Thread) -> String {
         if let projectID = thread.projectID,
-           let project = projectManager.projects.first(where: { $0.id == projectID }) {
+            let project = projectManager.projects.first(where: { $0.id == projectID }) {
             return project.name
         }
         return "全局"
@@ -751,8 +775,8 @@ struct ActivityPanel: View {
 
     private var twoColumns: [GridItem] {
         [
-            GridItem(.flexible(), spacing: AppSpace.sm),
-            GridItem(.flexible(), spacing: AppSpace.sm)
+            GridItem(.flexible(), spacing: AppSpace.small),
+            GridItem(.flexible(), spacing: AppSpace.small)
         ]
     }
 
@@ -774,10 +798,12 @@ struct ActivityPanel: View {
 
     private func latestThreadSummary(_ thread: Thread) -> String? {
         let slice = thread.steps.suffix(10)
-        guard let text = slice.reversed().first(where: { step in
-            let cleaned = step.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return !cleaned.isEmpty && step.kind != .userInput && !isInternalSummary(cleaned)
-        })?.text ?? slice.reversed().first(where: { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?.text else {
+        guard
+            let text = slice.reversed().first(where: { step in
+                let cleaned = step.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return !cleaned.isEmpty && step.kind != .userInput && !isInternalSummary(cleaned)
+            })?.text ?? slice.reversed().first(where: { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?.text
+        else {
             return nil
         }
         return compactWorkbenchText(text, limit: 150)
@@ -792,7 +818,8 @@ struct ActivityPanel: View {
     }
 
     private func compactWorkbenchText(_ text: String, limit: Int) -> String {
-        let compact = text
+        let compact =
+            text
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "  ", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -833,7 +860,7 @@ private struct AgentArtifactRow: View {
     }
 
     var body: some View {
-        HStack(spacing: AppSpace.xs) {
+        HStack(spacing: AppSpace.extraSmall) {
             Button {
                 if exists {
                     NSWorkspace.shared.open(url)
@@ -841,7 +868,7 @@ private struct AgentArtifactRow: View {
                     copyPath()
                 }
             } label: {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: icon)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(exists ? Brand.teal : TextGrade.ghost)
@@ -943,8 +970,8 @@ private struct InspectorBlock<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(spacing: AppSpace.small) {
                 Text(title)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(TextGrade.muted)
@@ -954,9 +981,9 @@ private struct InspectorBlock<Content: View>: View {
             }
             content()
         }
-        .padding(AppSpace.md)
+        .padding(AppSpace.medium)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(
                     LinearGradient(
                         colors: [SurfaceGrade.card.opacity(0.86), SurfaceGrade.elevated.opacity(0.56)],
@@ -966,10 +993,10 @@ private struct InspectorBlock<Content: View>: View {
                 )
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.7)
         )
-        .shadow(color: AppShadow.sm.color.opacity(0.75), radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
+        .shadow(color: AppShadow.small.color.opacity(0.75), radius: AppShadow.small.radius, y: AppShadow.small.verticalOffset)
     }
 }
 
@@ -979,7 +1006,7 @@ private struct InspectorEmptyRow: View {
     let subtitle: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+        HStack(alignment: .top, spacing: AppSpace.small) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Brand.primary)
@@ -995,7 +1022,7 @@ private struct InspectorEmptyRow: View {
                     .lineLimit(2)
             }
         }
-        .padding(.vertical, AppSpace.xs)
+        .padding(.vertical, AppSpace.extraSmall)
     }
 }
 
@@ -1015,7 +1042,7 @@ private struct InspectorMetricTile: View {
     let tint: Color
 
     var body: some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(tint)
@@ -1036,14 +1063,14 @@ private struct InspectorMetricTile: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, AppSpace.sm)
+        .padding(.horizontal, AppSpace.small)
         .frame(height: 36)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.elevated.opacity(0.55))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.65), lineWidth: 0.6)
         )
     }
@@ -1059,7 +1086,7 @@ private struct InspectorCommandTile: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: icon)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(isEnabled ? tint : TextGrade.ghost)
@@ -1069,14 +1096,14 @@ private struct InspectorCommandTile: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
             .frame(height: 32)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .fill(isHovering && isEnabled ? tint.opacity(0.10) : SurfaceGrade.elevated.opacity(0.50))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .strokeBorder(isEnabled ? tint.opacity(isHovering ? 0.24 : 0.12) : SurfaceGrade.hairline.opacity(0.65), lineWidth: 0.7)
             )
         }
@@ -1096,7 +1123,7 @@ private struct InspectorActivityLine: View {
     let tint: Color
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+        HStack(alignment: .top, spacing: AppSpace.small) {
             Image(systemName: icon)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(tint)
@@ -1115,7 +1142,7 @@ private struct InspectorActivityLine: View {
                     .lineLimit(1)
             }
         }
-        .padding(.vertical, AppSpace.sm)
+        .padding(.vertical, AppSpace.small)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -1124,7 +1151,7 @@ private struct WorkbenchFactTile: View {
     let fact: WorkbenchContextFact
 
     var body: some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             Image(systemName: fact.icon)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(fact.tint)
@@ -1141,14 +1168,14 @@ private struct WorkbenchFactTile: View {
                 .minimumScaleFactor(0.78)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, AppSpace.sm)
-        .padding(.vertical, AppSpace.xs + 2)
+        .padding(.horizontal, AppSpace.small)
+        .padding(.vertical, AppSpace.extraSmall + 2)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.72))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6)
         )
     }
@@ -1175,11 +1202,11 @@ private struct WorkbenchActionButton: View {
             .frame(maxWidth: .infinity)
             .frame(height: 30)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .fill(isHovering && isEnabled ? tint.opacity(0.10) : SurfaceGrade.card.opacity(0.58))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .strokeBorder(isEnabled ? tint.opacity(isHovering ? 0.24 : 0.12) : SurfaceGrade.hairline, lineWidth: 0.7)
             )
         }
@@ -1199,28 +1226,28 @@ private struct ThreadContextCard: View {
     let connector: ConnectorProfile?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
             Text("运行信息")
                 .font(AppFont.captionMedium)
                 .foregroundStyle(TextGrade.secondary)
 
             contextRow(icon: "folder", label: "工作区", value: workspaceRoot)
-                contextRow(icon: "doc.text", label: "文件", value: "\(workspaceRoot.isEmpty ? 0 : thread.events.count) 项")
-                contextRow(icon: "bubble.left.and.bubble.right", label: "记录", value: "\(thread.events.count) 条")
+            contextRow(icon: "doc.text", label: "文件", value: "\(workspaceRoot.isEmpty ? 0 : thread.events.count) 项")
+            contextRow(icon: "bubble.left.and.bubble.right", label: "记录", value: "\(thread.events.count) 条")
         }
-        .padding(AppSpace.md)
+        .padding(AppSpace.medium)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(Brand.primary.opacity(0.15), lineWidth: 1)
         )
     }
 
     private func contextRow(icon: String, label: String, value: String) -> some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             Image(systemName: icon)
                 .font(.system(size: 9))
                 .foregroundStyle(Brand.primary)
@@ -1246,7 +1273,7 @@ private struct ModelContextCard: View {
     var body: some View {
         let capability = ConnectorCapabilityProfile.infer(for: connector, mode: contextMode)
         contextSectionCard(title: "当前模型") {
-            VStack(alignment: .leading, spacing: AppSpace.sm) {
+            VStack(alignment: .leading, spacing: AppSpace.small) {
                 summaryRow(icon: "cpu", label: "模型", value: connector.modelName.isEmpty ? connector.name : connector.modelName)
                 summaryRow(icon: "link", label: "连接", value: connector.name)
                 summaryRow(icon: "wrench.and.screwdriver", label: "工具", value: connectorCapabilitySummary(for: connector, capability: capability))
@@ -1278,7 +1305,7 @@ private struct ResponseMetricsCard: View {
 
     var body: some View {
         contextSectionCard(title: "输出指标") {
-            VStack(alignment: .leading, spacing: AppSpace.sm) {
+            VStack(alignment: .leading, spacing: AppSpace.small) {
                 if let thinking = metrics.thinkingDuration {
                     summaryRow(icon: "brain", label: "思考", value: formatSeconds(thinking))
                 }
@@ -1308,9 +1335,9 @@ private struct RelatedFilesCard: View {
 
     var body: some View {
         contextSectionCard(title: "相关文件") {
-            VStack(alignment: .leading, spacing: AppSpace.xs) {
+            VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                 ForEach(Array(files.prefix(6))) { file in
-                    HStack(alignment: .top, spacing: AppSpace.sm) {
+                    HStack(alignment: .top, spacing: AppSpace.small) {
                         Image(systemName: fileIcon(for: file.language))
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(Brand.primary)
@@ -1330,7 +1357,7 @@ private struct RelatedFilesCard: View {
                             }
                         }
 
-                        Spacer(minLength: AppSpace.sm)
+                        Spacer(minLength: AppSpace.small)
 
                         if !file.language.isEmpty {
                             Text(file.language.uppercased())
@@ -1392,7 +1419,7 @@ private struct ActivityRow: View {
     let activity: ToolActivity
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+        HStack(alignment: .top, spacing: AppSpace.small) {
             Image(systemName: activity.isFailure ? "xmark.circle.fill" : "checkmark.circle.fill")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(statusColor)
@@ -1400,7 +1427,7 @@ private struct ActivityRow: View {
                 .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Text(activity.summary.isEmpty ? activity.name : activity.summary)
                         .font(AppFont.captionMedium)
                         .foregroundStyle(TextGrade.primary)
@@ -1428,8 +1455,8 @@ private struct ActivityRow: View {
                     .opacity(activity.name.isEmpty || activity.name == activity.summary ? 0 : 1)
             }
         }
-        .padding(.vertical, AppSpace.sm)
-        .padding(.horizontal, AppSpace.xs)
+        .padding(.vertical, AppSpace.small)
+        .padding(.horizontal, AppSpace.extraSmall)
     }
 
     private var statusColor: Color {

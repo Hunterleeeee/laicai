@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
@@ -43,7 +44,8 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "继续",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: "/tmp"),
             priorSteps: priorSteps
         )
@@ -126,7 +128,8 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "请解释 README",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -150,7 +153,8 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "请读取这个路径：\(workspace.appendingPathComponent("attached.txt").path)",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -172,7 +176,8 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "整理到wiki\n请读取这个附件：\(xlsx.path)",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path, vaultRoot: workspace.path)
         )
 
@@ -194,7 +199,8 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "全量读取这个项目并找问题",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -257,16 +263,19 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "写一篇长文",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: "/tmp")
         )
 
         XCTAssertEqual(task.status, .completed)
         XCTAssertTrue(task.steps.contains { $0.kind == .aiThinking && $0.text.contains("正在自动续写下一段") })
-        XCTAssertEqual(task.steps.filter { $0.kind == .textOutput }.map(\.text), [
-            "这是一段被供应商截断的回复",
-            "这是自动续写的第二段。"
-        ])
+        XCTAssertEqual(
+            task.steps.filter { $0.kind == .textOutput }.map(\.text),
+            [
+                "这是一段被供应商截断的回复",
+                "这是自动续写的第二段。"
+            ])
     }
     func testAgentLoopBootstrapsWebFetchForExplicitURL() {
         XCTAssertEqual(

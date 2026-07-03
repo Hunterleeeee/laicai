@@ -1,5 +1,5 @@
-import Foundation
 import Darwin
+import Foundation
 import LaicaiNativeDomain
 
 // MARK: - Verify Build Tool (auto build/test)
@@ -23,13 +23,25 @@ public struct VerifyBuildTool: LaicaiTool {
         )
     }
 
-    public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
-        struct Params: Codable {
-            var command: String?
-            var changedFiles: String?
-            var fix: Bool?
-        }
+    private static let suspiciousVerifyCommandPatterns = [
+        "python", "ruby", "node ", "curl ", "wget ", "rm -", "<<", "eval ", "exec ", "sudo ", "cat ", "echo ", "pip ", "brew "
+    ]
 
+    private static let allowedBuildPrefixes = [
+        "swift ", "xcodebuild", "cargo ", "make", "npm ", "yarn ", "pnpm ", "go ",
+        "gradle", "mvn ", "cmake", "dotnet ", "gcc ", "g++ ", "clang",
+        "bash build", "pytest", "npm run build", "npm run test"
+    ]
+
+    private static let contentCheckPatterns = ["assert", "read_text", "readtext", "path(", "from pathlib"]
+
+    private struct Params: Codable {
+        var command: String?
+        var changedFiles: String?
+        var fix: Bool?
+    }
+
+    public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
         let params: Params
         do {
             let jsonData = argumentsJSON.data(using: .utf8) ?? Data()
@@ -43,37 +55,15 @@ public struct VerifyBuildTool: LaicaiTool {
             return ToolResult(output: "未设置工作区，无法执行构建验证", success: false, error: "workspace_missing")
         }
 
-        let buildCommand: String
-        if let custom = params.command, !custom.isEmpty {
-            // Reject commands that are clearly not build commands
-            let dangerousPatterns = ["python", "ruby", "node ", "curl ", "wget ", "rm -", "<<", "eval ", "exec ", "sudo ", "cat ", "echo ", "pip ", "brew "]
-            let isSuspicious = dangerousPatterns.contains(where: { custom.lowercased().hasPrefix($0) || custom.lowercased().contains(" \($0)") })
-            // Also reject heredocs and multi-line scripts
-            let hasHeredoc = custom.contains("<<") || custom.contains("\"\"\"") || custom.contains("'''")
-            let allowedBuildPrefixes = ["swift ", "xcodebuild", "cargo ", "make", "npm ", "yarn ", "pnpm ", "go ", "gradle", "mvn ", "cmake", "dotnet ", "gcc ", "g++ ", "clang", "bash build", "pytest", "npm run build", "npm run test"]
-            let looksLikeBuild = allowedBuildPrefixes.contains(where: { custom.lowercased().hasPrefix($0) })
-            if (isSuspicious || hasHeredoc) && !looksLikeBuild {
-                let lowerCustom = custom.lowercased()
-                let isContentCheck = lowerCustom.contains("assert") || lowerCustom.contains("read_text") || lowerCustom.contains("readtext")
-                    || lowerCustom.contains("path(") || lowerCustom.contains("from pathlib")
-                let redirect = isContentCheck
-                    ? "\n💡 检查文件内容请改用 file_read / file_extract（读取后看返回值），而不是用 verify_build 跑 python assert。"
-                    : "\n💡 verify_build 仅用于编译/测试。一般 shell 任务请改用 shell_exec。"
-                return ToolResult(
-                    output: "拒绝命令「\(String(custom.prefix(60)))…」：verify.build 仅接受编译/测试类命令。\(redirect)",
-                    success: false,
-                    error: "invalid_command"
-                )
-            } else {
-                buildCommand = custom
-            }
-        } else {
-            let changedFiles = Self.parseChangedFiles(params.changedFiles) + Self.detectChangedFiles(workspaceRoot: workspaceRoot)
-            buildCommand = detectBuildCommand(workspaceRoot: workspaceRoot, changedFiles: changedFiles)
+        let resolved = buildCommand(from: params, workspaceRoot: workspaceRoot)
+        if let failure = resolved.failure {
+            return failure
         }
+        let buildCommand = resolved.command
 
         guard !buildCommand.isEmpty else {
-            return ToolResult(output: "当前工作区无构建系统（未找到 Package.swift / package.json / Cargo.toml / Makefile 等）。无需调用 verify.build。", success: false, error: "no_build_system")
+            return ToolResult(
+                output: "当前工作区无构建系统（未找到 Package.swift / package.json / Cargo.toml / Makefile 等）。无需调用 verify.build。", success: false, error: "no_build_system")
         }
 
         // Execute build command — use login shell so user PATH (brew, node, etc.) is available
@@ -139,7 +129,8 @@ public struct VerifyBuildTool: LaicaiTool {
         } else {
             // Extract error lines for model to fix
             let errorLines = extractErrorLines(from: output)
-            let fixHint = (params.fix ?? true)
+            let fixHint =
+                (params.fix ?? true)
                 ? "\n\n请根据以上错误信息修复代码，然后再次调用 verify_build 验证。"
                 : ""
             return ToolResult(
@@ -151,59 +142,110 @@ public struct VerifyBuildTool: LaicaiTool {
         }
     }
 
-    private func detectBuildCommand(workspaceRoot: String, changedFiles: [String] = []) -> String {
-        let fm = FileManager.default
-        // Swift / SPM
-        if fm.fileExists(atPath: (workspaceRoot as NSString).appendingPathComponent("Package.swift")) {
-            if changedFiles.contains(where: { $0.hasSuffix("Tests.swift") || $0.contains("/Tests/") }) {
-                return "swift test 2>&1"
+    private static func customBuildCommandRejection(_ command: String) -> ToolResult? {
+        let lowerCommand = command.lowercased()
+        let isSuspicious = suspiciousVerifyCommandPatterns.contains {
+            lowerCommand.hasPrefix($0) || lowerCommand.contains(" \($0)")
+        }
+        let hasHeredoc = command.contains("<<") || command.contains("\"\"\"") || command.contains("'''")
+        guard (isSuspicious || hasHeredoc) && !looksLikeBuildCommand(lowerCommand) else { return nil }
+        let redirect =
+            contentCheckPatterns.contains(where: lowerCommand.contains)
+            ? "\n💡 检查文件内容请改用 file_read / file_extract（读取后看返回值），而不是用 verify_build 跑 python assert。"
+            : "\n💡 verify_build 仅用于编译/测试。一般 shell 任务请改用 shell_exec。"
+        return ToolResult(
+            output: "拒绝命令「\(String(command.prefix(60)))…」：verify.build 仅接受编译/测试类命令。\(redirect)",
+            success: false,
+            error: "invalid_command"
+        )
+    }
+
+    private static func looksLikeBuildCommand(_ lowerCommand: String) -> Bool {
+        allowedBuildPrefixes.contains { lowerCommand.hasPrefix($0) }
+    }
+
+    private func buildCommand(from params: Params, workspaceRoot: String) -> (command: String, failure: ToolResult?) {
+        if let custom = params.command, !custom.isEmpty {
+            if let rejection = Self.customBuildCommandRejection(custom) {
+                return ("", rejection)
             }
-            return "swift build 2>&1"
+            return (custom, nil)
+        }
+        let changedFiles = Self.parseChangedFiles(params.changedFiles) + Self.detectChangedFiles(workspaceRoot: workspaceRoot)
+        return (detectBuildCommand(workspaceRoot: workspaceRoot, changedFiles: changedFiles), nil)
+    }
+
+    private func detectBuildCommand(workspaceRoot: String, changedFiles: [String] = []) -> String {
+        // Swift / SPM
+        if Self.workspaceContains("Package.swift", root: workspaceRoot) {
+            return Self.swiftBuildCommand(changedFiles: changedFiles)
         }
         // build.sh
-        if fm.fileExists(atPath: (workspaceRoot as NSString).appendingPathComponent("build.sh")) {
+        if Self.workspaceContains("build.sh", root: workspaceRoot) {
             return "bash build.sh 2>&1"
         }
         // Node.js
-        if fm.fileExists(atPath: (workspaceRoot as NSString).appendingPathComponent("package.json")) {
-            if fm.fileExists(atPath: (workspaceRoot as NSString).appendingPathComponent("node_modules/.bin/tsc")) {
-                return "npx tsc --noEmit 2>&1"
-            }
-            if let testFile = changedFiles.first(where: { $0.contains(".test.") || $0.contains(".spec.") }) {
-                return "npm test -- \(shellEscape(testFile)) 2>&1"
-            }
-            return "npm test 2>&1"
+        if Self.workspaceContains("package.json", root: workspaceRoot) {
+            return nodeBuildCommand(workspaceRoot: workspaceRoot, changedFiles: changedFiles)
         }
         // Rust
-        if fm.fileExists(atPath: (workspaceRoot as NSString).appendingPathComponent("Cargo.toml")) {
+        if Self.workspaceContains("Cargo.toml", root: workspaceRoot) {
             return "cargo build 2>&1"
         }
         // Go
-        if fm.fileExists(atPath: (workspaceRoot as NSString).appendingPathComponent("go.mod")) {
-            if let packageDir = changedFiles.first.map({ ($0 as NSString).deletingLastPathComponent }), !packageDir.isEmpty {
-                return "go test ./\(packageDir) 2>&1"
-            }
-            return "go build ./... 2>&1"
+        if Self.workspaceContains("go.mod", root: workspaceRoot) {
+            return Self.goBuildCommand(changedFiles: changedFiles)
         }
         // Python
-        if fm.fileExists(atPath: (workspaceRoot as NSString).appendingPathComponent("setup.py"))
-            || fm.fileExists(atPath: (workspaceRoot as NSString).appendingPathComponent("pyproject.toml")) {
+        if Self.isPythonProject(workspaceRoot) {
             return "python3 -m py_compile $(find . -name '*.py' -not -path '*/venv/*' | head -20) 2>&1"
         }
         // Make
-        if fm.fileExists(atPath: (workspaceRoot as NSString).appendingPathComponent("Makefile")) {
+        if Self.workspaceContains("Makefile", root: workspaceRoot) {
             return "make 2>&1"
         }
         // CMake
-        if fm.fileExists(atPath: (workspaceRoot as NSString).appendingPathComponent("CMakeLists.txt")) {
+        if Self.workspaceContains("CMakeLists.txt", root: workspaceRoot) {
             return "cmake --build build 2>&1"
         }
         return ""
     }
 
+    private static func workspaceContains(_ relativePath: String, root: String) -> Bool {
+        FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent(relativePath))
+    }
+
+    private static func swiftBuildCommand(changedFiles: [String]) -> String {
+        changedFiles.contains { $0.hasSuffix("Tests.swift") || $0.contains("/Tests/") }
+            ? "swift test 2>&1"
+            : "swift build 2>&1"
+    }
+
+    private func nodeBuildCommand(workspaceRoot: String, changedFiles: [String]) -> String {
+        if Self.workspaceContains("node_modules/.bin/tsc", root: workspaceRoot) {
+            return "npx tsc --noEmit 2>&1"
+        }
+        if let testFile = changedFiles.first(where: { $0.contains(".test.") || $0.contains(".spec.") }) {
+            return "npm test -- \(shellEscape(testFile)) 2>&1"
+        }
+        return "npm test 2>&1"
+    }
+
+    private static func goBuildCommand(changedFiles: [String]) -> String {
+        if let packageDir = changedFiles.first.map({ ($0 as NSString).deletingLastPathComponent }), !packageDir.isEmpty {
+            return "go test ./\(packageDir) 2>&1"
+        }
+        return "go build ./... 2>&1"
+    }
+
+    private static func isPythonProject(_ workspaceRoot: String) -> Bool {
+        workspaceContains("setup.py", root: workspaceRoot) || workspaceContains("pyproject.toml", root: workspaceRoot)
+    }
+
     private static func parseChangedFiles(_ raw: String?) -> [String] {
         guard let raw else { return [] }
-        return raw
+        return
+            raw
             .components(separatedBy: CharacterSet(charactersIn: ",\n"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -253,8 +295,8 @@ public struct VerifyBuildTool: LaicaiTool {
         return errorLines.prefix(30).joined(separator: "\n")
     }
 
-    private func shellEscape(_ s: String) -> String {
-        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    private func shellEscape(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
 
@@ -267,6 +309,19 @@ public struct WriteFileTool: LaicaiTool {
     public var description: String { "写入文件内容（需用户审查确认）" }
     public var requiresReview: Bool { true }
     public var executionPolicy: ToolExecutionPolicy { .fileChangeReview }
+
+    private struct Params: Codable {
+        var path: String
+        var content: String?
+        var oldContent: String?
+        var newContent: String?
+        var createDirectories: Bool?
+    }
+
+    private enum WriteContentResolution {
+        case content(String)
+        case failure(ToolResult)
+    }
 
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(
@@ -286,14 +341,6 @@ public struct WriteFileTool: LaicaiTool {
     }
 
     public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
-        struct Params: Codable {
-            var path: String
-            var content: String?
-            var oldContent: String?
-            var newContent: String?
-            var createDirectories: Bool?
-        }
-
         let params: Params
         do {
             let jsonData = argumentsJSON.data(using: .utf8) ?? Data()
@@ -332,80 +379,11 @@ public struct WriteFileTool: LaicaiTool {
         // Models sometimes send empty oldContent/newContent alongside a valid content param;
         // we must not let empty-string patch override the actual content.
         let finalContent: String
-        if let oldSnippet = params.oldContent, let newSnippet = params.newContent,
-           !oldSnippet.isEmpty || !newSnippet.isEmpty {
-            // Patch mode: replace exact match of oldContent with newContent
-            let trimmedOld = oldSnippet.trimmingCharacters(in: .whitespacesAndNewlines)
-            if oldContent.isEmpty || !FileManager.default.fileExists(atPath: fullPath) {
-                // File doesn't exist or is empty → create with newContent
-                finalContent = newSnippet
-            } else if trimmedOld.isEmpty {
-                // Empty oldContent means "overwrite entire file"
-                finalContent = newSnippet
-            } else if oldContent.contains(oldSnippet) {
-                // Exact match found
-                let occurrences = oldContent.components(separatedBy: oldSnippet).count - 1
-                if occurrences > 1 {
-                    return ToolResult(
-                        output: "patch 模式失败：要替换的内容在文件中出现 \(occurrences) 次，无法确定替换位置。请提供更长的上下文以唯一标识。",
-                        success: false,
-                        error: "patch_ambiguous"
-                    )
-                }
-                finalContent = oldContent.replacingOccurrences(of: oldSnippet, with: newSnippet)
-            } else {
-                // Exact match failed — try whitespace-normalized fuzzy match
-                let normalizedFile = oldContent.components(separatedBy: .whitespacesAndNewlines)
-                    .filter { !$0.isEmpty }.joined(separator: " ")
-                let normalizedSnippet = trimmedOld.components(separatedBy: .whitespacesAndNewlines)
-                    .filter { !$0.isEmpty }.joined(separator: " ")
-                if normalizedFile.contains(normalizedSnippet) {
-                    // Fuzzy match: find the original range and replace
-                    let lines = oldContent.components(separatedBy: "\n")
-                    let snippetLines = oldSnippet.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-                    var matchStart = -1
-                    for i in 0..<lines.count {
-                        var matched = true
-                        for j in 0..<snippetLines.count {
-                            guard i + j < lines.count else { matched = false; break }
-                            if lines[i + j].trimmingCharacters(in: .whitespaces) != snippetLines[j] {
-                                matched = false; break
-                            }
-                        }
-                        if matched { matchStart = i; break }
-                    }
-                    if matchStart >= 0 {
-                        var result = lines
-                        result.replaceSubrange(matchStart..<matchStart + snippetLines.count,
-                                               with: newSnippet.components(separatedBy: "\n"))
-                        finalContent = result.joined(separator: "\n")
-                    } else {
-                        // Fuzzy line match failed too — fall back to full overwrite
-                        finalContent = newSnippet
-                    }
-                } else {
-                    // No match at all — if oldSnippet looks like "the entire old file" (>80% of file length),
-                    // treat as full overwrite instead of failing
-                    if trimmedOld.count > oldContent.count * 4 / 5 {
-                        finalContent = newSnippet
-                    } else {
-                        return ToolResult(
-                            output: "patch 模式失败：在文件中未找到要替换的内容。请使用 file.read 先确认当前内容，或使用 content 参数全量写入。\n文件实际前 200 字符：\(String(oldContent.prefix(200)))",
-                            success: false,
-                            error: "patch_not_found"
-                        )
-                    }
-                }
-            }
-        } else if let content = params.content {
-            // Full write mode
+        switch Self.resolveFinalContent(params: params, oldContent: oldContent, fullPath: fullPath) {
+        case .content(let content):
             finalContent = content
-        } else {
-            return ToolResult(
-                output: "参数错误：必须提供 content（全量写入）或 oldContent+newContent（patch 写入）",
-                success: false,
-                error: "invalid_params"
-            )
+        case .failure(let result):
+            return result
         }
 
         let diff = Self.generateDiff(oldContent: oldContent, newContent: finalContent, filePath: path)
@@ -431,6 +409,129 @@ public struct WriteFileTool: LaicaiTool {
             ],
             success: true
         )
+    }
+
+    private static func resolveFinalContent(
+        params: Params,
+        oldContent: String,
+        fullPath: String
+    ) -> WriteContentResolution {
+        if let oldSnippet = params.oldContent, let newSnippet = params.newContent,
+            !oldSnippet.isEmpty || !newSnippet.isEmpty {
+            return resolvePatchContent(
+                oldSnippet: oldSnippet,
+                newSnippet: newSnippet,
+                oldContent: oldContent,
+                fullPath: fullPath
+            )
+        }
+        if let content = params.content {
+            return .content(content)
+        }
+        return .failure(
+            ToolResult(
+                output: "参数错误：必须提供 content（全量写入）或 oldContent+newContent（patch 写入）",
+                success: false,
+                error: "invalid_params"
+            ))
+    }
+
+    private static func resolvePatchContent(
+        oldSnippet: String,
+        newSnippet: String,
+        oldContent: String,
+        fullPath: String
+    ) -> WriteContentResolution {
+        let trimmedOld = oldSnippet.trimmingCharacters(in: .whitespacesAndNewlines)
+        if oldContent.isEmpty || !FileManager.default.fileExists(atPath: fullPath) || trimmedOld.isEmpty {
+            return .content(newSnippet)
+        }
+        if oldContent.contains(oldSnippet) {
+            return exactPatchContent(oldSnippet: oldSnippet, newSnippet: newSnippet, oldContent: oldContent)
+        }
+        return fuzzyPatchContent(
+            oldSnippet: oldSnippet,
+            newSnippet: newSnippet,
+            oldContent: oldContent,
+            trimmedOld: trimmedOld
+        )
+    }
+
+    private static func exactPatchContent(
+        oldSnippet: String,
+        newSnippet: String,
+        oldContent: String
+    ) -> WriteContentResolution {
+        let occurrences = oldContent.components(separatedBy: oldSnippet).count - 1
+        guard occurrences <= 1 else {
+            return .failure(
+                ToolResult(
+                    output: "patch 模式失败：要替换的内容在文件中出现 \(occurrences) 次，无法确定替换位置。请提供更长的上下文以唯一标识。",
+                    success: false,
+                    error: "patch_ambiguous"
+                ))
+        }
+        return .content(oldContent.replacingOccurrences(of: oldSnippet, with: newSnippet))
+    }
+
+    private static func fuzzyPatchContent(
+        oldSnippet: String,
+        newSnippet: String,
+        oldContent: String,
+        trimmedOld: String
+    ) -> WriteContentResolution {
+        let normalizedFile = normalizedWhitespace(oldContent)
+        let normalizedSnippet = normalizedWhitespace(trimmedOld)
+        guard normalizedFile.contains(normalizedSnippet) else {
+            return unmatchedPatchContent(newSnippet: newSnippet, oldContent: oldContent, trimmedOld: trimmedOld)
+        }
+        let lines = oldContent.components(separatedBy: "\n")
+        let snippetLines = oldSnippet.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let matchStart = fuzzyLineMatchStart(lines: lines, snippetLines: snippetLines) else {
+            return .content(newSnippet)
+        }
+        var result = lines
+        result.replaceSubrange(matchStart..<matchStart + snippetLines.count, with: newSnippet.components(separatedBy: "\n"))
+        return .content(result.joined(separator: "\n"))
+    }
+
+    private static func unmatchedPatchContent(
+        newSnippet: String,
+        oldContent: String,
+        trimmedOld: String
+    ) -> WriteContentResolution {
+        if trimmedOld.count > oldContent.count * 4 / 5 {
+            return .content(newSnippet)
+        }
+        return .failure(
+            ToolResult(
+                output: "patch 模式失败：在文件中未找到要替换的内容。请使用 file.read 先确认当前内容，或使用 content 参数全量写入。\n文件实际前 200 字符：\(String(oldContent.prefix(200)))",
+                success: false,
+                error: "patch_not_found"
+            ))
+    }
+
+    private static func normalizedWhitespace(_ text: String) -> String {
+        text.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private static func fuzzyLineMatchStart(lines: [String], snippetLines: [String]) -> Int? {
+        for lineIndex in 0..<lines.count where lineWindowMatches(lines: lines, snippetLines: snippetLines, start: lineIndex) {
+            return lineIndex
+        }
+        return nil
+    }
+
+    private static func lineWindowMatches(lines: [String], snippetLines: [String], start: Int) -> Bool {
+        for snippetIndex in 0..<snippetLines.count {
+            guard start + snippetIndex < lines.count else { return false }
+            if lines[start + snippetIndex].trimmingCharacters(in: .whitespaces) != snippetLines[snippetIndex] {
+                return false
+            }
+        }
+        return true
     }
 
     public func validate(result: ToolResult) -> Bool {
@@ -497,7 +598,15 @@ public struct ShellTool: LaicaiTool {
             description: description,
             parameters: FunctionParameters(
                 properties: [
-                    "command": FunctionProperty(type: "string", description: "要执行的终端命令。仅用于测试、构建、git、包管理脚本或小范围诊断；不要用 find/ls -R/tree/grep 等方式遍历或读取整个项目，项目结构请用 workspace_index，内容查找请用 code_search，文件读取请用 file_read。"),
+                    "command": FunctionProperty(
+                        type: "string",
+                        description:
+                            [
+                                "要执行的终端命令。仅用于测试、构建、git、包管理脚本或小范围诊断；",
+                                "不要用 find/ls -R/tree/grep 等方式遍历或读取整个项目，项目结构请用 workspace_index，",
+                                "内容查找请用 code_search，文件读取请用 file_read。"
+                            ].joined()
+                    ),
                     "timeout": FunctionProperty(type: "integer", description: "超时时间（秒），默认30秒"),
                     "background": FunctionProperty(type: "boolean", description: "后台运行（默认 false）。设为 true 可启动 dev server 等长运行进程而不阻塞。")
                 ],
@@ -530,7 +639,7 @@ public struct ShellTool: LaicaiTool {
 
         // Security check — use free function with policy snapshot to avoid MainActor hop
         let policySnapshot = await SecurityManager.shared.policySnapshot
-        if let securityError = ShellSecurityCheck(command: command, policy: policySnapshot) {
+        if let securityError = shellSecurityCheck(command: command, policy: policySnapshot) {
             return ToolResult(output: securityError, success: false, error: "security_denied")
         }
 
@@ -540,53 +649,14 @@ public struct ShellTool: LaicaiTool {
         }
 
         // Sandbox execution — route through SandboxEngine if configured
-        let sandboxConfig = await SecurityManager.shared.sandboxConfig
-        if sandboxConfig.mode != .none {
-            do {
-                let (output, errOutput, exitCode) = try await SandboxExecutor.execute(
-                    command: command,
-                    workspaceRoot: context.workspaceRoot,
-                    config: sandboxConfig
-                )
-                let combined = [output, errOutput].filter { !$0.isEmpty }.joined(separator: "\n")
-                let trimmed = String(combined.suffix(8000))
-                return ToolResult(
-                    output: trimmed.isEmpty ? "(命令执行完成，无输出)" : trimmed,
-                    data: ["exit_code": "\(exitCode)", "sandbox": sandboxConfig.mode.rawValue],
-                    success: exitCode == 0,
-                    error: exitCode == 0 ? nil : "exit_\(exitCode)"
-                )
-            } catch {
-                return ToolResult(output: "沙箱执行失败：\(error.localizedDescription)", success: false, error: "sandbox_error")
-            }
+        if let sandboxResult = await Self.sandboxedResultIfNeeded(command: command, context: context) {
+            return sandboxResult
         }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", command]
-        var environment = ProcessInfo.processInfo.environment
-        let commonPaths = [
-            "/opt/homebrew/bin", "/opt/homebrew/sbin",
-            "/usr/local/bin", "/usr/local/sbin",
-            "/usr/bin", "/bin", "/usr/sbin", "/sbin",
-            "\(NSHomeDirectory())/.local/bin",
-            "\(NSHomeDirectory())/.cargo/bin",
-            "\(NSHomeDirectory())/.bun/bin"
-        ]
-        let existingPath = environment["PATH"] ?? ""
-        let mergedPath = (commonPaths + existingPath.split(separator: ":").map(String.init))
-            .reduce(into: [String]()) { result, path in
-                if !path.isEmpty && !result.contains(path) { result.append(path) }
-            }
-            .joined(separator: ":")
-        environment["PATH"] = mergedPath
-        environment["SHELL"] = "/bin/zsh"
-        environment["HOME"] = NSHomeDirectory()
-        // Ensure UTF-8 locale for proper CJK character handling in command output.
-        // macOS .app bundles don't inherit terminal locale, causing wc/find/etc to output ? for non-ASCII.
-        if environment["LANG"] == nil { environment["LANG"] = "en_US.UTF-8" }
-        if environment["LC_ALL"] == nil { environment["LC_ALL"] = "en_US.UTF-8" }
-        process.environment = environment
+        process.environment = Self.shellEnvironment()
         if !context.workspaceRoot.isEmpty {
             process.currentDirectoryURL = URL(fileURLWithPath: context.workspaceRoot)
         }
@@ -622,7 +692,8 @@ public struct ShellTool: LaicaiTool {
             let errorOutput = String(data: errData, encoding: .utf8) ?? ""
 
             Task { @MainActor in
-                let auditOutput = exitCode == 0
+                let auditOutput =
+                    exitCode == 0
                     ? "exit code 0"
                     : "exit code \(exitCode)：\(String(errorOutput.prefix(300)))"
                 AuditLog.shared.record(
@@ -638,6 +709,55 @@ public struct ShellTool: LaicaiTool {
             }
             return Self.makeShellResult(exitCode: exitCode, stdout: output, stderr: errorOutput)
         }.value
+    }
+
+    private static func sandboxedResultIfNeeded(command: String, context: TaskContext) async -> ToolResult? {
+        let sandboxConfig = await SecurityManager.shared.sandboxConfig
+        guard sandboxConfig.mode != .none else { return nil }
+        do {
+            let result = try await SandboxExecutor.execute(
+                command: command,
+                workspaceRoot: context.workspaceRoot,
+                config: sandboxConfig
+            )
+            let combined = [result.output, result.error].filter { !$0.isEmpty }.joined(separator: "\n")
+            let trimmed = String(combined.suffix(8000))
+            return ToolResult(
+                output: trimmed.isEmpty ? "(命令执行完成，无输出)" : trimmed,
+                data: ["exit_code": "\(result.exitCode)", "sandbox": sandboxConfig.mode.rawValue],
+                success: result.exitCode == 0,
+                error: result.exitCode == 0 ? nil : "exit_\(result.exitCode)"
+            )
+        } catch {
+            return ToolResult(output: "沙箱执行失败：\(error.localizedDescription)", success: false, error: "sandbox_error")
+        }
+    }
+
+    private static func shellEnvironment() -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        let commonPaths = [
+            "/opt/homebrew/bin", "/opt/homebrew/sbin",
+            "/usr/local/bin", "/usr/local/sbin",
+            "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+            "\(NSHomeDirectory())/.local/bin",
+            "\(NSHomeDirectory())/.cargo/bin",
+            "\(NSHomeDirectory())/.bun/bin"
+        ]
+        let existingPath = environment["PATH"] ?? ""
+        environment["PATH"] = mergedPath(commonPaths: commonPaths, existingPath: existingPath)
+        environment["SHELL"] = "/bin/zsh"
+        environment["HOME"] = NSHomeDirectory()
+        if environment["LANG"] == nil { environment["LANG"] = "en_US.UTF-8" }
+        if environment["LC_ALL"] == nil { environment["LC_ALL"] = "en_US.UTF-8" }
+        return environment
+    }
+
+    private static func mergedPath(commonPaths: [String], existingPath: String) -> String {
+        (commonPaths + existingPath.split(separator: ":").map(String.init))
+            .reduce(into: [String]()) { result, path in
+                if !path.isEmpty && !result.contains(path) { result.append(path) }
+            }
+            .joined(separator: ":")
     }
 
     private static func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) async -> Bool {

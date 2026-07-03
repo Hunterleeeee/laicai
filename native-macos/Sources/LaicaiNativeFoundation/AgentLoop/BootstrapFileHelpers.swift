@@ -3,6 +3,44 @@ import LaicaiNativeDomain
 
 @MainActor
 extension AgentLoop {
+    struct BootstrapFileExtractRequest {
+        let path: String
+        let extractTool: any LaicaiTool
+        let callId: String
+        let maxTokens: Int
+
+        init(
+            path: String,
+            extractTool: any LaicaiTool,
+            maxTokens: Int,
+            callId: String = "call_bootstrap_file_extract"
+        ) {
+            self.path = path
+            self.extractTool = extractTool
+            self.callId = callId
+            self.maxTokens = maxTokens
+        }
+    }
+
+    struct BootstrapFileReadRequest {
+        let path: String
+        let readTool: any LaicaiTool
+        let callId: String
+        let maxTokens: Int
+
+        init(
+            path: String,
+            readTool: any LaicaiTool,
+            maxTokens: Int,
+            callId: String = "call_bootstrap_file_read"
+        ) {
+            self.path = path
+            self.readTool = readTool
+            self.callId = callId
+            self.maxTokens = maxTokens
+        }
+    }
+
     static func autoExtractUnsupportedRead(path: String, extractTool: any LaicaiTool, context: TaskContext) async -> ToolResult? {
         let extractArgs: [String: Any] = ["path": path, "limit": 60_000]
         let extractJSON = (try? JSONSerialization.data(withJSONObject: extractArgs)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
@@ -12,14 +50,12 @@ extension AgentLoop {
     }
 
     static func runBootstrapFileExtract(
-        path: String,
-        extractTool: any LaicaiTool,
+        _ request: BootstrapFileExtractRequest,
         taskContext: inout TaskContext,
         task: inout AgentTask,
-        callId: String = "call_bootstrap_file_extract",
-        maxTokens: Int,
         onStep: @MainActor (TaskStep) -> Void
     ) async -> ChatMessage {
+        let path = request.path
         let argumentsJSON = bootstrapExtractArgumentsJSON(for: path)
         let toolParams = displayParamsFromJSON(argumentsJSON)
         let callStep = TaskStep(
@@ -27,7 +63,7 @@ extension AgentLoop {
             text: ToolStepFormatter.callText(toolName: "file.extract", arguments: toolParams),
             toolName: "file.extract",
             toolParams: toolParams,
-            toolCallId: callId,
+            toolCallId: request.callId,
             isCollapsible: true,
             isCollapsed: true
         )
@@ -35,7 +71,7 @@ extension AgentLoop {
         onStep(callStep)
 
         let (toolResult, _) = await ValidationEngine.executeWithValidationJSON(
-            tool: extractTool,
+            tool: request.extractTool,
             argumentsJSON: argumentsJSON,
             context: taskContext
         )
@@ -43,7 +79,7 @@ extension AgentLoop {
             kind: .toolResult,
             text: ToolResultFormatter.displayText(toolName: "file.extract", arguments: toolParams, result: toolResult),
             toolName: "file.extract",
-            toolCallId: callId,
+            toolCallId: request.callId,
             isCollapsible: true,
             isCollapsed: true,
             isFailure: !toolResult.success
@@ -58,7 +94,7 @@ extension AgentLoop {
         let resultContent = ToolResultFormatter.modelContent(
             toolName: "file.extract",
             result: toolResult,
-            limit: maxTokens
+            limit: request.maxTokens
         )
         let instruction = toolResult.success
             ? "我已直接提取用户提供的表格/文档。请基于真实提取结果继续推进当前会话目标；如果用户要求整理到 Wiki，必须调用 wiki_build(save=true) 保存笔记。"
@@ -74,14 +110,12 @@ extension AgentLoop {
     }
 
     static func runBootstrapFileRead(
-        path: String,
-        readTool: any LaicaiTool,
+        _ request: BootstrapFileReadRequest,
         taskContext: inout TaskContext,
         task: inout AgentTask,
-        callId: String = "call_bootstrap_file_read",
-        maxTokens: Int,
         onStep: @MainActor (TaskStep) -> Void
     ) async -> String {
+        let path = request.path
         let argumentsJSON = bootstrapReadArgumentsJSON(for: path)
         let toolParams = displayParamsFromJSON(argumentsJSON)
         let callStep = TaskStep(
@@ -89,7 +123,7 @@ extension AgentLoop {
             text: ToolStepFormatter.callText(toolName: "file.read", arguments: toolParams),
             toolName: "file.read",
             toolParams: toolParams,
-            toolCallId: callId,
+            toolCallId: request.callId,
             isCollapsible: true,
             isCollapsed: true
         )
@@ -97,7 +131,7 @@ extension AgentLoop {
         onStep(callStep)
 
         let (toolResult, _) = await ValidationEngine.executeWithValidationJSON(
-            tool: readTool,
+            tool: request.readTool,
             argumentsJSON: argumentsJSON,
             context: taskContext
         )
@@ -105,7 +139,7 @@ extension AgentLoop {
             kind: .toolResult,
             text: ToolResultFormatter.displayText(toolName: "file.read", arguments: toolParams, result: toolResult),
             toolName: "file.read",
-            toolCallId: callId,
+            toolCallId: request.callId,
             isCollapsible: true,
             isCollapsed: true,
             isFailure: !toolResult.success
@@ -116,7 +150,7 @@ extension AgentLoop {
         let readContent = ToolResultFormatter.modelContent(
             toolName: "file.read",
             result: toolResult,
-            limit: maxTokens
+            limit: request.maxTokens
         )
         return """
 

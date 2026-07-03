@@ -80,29 +80,29 @@ public enum InputTransform: Codable, Sendable {
     private enum CodingKeys: String, CodingKey { case type, value }
 
     public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
+        var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .passthrough:
-            try c.encode("passthrough", forKey: .type)
-        case .template(let t):
-            try c.encode("template", forKey: .type)
-            try c.encode(t, forKey: .value)
-        case .jsonPath(let p):
-            try c.encode("jsonPath", forKey: .type)
-            try c.encode(p, forKey: .value)
+            try container.encode("passthrough", forKey: .type)
+        case .template(let template):
+            try container.encode("template", forKey: .type)
+            try container.encode(template, forKey: .value)
+        case .jsonPath(let path):
+            try container.encode("jsonPath", forKey: .type)
+            try container.encode(path, forKey: .value)
         case .lineByLine:
-            try c.encode("lineByLine", forKey: .type)
+            try container.encode("lineByLine", forKey: .type)
         }
     }
 
     public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try c.decode(String.self, forKey: .type)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
         switch type {
         case "template":
-            self = .template(try c.decode(String.self, forKey: .value))
+            self = .template(try container.decode(String.self, forKey: .value))
         case "jsonPath":
-            self = .jsonPath(try c.decode(String.self, forKey: .value))
+            self = .jsonPath(try container.decode(String.self, forKey: .value))
         case "lineByLine":
             self = .lineByLine
         default:
@@ -285,8 +285,8 @@ public final class SkillCompositionEngine: ObservableObject {
         switch transform {
         case .passthrough:
             return input
-        case .template(let t):
-            return t.replacingOccurrences(of: "{{input}}", with: input)
+        case .template(let template):
+            return template.replacingOccurrences(of: "{{input}}", with: input)
         case .jsonPath(let path):
             // Simple top-level key extraction
             guard let data = input.data(using: .utf8),

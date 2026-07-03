@@ -3,16 +3,19 @@ import LaicaiNativeDomain
 
 @MainActor
 extension AgentLoop {
+    struct RecoveryToolRequest {
+        let displayName: String
+        let argumentsJSON: String
+        let context: TaskContext
+    }
+
     func executeRecoveryTool(
-        displayName: String,
-        argumentsJSON: String,
+        request: RecoveryToolRequest,
         task: inout AgentTask,
         messages: inout [ChatMessage],
-        context: TaskContext,
-        usesOllamaChat: Bool,
         onStep: @MainActor (TaskStep) -> Void
     ) async -> Bool {
-        let canonicalName = ToolNameCodec.canonicalName(displayName)
+        let canonicalName = ToolNameCodec.canonicalName(request.displayName)
         guard isToolAllowed(canonicalName) else {
             let blockedStep = TaskStep(
                 kind: .toolResult,
@@ -26,11 +29,11 @@ extension AgentLoop {
             onStep(blockedStep)
             return false
         }
-        guard let tool = toolRegistry.tool(named: displayName) else {
+        guard let tool = toolRegistry.tool(named: request.displayName) else {
             return false
         }
 
-        let params = parseParamsFromJSON(argumentsJSON)
+        let params = parseParamsFromJSON(request.argumentsJSON)
         let callId = "call_recovery_\(ToolNameCodec.apiName(canonicalName))_\(UUID().uuidString.prefix(8))"
         let callStep = TaskStep(
             kind: .toolCall,
@@ -50,8 +53,8 @@ extension AgentLoop {
         } else {
             let validated = await ValidationEngine.executeWithValidationJSON(
                 tool: tool,
-                argumentsJSON: argumentsJSON,
-                context: context,
+                argumentsJSON: request.argumentsJSON,
+                context: request.context,
                 maxRetries: 1
             )
             result = validated.result

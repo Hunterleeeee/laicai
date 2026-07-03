@@ -58,30 +58,32 @@ public struct UserFrustrationDetector {
 // MARK: - Result Evaluator (self-evolution metrics)
 
 public struct ResultEvaluator {
+    public struct ScoreRequest: Sendable {
+        public let status: TaskStatus
+        public let iterations: Int
+        public let maxIterations: Int
+        public let hadFailure: Bool
+        public let wasCancelled: Bool
+        public let wasTruncated: Bool
+        public let durationSeconds: Double
+        public let userFollowupCount: Int
+    }
+
     /// Score a task outcome on a 0–100 scale for self-evolution.
     /// Higher = better user experience. Used to compare routing decisions and prompt variants.
-    public static func score(
-        status: TaskStatus,
-        iterations: Int,
-        maxIterations: Int,
-        hadFailure: Bool,
-        wasCancelled: Bool,
-        wasTruncated: Bool,
-        durationSeconds: Double,
-        userFollowupCount: Int
-    ) -> Int {
+    public static func score(_ request: ScoreRequest) -> Int {
         var score = 100
 
         // Heavy penalty for cancellation or failure
-        if wasCancelled { score -= 40 }
-        if status == .failed { score -= 30 }
-        if hadFailure { score -= 15 }
+        if request.wasCancelled { score -= 40 }
+        if request.status == .failed { score -= 30 }
+        if request.hadFailure { score -= 15 }
 
         // Penalty for truncation (incomplete output)
-        if wasTruncated { score -= 10 }
+        if request.wasTruncated { score -= 10 }
 
         // Penalty for excessive iterations (inefficiency)
-        let iterationRatio = Double(iterations) / Double(max(maxIterations, 1))
+        let iterationRatio = Double(request.iterations) / Double(max(request.maxIterations, 1))
         if iterationRatio > 0.8 {
             score -= 15
         } else if iterationRatio > 0.5 {
@@ -91,12 +93,12 @@ public struct ResultEvaluator {
         }
 
         // Penalty for long duration on simple tasks
-        if durationSeconds > 120 {
-            score -= Int(min(15, durationSeconds / 60))
+        if request.durationSeconds > 120 {
+            score -= Int(min(15, request.durationSeconds / 60))
         }
 
         // Penalty for user needing to follow up repeatedly
-        score -= min(20, userFollowupCount * 5)
+        score -= min(20, request.userFollowupCount * 5)
 
         return max(0, min(100, score))
     }

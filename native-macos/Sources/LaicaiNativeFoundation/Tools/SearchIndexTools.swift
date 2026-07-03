@@ -1,6 +1,17 @@
 import Foundation
 import LaicaiNativeDomain
 
+private struct WorkspaceIndexScan {
+    var files: [String] = []
+    var directories: Set<String> = []
+    var languageCounts: [String: Int] = [:]
+    var important: [String] = []
+    var entryCandidates: [String] = []
+    var testCandidates: [String] = []
+    var configCandidates: [String] = []
+    var riskCandidates: [String] = []
+}
+
 // MARK: - Search Tool
 
 public struct SearchTool: LaicaiTool {
@@ -82,8 +93,10 @@ public struct SearchTool: LaicaiTool {
         // English conversational patterns
         let words = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
         if words.count >= 5 {
-            let commonWords: Set<String> = ["the", "a", "an", "is", "are", "was", "were", "i", "you", "we", "they", "it",
-                                             "do", "does", "did", "can", "could", "would", "should", "please", "help", "want"]
+            let commonWords: Set<String> = [
+                "the", "a", "an", "is", "are", "was", "were", "i", "you", "we", "they", "it",
+                "do", "does", "did", "can", "could", "would", "should", "please", "help", "want"
+            ]
             let commonCount = words.filter { commonWords.contains($0.lowercased()) }.count
             if commonCount >= 3 { return true }
         }
@@ -91,14 +104,17 @@ public struct SearchTool: LaicaiTool {
     }
 
     private func searchFiles(query: String, root: String, maxResults: Int, contextMode: ContextMode = .balanced) throws -> ToolResult {
-        let fm = FileManager.default
+        let fileManager = FileManager.default
         var results: [String] = []
-        let enumerator = fm.enumerator(atPath: root)
-        let ignoredDirs: Set<String> = [".git", "node_modules", ".build", "DerivedData", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv"]
+        let enumerator = fileManager.enumerator(atPath: root)
+        let ignoredDirs: Set<String> = [
+            ".git", "node_modules", ".build", "DerivedData", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv"
+        ]
         // Short ASCII queries (≤4 chars like "RAG") use word-boundary matching
         // to avoid "RAG" matching "draggable", "LLM" matching "scrolllm", etc.
         let isShortAscii = query.count <= 4 && query.allSatisfy(\.isASCII)
-        let wordBoundaryRegex = isShortAscii
+        let wordBoundaryRegex =
+            isShortAscii
             ? try? NSRegularExpression(pattern: "(?:^|[^a-zA-Z])\(NSRegularExpression.escapedPattern(for: query))(?:[^a-zA-Z]|$)", options: .caseInsensitive)
             : nil
         while let file = enumerator?.nextObject() as? String {
@@ -125,13 +141,18 @@ public struct SearchTool: LaicaiTool {
     }
 
     private func searchContent(query: String, root: String, maxResults: Int, contextMode: ContextMode = .balanced) async throws -> ToolResult {
+        guard Self.commandExists("rg") else {
+            return ToolResult(output: "未找到 ripgrep（rg）。请安装 rg 后再使用 code.search，或改用 file.read 精确读取已知文件。", success: false, error: "rg_missing")
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         // Short ASCII queries get -w (whole word) to avoid "RAG" matching "draggable" etc.
         let isShortAscii = query.count <= 4 && query.allSatisfy(\.isASCII)
-        var args = ["rg", "--no-heading", "-n", "--max-count", "\(maxResults)",
+        var args = [
+            "rg", "--no-heading", "-n", "--max-count", "\(maxResults)",
             "--max-filesize", "1M", "--glob", "!**/.git/**", "--glob", "!**/.build/**",
-            "--glob", "!**/node_modules/**", "--glob", "!**/DerivedData/**"]
+            "--glob", "!**/node_modules/**", "--glob", "!**/DerivedData/**"
+        ]
         if isShortAscii { args.append("-w") }
         args.append(contentsOf: [query, root])
         process.arguments = args
@@ -159,6 +180,21 @@ public struct SearchTool: LaicaiTool {
         let truncated = output.count > maxChars ? String(output.prefix(maxChars)) + "\n... (已截断，当前\(contextMode.rawValue)模式)" : output
         let count = output.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
         return ToolResult(output: truncated, data: ["query": query, "count": "\(count)"])
+    }
+
+    private static func commandExists(_ name: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["which", name]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
     }
 
     private func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) async -> Bool {
@@ -197,7 +233,7 @@ public struct WorkspaceIndexTool: LaicaiTool {
 
     // Simple dedup: cache last index result per workspace root (5-minute TTL)
     private static var indexCache: [String: (result: ToolResult, at: Date)] = [:]
-    private static let cacheTTL: TimeInterval = 300 // 5 minutes
+    private static let cacheTTL: TimeInterval = 300  // 5 minutes
 
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(
@@ -238,7 +274,7 @@ public struct WorkspaceIndexTool: LaicaiTool {
 
         // Return cached result if indexed recently (prevents wasteful re-scans)
         if let cached = Self.indexCache[root],
-           Date().timeIntervalSince(cached.at) < Self.cacheTTL {
+            Date().timeIntervalSince(cached.at) < Self.cacheTTL {
             return ToolResult(
                 output: "（缓存）" + cached.result.output + "\n\n⚠️ 该工作区在 \(Int(Date().timeIntervalSince(cached.at))) 秒前刚索引过，返回缓存结果。请勿重复调用 workspace.index。",
                 data: cached.result.data
@@ -247,71 +283,15 @@ public struct WorkspaceIndexTool: LaicaiTool {
 
         let maxFiles = max(20, min(params.maxFiles ?? 300, 1000))
         let maxDepth = max(1, min(params.maxDepth ?? 5, 10))
-        let ignored: Set<String> = [
-            ".git", ".build", "DerivedData", "node_modules", "__pycache__", ".pytest_cache",
-            ".mypy_cache", ".ruff_cache", ".venv", "venv", "venv3", "dist", "build",
-            ".DS_Store"
-        ]
-        let importantNames: Set<String> = [
-            "README.md", "AGENTS.md", "CLAUDE.md", "Package.swift", "pyproject.toml",
-            "package.json", "Cargo.toml", "go.mod", "Makefile", "Dockerfile", "ROADMAP.md"
-        ]
-
-        var files: [String] = []
-        var directories: Set<String> = []
-        var languageCounts: [String: Int] = [:]
-        var important: [String] = []
-        var entryCandidates: [String] = []
-        var testCandidates: [String] = []
-        var configCandidates: [String] = []
-        var riskCandidates: [String] = []
-        let enumerator = FileManager.default.enumerator(atPath: root)
-        while let item = enumerator?.nextObject() as? String {
-            let components = item.split(separator: "/").map(String.init)
-            let name = components.last ?? item
-            let lowerItem = item.lowercased()
-            let lowerName = name.lowercased()
-            if ignored.contains(name) || components.contains(where: { ignored.contains($0) }) {
-                enumerator?.skipDescendants()
-                continue
-            }
-            guard components.count <= maxDepth else {
-                if FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent(item), isDirectory: &isDirectory),
-                   isDirectory.boolValue {
-                    enumerator?.skipDescendants()
-                }
-                continue
-            }
-
-            let full = (root as NSString).appendingPathComponent(item)
-            var childIsDirectory: ObjCBool = false
-            FileManager.default.fileExists(atPath: full, isDirectory: &childIsDirectory)
-            if childIsDirectory.boolValue {
-                directories.insert(item)
-                continue
-            }
-
-            files.append(item)
-            let ext = (item as NSString).pathExtension.lowercased()
-            let language = ext.isEmpty ? name : ext
-            languageCounts[language, default: 0] += 1
-            if importantNames.contains(name) || item.contains("/Tests/") || item.contains("/tests/") {
-                important.append(item)
-            }
-            if importantNames.contains(name) || ["package.json", "pyproject.toml", "Package.swift", "Cargo.toml", "go.mod", "requirements.txt", "tsconfig.json"].contains(name) {
-                configCandidates.append(item)
-            }
-            if lowerName == "main.swift" || lowerName == "main.py" || lowerName == "app.py" || lowerName == "index.ts" || lowerName == "index.js" || lowerName == "main.ts" || lowerName == "main.js" || lowerItem.hasPrefix("sources/") || lowerItem.contains("/sources/") || lowerItem.hasPrefix("src/") || lowerItem.contains("/src/") {
-                entryCandidates.append(item)
-            }
-            if lowerItem.hasPrefix("test") || lowerItem.contains("/test") || lowerItem.contains("/tests/") || lowerName.hasPrefix("test_") || lowerName.hasSuffix("test.swift") || lowerName.hasSuffix("tests.swift") || lowerName.hasSuffix(".test.ts") || lowerName.hasSuffix(".spec.ts") {
-                testCandidates.append(item)
-            }
-            if lowerItem.contains("todo") || lowerItem.contains("fixme") || lowerItem.contains("security") || lowerItem.contains("secret") || lowerItem.contains("auth") || lowerItem.contains("token") || lowerItem.contains("credential") {
-                riskCandidates.append(item)
-            }
-            if files.count >= maxFiles { break }
-        }
+        let scan = Self.scanWorkspace(root: root, maxFiles: maxFiles, maxDepth: maxDepth)
+        let files = scan.files
+        let directories = scan.directories
+        let languageCounts = scan.languageCounts
+        let important = scan.important
+        let entryCandidates = scan.entryCandidates
+        let testCandidates = scan.testCandidates
+        let configCandidates = scan.configCandidates
+        let riskCandidates = scan.riskCandidates
 
         let topDirs = directories.sorted().prefix(40)
         let topFiles = files.prefix(120)
@@ -339,55 +319,56 @@ public struct WorkspaceIndexTool: LaicaiTool {
         let symbolIndex = Self.extractSymbols(files: entryCandidates + important, root: root, limit: 40)
         let sourceKitAvailable = Self.commandAvailable("sourcekit-lsp")
         let treeSitterAvailable = Self.commandAvailable("tree-sitter")
-        let indexEngine = sourceKitAvailable ? "sourcekit-ready+regex-lightweight" : (treeSitterAvailable ? "tree-sitter-ready+regex-lightweight" : "regex-lightweight")
+        let indexEngine =
+            sourceKitAvailable ? "sourcekit-ready+regex-lightweight" : (treeSitterAvailable ? "tree-sitter-ready+regex-lightweight" : "regex-lightweight")
 
         let output = """
-        工作区：\(root)
-        已索引：\(files.count) 个文件，\(directories.count) 个目录（上限 \(maxFiles) 文件，深度 \(maxDepth)）
-        索引引擎：\(indexEngine)
+            工作区：\(root)
+            已索引：\(files.count) 个文件，\(directories.count) 个目录（上限 \(maxFiles) 文件，深度 \(maxDepth)）
+            索引引擎：\(indexEngine)
 
-        语言/类型分布：
-        \(languages.map { "- \($0.key): \($0.value)" }.joined(separator: "\n"))
+            语言/类型分布：
+            \(languages.map { "- \($0.key): \($0.value)" }.joined(separator: "\n"))
 
-        关键文件：
-        \((important.isEmpty ? Array(topFiles.prefix(20)) : Array(important.prefix(40))).map { "- \($0)" }.joined(separator: "\n"))
+            关键文件：
+            \((important.isEmpty ? Array(topFiles.prefix(20)) : Array(important.prefix(40))).map { "- \($0)" }.joined(separator: "\n"))
 
-        入口候选：
-        \(entryCandidates.prefix(30).map { "- \($0)" }.joined(separator: "\n"))
+            入口候选：
+            \(entryCandidates.prefix(30).map { "- \($0)" }.joined(separator: "\n"))
 
-        测试候选：
-        \(testCandidates.prefix(30).map { "- \($0)" }.joined(separator: "\n"))
+            测试候选：
+            \(testCandidates.prefix(30).map { "- \($0)" }.joined(separator: "\n"))
 
-        配置候选：
-        \(configCandidates.prefix(30).map { "- \($0)" }.joined(separator: "\n"))
+            配置候选：
+            \(configCandidates.prefix(30).map { "- \($0)" }.joined(separator: "\n"))
 
-        风险/关注候选：
-        \((riskCandidates.isEmpty ? ["- 暂未从路径名发现明显风险文件"] : riskCandidates.prefix(30).map { "- \($0)" }).joined(separator: "\n"))
+            风险/关注候选：
+            \((riskCandidates.isEmpty ? ["- 暂未从路径名发现明显风险文件"] : riskCandidates.prefix(30).map { "- \($0)" }).joined(separator: "\n"))
 
-        模块边界：
-        \(moduleBoundaries.isEmpty ? "- 未检测到明显模块分区" : moduleBoundaries.prefix(15).map { "- \($0)" }.joined(separator: "\n"))
+            模块边界：
+            \(moduleBoundaries.isEmpty ? "- 未检测到明显模块分区" : moduleBoundaries.prefix(15).map { "- \($0)" }.joined(separator: "\n"))
 
-        符号索引（关键类型与函数）：
-        \(symbolIndex.isEmpty ? "- 未提取到符号" : symbolIndex.prefix(60).map { "- \($0)" }.joined(separator: "\n"))
+            符号索引（关键类型与函数）：
+            \(symbolIndex.isEmpty ? "- 未提取到符号" : symbolIndex.prefix(60).map { "- \($0)" }.joined(separator: "\n"))
 
-        依赖热点（被最多文件引用）：
-        \(dependencyHotspots.isEmpty ? "- 未检测到明显依赖热点" : dependencyHotspots.prefix(10).map { "- \($0)" }.joined(separator: "\n"))
+            依赖热点（被最多文件引用）：
+            \(dependencyHotspots.isEmpty ? "- 未检测到明显依赖热点" : dependencyHotspots.prefix(10).map { "- \($0)" }.joined(separator: "\n"))
 
-        最近改动热点（7天内）：
-        \(recentChanges.isEmpty ? "- 暂无最近改动记录" : recentChanges.prefix(15).map { "- \($0)" }.joined(separator: "\n"))
+            最近改动热点（7天内）：
+            \(recentChanges.isEmpty ? "- 暂无最近改动记录" : recentChanges.prefix(15).map { "- \($0)" }.joined(separator: "\n"))
 
-        调用图（模块间依赖）：
-        \(callGraph.isEmpty ? "- 未检测到模块间调用关系" : callGraph.map { "- \($0)" }.joined(separator: "\n"))
+            调用图（模块间依赖）：
+            \(callGraph.isEmpty ? "- 未检测到模块间调用关系" : callGraph.map { "- \($0)" }.joined(separator: "\n"))
 
-        测试覆盖关系：
-        \(testCoverage.isEmpty ? "- 未检测到测试文件" : testCoverage.map { "- \($0)" }.joined(separator: "\n"))
+            测试覆盖关系：
+            \(testCoverage.isEmpty ? "- 未检测到测试文件" : testCoverage.map { "- \($0)" }.joined(separator: "\n"))
 
-        顶层/重要目录：
-        \(topDirs.map { "- \($0)/" }.joined(separator: "\n"))
+            顶层/重要目录：
+            \(topDirs.map { "- \($0)/" }.joined(separator: "\n"))
 
-        文件样例：
-        \(topFiles.map { "- \($0)" }.joined(separator: "\n"))
-        """
+            文件样例：
+            \(topFiles.map { "- \($0)" }.joined(separator: "\n"))
+            """
 
         await AuditLog.shared.record(
             tool: name,
@@ -416,6 +397,125 @@ public struct WorkspaceIndexTool: LaicaiTool {
     }
 
     // MARK: - Workspace Analysis Helpers
+
+    private static let ignoredIndexNames: Set<String> = [
+        ".git", ".build", "DerivedData", "node_modules", "__pycache__", ".pytest_cache",
+        ".mypy_cache", ".ruff_cache", ".venv", "venv", "venv3", "dist", "build",
+        ".DS_Store"
+    ]
+
+    private static let importantIndexNames: Set<String> = [
+        "README.md", "AGENTS.md", "CLAUDE.md", "Package.swift", "pyproject.toml",
+        "package.json", "Cargo.toml", "go.mod", "Makefile", "Dockerfile", "ROADMAP.md"
+    ]
+
+    private static let configIndexNames: Set<String> = [
+        "package.json", "pyproject.toml", "Package.swift", "Cargo.toml",
+        "go.mod", "requirements.txt", "tsconfig.json"
+    ]
+
+    private static let entryIndexNames: Set<String> = [
+        "main.swift", "main.py", "app.py", "index.ts", "index.js", "main.ts", "main.js"
+    ]
+
+    private static let riskIndexTerms: [String] = [
+        "todo", "fixme", "security", "secret", "auth", "token", "credential"
+    ]
+
+    private static func scanWorkspace(root: String, maxFiles: Int, maxDepth: Int) -> WorkspaceIndexScan {
+        var scan = WorkspaceIndexScan()
+        let enumerator = FileManager.default.enumerator(atPath: root)
+        while let item = enumerator?.nextObject() as? String {
+            let components = item.split(separator: "/").map(String.init)
+            let name = components.last ?? item
+            if shouldIgnoreIndexItem(name: name, components: components) {
+                enumerator?.skipDescendants()
+                continue
+            }
+            guard components.count <= maxDepth else {
+                skipIndexDirectory(root: root, item: item, enumerator: enumerator)
+                continue
+            }
+            let fullPath = (root as NSString).appendingPathComponent(item)
+            if isDirectory(fullPath) {
+                scan.directories.insert(item)
+                continue
+            }
+            recordIndexFile(item, name: name, in: &scan)
+            if scan.files.count >= maxFiles { break }
+        }
+        return scan
+    }
+
+    private static func shouldIgnoreIndexItem(name: String, components: [String]) -> Bool {
+        ignoredIndexNames.contains(name) || components.contains(where: { ignoredIndexNames.contains($0) })
+    }
+
+    private static func skipIndexDirectory(root: String, item: String, enumerator: FileManager.DirectoryEnumerator?) {
+        let fullPath = (root as NSString).appendingPathComponent(item)
+        guard isDirectory(fullPath) else { return }
+        enumerator?.skipDescendants()
+    }
+
+    private static func isDirectory(_ path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+
+    private static func recordIndexFile(_ item: String, name: String, in scan: inout WorkspaceIndexScan) {
+        let lowerItem = item.lowercased()
+        let lowerName = name.lowercased()
+        scan.files.append(item)
+        recordLanguage(for: item, name: name, in: &scan)
+        if isImportantIndexFile(item: item, name: name) {
+            scan.important.append(item)
+        }
+        if isConfigIndexFile(name: name) {
+            scan.configCandidates.append(item)
+        }
+        if isEntryIndexFile(lowerItem: lowerItem, lowerName: lowerName) {
+            scan.entryCandidates.append(item)
+        }
+        if isTestIndexFile(lowerItem: lowerItem, lowerName: lowerName) {
+            scan.testCandidates.append(item)
+        }
+        if riskIndexTerms.contains(where: lowerItem.contains) {
+            scan.riskCandidates.append(item)
+        }
+    }
+
+    private static func recordLanguage(for item: String, name: String, in scan: inout WorkspaceIndexScan) {
+        let ext = (item as NSString).pathExtension.lowercased()
+        let language = ext.isEmpty ? name : ext
+        scan.languageCounts[language, default: 0] += 1
+    }
+
+    private static func isImportantIndexFile(item: String, name: String) -> Bool {
+        importantIndexNames.contains(name) || item.contains("/Tests/") || item.contains("/tests/")
+    }
+
+    private static func isConfigIndexFile(name: String) -> Bool {
+        importantIndexNames.contains(name) || configIndexNames.contains(name)
+    }
+
+    private static func isEntryIndexFile(lowerItem: String, lowerName: String) -> Bool {
+        entryIndexNames.contains(lowerName)
+            || lowerItem.hasPrefix("sources/")
+            || lowerItem.contains("/sources/")
+            || lowerItem.hasPrefix("src/")
+            || lowerItem.contains("/src/")
+    }
+
+    private static func isTestIndexFile(lowerItem: String, lowerName: String) -> Bool {
+        lowerItem.hasPrefix("test")
+            || lowerItem.contains("/test")
+            || lowerItem.contains("/tests/")
+            || lowerName.hasPrefix("test_")
+            || lowerName.hasSuffix("test.swift")
+            || lowerName.hasSuffix("tests.swift")
+            || lowerName.hasSuffix(".test.ts")
+            || lowerName.hasSuffix(".spec.ts")
+    }
 
     private static func commandAvailable(_ command: String) -> Bool {
         let process = Process()
@@ -470,34 +570,49 @@ public struct WorkspaceIndexTool: LaicaiTool {
         var importCounts: [String: Int] = [:]
         let importPatterns: [(prefix: String, extract: (String) -> String?)] = [
             // Swift: import Foo or import struct Foo.Bar
-            ("import ", { line in
-                let parts = line.dropFirst("import ".count).split(separator: " ", maxSplits: 1)
-                return parts.first.map { String($0) }
-            }),
+            (
+                "import ",
+                { line in
+                    let parts = line.dropFirst("import ".count).split(separator: " ", maxSplits: 1)
+                    return parts.first.map { String($0) }
+                }
+            ),
             // Python: from foo import bar or import foo
-            ("from ", { line in
-                let parts = line.dropFirst("from ".count).split(separator: " ", maxSplits: 1)
-                return parts.first.map { String($0) }
-            }),
-            ("import ", { line in
-                let parts = line.dropFirst("import ".count).split(separator: ",", maxSplits: 1)
-                return parts.first.map { String($0).trimmingCharacters(in: .whitespaces) }
-            }),
+            (
+                "from ",
+                { line in
+                    let parts = line.dropFirst("from ".count).split(separator: " ", maxSplits: 1)
+                    return parts.first.map { String($0) }
+                }
+            ),
+            (
+                "import ",
+                { line in
+                    let parts = line.dropFirst("import ".count).split(separator: ",", maxSplits: 1)
+                    return parts.first.map { String($0).trimmingCharacters(in: .whitespaces) }
+                }
+            ),
             // JS/TS: import ... from 'foo'
-            ("from '", { line in
-                if let start = line.range(of: "from '")?.upperBound,
-                   let end = line[start...].firstIndex(of: "'") {
-                    return String(line[start..<end])
+            (
+                "from '",
+                { line in
+                    if let start = line.range(of: "from '")?.upperBound,
+                        let end = line[start...].firstIndex(of: "'") {
+                        return String(line[start..<end])
+                    }
+                    return nil
                 }
-                return nil
-            }),
-            ("from \"", { line in
-                if let start = line.range(of: "from \"")?.upperBound,
-                   let end = line[start...].firstIndex(of: "\"") {
-                    return String(line[start..<end])
+            ),
+            (
+                "from \"",
+                { line in
+                    if let start = line.range(of: "from \"")?.upperBound,
+                        let end = line[start...].firstIndex(of: "\"") {
+                        return String(line[start..<end])
+                    }
+                    return nil
                 }
-                return nil
-            }),
+            )
         ]
 
         for file in files.prefix(80) {
@@ -558,25 +673,8 @@ public struct WorkspaceIndexTool: LaicaiTool {
             var localImports: Set<String> = []
             for line in content.components(separatedBy: "\n").prefix(40) {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
-                // Swift: import ModuleName
-                if ext == "swift" && trimmed.hasPrefix("import ") {
-                    let module = String(trimmed.dropFirst("import ".count).split(separator: " ").first ?? "")
-                    if uniqueLocalPrefixes.contains(module) { localImports.insert(module) }
-                }
-                // Python: from pkg import or import pkg
-                if ext == "py" && (trimmed.hasPrefix("from ") || trimmed.hasPrefix("import ")) {
-                    let pkg = trimmed.hasPrefix("from ")
-                        ? String(trimmed.dropFirst("from ".count).split(separator: " ").first ?? "")
-                        : String(trimmed.dropFirst("import ".count).split(separator: ",").first?.split(separator: " ").first ?? "")
-                    if uniqueLocalPrefixes.contains(pkg) { localImports.insert(pkg) }
-                }
-                // Go: import "pkg" or import alias "pkg"
-                if ext == "go" && trimmed.contains("import") {
-                    if let range = trimmed.range(of: "\""), let endRange = trimmed.range(of: "\"", range: range.upperBound..<trimmed.endIndex) {
-                        let pkg = String(trimmed[range.upperBound..<endRange.lowerBound])
-                        let leaf = (pkg as NSString).lastPathComponent
-                        if uniqueLocalPrefixes.contains(leaf) { localImports.insert(leaf) }
-                    }
+                if let localImport = localImport(from: trimmed, extensionName: ext, localPrefixes: uniqueLocalPrefixes) {
+                    localImports.insert(localImport)
                 }
             }
             if !localImports.isEmpty {
@@ -588,6 +686,44 @@ public struct WorkspaceIndexTool: LaicaiTool {
             let targets = edge.value.sorted().joined(separator: " → ")
             return "\(edge.key) → \(targets)"
         }
+    }
+
+    private static func localImport(from trimmed: String, extensionName: String, localPrefixes: Set<String>) -> String? {
+        switch extensionName {
+        case "swift":
+            return swiftLocalImport(from: trimmed, localPrefixes: localPrefixes)
+        case "py":
+            return pythonLocalImport(from: trimmed, localPrefixes: localPrefixes)
+        case "go":
+            return goLocalImport(from: trimmed, localPrefixes: localPrefixes)
+        default:
+            return nil
+        }
+    }
+
+    private static func swiftLocalImport(from trimmed: String, localPrefixes: Set<String>) -> String? {
+        guard trimmed.hasPrefix("import ") else { return nil }
+        let module = String(trimmed.dropFirst("import ".count).split(separator: " ").first ?? "")
+        return localPrefixes.contains(module) ? module : nil
+    }
+
+    private static func pythonLocalImport(from trimmed: String, localPrefixes: Set<String>) -> String? {
+        guard trimmed.hasPrefix("from ") || trimmed.hasPrefix("import ") else { return nil }
+        let pkg =
+            trimmed.hasPrefix("from ")
+            ? String(trimmed.dropFirst("from ".count).split(separator: " ").first ?? "")
+            : String(trimmed.dropFirst("import ".count).split(separator: ",").first?.split(separator: " ").first ?? "")
+        return localPrefixes.contains(pkg) ? pkg : nil
+    }
+
+    private static func goLocalImport(from trimmed: String, localPrefixes: Set<String>) -> String? {
+        guard trimmed.contains("import"),
+            let range = trimmed.range(of: "\""),
+            let endRange = trimmed.range(of: "\"", range: range.upperBound..<trimmed.endIndex)
+        else { return nil }
+        let pkg = String(trimmed[range.upperBound..<endRange.lowerBound])
+        let leaf = (pkg as NSString).lastPathComponent
+        return localPrefixes.contains(leaf) ? leaf : nil
     }
 
     /// Detect test-to-source coverage mapping by naming convention.
@@ -611,11 +747,10 @@ public struct WorkspaceIndexTool: LaicaiTool {
             let testName = (testFile as NSString).lastPathComponent
             // Strip test suffixes to find matching source
             var baseName = testName
-            for suffix in ["Tests.swift", "Test.swift", "Spec.swift", "_test.py", "_spec.py", ".test.js", ".test.ts", ".spec.js", ".spec.ts", "_test.go"] {
-                if baseName.hasSuffix(suffix) {
-                    baseName = String(baseName.dropLast(suffix.count))
-                    break
-                }
+            for suffix in ["Tests.swift", "Test.swift", "Spec.swift", "_test.py", "_spec.py", ".test.js", ".test.ts", ".spec.js", ".spec.ts", "_test.go"]
+            where baseName.hasSuffix(suffix) {
+                baseName = String(baseName.dropLast(suffix.count))
+                break
             }
             // Find matching source files
             for sourceFile in sourceFiles {
@@ -682,7 +817,7 @@ public struct WorkspaceIndexTool: LaicaiTool {
             ("ts", #"(?:export\s+)?(?:class|interface|type|function|const)\s+(\w+)"#),
             ("js", #"(?:export\s+)?(?:class|function|const)\s+(\w+)"#),
             ("go", #"(?:func|type)\s+(\w+)"#),
-            ("rs", #"(?:pub\s+)?(?:fn|struct|enum|trait|impl|type)\s+(\w+)"#),
+            ("rs", #"(?:pub\s+)?(?:fn|struct|enum|trait|impl|type)\s+(\w+)"#)
         ]
 
         var compiled: [String: [NSRegularExpression]] = [:]
@@ -705,12 +840,10 @@ public struct WorkspaceIndexTool: LaicaiTool {
 
             for regex in regexes {
                 let matches = regex.matches(in: linesToScan, range: NSRange(location: 0, length: nsStr.length))
-                for match in matches {
-                    if match.numberOfRanges > 1 {
-                        let name = nsStr.substring(with: match.range(at: 1))
-                        if name.count >= 2 && !name.hasPrefix("_") {
-                            fileSymbols.append(name)
-                        }
+                for match in matches where match.numberOfRanges > 1 {
+                    let name = nsStr.substring(with: match.range(at: 1))
+                    if name.count >= 2 && !name.hasPrefix("_") {
+                        fileSymbols.append(name)
                     }
                 }
             }
@@ -742,29 +875,23 @@ public struct WorkspaceIndexTool: LaicaiTool {
         let varPattern = #"^\s*(?:public\s+|private\s+|internal\s+)?(?:static\s+|class\s+)?(?:let|var)\s+(\w+)\s*[:=]"#
 
         if let typeRegex = try? NSRegularExpression(pattern: typePattern),
-           let funcRegex = try? NSRegularExpression(pattern: funcPattern),
-           let varRegex = try? NSRegularExpression(pattern: varPattern) {
+            let funcRegex = try? NSRegularExpression(pattern: funcPattern),
+            let varRegex = try? NSRegularExpression(pattern: varPattern) {
             let nsContent = lines.joined(separator: "\n") as NSString
             let fullRange = NSRange(location: 0, length: nsContent.length)
 
-            for match in typeRegex.matches(in: nsContent as String, range: fullRange) {
-                if match.numberOfRanges > 2 {
-                    let kind = nsContent.substring(with: match.range(at: 1))
-                    let name = nsContent.substring(with: match.range(at: 2))
-                    if name.count >= 2 && !name.hasPrefix("_") { symbols.append("\(kind) \(name)") }
-                }
+            for match in typeRegex.matches(in: nsContent as String, range: fullRange) where match.numberOfRanges > 2 {
+                let kind = nsContent.substring(with: match.range(at: 1))
+                let name = nsContent.substring(with: match.range(at: 2))
+                if name.count >= 2 && !name.hasPrefix("_") { symbols.append("\(kind) \(name)") }
             }
-            for match in funcRegex.matches(in: nsContent as String, range: fullRange) {
-                if match.numberOfRanges > 1 {
-                    let name = nsContent.substring(with: match.range(at: 1))
-                    if name.count >= 2 && !name.hasPrefix("_") { symbols.append("func \(name)") }
-                }
+            for match in funcRegex.matches(in: nsContent as String, range: fullRange) where match.numberOfRanges > 1 {
+                let name = nsContent.substring(with: match.range(at: 1))
+                if name.count >= 2 && !name.hasPrefix("_") { symbols.append("func \(name)") }
             }
-            for match in varRegex.matches(in: nsContent as String, range: fullRange) {
-                if match.numberOfRanges > 1 {
-                    let name = nsContent.substring(with: match.range(at: 1))
-                    if name.count >= 2 && !name.hasPrefix("_") { symbols.append("var \(name)") }
-                }
+            for match in varRegex.matches(in: nsContent as String, range: fullRange) where match.numberOfRanges > 1 {
+                let name = nsContent.substring(with: match.range(at: 1))
+                if name.count >= 2 && !name.hasPrefix("_") { symbols.append("var \(name)") }
             }
         }
         return symbols

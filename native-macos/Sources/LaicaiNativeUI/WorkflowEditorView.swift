@@ -2,6 +2,12 @@ import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
 
+private struct WorkflowNodeTypeOption {
+    let type: NodeToolType
+    let icon: String
+    let label: String
+}
+
 // MARK: - Workflow Editor
 
 struct WorkflowEditorView: View {
@@ -52,13 +58,13 @@ struct WorkflowEditorView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     startNode
-                        .padding(.horizontal, AppSpace.xl)
-                        .padding(.top, AppSpace.xl)
+                        .padding(.horizontal, AppSpace.extraLarge)
+                        .padding(.top, AppSpace.extraLarge)
 
                     ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
                         flowConnector(index: index)
                         stepNode(step, index: index)
-                            .padding(.horizontal, AppSpace.xl)
+                            .padding(.horizontal, AppSpace.extraLarge)
                             .onDrag {
                                 draggedStep = step
                                 return NSItemProvider(object: step.id.uuidString as NSString)
@@ -72,7 +78,7 @@ struct WorkflowEditorView: View {
 
                     flowConnector(index: steps.count)
                     addNodeButton
-                        .padding(.horizontal, AppSpace.xl)
+                        .padding(.horizontal, AppSpace.extraLarge)
                         .padding(.bottom, AppSpace.xxxl)
                 }
             }
@@ -80,7 +86,7 @@ struct WorkflowEditorView: View {
     }
 
     private var canvasToolbar: some View {
-        HStack(spacing: AppSpace.md) {
+        HStack(spacing: AppSpace.medium) {
             // Editable name + description
             VStack(alignment: .leading, spacing: 2) {
                 TextField("工作流名称", text: $name)
@@ -105,7 +111,7 @@ struct WorkflowEditorView: View {
                     }
                 }
             } label: {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: category.icon)
                         .font(.system(size: 9, weight: .semibold))
                     Text(category.rawValue)
@@ -130,7 +136,7 @@ struct WorkflowEditorView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .fill(SurfaceGrade.elevated.opacity(0.5))
                     )
             }
@@ -148,7 +154,7 @@ struct WorkflowEditorView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .fill(canSave ? Brand.premiumGradient : LinearGradient(colors: [SurfaceGrade.elevated], startPoint: .leading, endPoint: .trailing))
                 )
                 .shadow(color: canSave ? Brand.primary.opacity(0.3) : .clear, radius: 8, y: 2)
@@ -156,14 +162,14 @@ struct WorkflowEditorView: View {
             .buttonStyle(.plain)
             .disabled(!canSave)
         }
-        .padding(.horizontal, AppSpace.lg)
+        .padding(.horizontal, AppSpace.large)
         .padding(.vertical, 10)
     }
 
     // MARK: - Nodes
 
     private var startNode: some View {
-        HStack(spacing: AppSpace.md) {
+        HStack(spacing: AppSpace.medium) {
             // Animated start icon
             ZStack {
                 Circle()
@@ -205,11 +211,11 @@ struct WorkflowEditorView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(SurfaceGrade.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(Semantic.success.opacity(0.3), lineWidth: 1)
         )
         .shadow(color: Semantic.success.opacity(0.08), radius: 12, y: 4)
@@ -223,7 +229,7 @@ struct WorkflowEditorView: View {
         let isHovered = hoveredStepID == step.id
         let color = nodeColor(for: step.toolType)
 
-        return HStack(spacing: AppSpace.md) {
+        return HStack(spacing: AppSpace.medium) {
             // Type icon
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -299,11 +305,11 @@ struct WorkflowEditorView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(isSelected ? color.opacity(0.06) : SurfaceGrade.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(
                     isSelected ? color.opacity(0.4) : (isHovered ? SurfaceGrade.border.opacity(0.4) : SurfaceGrade.border.opacity(0.12)),
                     lineWidth: isSelected ? 1.5 : 0.5
@@ -372,11 +378,11 @@ struct WorkflowEditorView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .fill(Brand.primary.opacity(0.06))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .strokeBorder(Brand.primary.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
             )
         }
@@ -389,7 +395,7 @@ struct WorkflowEditorView: View {
     private var nodeInspector: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Brand.primary)
@@ -398,7 +404,7 @@ struct WorkflowEditorView: View {
                     .foregroundStyle(TextGrade.primary)
                 Spacer()
             }
-            .padding(.horizontal, AppSpace.lg)
+            .padding(.horizontal, AppSpace.large)
             .padding(.vertical, 12)
 
             Rectangle().fill(SurfaceGrade.divider).frame(height: 1)
@@ -406,10 +412,10 @@ struct WorkflowEditorView: View {
             if let stepID = selectedStepID, let index = steps.firstIndex(where: { $0.id == stepID }) {
                 ScrollView {
                     stepInspectorContent(index: index)
-                        .padding(AppSpace.lg)
+                        .padding(AppSpace.large)
                 }
             } else {
-                VStack(spacing: AppSpace.lg) {
+                VStack(spacing: AppSpace.large) {
                     Spacer()
                     ZStack {
                         Circle()
@@ -439,7 +445,7 @@ struct WorkflowEditorView: View {
         VStack(alignment: .leading, spacing: 16) {
             // Selected node header
             let color = nodeColor(for: steps[index].toolType)
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(color.opacity(0.15))
@@ -499,11 +505,11 @@ struct WorkflowEditorView: View {
                     .scrollContentBackground(.hidden)
                     .padding(6)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .fill(SurfaceGrade.base)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .strokeBorder(SurfaceGrade.border.opacity(0.2), lineWidth: 0.5)
                     )
                 }
@@ -545,41 +551,41 @@ struct WorkflowEditorView: View {
     // MARK: - Custom Pickers
 
     private func nodeTypePicker(selection: Binding<NodeToolType>) -> some View {
-        let types: [(NodeToolType, String, String)] = [
-            (.tool, "wrench", "工具"),
-            (.llm, "brain", "LLM"),
-            (.code, "chevron.left.forwardslash.chevron.right", "代码"),
-            (.condition, "arrow.branch", "条件"),
-            (.humanInput, "person.crop.circle.badge.checkmark", "确认"),
-            (.http, "globe", "HTTP"),
+        let types: [WorkflowNodeTypeOption] = [
+            WorkflowNodeTypeOption(type: .tool, icon: "wrench", label: "工具"),
+            WorkflowNodeTypeOption(type: .llm, icon: "brain", label: "LLM"),
+            WorkflowNodeTypeOption(type: .code, icon: "chevron.left.forwardslash.chevron.right", label: "代码"),
+            WorkflowNodeTypeOption(type: .condition, icon: "arrow.branch", label: "条件"),
+            WorkflowNodeTypeOption(type: .humanInput, icon: "person.crop.circle.badge.checkmark", label: "确认"),
+            WorkflowNodeTypeOption(type: .http, icon: "globe", label: "HTTP")
         ]
 
         return LazyVGrid(columns: [
             GridItem(.flexible(), spacing: 6),
             GridItem(.flexible(), spacing: 6),
-            GridItem(.flexible(), spacing: 6),
+            GridItem(.flexible(), spacing: 6)
         ], spacing: 6) {
-            ForEach(types, id: \.0) { type, icon, label in
-                let isActive = selection.wrappedValue == type
-                let color = nodeColor(for: type)
+            ForEach(types, id: \.type) { option in
+                let isActive = selection.wrappedValue == option.type
+                let color = nodeColor(for: option.type)
                 Button {
-                    withAnimation(AppAnimation.quick) { selection.wrappedValue = type }
+                    withAnimation(AppAnimation.quick) { selection.wrappedValue = option.type }
                 } label: {
                     VStack(spacing: 3) {
-                        Image(systemName: icon)
+                        Image(systemName: option.icon)
                             .font(.system(size: 11, weight: .medium))
-                        Text(label)
+                        Text(option.label)
                             .font(.system(size: 9, weight: .medium))
                     }
                     .foregroundStyle(isActive ? color : TextGrade.muted)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .fill(isActive ? color.opacity(0.1) : SurfaceGrade.base)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .strokeBorder(isActive ? color.opacity(0.3) : SurfaceGrade.border.opacity(0.15), lineWidth: isActive ? 1 : 0.5)
                     )
                 }
@@ -593,7 +599,7 @@ struct WorkflowEditorView: View {
             ("continue", "arrow.right", "继续"),
             ("abort", "xmark.circle", "中止"),
             ("skip", "forward", "跳过"),
-            ("retry", "arrow.counterclockwise", "重试"),
+            ("retry", "arrow.counterclockwise", "重试")
         ]
 
         return HStack(spacing: 6) {
@@ -612,11 +618,11 @@ struct WorkflowEditorView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                             .fill(isActive ? Brand.primary.opacity(0.1) : Color.clear)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                             .strokeBorder(isActive ? Brand.primary.opacity(0.25) : Color.clear, lineWidth: 0.5)
                     )
                 }
@@ -625,7 +631,7 @@ struct WorkflowEditorView: View {
         }
         .padding(3)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.base)
         )
     }
@@ -637,22 +643,22 @@ struct WorkflowEditorView: View {
                 .foregroundStyle(TextGrade.ghost)
                 .textCase(.uppercase)
             content()
-                .padding(AppSpace.sm)
+                .padding(AppSpace.small)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .fill(SurfaceGrade.card)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .strokeBorder(SurfaceGrade.border.opacity(0.15), lineWidth: 0.5)
                 )
         }
     }
 
     private func paramKeyValueEditor(stepIndex: Int) -> some View {
-        VStack(spacing: AppSpace.xs) {
-            ForEach(Array(steps[stepIndex].paramPairs.enumerated()), id: \.offset) { pairIndex, pair in
-                HStack(spacing: AppSpace.xs) {
+        VStack(spacing: AppSpace.extraSmall) {
+            ForEach(Array(steps[stepIndex].paramPairs.enumerated()), id: \.offset) { pairIndex, _ in
+                HStack(spacing: AppSpace.extraSmall) {
                     TextField("key", text: Binding(
                         get: { steps[stepIndex].paramPairs[pairIndex].key },
                         set: { steps[stepIndex].paramPairs[pairIndex].key = $0 }
@@ -699,7 +705,7 @@ struct WorkflowEditorView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 5)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                         .fill(Brand.primary.opacity(0.06))
                 )
             }
@@ -737,12 +743,12 @@ struct WorkflowEditorView: View {
     }
 
     private func loadExisting() {
-        guard let wf = existingWorkflow else { return }
-        name = wf.name
-        description = wf.description
-        category = wf.category
-        inputParams = wf.inputParams
-        steps = wf.steps.map { step in
+        guard let workflow = existingWorkflow else { return }
+        name = workflow.name
+        description = workflow.description
+        category = workflow.category
+        inputParams = workflow.inputParams
+        steps = workflow.steps.map { step in
             var editable = EditableStep(
                 name: step.name,
                 tool: step.tool,
@@ -801,16 +807,16 @@ struct WorkflowEditorView: View {
         }
     }
 
-    private func exportYAML(_ wf: WorkflowDefinition) -> String {
+    private func exportYAML(_ workflow: WorkflowDefinition) -> String {
         var lines: [String] = []
-        lines.append("name: \(wf.name)")
-        if !wf.description.isEmpty {
-            lines.append("description: \(wf.description)")
+        lines.append("name: \(workflow.name)")
+        if !workflow.description.isEmpty {
+            lines.append("description: \(workflow.description)")
         }
-        lines.append("category: \(wf.category.rawValue)")
+        lines.append("category: \(workflow.category.rawValue)")
         lines.append("")
 
-        for step in wf.steps {
+        for step in workflow.steps {
             lines.append("- step: \(step.name)")
             lines.append("  tool: \(step.tool)")
             if let condition = step.condition {
@@ -909,32 +915,42 @@ struct NodeEdge: Identifiable, Equatable {
     var label: String  // "success", "failure", "always"
 }
 
+struct DAGLayoutPosition {
+    let id: UUID
+    let col: Int
+    let row: Int
+}
+
 // MARK: - DAG Layout Helpers
 
 enum DAGLayout {
     /// Compute column assignments for steps based on condition branches.
     /// Returns (stepID → column, stepID → row) for 2D positioning.
-    static func layout(steps: [EditableStep], edges: [NodeEdge]) -> [(id: UUID, col: Int, row: Int)] {
+    static func layout(steps: [EditableStep], edges: [NodeEdge]) -> [DAGLayoutPosition] {
         guard !steps.isEmpty else { return [] }
-        var result: [(id: UUID, col: Int, row: Int)] = []
+        var result: [DAGLayoutPosition] = []
         var row = 0
-        var i = 0
-        while i < steps.count {
-            let step = steps[i]
+        var index = 0
+        while index < steps.count {
+            let step = steps[index]
             if step.toolType == .condition {
                 // Condition node at center
-                result.append((id: step.id, col: 1, row: row))
+                result.append(DAGLayoutPosition(id: step.id, col: 1, row: row))
                 row += 1
                 // Next two steps are branches (success / failure) if available
-                let branchCount = min(2, steps.count - i - 1)
-                for b in 0..<branchCount {
-                    result.append((id: steps[i + 1 + b].id, col: b * 2, row: row))
+                let branchCount = min(2, steps.count - index - 1)
+                for branchIndex in 0..<branchCount {
+                    result.append(DAGLayoutPosition(
+                        id: steps[index + 1 + branchIndex].id,
+                        col: branchIndex * 2,
+                        row: row
+                    ))
                 }
-                i += 1 + branchCount
+                index += 1 + branchCount
                 row += 1
             } else {
-                result.append((id: step.id, col: 1, row: row))
-                i += 1
+                result.append(DAGLayoutPosition(id: step.id, col: 1, row: row))
+                index += 1
                 row += 1
             }
         }
@@ -976,14 +992,14 @@ struct ParamEditorSheet: View {
     @State private var newRequired = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             Text("输入参数")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(TextGrade.primary)
 
             // Existing params
             ForEach(Array(params.enumerated()), id: \.element.id) { index, param in
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(param.label)
                             .font(AppFont.captionMedium)
@@ -1007,14 +1023,14 @@ struct ParamEditorSheet: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(AppSpace.sm)
-                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card))
+                .padding(AppSpace.small)
+                .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card))
             }
 
             Divider().opacity(0.2)
 
             // Add new param
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 TextField("变量名", text: $newKey)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11, design: .monospaced))
@@ -1034,8 +1050,8 @@ struct ParamEditorSheet: View {
                     .toggleStyle(.checkbox)
                     .font(AppFont.tiny)
             }
-            .padding(AppSpace.sm)
-            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.base))
+            .padding(AppSpace.small)
+            .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.base))
 
             HStack {
                 Spacer()
@@ -1050,7 +1066,7 @@ struct ParamEditorSheet: View {
                     newKey = ""
                     newLabel = ""
                 } label: {
-                    HStack(spacing: AppSpace.xs) {
+                    HStack(spacing: AppSpace.extraSmall) {
                         Image(systemName: "plus")
                             .font(.system(size: 10, weight: .bold))
                         Text("添加")
@@ -1064,14 +1080,14 @@ struct ParamEditorSheet: View {
                     Text("完成")
                         .font(AppFont.captionMedium)
                         .foregroundStyle(.white)
-                        .padding(.horizontal, AppSpace.md)
-                        .padding(.vertical, AppSpace.xs)
+                        .padding(.horizontal, AppSpace.medium)
+                        .padding(.vertical, AppSpace.extraSmall)
                         .background(Capsule().fill(Brand.premiumGradient))
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .frame(width: 420)
         .frame(minHeight: 300)
         .background(SurfaceGrade.panel)

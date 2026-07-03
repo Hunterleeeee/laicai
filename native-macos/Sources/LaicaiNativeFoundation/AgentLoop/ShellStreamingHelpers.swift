@@ -3,21 +3,23 @@ import LaicaiNativeDomain
 
 @MainActor
 extension AgentLoop {
-    static func executeShellStreamingViaNotification(
-        argumentsJSON: String,
-        context: TaskContext,
-        threadID: UUID,
-        resultStepID: UUID,
-        callID: String,
-        command: String
-    ) async -> ToolResult {
+    struct ShellStreamingRequest {
+        let argumentsJSON: String
+        let context: TaskContext
+        let threadID: UUID
+        let resultStepID: UUID
+        let callID: String
+        let command: String
+    }
+
+    static func executeShellStreamingViaNotification(_ request: ShellStreamingRequest) async -> ToolResult {
         struct Params: Codable {
             var command: String
             var timeout: Int?
         }
         let params: Params
         do {
-            let data = argumentsJSON.data(using: .utf8) ?? Data()
+            let data = request.argumentsJSON.data(using: .utf8) ?? Data()
             params = try JSONDecoder().decode(Params.self, from: data)
         } catch {
             return ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params")
@@ -32,15 +34,15 @@ extension AgentLoop {
             )
         }
         let policySnapshot = SecurityManager.shared.policySnapshot
-        if let securityError = ShellSecurityCheck(command: cmd, policy: policySnapshot) {
+        if let securityError = shellSecurityCheck(command: cmd, policy: policySnapshot) {
             return ToolResult(output: securityError, success: false, error: "security_denied")
         }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-c", cmd]
-        if !context.workspaceRoot.isEmpty {
-            process.currentDirectoryURL = URL(fileURLWithPath: context.workspaceRoot)
+        if !request.context.workspaceRoot.isEmpty {
+            process.currentDirectoryURL = URL(fileURLWithPath: request.context.workspaceRoot)
         }
         let stdout = Pipe()
         let stderr = Pipe()
@@ -55,9 +57,9 @@ extension AgentLoop {
                     name: .shellStreamUpdate,
                     object: nil,
                     userInfo: [
-                        "threadID": threadID,
-                        "stepID": resultStepID,
-                        "callID": callID,
+                        "threadID": request.threadID,
+                        "stepID": request.resultStepID,
+                        "callID": request.callID,
                         "command": cmd,
                         "text": text.isEmpty ? "命令运行中…" : text,
                         "isFinal": isFinal,

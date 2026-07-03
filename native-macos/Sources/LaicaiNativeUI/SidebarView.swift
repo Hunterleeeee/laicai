@@ -82,8 +82,8 @@ struct SidebarView: View {
     // MARK: - Expanded Navigation Header
 
     private var sidebarHeader: some View {
-        return VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(alignment: .center, spacing: AppSpace.sm) {
+        return VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(alignment: .center, spacing: AppSpace.small) {
                 BrandLogo(size: 24)
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -97,15 +97,15 @@ struct SidebarView: View {
                         .truncationMode(.middle)
                 }
 
-                Spacer(minLength: AppSpace.xs)
+                Spacer(minLength: AppSpace.extraSmall)
 
                 IconButton(icon: "sidebar.left", tooltip: "收起侧栏") {
                     isVisible = false
                 }
             }
-            .padding(.top, AppSpace.xs)
+            .padding(.top, AppSpace.extraSmall)
 
-            VStack(spacing: AppSpace.xs) {
+            VStack(spacing: AppSpace.extraSmall) {
                 PrimaryNavButton(icon: "hammer", title: "新任务", isSelected: false) {
                     startNewTask()
                 }
@@ -132,9 +132,9 @@ struct SidebarView: View {
             }
 
             searchBar
-                .padding(.top, AppSpace.xs)
+                .padding(.top, AppSpace.extraSmall)
 
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 Text("历史记录")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(TextGrade.ghost)
@@ -151,11 +151,11 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .help("新建项目")
             }
-            .padding(.top, AppSpace.xs)
+            .padding(.top, AppSpace.extraSmall)
         }
-        .padding(.horizontal, AppSpace.md)
-        .padding(.top, AppSpace.sm)
-        .padding(.bottom, AppSpace.xs)
+        .padding(.horizontal, AppSpace.medium)
+        .padding(.top, AppSpace.small)
+        .padding(.bottom, AppSpace.extraSmall)
     }
 
     // MARK: - Compact Rail (60px mode)
@@ -163,14 +163,14 @@ struct SidebarView: View {
     private var compactRail: some View {
         let items = Array(filteredThreadItems.prefix(compactRailHistoryLimit))
         return ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: AppSpace.xs) {
+            LazyVStack(spacing: AppSpace.extraSmall) {
                 Button {
                     isVisible = true
                 } label: {
                     BrandLogo(size: 28)
                 }
                 .buttonStyle(.plain)
-                .padding(.vertical, AppSpace.sm)
+                .padding(.vertical, AppSpace.small)
                 .help("展开导航")
 
                 CompactRailButton(icon: "hammer", tooltip: "新任务") {
@@ -208,8 +208,8 @@ struct SidebarView: View {
                     .contextMenu { threadMenu(for: item) }
                 }
             }
-            .padding(.horizontal, AppSpace.sm)
-            .padding(.vertical, AppSpace.xs)
+            .padding(.horizontal, AppSpace.small)
+            .padding(.vertical, AppSpace.extraSmall)
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -225,9 +225,9 @@ struct SidebarView: View {
         )
 
         return ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(alignment: .leading, spacing: AppSpace.xs) {
+            LazyVStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                 if sections.isEmpty {
-                    VStack(alignment: .leading, spacing: AppSpace.xs) {
+                    VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                         Text("暂无内容")
                             .font(AppFont.captionMedium)
                             .foregroundStyle(TextGrade.secondary)
@@ -235,8 +235,8 @@ struct SidebarView: View {
                             .font(AppFont.tiny)
                             .foregroundStyle(TextGrade.ghost)
                     }
-                    .padding(.horizontal, AppSpace.sm)
-                    .padding(.vertical, AppSpace.md)
+                    .padding(.horizontal, AppSpace.small)
+                    .padding(.vertical, AppSpace.medium)
                 }
 
                 if !sections.recentItems.isEmpty {
@@ -254,7 +254,7 @@ struct SidebarView: View {
                             Button {
                                 recentHistoryLimit += 8
                             } label: {
-                                HStack(spacing: AppSpace.xs) {
+                                HStack(spacing: AppSpace.extraSmall) {
                                     Image(systemName: "ellipsis.circle")
                                         .font(.system(size: 11, weight: .medium))
                                     Text("显示更多最近")
@@ -263,7 +263,7 @@ struct SidebarView: View {
                                 }
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(TextGrade.muted)
-                                .padding(.horizontal, AppSpace.sm)
+                                .padding(.horizontal, AppSpace.small)
                                 .frame(height: 28)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -288,7 +288,7 @@ struct SidebarView: View {
                             .buttonStyle(.plain)
                             .help("新建项目")
                         }
-                            .padding(.top, AppSpace.xs)
+                            .padding(.top, AppSpace.extraSmall)
 
                         ForEach(projectManager.projects) { project in
                             projectGroupView(project, projectThreads: sections.projectThreadsByID[project.id] ?? [])
@@ -311,7 +311,7 @@ struct SidebarView: View {
                             Button {
                                 olderHistoryLimit += 16
                             } label: {
-                                HStack(spacing: AppSpace.xs) {
+                                HStack(spacing: AppSpace.extraSmall) {
                                     Image(systemName: "ellipsis.circle")
                                         .font(.system(size: 11, weight: .medium))
                                     Text("显示更多历史")
@@ -320,7 +320,7 @@ struct SidebarView: View {
                                 }
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(TextGrade.muted)
-                                .padding(.horizontal, AppSpace.sm)
+                                .padding(.horizontal, AppSpace.small)
                                 .frame(height: 28)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -329,8 +329,8 @@ struct SidebarView: View {
                     }
                 }
             }
-            .padding(.horizontal, AppSpace.md)
-            .padding(.bottom, AppSpace.md)
+            .padding(.horizontal, AppSpace.medium)
+            .padding(.bottom, AppSpace.medium)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -384,7 +384,7 @@ struct SidebarView: View {
                 }
             }
         } label: {
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(TextGrade.ghost)
@@ -427,7 +427,7 @@ struct SidebarView: View {
                 }
             }
             .padding(.vertical, 3)
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
             .threadRailItem(isSelected: isActive)
         }
         .buttonStyle(.plain)
@@ -441,7 +441,7 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .contextMenu { threadMenu(for: item) }
-            .padding(.leading, AppSpace.lg)
+            .padding(.leading, AppSpace.large)
         }
 
         // "展开显示" link
@@ -450,7 +450,7 @@ struct SidebarView: View {
                 expandedProjects.insert(project.id)
                 projectHistoryLimits[project.id, default: 8] += 8
             } label: {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Text(isShowingAll ? "继续显示" : "展开显示")
                     Text("\(hiddenCount)")
                         .foregroundStyle(TextGrade.ghost)
@@ -459,7 +459,7 @@ struct SidebarView: View {
                 .foregroundStyle(Brand.primary)
             }
             .buttonStyle(.plain)
-            .padding(.leading, AppSpace.xl)
+            .padding(.leading, AppSpace.extraLarge)
             .padding(.vertical, 2)
         }
     }
@@ -487,7 +487,7 @@ struct SidebarView: View {
     }
 
     private var searchBar: some View {
-        HStack(spacing: AppSpace.xs) {
+        HStack(spacing: AppSpace.extraSmall) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(TextGrade.ghost)
@@ -509,14 +509,14 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, AppSpace.sm)
+        .padding(.horizontal, AppSpace.small)
         .padding(.vertical, 5)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.sunken)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.border.opacity(0.5), lineWidth: 0.5)
         )
     }
@@ -527,7 +527,7 @@ struct SidebarView: View {
         Group {
             if isVisible {
                 let connectorLabel = activeConnectorLabel
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Circle()
                         .fill(store.state.activeConnector?.health.color ?? TextGrade.ghost)
                         .frame(width: 6, height: 6)
@@ -538,14 +538,14 @@ struct SidebarView: View {
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal, AppSpace.md)
-                .padding(.top, AppSpace.sm)
-                .padding(.bottom, AppSpace.sm + 2)
+                .padding(.horizontal, AppSpace.medium)
+                .padding(.top, AppSpace.small)
+                .padding(.bottom, AppSpace.small + 2)
             } else {
                 Circle()
                     .fill(store.state.activeConnector?.health.color ?? TextGrade.ghost)
                     .frame(width: 7, height: 7)
-                    .padding(.vertical, AppSpace.md)
+                    .padding(.vertical, AppSpace.medium)
                     .help(activeConnectorLabel)
             }
         }
@@ -614,8 +614,8 @@ struct SidebarView: View {
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(TextGrade.ghost)
             .textCase(.uppercase)
-            .padding(.top, AppSpace.xs)
-            .padding(.leading, AppSpace.xs)
+            .padding(.top, AppSpace.extraSmall)
+            .padding(.leading, AppSpace.extraSmall)
     }
 
     private var selectedProjectIDForDisplay: UUID? {
@@ -701,7 +701,7 @@ private struct PrimaryNavButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: icon)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(isSelected ? TextGrade.primary : TextGrade.secondary)
@@ -714,10 +714,10 @@ private struct PrimaryNavButton: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
             .frame(height: 32)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                     .fill(isSelected ? SurfaceGrade.selected : Color.clear)
             )
             .contentShape(Rectangle())
@@ -762,11 +762,11 @@ private struct CompactThreadDot: View {
 
             ZStack {
                 // Avatar tile
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .fill(isSelected ? SurfaceGrade.selected : SurfaceGrade.elevated)
                     .frame(width: 34, height: 34)
                     .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .strokeBorder(
                                 isSelected ? Brand.primary.opacity(0.30) : SurfaceGrade.hairline,
                                 lineWidth: 0.6
@@ -805,13 +805,13 @@ private struct SidebarNavButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(isSelected ? Brand.primary : TextGrade.muted)
                     .frame(width: 22, height: 22)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.extraSmall, style: .continuous)
                             .fill(isSelected ? Brand.primary.opacity(0.12) : SurfaceGrade.elevated.opacity(0.45))
                     )
 
@@ -827,10 +827,10 @@ private struct SidebarNavButton: View {
                     .foregroundStyle(isSelected ? Brand.primary : TextGrade.ghost)
                     .lineLimit(1)
             }
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
             .frame(height: 30)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .fill(isSelected ? SurfaceGrade.selected : Color.clear)
             )
         }
@@ -860,9 +860,9 @@ private struct ExpandedThreadRow: View, Equatable {
     }
 
     var body: some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             ZStack {
-                RoundedRectangle(cornerRadius: AppRadius.xs, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.extraSmall, style: .continuous)
                     .fill(statusTint.opacity(isSelected ? 0.18 : 0.10))
                     .frame(width: 24, height: 24)
                 Image(systemName: agentIcon)
@@ -900,8 +900,8 @@ private struct ExpandedThreadRow: View, Equatable {
                 .font(.system(size: 10, weight: .regular))
                 .foregroundStyle(TextGrade.ghost)
         }
-        .padding(.horizontal, AppSpace.sm)
-        .padding(.vertical, AppSpace.xs)
+        .padding(.horizontal, AppSpace.small)
+        .padding(.vertical, AppSpace.extraSmall)
         .threadRailItem(isSelected: isSelected)
         .contentShape(Rectangle())
     }
@@ -965,7 +965,7 @@ private struct CompactRailButton: View {
                 .foregroundStyle(TextGrade.muted)
                 .frame(width: 34, height: 30)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                         .fill(Color.clear)
                 )
         }
@@ -989,7 +989,7 @@ struct IconButton: View {
                 .foregroundStyle(isHovered ? TextGrade.primary : TextGrade.muted)
                 .frame(width: 28, height: 28)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                         .fill(isHovered ? SurfaceGrade.hover : Color.clear)
                 )
                 .contentShape(Rectangle())
@@ -1011,7 +1011,7 @@ struct NewProjectSheet: View {
     @State private var newFolderName = ""
 
     var body: some View {
-        VStack(spacing: AppSpace.lg) {
+        VStack(spacing: AppSpace.large) {
             // Header
             HStack {
                 Text("新建项目")
@@ -1094,7 +1094,7 @@ struct NewProjectSheet: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Brand.primary)
                     }
-                    .padding(AppSpace.sm)
+                    .padding(AppSpace.small)
                     .background(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(SurfaceGrade.card)
@@ -1123,10 +1123,10 @@ struct NewProjectSheet: View {
                     Text("创建项目")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, AppSpace.lg)
-                        .padding(.vertical, AppSpace.sm)
+                        .padding(.horizontal, AppSpace.large)
+                        .padding(.vertical, AppSpace.small)
                         .background(
-                            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                 .fill(canCreate ? AnyShapeStyle(Brand.primary) : AnyShapeStyle(TextGrade.ghost))
                         )
                 }
@@ -1134,7 +1134,7 @@ struct NewProjectSheet: View {
                 .disabled(!canCreate)
             }
         }
-        .padding(AppSpace.xl)
+        .padding(AppSpace.extraLarge)
         .frame(width: 420, height: 380)
         .background(SurfaceGrade.panel)
     }

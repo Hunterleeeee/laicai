@@ -45,8 +45,8 @@ extension AppStore {
                 // Continue best-effort rollback for the remaining files.
             }
         }
-        for (si, _) in approvedSteps {
-            state.threads[threadIndex].steps[si].approved = nil
+        for (stepIndex, _) in approvedSteps {
+            state.threads[threadIndex].steps[stepIndex].approved = nil
         }
         appendReviewResult(to: threadIndex, approved: false, text: "批量回滚完成：\(rolledBack)/\(approvedSteps.count) 个文件已恢复")
         AuditLog.shared.record(tool: "batch.rollback", input: "\(approvedSteps.count) files", output: "回滚 \(rolledBack) 个文件", success: true)

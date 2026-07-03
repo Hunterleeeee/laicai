@@ -1,7 +1,7 @@
 import AppKit
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 struct CommandPaletteView: View {
     @EnvironmentObject private var store: AppStore
@@ -20,7 +20,7 @@ struct CommandPaletteView: View {
                 .onTapGesture { isPresented = false }
 
             VStack(spacing: 0) {
-                HStack(spacing: AppSpace.md) {
+                HStack(spacing: AppSpace.medium) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(TextGrade.muted)
@@ -35,16 +35,16 @@ struct CommandPaletteView: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(
-                            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                                 .fill(SurfaceGrade.elevated)
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                                    RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                                         .strokeBorder(SurfaceGrade.divider, lineWidth: 0.5)
                                 )
                         )
                 }
-                .padding(.horizontal, AppSpace.xl)
-                .padding(.vertical, AppSpace.lg)
+                .padding(.horizontal, AppSpace.extraLarge)
+                .padding(.vertical, AppSpace.large)
 
                 Rectangle().fill(SurfaceGrade.divider).frame(height: 0.5)
 
@@ -83,30 +83,30 @@ struct CommandPaletteView: View {
                                 .font(AppFont.caption)
                                 .foregroundStyle(TextGrade.muted)
                                 .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(AppSpace.xl)
+                                .padding(AppSpace.extraLarge)
                         }
                     }
-                    .padding(.vertical, AppSpace.xs)
+                    .padding(.vertical, AppSpace.extraSmall)
                 }
                 .frame(maxHeight: 420)
             }
             .frame(width: 540)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .fill(SurfaceGrade.panel)
             )
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .fill(.ultraThinMaterial)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                     .strokeBorder(SurfaceGrade.border.opacity(0.4), lineWidth: 0.5)
             )
             .shadow(color: Color.black.opacity(0.5), radius: 40, y: 16)
         }
         .onExitCommand { isPresented = false }
-        .onChange(of: query) { _ in
+        .onChange(of: query) { _, _ in
             selectedIndex = 0
         }
         .onAppear {
@@ -115,13 +115,13 @@ struct CommandPaletteView: View {
                 keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                     guard self.isPresented else { return event }
                     switch event.keyCode {
-                    case 125: // down arrow
+                    case 125:  // down arrow
                         self.selectedIndex = min(self.selectedIndex + 1, max(self.filteredActions.count - 1, 0))
                         return nil
-                    case 126: // up arrow
+                    case 126:  // up arrow
                         self.selectedIndex = max(self.selectedIndex - 1, 0)
                         return nil
-                    case 36: // return
+                    case 36:  // return
                         guard !self.filteredActions.isEmpty else { return event }
                         if self.selectedIndex < self.filteredActions.count {
                             self.run(self.filteredActions[self.selectedIndex])
@@ -179,20 +179,36 @@ struct CommandPaletteView: View {
         ]
 
         if store.state.selectedThread?.canContinue == true {
-            result.insert(.init(kind: .continueThread, icon: "arrow.turn.down.right", title: "继续当前 \(typeLabel)", subtitle: "沿用当前 \(typeLabel) 的上下文", keywords: ["continue", "resume"]), at: 2)
+            result.insert(
+                .init(
+                    kind: .continueThread, icon: "arrow.turn.down.right", title: "继续当前 \(typeLabel)", subtitle: "沿用当前 \(typeLabel) 的上下文",
+                    keywords: ["continue", "resume"]), at: 2)
         }
         if store.state.selectedThread != nil {
-            result.append(.init(kind: .copyMarkdown, icon: "doc.on.doc", title: "复制当前 \(typeLabel) Markdown", subtitle: "导出可读记录", keywords: ["copy", "export", "markdown"]))
-            result.append(.init(kind: .exportJSON, icon: "square.and.arrow.up", title: "导出当前 \(typeLabel) JSON", subtitle: "导出完整结构化记录", keywords: ["export", "json"]))
-            result.append(.init(kind: .exportShellScript, icon: "terminal", title: "导出为 Shell 脚本", subtitle: "提取所有 shell 命令为可运行脚本", keywords: ["export", "shell", "bash", "script"]))
-            result.append(.init(kind: .exportWorkflowYAML, icon: "arrow.triangle.branch", title: "导出为工作流 YAML", subtitle: "将步骤转为可重放工作流", keywords: ["export", "workflow", "yaml"]))
+            result.append(
+                .init(
+                    kind: .copyMarkdown, icon: "doc.on.doc", title: "复制当前 \(typeLabel) Markdown", subtitle: "导出可读记录", keywords: ["copy", "export", "markdown"]))
+            result.append(
+                .init(kind: .exportJSON, icon: "square.and.arrow.up", title: "导出当前 \(typeLabel) JSON", subtitle: "导出完整结构化记录", keywords: ["export", "json"]))
+            result.append(
+                .init(
+                    kind: .exportShellScript, icon: "terminal", title: "导出为 Shell 脚本", subtitle: "提取所有 shell 命令为可运行脚本",
+                    keywords: ["export", "shell", "bash", "script"]))
+            result.append(
+                .init(
+                    kind: .exportWorkflowYAML, icon: "arrow.triangle.branch", title: "导出为工作流 YAML", subtitle: "将步骤转为可重放工作流",
+                    keywords: ["export", "workflow", "yaml"]))
             result.append(.init(kind: .archiveThread, icon: "archivebox", title: "归档当前 \(typeLabel)", subtitle: "从侧栏隐藏", keywords: ["archive", "hide"]))
         }
         if store.state.selectedThread?.canContinue == true {
-            result.append(.init(kind: .copyEvidence, icon: "checklist", title: "复制证据清单", subtitle: "导出已读文件、工具和验证状态", keywords: ["evidence", "verify", "proof"]))
+            result.append(
+                .init(kind: .copyEvidence, icon: "checklist", title: "复制证据清单", subtitle: "导出已读文件、工具和验证状态", keywords: ["evidence", "verify", "proof"]))
         }
         if store.state.activeConnector != nil {
-            result.append(.init(kind: .testModel, icon: "waveform.path.ecg", title: "测试当前模型", subtitle: store.state.activeConnector?.name ?? "当前连接器", keywords: ["health", "connector"]))
+            result.append(
+                .init(
+                    kind: .testModel, icon: "waveform.path.ecg", title: "测试当前模型", subtitle: store.state.activeConnector?.name ?? "当前连接器",
+                    keywords: ["health", "connector"]))
         }
         if store.state.selectedThread?.steps.isEmpty == false {
             result.append(.init(kind: .retry, icon: "arrow.clockwise", title: "重试最近请求", subtitle: "重新执行最后一条用户输入", keywords: ["retry"]))
@@ -201,13 +217,14 @@ struct CommandPaletteView: View {
         // Connector switching
         for connector in store.state.connectors.prefix(6) {
             let isActive = connector.id == store.state.activeConnectorID
-            result.append(.init(
-                kind: .switchConnector(connector.id),
-                icon: isActive ? "checkmark.circle.fill" : "circle",
-                title: "切换到 \(connector.name)",
-                subtitle: connector.kind,
-                keywords: ["connector", "model", connector.name]
-            ))
+            result.append(
+                .init(
+                    kind: .switchConnector(connector.id),
+                    icon: isActive ? "checkmark.circle.fill" : "circle",
+                    title: "切换到 \(connector.name)",
+                    subtitle: connector.kind,
+                    keywords: ["connector", "model", connector.name]
+                ))
         }
 
         // Project switching
@@ -215,13 +232,14 @@ struct CommandPaletteView: View {
         if projects.count > 1 {
             for project in projects.prefix(6) {
                 let isActive = project.id == ProjectManager.shared.activeProjectID
-                result.append(.init(
-                    kind: .switchProject(project.rootPath),
-                    icon: isActive ? "folder.fill" : "folder",
-                    title: "项目：\(project.name)",
-                    subtitle: project.techStack.prefix(3).joined(separator: ", "),
-                    keywords: ["project", "项目", project.name]
-                ))
+                result.append(
+                    .init(
+                        kind: .switchProject(project.rootPath),
+                        icon: isActive ? "folder.fill" : "folder",
+                        title: "项目：\(project.name)",
+                        subtitle: project.techStack.prefix(3).joined(separator: ", "),
+                        keywords: ["project", "项目", project.name]
+                    ))
             }
         }
 
@@ -233,28 +251,30 @@ struct CommandPaletteView: View {
             (.experimentDesign, "实验设计"),
             (.retrospective, "项目复盘"),
             (.persona, "用户画像"),
-            (.okrWriter, "写 OKR"),
+            (.okrWriter, "写 OKR")
         ]
         for (skill, title) in pmSkills {
-            result.append(.init(
-                kind: .pmAgent(skill.rawValue),
-                icon: skill.icon,
-                title: "PM：\(title)",
-                subtitle: "[\(skill.phase)] \(skill.displayName)",
-                keywords: ["pm", "product", skill.rawValue, skill.displayName]
-            ))
+            result.append(
+                .init(
+                    kind: .pmAgent(skill.rawValue),
+                    icon: skill.icon,
+                    title: "PM：\(title)",
+                    subtitle: "[\(skill.phase)] \(skill.displayName)",
+                    keywords: ["pm", "product", skill.rawValue, skill.displayName]
+                ))
         }
 
         // Skill shortcuts
         let skillRegistry = SkillRegistry.shared
         for skill in skillRegistry.skills.filter({ !$0.tools.isEmpty || $0.workflowName != nil }).prefix(8) {
-            result.append(.init(
-                kind: .runSkill(skill.name),
-                icon: "sparkles",
-                title: "技能：\(skill.name)",
-                subtitle: skill.description,
-                keywords: ["skill", skill.name]
-            ))
+            result.append(
+                .init(
+                    kind: .runSkill(skill.name),
+                    icon: "sparkles",
+                    title: "技能：\(skill.name)",
+                    subtitle: skill.description,
+                    keywords: ["skill", skill.name]
+                ))
         }
 
         return result
@@ -262,6 +282,22 @@ struct CommandPaletteView: View {
 
     private func run(_ action: CommandPaletteAction) {
         switch action.kind {
+        case .newTask, .newThread, .continueThread:
+            runThreadCreationAction(action.kind)
+        case .search, .toggleWorkbench, .settings:
+            runNavigationAction(action.kind)
+        case .copyMarkdown, .copyEvidence, .exportJSON, .exportShellScript, .exportWorkflowYAML:
+            runExportAction(action.kind)
+        case .testModel, .retry, .switchConnector, .runSkill:
+            runConnectorAction(action.kind)
+        case .archiveThread, .pmAgent, .switchProject:
+            runThreadManagementAction(action.kind)
+        }
+        isPresented = false
+    }
+
+    private func runThreadCreationAction(_ kind: CommandPaletteActionKind) {
+        switch kind {
         case .newTask:
             if let projectID = ProjectManager.shared.activeProjectID {
                 store.newThreadInProject(projectID)
@@ -275,24 +311,43 @@ struct CommandPaletteView: View {
             if let agent = store.state.selectedThread {
                 store.continueThread(id: agent.id)
             }
+        default:
+            break
+        }
+    }
+
+    private func runNavigationAction(_ kind: CommandPaletteActionKind) {
+        switch kind {
         case .search:
             NotificationCenter.default.post(name: .laicaiToggleSearch, object: nil)
         case .toggleWorkbench:
             showWorkbench.toggle()
         case .settings:
             showingSettings = true
+        default:
+            break
+        }
+    }
+
+    private func runExportAction(_ kind: CommandPaletteActionKind) {
+        switch kind {
         case .copyMarkdown:
-            if let markdown = store.exportSelectedThreadMarkdown() {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(markdown, forType: .string)
-                ToastCenter.shared.success("已复制当前会话")
-            }
+            copyToPasteboard(store.exportSelectedThreadMarkdown(), success: "已复制当前会话")
         case .copyEvidence:
-            if let markdown = store.exportSelectedTaskEvidenceMarkdown() {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(markdown, forType: .string)
-                ToastCenter.shared.success("已复制证据清单")
-            }
+            copyToPasteboard(store.exportSelectedTaskEvidenceMarkdown(), success: "已复制证据清单")
+        case .exportJSON:
+            copyToPasteboard(store.exportSelectedThreadJSON(), success: "已导出 JSON")
+        case .exportShellScript:
+            copyToPasteboard(store.exportSelectedThreadShellScript(), success: "已复制 Shell 脚本", failure: "当前会话无 shell 命令")
+        case .exportWorkflowYAML:
+            copyToPasteboard(store.exportSelectedThreadWorkflowYAML(), success: "已复制工作流 YAML", failure: "当前会话无工具调用")
+        default:
+            break
+        }
+    }
+
+    private func runConnectorAction(_ kind: CommandPaletteActionKind) {
+        switch kind {
         case .testModel:
             if let id = store.state.activeConnectorID {
                 store.checkConnectorHealth(id: id)
@@ -304,43 +359,18 @@ struct CommandPaletteView: View {
             store.selectConnector(id: id)
             ToastCenter.shared.success("已切换连接器")
         case .runSkill(let name):
-            if let skill = SkillRegistry.shared.skills.first(where: { $0.name == name }) {
-                var template = ""
-                if let workflow = skill.workflowName {
-                    template = "请执行\(workflow)工作流"
-                } else if !skill.tools.isEmpty {
-                    template = "请使用\(skill.tools.joined(separator: "、"))处理以下目标："
-                }
-                if !template.isEmpty {
-                    store.updateDraft(template)
-                }
-            }
+            updateDraftForSkill(named: name)
+        default:
+            break
+        }
+    }
+
+    private func runThreadManagementAction(_ kind: CommandPaletteActionKind) {
+        switch kind {
         case .archiveThread:
             if let threadID = store.state.selectedThread?.id {
                 store.archiveThread(id: threadID)
                 ToastCenter.shared.success("已归档")
-            }
-        case .exportJSON:
-            if let json = store.exportSelectedThreadJSON() {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(json, forType: .string)
-                ToastCenter.shared.success("已导出 JSON")
-            }
-        case .exportShellScript:
-            if let script = store.exportSelectedThreadShellScript() {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(script, forType: .string)
-                ToastCenter.shared.success("已复制 Shell 脚本")
-            } else {
-                ToastCenter.shared.error("当前会话无 shell 命令")
-            }
-        case .exportWorkflowYAML:
-            if let yaml = store.exportSelectedThreadWorkflowYAML() {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(yaml, forType: .string)
-                ToastCenter.shared.success("已复制工作流 YAML")
-            } else {
-                ToastCenter.shared.error("当前会话无工具调用")
             }
         case .pmAgent(let skillName):
             let skill = PMSkillType(rawValue: skillName) ?? .prd
@@ -350,8 +380,28 @@ struct CommandPaletteView: View {
             store.switchWorkspace(to: path)
             let name = URL(fileURLWithPath: path).lastPathComponent
             ToastCenter.shared.success("已切换到项目：\(name)")
+        default:
+            break
         }
-        isPresented = false
+    }
+
+    private func copyToPasteboard(_ value: String?, success: String, failure: String? = nil) {
+        guard let value else {
+            if let failure { ToastCenter.shared.error(failure) }
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+        ToastCenter.shared.success(success)
+    }
+
+    private func updateDraftForSkill(named name: String) {
+        guard let skill = SkillRegistry.shared.skills.first(where: { $0.name == name }) else { return }
+        if let workflow = skill.workflowName {
+            store.updateDraft("请执行\(workflow)工作流")
+        } else if !skill.tools.isEmpty {
+            store.updateDraft("请使用\(skill.tools.joined(separator: "、"))处理以下目标：")
+        }
     }
 
     private func open(_ thread: ThreadRecord) {
@@ -371,9 +421,9 @@ private struct CommandPaletteSectionTitle: View {
         Text(title)
             .font(AppFont.tiny)
             .foregroundStyle(TextGrade.ghost)
-            .padding(.horizontal, AppSpace.lg)
-            .padding(.top, AppSpace.sm)
-            .padding(.bottom, AppSpace.xs)
+            .padding(.horizontal, AppSpace.large)
+            .padding(.top, AppSpace.small)
+            .padding(.bottom, AppSpace.extraSmall)
     }
 }
 
@@ -383,7 +433,7 @@ private struct CommandPaletteRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             Image(systemName: action.icon)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(isSelected ? Brand.primary : TextGrade.muted)
@@ -401,14 +451,14 @@ private struct CommandPaletteRow: View {
 
             Spacer()
         }
-        .padding(.horizontal, AppSpace.lg)
-        .padding(.vertical, AppSpace.xs + 2)
+        .padding(.horizontal, AppSpace.large)
+        .padding(.vertical, AppSpace.extraSmall + 2)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                 .fill(isSelected ? Brand.primary.opacity(0.08) : (isHovered ? SurfaceGrade.hover : Color.clear))
         )
         .contentShape(Rectangle())
-        .onHover { h in withAnimation(AppAnimation.micro) { isHovered = h } }
+        .onHover { hovering in withAnimation(AppAnimation.micro) { isHovered = hovering } }
     }
 }
 
@@ -417,7 +467,7 @@ private struct CommandPaletteThreadRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(tint)
@@ -437,14 +487,14 @@ private struct CommandPaletteThreadRow: View {
 
             Spacer()
         }
-        .padding(.horizontal, AppSpace.lg)
-        .padding(.vertical, AppSpace.xs + 2)
+        .padding(.horizontal, AppSpace.large)
+        .padding(.vertical, AppSpace.extraSmall + 2)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                 .fill(isHovered ? SurfaceGrade.hover : Color.clear)
         )
         .contentShape(Rectangle())
-        .onHover { h in withAnimation(AppAnimation.micro) { isHovered = h } }
+        .onHover { hovering in withAnimation(AppAnimation.micro) { isHovered = hovering } }
     }
 
     private var subtitle: String {

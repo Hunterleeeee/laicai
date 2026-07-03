@@ -53,17 +53,23 @@ public struct SandboxConfig: Codable, Sendable {
     }
 }
 
+public struct SandboxCommandResult: Sendable {
+    public let output: String
+    public let error: String
+    public let exitCode: Int32
+}
+
 // MARK: - Sandbox Executor
 
 public struct SandboxExecutor: Sendable {
 
     /// Execute a shell command within the configured sandbox.
-    /// Returns (stdout, stderr, exitCode).
+    /// Returns stdout, stderr, and exit code.
     public static func execute(
         command: String,
         workspaceRoot: String,
         config: SandboxConfig
-    ) async throws -> (output: String, error: String, exitCode: Int32) {
+    ) async throws -> SandboxCommandResult {
         switch config.mode {
         case .auto:
             if isDockerAvailable() {
@@ -71,8 +77,8 @@ public struct SandboxExecutor: Sendable {
             }
             let result = try await executeNative(command: command, workspaceRoot: workspaceRoot, timeout: config.timeoutSeconds)
             let warning = "沙箱自动模式警告：Docker 不可用，已回退到原生执行（无隔离）。"
-            let error = result.1.isEmpty ? warning : warning + "\n" + result.1
-            return (result.0, error, result.2)
+            let error = result.error.isEmpty ? warning : warning + "\n" + result.error
+            return SandboxCommandResult(output: result.output, error: error, exitCode: result.exitCode)
         case .none:
             return try await executeNative(command: command, workspaceRoot: workspaceRoot, timeout: config.timeoutSeconds)
         case .macSandbox:
@@ -100,7 +106,7 @@ public struct SandboxExecutor: Sendable {
 
     // MARK: - Native (no sandbox)
 
-    private static func executeNative(command: String, workspaceRoot: String, timeout: Int) async throws -> (String, String, Int32) {
+    private static func executeNative(command: String, workspaceRoot: String, timeout: Int) async throws -> SandboxCommandResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-lc", command]
@@ -126,7 +132,7 @@ public struct SandboxExecutor: Sendable {
         let output = String(data: outData, encoding: .utf8) ?? ""
         let errOutput = String(data: errData, encoding: .utf8) ?? ""
 
-        return (output, errOutput, process.terminationStatus)
+        return SandboxCommandResult(output: output, error: errOutput, exitCode: process.terminationStatus)
     }
 
     private static func waitForExit(_ process: Process, timeoutSeconds: Int) async -> Bool {
@@ -158,7 +164,11 @@ public struct SandboxExecutor: Sendable {
 
     // MARK: - macOS sandbox-exec
 
-    private static func executeMacSandbox(command: String, workspaceRoot: String, config: SandboxConfig) async throws -> (String, String, Int32) {
+    private static func executeMacSandbox(
+        command: String,
+        workspaceRoot: String,
+        config: SandboxConfig
+    ) async throws -> SandboxCommandResult {
         let runtimeRoot = NSTemporaryDirectory().appending("laicai_sandbox_runtime_\(UUID().uuidString)")
         try FileManager.default.createDirectory(atPath: runtimeRoot, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: runtimeRoot) }
@@ -204,7 +214,11 @@ public struct SandboxExecutor: Sendable {
 
     // MARK: - Docker execution
 
-    private static func executeDocker(command: String, workspaceRoot: String, config: SandboxConfig) async throws -> (String, String, Int32) {
+    private static func executeDocker(
+        command: String,
+        workspaceRoot: String,
+        config: SandboxConfig
+    ) async throws -> SandboxCommandResult {
         var dockerArgs = ["docker", "run", "--rm"]
 
         // Memory limit

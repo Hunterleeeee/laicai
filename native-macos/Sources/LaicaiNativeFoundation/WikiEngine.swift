@@ -40,6 +40,55 @@ public struct WikiBuildResult: Sendable, Identifiable {
 }
 
 public enum WikiEngine {
+    private struct WikiSynthesisRequest {
+        let topic: String
+        let sources: [WikiSource]
+        let previous: String?
+        let existingPages: [VaultPage]
+        let mode: WikiMode
+        let connector: ConnectorProfile
+        let runtime: any ChatRuntimeClient
+    }
+
+    private struct WikiSaveOutcome {
+        var didSave = false
+        var backlinksAdded: [String] = []
+        var mocUpdated: String?
+        var saveError: String?
+    }
+
+    private struct WikiRenderRequest {
+        let topic: String
+        let sources: [WikiSource]
+        let previous: String?
+        let existingPages: [VaultPage]
+        let mode: WikiMode
+        let connector: ConnectorProfile?
+        let runtime: (any ChatRuntimeClient)?
+        let onChunk: (@Sendable @MainActor (String) -> Void)?
+    }
+
+    private struct WikiSaveRequest {
+        let shouldSave: Bool
+        let rendered: String
+        let topic: String
+        let noteURL: URL
+        let root: URL
+        let mode: WikiMode
+        let existingPages: [VaultPage]
+    }
+
+    private struct VaultDocEntry {
+        var file: String
+        var text: String
+        var lower: String
+    }
+
+    private static let sourceStopwords: Set<String> = [
+        "的", "了", "和", "是", "在", "有", "与", "对", "及", "等",
+        "the", "and", "for", "with", "this", "that", "from", "are", "was"
+    ]
+
     /// Recent wiki build results, persisted in memory for the session
     public private(set) static var recentResults: [WikiBuildResult] = []
 
@@ -59,77 +108,37 @@ public enum WikiEngine {
     ) async -> WikiBuildResult {
         let cleanTopic = sanitizedTopic(topic)
         let root = URL(fileURLWithPath: vaultRoot)
-
-        // Determine target directory based on mode
-        let subdir: String
-        switch mode {
-        case .atomic: subdir = "02 Atomic"
-        case .moc, .topic: subdir = "03 MOC"
-        }
         let noteURL = root
-            .appendingPathComponent(subdir, isDirectory: true)
+            .appendingPathComponent(noteSubdirectory(for: mode), isDirectory: true)
             .appendingPathComponent(cleanTopic + ".md")
         let previous = try? String(contentsOf: noteURL, encoding: .utf8)
-        var sources = collectVaultSources(topic: cleanTopic, vaultRoot: root, limit: topK)
-
-        // Scan vault for existing pages to build backlinks
+        let localSources = collectVaultSources(topic: cleanTopic, vaultRoot: root, limit: topK)
         let existingPages = scanVaultPages(root: root)
-
-        if useWeb {
-            let web = try? await WebSearchTool().execute(
-                argumentsJSON: #"{"query":"\#(cleanTopic) 最新","maxResults":3}"#,
-                context: TaskContext(workspaceRoot: vaultRoot)
-            )
-            if let web, web.success {
-                sources.append(contentsOf: parseWebSources(web.output))
-            }
-        }
-
-        let rendered: String
-        if let connector, let runtime {
-            rendered = await synthesizeWithLLM(
-                topic: cleanTopic,
-                sources: sources,
-                previous: previous,
-                existingPages: existingPages,
-                mode: mode,
-                connector: connector,
-                runtime: runtime,
-                onChunk: onChunk
-            )
-        } else {
-            rendered = render(topic: cleanTopic, sources: sources, existingPages: existingPages, mode: mode)
-        }
-
-        var didSave = false
-        var backlinksAdded: [String] = []
-        var mocUpdated: String? = nil
-        var saveError: String?
-
-        if save {
-            let securityError = await SecurityManager.shared.checkWrite(path: noteURL.path)
-            if securityError == nil {
-                do {
-                    try FileManager.default.createDirectory(at: noteURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    try rendered.write(to: noteURL, atomically: true, encoding: .utf8)
-                    didSave = true
-
-                    // Auto-add backlinks to related existing pages
-                    if mode == .atomic {
-                        backlinksAdded = addBacklinks(topic: cleanTopic, noteURL: noteURL, root: root, existingPages: existingPages)
-                    }
-
-                    // Auto-update MOC when creating atomic notes
-                    if mode == .atomic {
-                        mocUpdated = updateMOC(topic: cleanTopic, root: root, existingPages: existingPages)
-                    }
-                } catch {
-                    saveError = error.localizedDescription
-                }
-            } else {
-                saveError = securityError
-            }
-        }
+        let sources = await sourcesWithOptionalWeb(
+            localSources,
+            topic: cleanTopic,
+            vaultRoot: vaultRoot,
+            useWeb: useWeb
+        )
+        let rendered = await renderedWikiMarkdown(WikiRenderRequest(
+            topic: cleanTopic,
+            sources: sources,
+            previous: previous,
+            existingPages: existingPages,
+            mode: mode,
+            connector: connector,
+            runtime: runtime,
+            onChunk: onChunk
+        ))
+        let saveOutcome = await saveWikiNoteIfNeeded(WikiSaveRequest(
+            shouldSave: save,
+            rendered: rendered,
+            topic: cleanTopic,
+            noteURL: noteURL,
+            root: root,
+            mode: mode,
+            existingPages: existingPages
+        ))
 
         let result = WikiBuildResult(
             topic: cleanTopic,
@@ -137,36 +146,123 @@ public enum WikiEngine {
             renderedMarkdown: rendered,
             previousMarkdown: previous,
             sources: sources,
-            saved: didSave,
+            saved: saveOutcome.didSave,
             mode: mode,
-            backlinksAdded: backlinksAdded,
-            mocUpdated: mocUpdated,
-            saveError: saveError
+            backlinksAdded: saveOutcome.backlinksAdded,
+            mocUpdated: saveOutcome.mocUpdated,
+            saveError: saveOutcome.saveError
         )
-        recentResults.append(result)
-        if recentResults.count > 20 { recentResults.removeFirst(recentResults.count - 20) }
+        recordRecentResult(result)
         return result
+    }
+
+    private static func noteSubdirectory(for mode: WikiMode) -> String {
+        switch mode {
+        case .atomic: return "02 Atomic"
+        case .moc, .topic: return "03 MOC"
+        }
+    }
+
+    private static func sourcesWithOptionalWeb(
+        _ localSources: [WikiSource],
+        topic: String,
+        vaultRoot: String,
+        useWeb: Bool
+    ) async -> [WikiSource] {
+        guard useWeb else { return localSources }
+        let web = try? await WebSearchTool().execute(
+            argumentsJSON: #"{"query":"\#(topic) 最新","maxResults":3}"#,
+            context: TaskContext(workspaceRoot: vaultRoot)
+        )
+        guard let web, web.success else { return localSources }
+        return localSources + parseWebSources(web.output)
+    }
+
+    private static func renderedWikiMarkdown(_ request: WikiRenderRequest) async -> String {
+        guard let connector = request.connector, let runtime = request.runtime else {
+            return render(
+                topic: request.topic,
+                sources: request.sources,
+                existingPages: request.existingPages,
+                mode: request.mode
+            )
+        }
+        return await synthesizeWithLLM(
+            WikiSynthesisRequest(
+                topic: request.topic,
+                sources: request.sources,
+                previous: request.previous,
+                existingPages: request.existingPages,
+                mode: request.mode,
+                connector: connector,
+                runtime: runtime
+            ),
+            onChunk: request.onChunk
+        )
+    }
+
+    private static func saveWikiNoteIfNeeded(_ request: WikiSaveRequest) async -> WikiSaveOutcome {
+        guard request.shouldSave else { return WikiSaveOutcome() }
+        if let securityError = await SecurityManager.shared.checkWrite(path: request.noteURL.path) {
+            return WikiSaveOutcome(saveError: securityError)
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: request.noteURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try request.rendered.write(to: request.noteURL, atomically: true, encoding: .utf8)
+            return savedWikiOutcome(
+                topic: request.topic,
+                noteURL: request.noteURL,
+                root: request.root,
+                mode: request.mode,
+                existingPages: request.existingPages
+            )
+        } catch {
+            return WikiSaveOutcome(saveError: error.localizedDescription)
+        }
+    }
+
+    private static func savedWikiOutcome(
+        topic: String,
+        noteURL: URL,
+        root: URL,
+        mode: WikiMode,
+        existingPages: [VaultPage]
+    ) -> WikiSaveOutcome {
+        guard mode == .atomic else { return WikiSaveOutcome(didSave: true) }
+        return WikiSaveOutcome(
+            didSave: true,
+            backlinksAdded: addBacklinks(topic: topic, noteURL: noteURL, root: root, existingPages: existingPages),
+            mocUpdated: updateMOC(topic: topic, root: root, existingPages: existingPages)
+        )
+    }
+
+    private static func recordRecentResult(_ result: WikiBuildResult) {
+        recentResults.append(result)
+        if recentResults.count > 20 {
+            recentResults.removeFirst(recentResults.count - 20)
+        }
     }
 
     /// Use the LLM to synthesize a wiki note with knowledge-graph approach.
     private static func synthesizeWithLLM(
-        topic: String,
-        sources: [WikiSource],
-        previous: String?,
-        existingPages: [VaultPage],
-        mode: WikiMode,
-        connector: ConnectorProfile,
-        runtime: any ChatRuntimeClient,
+        _ request: WikiSynthesisRequest,
         onChunk: (@Sendable @MainActor (String) -> Void)?
     ) async -> String {
-        let sourceMaterial = sources.prefix(10).enumerated().map { i, s in
-            "[\(i+1)] \(s.title)\n\(s.preview)"
+        let topic = request.topic
+        let mode = request.mode
+        let sources = request.sources
+        let previous = request.previous
+        let sourceMaterial = request.sources.prefix(10).enumerated().map { index, source in
+            "[\(index + 1)] \(source.title)\n\(source.preview)"
         }.joined(separator: "\n\n")
 
         let existingNote = previous.map { "\n\n已有内容（只补充新信息，保留原有要点和结构，不要删除或替换已有内容）：\n\($0.prefix(4000))" } ?? ""
 
         // Build backlink context: show existing pages that can be linked
-        let relatedPages = existingPages
+        let relatedPages = request.existingPages
             .filter { $0.title.lowercased() != topic.lowercased() }
             .prefix(30)
             .map { "- [\($0.title)](\($0.relativePath))" }
@@ -215,10 +311,10 @@ public enum WikiEngine {
             ChatMessage(role: "system", content: systemPrompt),
             ChatMessage(role: "user", content: userPrompt)
         ]
-        let request = SendMessageRequest(
+        let messageRequest = SendMessageRequest(
             sessionID: UUID(),
             message: userPrompt,
-            connector: connector,
+            connector: request.connector,
             modeLabel: "Wiki",
             systemPrompt: systemPrompt,
             tools: [],
@@ -229,9 +325,9 @@ public enum WikiEngine {
         do {
             let response: SendMessageResponse
             if let onChunk {
-                response = try await runtime.sendMessageStream(request, onChunk: onChunk)
+                response = try await request.runtime.sendMessageStream(messageRequest, onChunk: onChunk)
             } else {
-                response = try await runtime.sendMessage(request)
+                response = try await request.runtime.sendMessage(messageRequest)
             }
             var text = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return render(topic: topic, sources: sources) }
@@ -270,86 +366,117 @@ public enum WikiEngine {
 
     private static func collectVaultSources(topic: String, vaultRoot: URL, limit: Int) -> [WikiSource] {
         guard FileManager.default.fileExists(atPath: vaultRoot.path) else { return [] }
-        let terms = topic
+        let terms = sourceTerms(from: topic)
+        guard !terms.isEmpty else { return [] }
+
+        let docs = collectVaultDocs(vaultRoot: vaultRoot)
+        guard !docs.isEmpty else { return [] }
+
+        let frequency = documentFrequency(terms: terms, docs: docs)
+        return rankedVaultSources(topic: topic, terms: terms, docs: docs, documentFrequency: frequency, limit: limit)
+    }
+
+    private static func sourceTerms(from topic: String) -> [String] {
+        topic
             .lowercased()
             .split { !$0.isLetter && !$0.isNumber }
             .map(String.init)
-            .filter { $0.count >= 2 } // Skip single-char terms (noise)
-        guard !terms.isEmpty else { return [] }
+            .filter { $0.count >= 2 }
+    }
 
-        // Stopwords for Chinese/English common terms
-        let stopwords: Set<String> = ["的", "了", "和", "是", "在", "有", "与", "对", "及", "等",
-                                       "the", "and", "for", "with", "this", "that", "from", "are", "was"]
-
-        // Phase 1: collect all docs and compute document frequency per term
-        struct DocEntry {
-            var file: String
-            var text: String
-            var lower: String
-        }
-        var docs: [DocEntry] = []
+    private static func collectVaultDocs(vaultRoot: URL) -> [VaultDocEntry] {
+        var docs: [VaultDocEntry] = []
         guard let enumerator = FileManager.default.enumerator(atPath: vaultRoot.path) else { return [] }
         while let file = enumerator.nextObject() as? String {
-            let name = (file as NSString).lastPathComponent
-            if name.hasPrefix(".") {
+            if shouldSkipVaultPath(file) {
                 enumerator.skipDescendants()
                 continue
             }
             guard file.hasSuffix(".md") else { continue }
             let full = vaultRoot.appendingPathComponent(file)
             guard let text = try? String(contentsOf: full, encoding: .utf8) else { continue }
-            docs.append(DocEntry(file: file, text: text, lower: (file + "\n" + text).lowercased()))
+            docs.append(VaultDocEntry(file: file, text: text, lower: (file + "\n" + text).lowercased()))
         }
-        guard !docs.isEmpty else { return [] }
+        return docs
+    }
 
+    private static func shouldSkipVaultPath(_ file: String) -> Bool {
+        (file as NSString).lastPathComponent.hasPrefix(".")
+    }
+
+    private static func documentFrequency(terms: [String], docs: [VaultDocEntry]) -> [String: Int] {
+        var frequency: [String: Int] = [:]
+        for term in terms where !sourceStopwords.contains(term) {
+            frequency[term] = docs.filter { $0.lower.contains(term) }.count
+        }
+        return frequency
+    }
+
+    private static func rankedVaultSources(
+        topic: String,
+        terms: [String],
+        docs: [VaultDocEntry],
+        documentFrequency: [String: Int],
+        limit: Int
+    ) -> [WikiSource] {
         let totalDocs = Double(docs.count)
-        // Document frequency: how many docs contain each term
-        var df: [String: Int] = [:]
-        for term in terms where !stopwords.contains(term) {
-            df[term] = docs.filter { $0.lower.contains(term) }.count
-        }
-
-        // Phase 2: score each doc using TF-IDF-like scoring
-        var ranked: [(score: Double, source: WikiSource)] = []
-        for doc in docs {
-            var score: Double = 0
-            for term in terms where !stopwords.contains(term) {
-                let termDF = df[term] ?? 0
-                guard termDF > 0 else { continue }
-
-                // TF: count occurrences, normalize by doc length
-                let occurrences = doc.lower.components(separatedBy: term).count - 1
-                guard occurrences > 0 else { continue }
-                let tf = Double(occurrences) / max(1, Double(doc.lower.count) / 500.0) // normalize per ~500 chars
-
-                // IDF: rarer terms get higher weight
-                let idf = log(totalDocs / Double(termDF) + 1)
-
-                score += tf * idf
-
-                // Bonus: term in filename (3x weight)
-                let fileName = (doc.file as NSString).lastPathComponent.lowercased()
-                if fileName.contains(term) {
-                    score += idf * 3.0
-                }
-            }
-
-            // Bonus: exact topic match in title
-            let title = extractTitle(doc.text, fallback: (doc.file as NSString).deletingPathExtension)
-            if title.lowercased().contains(topic.lowercased()) {
-                score += 10.0
-            }
-
-            guard score > 0.1 else { continue }
-            ranked.append((
-                score,
-                WikiSource(path: doc.file, title: title, preview: snippet(doc.text, terms: terms), kind: "vault")
-            ))
+        let ranked = docs.compactMap { doc -> (score: Double, source: WikiSource)? in
+            let score = vaultSourceScore(
+                doc: doc,
+                topic: topic,
+                terms: terms,
+                documentFrequency: documentFrequency,
+                totalDocs: totalDocs
+            )
+            guard score > 0.1 else { return nil }
+            return (score, vaultSource(doc: doc, terms: terms))
         }
         return ranked
             .sorted { $0.score > $1.score }
             .prefix(limit)
             .map(\.source)
+    }
+
+    private static func vaultSourceScore(
+        doc: VaultDocEntry,
+        topic: String,
+        terms: [String],
+        documentFrequency: [String: Int],
+        totalDocs: Double
+    ) -> Double {
+        var score = terms.reduce(0.0) { partial, term in
+            partial + vaultTermScore(
+                doc: doc,
+                term: term,
+                termDocumentFrequency: documentFrequency[term] ?? 0,
+                totalDocs: totalDocs
+            )
+        }
+        let title = extractTitle(doc.text, fallback: (doc.file as NSString).deletingPathExtension)
+        if title.lowercased().contains(topic.lowercased()) {
+            score += 10.0
+        }
+        return score
+    }
+
+    private static func vaultTermScore(
+        doc: VaultDocEntry,
+        term: String,
+        termDocumentFrequency: Int,
+        totalDocs: Double
+    ) -> Double {
+        guard !sourceStopwords.contains(term), termDocumentFrequency > 0 else { return 0 }
+        let occurrences = doc.lower.components(separatedBy: term).count - 1
+        guard occurrences > 0 else { return 0 }
+        let termFrequency = Double(occurrences) / max(1, Double(doc.lower.count) / 500.0)
+        let idf = log(totalDocs / Double(termDocumentFrequency) + 1)
+        let fileName = (doc.file as NSString).lastPathComponent.lowercased()
+        return fileName.contains(term) ? termFrequency * idf + idf * 3.0 : termFrequency * idf
+    }
+
+    private static func vaultSource(doc: VaultDocEntry, terms: [String]) -> WikiSource {
+        let title = extractTitle(doc.text, fallback: (doc.file as NSString).deletingPathExtension)
+        return WikiSource(path: doc.file, title: title, preview: snippet(doc.text, terms: terms), kind: "vault")
     }
 
     private static func parseWebSources(_ output: String) -> [WikiSource] {
@@ -537,10 +664,8 @@ public enum WikiEngine {
     }
 
     private static func extractTitle(_ text: String, fallback: String) -> String {
-        for line in text.components(separatedBy: .newlines) {
-            if line.hasPrefix("# ") {
-                return String(line.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
-            }
+        for line in text.components(separatedBy: .newlines) where line.hasPrefix("# ") {
+            return String(line.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return fallback
     }
@@ -642,6 +767,15 @@ public struct WikiBuildTool: LaicaiTool {
         var sourceText: String?
     }
 
+    private struct WikiAuditRequest {
+        let tool: String
+        let topic: String
+        let mode: WikiMode
+        let action: String
+        let result: WikiBuildResult
+        let success: Bool
+    }
+
     public var functionDefinition: FunctionDefinition {
         FunctionDefinition(
             name: name,
@@ -664,32 +798,77 @@ public struct WikiBuildTool: LaicaiTool {
     }
 
     public func execute(argumentsJSON: String, context: TaskContext) async throws -> ToolResult {
-        let params: Params
-        do {
-            let jsonData = argumentsJSON.data(using: .utf8) ?? Data()
-            params = try JSONDecoder().decode(Params.self, from: jsonData)
-        } catch {
-            return ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params")
-        }
-
-        let topic = params.topic.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !topic.isEmpty else {
+        let decoded = Self.decodeParams(argumentsJSON)
+        guard let params = decoded.params else { return decoded.failure! }
+        guard let topic = Self.validTopic(params.topic) else {
             return ToolResult(output: "主题不能为空。", success: false, error: "empty_topic")
         }
 
-        let mode: WikiMode
-        switch params.mode?.lowercased() {
-        case "moc", "topic": mode = .moc
-        default: mode = .atomic
-        }
+        let mode = Self.wikiMode(from: params.mode)
+        let root = Self.rootPath(params: params, context: context)
+        await Self.allowWikiRootIfSafe(root)
 
-        let root = (params.vaultPath?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+        var result = await Self.buildWikiResult(params: params, topic: topic, root: root, mode: mode)
+        result = await Self.resultWithProvidedSource(result, params: params, mode: mode, root: root)
+        let wantedSave = params.save ?? false
+        let action = Self.actionText(result: result, wantedSave: wantedSave)
+        let success = !wantedSave || result.saved
+        await Self.recordAudit(WikiAuditRequest(
+            tool: name,
+            topic: topic,
+            mode: mode,
+            action: action,
+            result: result,
+            success: success
+        ))
+
+        return ToolResult(
+            output: Self.outputText(result: result, mode: mode, topic: topic, action: action),
+            data: Self.resultData(result: result, mode: mode),
+            success: success,
+            error: success ? nil : "wiki_save_failed"
+        )
+    }
+
+    private static func decodeParams(_ argumentsJSON: String) -> (params: Params?, failure: ToolResult?) {
+        do {
+            let jsonData = argumentsJSON.data(using: .utf8) ?? Data()
+            return (try JSONDecoder().decode(Params.self, from: jsonData), nil)
+        } catch {
+            return (nil, ToolResult(output: "参数解析失败：\(error.localizedDescription)", success: false, error: "invalid_params"))
+        }
+    }
+
+    private static func validTopic(_ topic: String) -> String? {
+        let trimmed = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func wikiMode(from rawMode: String?) -> WikiMode {
+        switch rawMode?.lowercased() {
+        case "moc", "topic": return .moc
+        default: return .atomic
+        }
+    }
+
+    private static func rootPath(params: Params, context: TaskContext) -> String {
+        (params.vaultPath?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
             ?? context.vaultRoot
             ?? (context.workspaceRoot.isEmpty ? FileManager.default.homeDirectoryForCurrentUser.path : context.workspaceRoot)
-        if !root.isEmpty, !WorkspaceSandbox.isOverlyBroadWorkspace(root) {
-            await WorkspaceSandbox.shared.addAllowedPath(root)
-        }
-        var result = await WikiEngine.buildTopic(
+    }
+
+    private static func allowWikiRootIfSafe(_ root: String) async {
+        guard !root.isEmpty, !WorkspaceSandbox.isOverlyBroadWorkspace(root) else { return }
+        await WorkspaceSandbox.shared.addAllowedPath(root)
+    }
+
+    private static func buildWikiResult(
+        params: Params,
+        topic: String,
+        root: String,
+        mode: WikiMode
+    ) async -> WikiBuildResult {
+        await WikiEngine.buildTopic(
             topic: topic,
             vaultRoot: root,
             save: params.save ?? false,
@@ -697,98 +876,118 @@ public struct WikiBuildTool: LaicaiTool {
             useWeb: params.useWeb ?? false,
             topK: max(1, min(params.topK ?? 8, 20))
         )
-        if let providedSource = Self.providedSource(from: params) {
-            result.sources.insert(providedSource, at: 0)
-            let rendered = Self.renderProvidedSourceNote(
-                topic: result.topic,
-                mode: mode,
-                sources: result.sources,
-                existingMarkdown: result.renderedMarkdown
-            )
-            result.renderedMarkdown = rendered
-            if params.save ?? false {
-                let target = URL(fileURLWithPath: root).appendingPathComponent(result.notePath)
-                if let securityError = await SecurityManager.shared.checkWrite(path: target.path) {
-                    result.saved = false
-                    result.saveError = securityError
-                } else {
-                    do {
-                        try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-                        try rendered.write(to: target, atomically: true, encoding: .utf8)
-                        result.saved = true
-                        result.saveError = nil
-                    } catch {
-                        result.saved = false
-                        result.saveError = error.localizedDescription
-                    }
-                }
-            }
-        }
+    }
 
-        let sourceLines = result.sources.prefix(8).map { source in
-            switch source.kind {
-            case "web":
-                return "- [\(source.title)](\(source.path))"
-            case "task":
-                return "- \(source.title)：\(source.path)"
-            default:
-                return "- [[\(WikiEngine.wikilinkTarget(for: source))]]"
-            }
-        }.joined(separator: "\n")
-        let wantedSave = params.save ?? false
-        let action: String
-        if result.saved {
-            action = "已保存"
-        } else if wantedSave {
-            action = "保存失败（\(result.saveError ?? "路径可能超出工作区范围或权限不足")），仅生成预览"
-        } else {
-            action = "已生成预览"
+    private static func resultWithProvidedSource(
+        _ original: WikiBuildResult,
+        params: Params,
+        mode: WikiMode,
+        root: String
+    ) async -> WikiBuildResult {
+        guard let providedSource = providedSource(from: params) else { return original }
+        var result = original
+        result.sources.insert(providedSource, at: 0)
+        result.renderedMarkdown = renderProvidedSourceNote(
+            topic: result.topic,
+            mode: mode,
+            sources: result.sources,
+            existingMarkdown: result.renderedMarkdown
+        )
+        guard params.save ?? false else { return result }
+        return await saveProvidedSourceResult(result, root: root)
+    }
+
+    private static func saveProvidedSourceResult(_ original: WikiBuildResult, root: String) async -> WikiBuildResult {
+        var result = original
+        let target = URL(fileURLWithPath: root).appendingPathComponent(result.notePath)
+        if let securityError = await SecurityManager.shared.checkWrite(path: target.path) {
+            result.saved = false
+            result.saveError = securityError
+            return result
         }
-        // Only include summary in tool result — full content is in the Wiki panel.
+        do {
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try result.renderedMarkdown.write(to: target, atomically: true, encoding: .utf8)
+            result.saved = true
+            result.saveError = nil
+        } catch {
+            result.saved = false
+            result.saveError = error.localizedDescription
+        }
+        return result
+    }
+
+    private static func sourceLines(for result: WikiBuildResult) -> String {
+        result.sources.prefix(8).map(sourceLine).joined(separator: "\n")
+    }
+
+    private static func sourceLine(_ source: WikiSource) -> String {
+        switch source.kind {
+        case "web":
+            return "- [\(source.title)](\(source.path))"
+        case "task":
+            return "- \(source.title)：\(source.path)"
+        default:
+            return "- [[\(WikiEngine.wikilinkTarget(for: source))]]"
+        }
+    }
+
+    private static func actionText(result: WikiBuildResult, wantedSave: Bool) -> String {
+        if result.saved { return "已保存" }
+        if wantedSave {
+            return "保存失败（\(result.saveError ?? "路径可能超出工作区范围或权限不足")），仅生成预览"
+        }
+        return "已生成预览"
+    }
+
+    private static func outputText(result: WikiBuildResult, mode: WikiMode, topic: String, action: String) -> String {
         let preview = String(result.renderedMarkdown.prefix(500))
         let truncated = result.renderedMarkdown.count > 500 ? "\n\n... （共 \(result.renderedMarkdown.count) 字，完整内容见 Wiki 面板）" : ""
-        var extraInfo = ""
-        if !result.backlinksAdded.isEmpty {
-            extraInfo += "\n\n自动双链：已在 \(result.backlinksAdded.count) 个页面添加了指向 [[\(topic)]] 的反向链接"
-            extraInfo += "\n（\(result.backlinksAdded.prefix(5).joined(separator: "、"))）"
-        }
-        if let moc = result.mocUpdated {
-            extraInfo += "\n\nMOC 更新：已将 [[\(topic)]] 添加到索引页「\(moc)」"
-        }
-        let output = """
+        let sources = sourceLines(for: result)
+        return """
         \(action)：\(result.notePath)（\(mode == .atomic ? "原子笔记" : "索引页")）
         \(result.diffSummary)
 
         来源：
-        \(sourceLines.isEmpty ? "- 暂无来源" : sourceLines)\(extraInfo)
+        \(sources.isEmpty ? "- 暂无来源" : sources)\(extraInfo(result: result, topic: topic))
 
         预览：
         \(preview)\(truncated)
         """
+    }
 
-        let success = !wantedSave || result.saved
+    private static func extraInfo(result: WikiBuildResult, topic: String) -> String {
+        var text = ""
+        if !result.backlinksAdded.isEmpty {
+            text += "\n\n自动双链：已在 \(result.backlinksAdded.count) 个页面添加了指向 [[\(topic)]] 的反向链接"
+            text += "\n（\(result.backlinksAdded.prefix(5).joined(separator: "、"))）"
+        }
+        if let moc = result.mocUpdated {
+            text += "\n\nMOC 更新：已将 [[\(topic)]] 添加到索引页「\(moc)」"
+        }
+        return text
+    }
+
+    private static func resultData(result: WikiBuildResult, mode: WikiMode) -> [String: String] {
+        [
+            "topic": result.topic,
+            "path": result.notePath,
+            "mode": mode.rawValue,
+            "sourceCount": "\(result.sources.count)",
+            "saved": result.saved ? "true" : "false",
+            "diffSummary": result.diffSummary,
+            "backlinksAdded": "\(result.backlinksAdded.count)",
+            "mocUpdated": result.mocUpdated ?? "",
+            "saveError": result.saveError ?? ""
+        ]
+    }
+
+    private static func recordAudit(_ request: WikiAuditRequest) async {
         await AuditLog.shared.record(
-            tool: name,
-            input: "\(topic) [\(mode.rawValue)]",
-            output: "\(action) \(result.notePath)，来源 \(result.sources.count) 条，双链 \(result.backlinksAdded.count) 个",
-            success: success
-        )
-
-        return ToolResult(
-            output: output,
-            data: [
-                "topic": result.topic,
-                "path": result.notePath,
-                "mode": mode.rawValue,
-                "sourceCount": "\(result.sources.count)",
-                "saved": result.saved ? "true" : "false",
-                "diffSummary": result.diffSummary,
-                "backlinksAdded": "\(result.backlinksAdded.count)",
-                "mocUpdated": result.mocUpdated ?? "",
-                "saveError": result.saveError ?? ""
-            ],
-            success: success,
-            error: success ? nil : "wiki_save_failed"
+            tool: request.tool,
+            input: "\(request.topic) [\(request.mode.rawValue)]",
+            output: "\(request.action) \(request.result.notePath)，来源 \(request.result.sources.count) 条，双链 \(request.result.backlinksAdded.count) 个",
+            success: request.success
         )
     }
 

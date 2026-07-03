@@ -20,7 +20,8 @@ extension AgentLoop {
                 "file_read", "file_write", "file_edit", "code_search",
                 "shell_exec", "workspace_index"
             ]
-            return defs
+            return
+                defs
                 .filter { coreTools.contains($0.function.name) }
                 .map { simplifyDescription($0) }
         }
@@ -40,13 +41,13 @@ extension AgentLoop {
     }
 
     private static func simplifyDescription(_ def: ToolDefinition) -> ToolDefinition {
-        var d = def
+        var definition = def
         // Truncate long descriptions to 100 chars
-        if d.function.description.count > 100 {
-            d.function.description = String(d.function.description.prefix(97)) + "..."
+        if definition.function.description.count > 100 {
+            definition.function.description = String(definition.function.description.prefix(97)) + "..."
         }
         // Truncate parameter descriptions
-        var props = d.function.parameters.properties
+        var props = definition.function.parameters.properties
         for (key, prop) in props {
             if let desc = prop.description, desc.count > 60 {
                 props[key] = FunctionProperty(
@@ -56,8 +57,8 @@ extension AgentLoop {
                 )
             }
         }
-        d.function.parameters.properties = props
-        return d
+        definition.function.parameters.properties = props
+        return definition
     }
 
     static func shouldRetryWithoutTools(
@@ -67,10 +68,12 @@ extension AgentLoop {
     ) -> Bool {
         guard !requestedTools.isEmpty, !hasRetriedWithoutTools else { return false }
         let text = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.hasPrefix("请求格式不被")
+        guard
+            text.hasPrefix("请求格式不被")
                 || text.hasPrefix("请求被拒绝")
                 || text.localizedCaseInsensitiveContains("HTTP 400")
-                || text.localizedCaseInsensitiveContains("HTTP 403") else { return false }
+                || text.localizedCaseInsensitiveContains("HTTP 403")
+        else { return false }
         let detail = ([text] + response.toolActivities.map { "\($0.summary) \($0.statusLine)" })
             .joined(separator: " ")
             .lowercased()
@@ -83,7 +86,8 @@ extension AgentLoop {
     }
 
     static func applyToolCompatibilityFallbackInstruction(to messages: inout [ChatMessage]) {
-        let instruction = "\n\n## 工具兼容限制\n当前连接器不兼容工具调用。后续禁止再调用任何工具，也不要声称已经读取文件、搜索项目、联网、运行命令或写入文件。只能基于当前已知上下文直接回答；如果完成当前会话目标必须依赖工具，请明确说明当前连接器暂不兼容工具调用，并建议用户切换支持工具的连接器后重试。"
+        let instruction =
+            "\n\n## 工具兼容限制\n当前连接器不兼容工具调用。后续禁止再调用任何工具，也不要声称已经读取文件、搜索项目、联网、运行命令或写入文件。只能基于当前已知上下文直接回答；如果完成当前会话目标必须依赖工具，请明确说明当前连接器暂不兼容工具调用，并建议用户切换支持工具的连接器后重试。"
         if !messages.isEmpty, messages[0].role == "system" {
             messages[0].content = (messages[0].content ?? "") + instruction
             return
@@ -116,26 +120,29 @@ extension AgentLoop {
         return markers.contains { message.contains($0) }
     }
 
-    static func shouldRequireToolEvidenceBeforeFinalText(
-        message: String,
-        intent: UserIntent,
-        isReadOnlyRun: Bool,
-        toolCallCount: Int,
-        toolDefs: [ToolDefinition],
-        usedToolCompatibilityFallback: Bool
-    ) -> Bool {
-        guard intent != .chat,
-              !isReadOnlyRun,
-              toolCallCount == 0,
-              !toolDefs.isEmpty,
-              !usedToolCompatibilityFallback else {
+    struct ToolEvidenceRequirementContext {
+        let message: String
+        let intent: UserIntent
+        let isReadOnlyRun: Bool
+        let toolCallCount: Int
+        let toolDefs: [ToolDefinition]
+        let usedToolCompatibilityFallback: Bool
+    }
+
+    static func shouldRequireToolEvidenceBeforeFinalText(_ context: ToolEvidenceRequirementContext) -> Bool {
+        guard context.intent != .chat,
+            !context.isReadOnlyRun,
+            context.toolCallCount == 0,
+            !context.toolDefs.isEmpty,
+            !context.usedToolCompatibilityFallback
+        else {
             return false
         }
-        if Self.isPureContinuationCommand(message) {
+        if Self.isPureContinuationCommand(context.message) {
             return false
         }
 
-        let lower = message.lowercased()
+        let lower = context.message.lowercased()
         let explicitReadOnlyMarkers = [
             "只分析", "先别改", "不要改", "别改", "不用改", "只给建议", "不要执行", "先不执行", "只要方案"
         ]
@@ -150,7 +157,7 @@ extension AgentLoop {
             "最新进展", "进展", "继续", "接着", "没反应", "不生效",
             "workspace", "code", "file", "bug", "error", "fix", "implement", "optimize", "performance"
         ]
-        return actionMarkers.contains { lower.contains($0) } || expectsWriteOutput(message)
+        return actionMarkers.contains { lower.contains($0) } || expectsWriteOutput(context.message)
     }
 
     /// Detect if model output claims completion of a write/save action.
@@ -177,98 +184,122 @@ extension AgentLoop {
     /// F2: Rewrite tool arguments to fix common model mistakes before execution
     static func rewriteToolArguments(toolName: String, argumentsJSON: String, workspaceRoot: String) -> String {
         guard let data = argumentsJSON.data(using: .utf8),
-              var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             return argumentsJSON
         }
         var changed = false
 
-        if toolName == "document.transform" || toolName == "document_transform" {
-            if dict["sourcePath"] == nil, let path = dict["path"] {
-                dict["sourcePath"] = path
-                changed = true
-            }
-            if dict["action"] == nil, let mode = dict["mode"] as? String {
-                dict["action"] = mode
-                changed = true
-            }
-            if dict["action"] == nil, dict["workspace"] != nil || dict["workflowPath"] != nil {
-                dict["action"] = "workspace"
-                changed = true
-            }
-        }
-
-        // Fix 1: Relative paths → absolute paths for file tools
-        if ["file.read", "file.write", "file.edit", "diff.apply", "document.transform", "document_transform"].contains(toolName),
-           let path = dict["path"] as? String,
-           !path.hasPrefix("/") && !workspaceRoot.isEmpty {
-            dict["path"] = (workspaceRoot as NSString).appendingPathComponent(path)
-            changed = true
-        }
-        if toolName == "document.transform" || toolName == "document_transform",
-           let sourcePath = dict["sourcePath"] as? String,
-           !sourcePath.hasPrefix("/") && !workspaceRoot.isEmpty {
-            dict["sourcePath"] = (workspaceRoot as NSString).appendingPathComponent(sourcePath)
-            changed = true
-        }
-        if toolName == "document.transform" || toolName == "document_transform",
-           let outputPath = dict["outputPath"] as? String,
-           !outputPath.hasPrefix("/") && !workspaceRoot.isEmpty {
-            dict["outputPath"] = (workspaceRoot as NSString).appendingPathComponent(outputPath)
-            changed = true
-        }
-        if toolName == "document.transform" || toolName == "document_transform",
-           let workflowPath = dict["workflowPath"] as? String,
-           !workflowPath.hasPrefix("/") && !workspaceRoot.isEmpty {
-            dict["workflowPath"] = (workspaceRoot as NSString).appendingPathComponent(workflowPath)
-            changed = true
-        }
-        if toolName == "document.transform" || toolName == "document_transform",
-           let renderDir = dict["renderDir"] as? String,
-           !renderDir.hasPrefix("/") && !workspaceRoot.isEmpty {
-            dict["renderDir"] = (workspaceRoot as NSString).appendingPathComponent(renderDir)
-            changed = true
-        }
-
-        // Fix 2: shell.exec — ensure 'command' param exists (some models use 'cmd')
-        if toolName == "shell.exec" {
-            if dict["command"] == nil, let cmd = dict["cmd"] as? String {
-                dict["command"] = cmd
-                dict.removeValue(forKey: "cmd")
-                changed = true
-            }
-        }
-
-        // Fix 3: code.search — ensure 'query' param (some models use 'keyword' or 'search')
-        if toolName == "code.search" {
-            if dict["query"] == nil {
-                let alt = dict["keyword"] as? String ?? dict["search"] as? String ?? dict["pattern"] as? String
-                if let alt {
-                    dict["query"] = alt
-                    changed = true
-                }
-            }
-        }
-
-        // Fix 4: file.write — ensure both path and content exist
-        if toolName == "file.write" {
-            if dict["content"] == nil, let text = dict["text"] as? String ?? dict["data"] as? String {
-                dict["content"] = text
-                changed = true
-            }
-        }
+        changed = normalizeDocumentTransformArguments(&dict, toolName: toolName) || changed
+        changed = absolutizePrimaryPath(&dict, toolName: toolName, workspaceRoot: workspaceRoot) || changed
+        changed = absolutizeDocumentTransformPaths(&dict, toolName: toolName, workspaceRoot: workspaceRoot) || changed
+        changed = normalizeShellArguments(&dict, toolName: toolName) || changed
+        changed = normalizeCodeSearchArguments(&dict, toolName: toolName) || changed
+        changed = normalizeFileWriteArguments(&dict, toolName: toolName) || changed
 
         guard changed, let rewritten = try? JSONSerialization.data(withJSONObject: dict),
-              let json = String(data: rewritten, encoding: .utf8) else {
+            let json = String(data: rewritten, encoding: .utf8)
+        else {
             return argumentsJSON
         }
         return json
+    }
+
+    private static func normalizeDocumentTransformArguments(_ dict: inout [String: Any], toolName: String) -> Bool {
+        guard isDocumentTransformTool(toolName) else { return false }
+        var changed = false
+        if dict["sourcePath"] == nil, let path = dict["path"] {
+            dict["sourcePath"] = path
+            changed = true
+        }
+        if dict["action"] == nil, let mode = dict["mode"] as? String {
+            dict["action"] = mode
+            changed = true
+        }
+        if dict["action"] == nil, dict["workspace"] != nil || dict["workflowPath"] != nil {
+            dict["action"] = "workspace"
+            changed = true
+        }
+        return changed
+    }
+
+    private static func absolutizePrimaryPath(
+        _ dict: inout [String: Any],
+        toolName: String,
+        workspaceRoot: String
+    ) -> Bool {
+        if ["file.read", "file.write", "file.edit", "diff.apply", "document.transform", "document_transform"].contains(toolName),
+            let path = dict["path"] as? String,
+            !path.hasPrefix("/") && !workspaceRoot.isEmpty {
+            dict["path"] = (workspaceRoot as NSString).appendingPathComponent(path)
+            return true
+        }
+        return false
+    }
+
+    private static func absolutizeDocumentTransformPaths(
+        _ dict: inout [String: Any],
+        toolName: String,
+        workspaceRoot: String
+    ) -> Bool {
+        guard isDocumentTransformTool(toolName), !workspaceRoot.isEmpty else { return false }
+        var changed = false
+        for key in ["sourcePath", "outputPath", "workflowPath", "renderDir"] {
+            changed = absolutizePathValue(&dict, key: key, workspaceRoot: workspaceRoot) || changed
+        }
+        return changed
+    }
+
+    private static func absolutizePathValue(
+        _ dict: inout [String: Any],
+        key: String,
+        workspaceRoot: String
+    ) -> Bool {
+        guard let path = dict[key] as? String, !path.hasPrefix("/") else { return false }
+        dict[key] = (workspaceRoot as NSString).appendingPathComponent(path)
+        return true
+    }
+
+    private static func normalizeShellArguments(_ dict: inout [String: Any], toolName: String) -> Bool {
+        guard toolName == "shell.exec", dict["command"] == nil, let cmd = dict["cmd"] as? String else {
+            return false
+        }
+        dict["command"] = cmd
+        dict.removeValue(forKey: "cmd")
+        return true
+    }
+
+    private static func normalizeCodeSearchArguments(_ dict: inout [String: Any], toolName: String) -> Bool {
+        guard toolName == "code.search", dict["query"] == nil else { return false }
+        let alt = dict["keyword"] as? String ?? dict["search"] as? String ?? dict["pattern"] as? String
+        if let alt {
+            dict["query"] = alt
+            return true
+        }
+        return false
+    }
+
+    private static func normalizeFileWriteArguments(_ dict: inout [String: Any], toolName: String) -> Bool {
+        guard toolName == "file.write",
+            dict["content"] == nil,
+            let text = dict["text"] as? String ?? dict["data"] as? String
+        else {
+            return false
+        }
+        dict["content"] = text
+        return true
+    }
+
+    private static func isDocumentTransformTool(_ toolName: String) -> Bool {
+        toolName == "document.transform" || toolName == "document_transform"
     }
 
     /// Extract newText values from a file.edit edits JSON string.
     /// Used by circuit breaker auto-repair to salvage content from failed edits.
     static func extractNewTexts(from editsJSON: String) -> [String] {
         guard let data = editsJSON.data(using: .utf8),
-              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else {
             return []
         }
         return arr.compactMap { $0["newText"] as? String }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }

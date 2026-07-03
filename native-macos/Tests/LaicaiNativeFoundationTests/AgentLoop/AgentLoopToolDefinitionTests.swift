@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AgentLoopToolDefinitionTests: LaicaiNativeFoundationTestCase {
@@ -52,21 +53,24 @@ final class AgentLoopToolDefinitionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "打开真实浏览器",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: "/tmp")
         )
 
         XCTAssertEqual(task.status, .failed)
         XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "browser.real" })
-        XCTAssertTrue(task.steps.contains { step in
-            step.kind == .toolResult
-                && step.toolName == "browser.real"
-                && step.isFailure
-                && step.text.contains("approval_required")
-        })
-        XCTAssertTrue(runtime.requests.contains { request in
-            (request.messages ?? []).contains { $0.role == "tool" && ($0.content ?? "").contains("approval_required") }
-        })
+        XCTAssertTrue(
+            task.steps.contains { step in
+                step.kind == .toolResult
+                    && step.toolName == "browser.real"
+                    && step.isFailure
+                    && step.text.contains("approval_required")
+            })
+        XCTAssertTrue(
+            runtime.requests.contains { request in
+                (request.messages ?? []).contains { $0.role == "tool" && ($0.content ?? "").contains("approval_required") }
+            })
     }
     func testDiffApplyUsesFileChangeToolSemantics() {
         let names = AgentLoop.toolDefinitions(for: .task, phase: .execute).map {
@@ -131,12 +135,13 @@ final class AgentLoopToolDefinitionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(AgentLoop.hasSuccessfulDocumentWrite(in: task))
         XCTAssertFalse(AgentLoop.hasSatisfiedDocumentDelivery(in: task, originalMessage: "把 /tmp/demo.pptx 翻译成英文"))
 
-        task.steps.append(TaskStep(
-            kind: .toolResult,
-            text: "remainingCJK: 0",
-            toolName: "document.transform",
-            toolParams: ["action": "verify", "outputPath": outputURL.path, "remainingCJK": "0"]
-        ))
+        task.steps.append(
+            TaskStep(
+                kind: .toolResult,
+                text: "remainingCJK: 0",
+                toolName: "document.transform",
+                toolParams: ["action": "verify", "outputPath": outputURL.path, "remainingCJK": "0"]
+            ))
 
         XCTAssertTrue(AgentLoop.hasSatisfiedDocumentDelivery(in: task, originalMessage: "把 /tmp/demo.pptx 翻译成英文"))
     }

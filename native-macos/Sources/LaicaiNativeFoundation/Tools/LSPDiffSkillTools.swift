@@ -88,9 +88,9 @@ public struct LSPTool: LaicaiTool {
                         "enum \\b\(symbolResult)\\b"
                     ].joined(separator: "|")
                     let grepCommand = """
-                    cd \(Self.shellEscape(root)) && rg -n '\(swiftPatterns)' \
-                    --max-count 5 --glob '*.swift' 2>/dev/null
-                    """
+                        cd \(Self.shellEscape(root)) && rg -n '\(swiftPatterns)' \
+                        --max-count 5 --glob '*.swift' 2>/dev/null
+                        """
                     let grepResult = Self.runShell(grepCommand, cwd: root)
                     if !grepResult.isEmpty {
                         return ToolResult(output: "符号 '\(symbolResult)' 的定义位置：\n\(grepResult)", data: ["symbol": symbolResult])
@@ -105,11 +105,18 @@ public struct LSPTool: LaicaiTool {
             return ToolResult(output: "无法识别位置 \(file):\(line):\(column) 的符号", success: false, error: "no_symbol")
         }
 
-        let defPatterns = "func \\b\(symbolAtPos)\\b|class \\b\(symbolAtPos)\\b|struct \\b\(symbolAtPos)\\b|def \\b\(symbolAtPos)\\b|interface \\b\(symbolAtPos)\\b|type \\b\(symbolAtPos)\\b"
+        let defPatterns = [
+            "func \\b\(symbolAtPos)\\b",
+            "class \\b\(symbolAtPos)\\b",
+            "struct \\b\(symbolAtPos)\\b",
+            "def \\b\(symbolAtPos)\\b",
+            "interface \\b\(symbolAtPos)\\b",
+            "type \\b\(symbolAtPos)\\b"
+        ].joined(separator: "|")
         let definitionCommand = """
-        cd \(Self.shellEscape(root)) && rg -n '\(defPatterns)' \
-        --max-count 10 --max-filesize 1M --glob '!**/.git/**' --glob '!**/node_modules/**' 2>/dev/null
-        """
+            cd \(Self.shellEscape(root)) && rg -n '\(defPatterns)' \
+            --max-count 10 --max-filesize 1M --glob '!**/.git/**' --glob '!**/node_modules/**' 2>/dev/null
+            """
         let result = Self.runShell(definitionCommand, cwd: root)
 
         return result.isEmpty
@@ -124,15 +131,17 @@ public struct LSPTool: LaicaiTool {
         }
 
         let referenceCommand = """
-        cd \(Self.shellEscape(root)) && rg -n '\\b\(symbol)\\b' \
-        --max-count 30 --max-filesize 1M --glob '!**/.git/**' \
-        --glob '!**/node_modules/**' --glob '!**/.build/**' 2>/dev/null
-        """
+            cd \(Self.shellEscape(root)) && rg -n '\\b\(symbol)\\b' \
+            --max-count 30 --max-filesize 1M --glob '!**/.git/**' \
+            --glob '!**/node_modules/**' --glob '!**/.build/**' 2>/dev/null
+            """
         let result = Self.runShell(referenceCommand, cwd: root)
 
         return result.isEmpty
             ? ToolResult(output: "未找到 '\(symbol)' 的引用", data: ["symbol": symbol])
-            : ToolResult(output: "符号 '\(symbol)' 的引用（\(result.components(separatedBy: "\n").filter { !$0.isEmpty }.count) 处）：\n\(String(result.prefix(8000)))", data: ["symbol": symbol])
+            : ToolResult(
+                output: "符号 '\(symbol)' 的引用（\(result.components(separatedBy: "\n").filter { !$0.isEmpty }.count) 处）：\n\(String(result.prefix(8000)))",
+                data: ["symbol": symbol])
     }
 
     private func symbolSearch(query: String, root: String) async -> ToolResult {
@@ -140,12 +149,22 @@ public struct LSPTool: LaicaiTool {
             return ToolResult(output: "请提供 symbol 参数", success: false, error: "missing_symbol")
         }
 
-        let patterns = "func \\b\(query)|class \\b\(query)|struct \\b\(query)|protocol \\b\(query)|enum \\b\(query)|def \\b\(query)|interface \\b\(query)|type \\b\(query)|export.*\\b\(query)"
+        let patterns = [
+            "func \\b\(query)",
+            "class \\b\(query)",
+            "struct \\b\(query)",
+            "protocol \\b\(query)",
+            "enum \\b\(query)",
+            "def \\b\(query)",
+            "interface \\b\(query)",
+            "type \\b\(query)",
+            "export.*\\b\(query)"
+        ].joined(separator: "|")
         let searchCommand = """
-        cd \(Self.shellEscape(root)) && rg -n '\(patterns)' \
-        --max-count 30 --max-filesize 1M --glob '!**/.git/**' \
-        --glob '!**/node_modules/**' --glob '!**/.build/**' 2>/dev/null
-        """
+            cd \(Self.shellEscape(root)) && rg -n '\(patterns)' \
+            --max-count 30 --max-filesize 1M --glob '!**/.git/**' \
+            --glob '!**/node_modules/**' --glob '!**/.build/**' 2>/dev/null
+            """
         let result = Self.runShell(searchCommand, cwd: root)
 
         return result.isEmpty
@@ -305,7 +324,9 @@ public struct DiffApplyTool: LaicaiTool {
                     if diffLine.hasPrefix("@@")
                         || diffLine.hasPrefix("diff ")
                         || diffLine.hasPrefix("---")
-                        || diffLine.hasPrefix("+++") { break }
+                        || diffLine.hasPrefix("+++") {
+                        break
+                    }
                     if diffLine.hasPrefix("-") {
                         // Remove line
                         if lineIndex >= 0 && lineIndex < lines.count {
@@ -362,8 +383,11 @@ public struct SkillManageTool: LaicaiTool {
                     "category": FunctionProperty(
                         type: "string",
                         description: """
-                        技能分类，可用中文或英文：通用/general、知识/knowledge、营销/marketing、产品/product、内容/content、设计/design、数据/data、商业/business、分析/analysis、编辑/editing、执行/execution、研究/research、流程/workflow、元技能/meta
-                        """
+                            技能分类，可用中文或英文：
+                            通用/general、知识/knowledge、营销/marketing、产品/product、内容/content、设计/design、
+                            数据/data、商业/business、分析/analysis、编辑/editing、执行/execution、
+                            研究/research、流程/workflow、元技能/meta
+                            """
                     )
                 ],
                 required: ["action"]
@@ -391,8 +415,10 @@ public struct SkillManageTool: LaicaiTool {
         }
 
         let root = context.workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
-        let skillDir = root.isEmpty
-            ? ((FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory()) as NSString).appendingPathComponent("Laicai/skills")
+        let skillDir =
+            root.isEmpty
+            ? ((FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory()) as NSString)
+                .appendingPathComponent("Laicai/skills")
             : (root as NSString).appendingPathComponent(".laicai/skills")
         try? FileManager.default.createDirectory(atPath: skillDir, withIntermediateDirectories: true)
 
@@ -430,13 +456,13 @@ public struct SkillManageTool: LaicaiTool {
         let trigger = params.trigger ?? ""
         let category = SkillRegistry.normalizeSkillCategory(params.category) ?? "general"
 
-        var md = "---\nname: \(name)\ndescription: \(desc)\ncategory: \(category)\ntools: [\(tools.joined(separator: ", "))]"
+        var markdown = "---\nname: \(name)\ndescription: \(desc)\ncategory: \(category)\ntools: [\(tools.joined(separator: ", "))]"
         if !trigger.isEmpty {
-            md += "\ntrigger: \(trigger)"
+            markdown += "\ntrigger: \(trigger)"
         }
-        md += "\n---\n\n# \(name)\n\n\(desc)\n\n## 执行步骤\n\n\(instructions)\n"
+        markdown += "\n---\n\n# \(name)\n\n\(desc)\n\n## 执行步骤\n\n\(instructions)\n"
 
-        try md.write(toFile: mdPath, atomically: true, encoding: .utf8)
+        try markdown.write(toFile: mdPath, atomically: true, encoding: .utf8)
 
         let skill = SkillDefinition(name: name, description: desc, tools: tools, isBuiltin: false, isPublished: true, category: category)
         await SkillRegistry.shared.register(skill)
@@ -452,37 +478,14 @@ public struct SkillManageTool: LaicaiTool {
             return ToolResult(output: "更新技能需要 name 参数", success: false, error: "invalid_params")
         }
 
-        let fm = FileManager.default
-        let files = (try? fm.contentsOfDirectory(atPath: skillDir)) ?? []
-        guard let existing = files.first(where: { file in
-            guard file.hasSuffix(".md") else { return false }
-            let content = (try? String(contentsOfFile: (skillDir as NSString).appendingPathComponent(file), encoding: .utf8)) ?? ""
-            return content.contains("name: \(name)")
-        }) else {
+        let fileManager = FileManager.default
+        let files = (try? fileManager.contentsOfDirectory(atPath: skillDir)) ?? []
+        guard let existing = existingSkillFile(named: name, files: files, skillDir: skillDir) else {
             return ToolResult(output: "未找到技能：\(name)", success: false, error: "not_found")
         }
 
         let path = (skillDir as NSString).appendingPathComponent(existing)
-        var content = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-
-        if let desc = params.description {
-            content = content.replacingOccurrences(of: #"description: .*"#, with: "description: \(desc)", options: .regularExpression)
-        }
-        if let tools = params.tools {
-            content = content.replacingOccurrences(of: #"tools: \[.*\]"#, with: "tools: [\(tools)]", options: .regularExpression)
-        }
-        if let category = SkillRegistry.normalizeSkillCategory(params.category) {
-            if content.range(of: #"(?m)^category:\s*.*$"#, options: .regularExpression) != nil {
-                content = content.replacingOccurrences(of: #"(?m)^category:\s*.*$"#, with: "category: \(category)", options: .regularExpression)
-            } else if let range = content.range(of: "---\n", options: [], range: content.index(after: content.startIndex)..<content.endIndex) {
-                content.insert(contentsOf: "category: \(category)\n", at: range.lowerBound)
-            }
-        }
-        if let instructions = params.instructions {
-            if let range = content.range(of: "## 执行步骤") {
-                content = String(content[content.startIndex..<range.lowerBound]) + "## 执行步骤\n\n\(instructions)\n"
-            }
-        }
+        let content = updatedSkillContent((try? String(contentsOfFile: path, encoding: .utf8)) ?? "", params: params)
 
         try content.write(toFile: path, atomically: true, encoding: .utf8)
         var data = ["action": "update", "path": path, "name": name]
@@ -492,21 +495,65 @@ public struct SkillManageTool: LaicaiTool {
         return ToolResult(output: "技能已更新：\(name)", data: data)
     }
 
+    private func existingSkillFile(named name: String, files: [String], skillDir: String) -> String? {
+        files.first { file in
+            guard file.hasSuffix(".md") else { return false }
+            let path = (skillDir as NSString).appendingPathComponent(file)
+            let content = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+            return content.contains("name: \(name)")
+        }
+    }
+
+    private func updatedSkillContent(_ original: String, params: SkillParams) -> String {
+        var content = original
+        if let desc = params.description {
+            content = content.replacingOccurrences(of: #"description: .*"#, with: "description: \(desc)", options: .regularExpression)
+        }
+        if let tools = params.tools {
+            content = content.replacingOccurrences(of: #"tools: \[.*\]"#, with: "tools: [\(tools)]", options: .regularExpression)
+        }
+        if let category = SkillRegistry.normalizeSkillCategory(params.category) {
+            content = contentWithSkillCategory(category, content: content)
+        }
+        if let instructions = params.instructions,
+            let range = content.range(of: "## 执行步骤") {
+            content = String(content[content.startIndex..<range.lowerBound]) + "## 执行步骤\n\n\(instructions)\n"
+        }
+        return content
+    }
+
+    private func contentWithSkillCategory(_ category: String, content: String) -> String {
+        var content = content
+        if content.range(of: #"(?m)^category:\s*.*$"#, options: .regularExpression) != nil {
+            return content.replacingOccurrences(
+                of: #"(?m)^category:\s*.*$"#,
+                with: "category: \(category)",
+                options: .regularExpression
+            )
+        }
+        if let range = content.range(of: "---\n", options: [], range: content.index(after: content.startIndex)..<content.endIndex) {
+            content.insert(contentsOf: "category: \(category)\n", at: range.lowerBound)
+        }
+        return content
+    }
+
     private func deleteSkill(params: SkillParams, skillDir: String) throws -> ToolResult {
         guard let name = params.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
             return ToolResult(output: "删除技能需要 name 参数", success: false, error: "invalid_params")
         }
 
-        let fm = FileManager.default
-        let files = (try? fm.contentsOfDirectory(atPath: skillDir)) ?? []
-        guard let existing = files.first(where: { file in
-            let content = (try? String(contentsOfFile: (skillDir as NSString).appendingPathComponent(file), encoding: .utf8)) ?? ""
-            return content.contains("name: \(name)") || file.contains(name.lowercased())
-        }) else {
+        let fileManager = FileManager.default
+        let files = (try? fileManager.contentsOfDirectory(atPath: skillDir)) ?? []
+        guard
+            let existing = files.first(where: { file in
+                let content = (try? String(contentsOfFile: (skillDir as NSString).appendingPathComponent(file), encoding: .utf8)) ?? ""
+                return content.contains("name: \(name)") || file.contains(name.lowercased())
+            })
+        else {
             return ToolResult(output: "未找到技能：\(name)", success: false, error: "not_found")
         }
 
-        try fm.removeItem(atPath: (skillDir as NSString).appendingPathComponent(existing))
+        try fileManager.removeItem(atPath: (skillDir as NSString).appendingPathComponent(existing))
         return ToolResult(output: "技能已删除：\(name)", data: ["action": "delete", "name": name])
     }
 
@@ -521,7 +568,7 @@ public struct SkillManageTool: LaicaiTool {
         let builtinCount = allSkills.filter { $0.isBuiltin }.count
         let customSkills = allSkills.filter { !$0.isBuiltin }
 
-        // Group all skills by category, including local markdown/json skills.
+        // Group all skills by category, including local Markdown/JSON skills.
         var categoryGroups: [String: [String]] = [:]
         for skill in allSkills {
             let cat = SkillRegistry.normalizeSkillCategory(skill.category) ?? "general"
@@ -585,13 +632,13 @@ public struct SkillManageTool: LaicaiTool {
     }
 
     private static func workspaceRoot(fromSkillDir skillDir: String) -> String {
-        let ns = skillDir as NSString
-        if ns.lastPathComponent == "skills" {
-            let parent = ns.deletingLastPathComponent as NSString
+        let nsString = skillDir as NSString
+        if nsString.lastPathComponent == "skills" {
+            let parent = nsString.deletingLastPathComponent as NSString
             if parent.lastPathComponent == ".laicai" {
                 return parent.deletingLastPathComponent
             }
         }
-        return ns.deletingLastPathComponent
+        return nsString.deletingLastPathComponent
     }
 }

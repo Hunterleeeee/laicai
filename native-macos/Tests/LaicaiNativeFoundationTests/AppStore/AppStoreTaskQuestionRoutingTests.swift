@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
@@ -8,7 +9,9 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         let original = "把 /tmp/demo.pptx 翻译成英文版并保存到桌面"
         let priorSteps = [
             TaskStep(kind: .userInput, text: original),
-            TaskStep(kind: .toolCall, text: "document.transform prepare", toolName: "document.transform", toolParams: ["action": "prepare", "sourcePath": "/tmp/demo.pptx"]),
+            TaskStep(
+                kind: .toolCall, text: "document.transform prepare", toolName: "document.transform",
+                toolParams: ["action": "prepare", "sourcePath": "/tmp/demo.pptx"]),
             TaskStep(kind: .toolResult, text: "缺少 translationsJSON", toolName: "document.transform", toolParams: ["action": "apply"], isFailure: true)
         ]
         var context = TaskContext(workspaceRoot: "/tmp")
@@ -29,7 +32,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
     }
 
     func testTaskStatusQuestionAnswersFromCurrentTaskWithoutRuntimeCall() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
             title: "读取项目",
             status: .failed,
@@ -55,7 +59,9 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
             ),
@@ -79,7 +85,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.modeLabel, "会话")
     }
     func testUnrelatedQuestionOnSelectedTaskStaysPlainChat() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
             title: "读取项目",
             status: .completed,
@@ -103,7 +110,9 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
             ),
@@ -126,7 +135,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.modeLabel, "会话 问答")
     }
     func testRecentBadDomainQuestionsDoNotContinueSelectedToolTask() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let prompts = ["大小六壬 梅花易数呢", "这个skill都能干嘛呢"]
 
         for prompt in prompts {
@@ -155,7 +165,9 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                     workflowRuns: [],
                     draftMessage: "",
                     isGenerating: false,
-                    settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                    settings: .init(
+                        workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                        showDebugPanels: false),
                     tasks: [task],
                     selectedTaskID: task.id
                 ),
@@ -179,7 +191,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
     }
 
     func testContextualComplaintContinuesSelectedTaskInsteadOfCreatingNewSession() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
             title: "升级来财 UI",
             status: .completed,
@@ -205,7 +218,9 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
             ),
@@ -228,7 +243,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
     }
 
     func testReadOnlyContinuationDoesNotEscalateToWriteOrShellTools() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let thread = Thread(
             title: "全量体验",
             status: .completed,
@@ -272,7 +288,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
     }
 
     func testContinueAgentActionResumesPausedTaskDirectly() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
             title: "修复继续按钮",
             status: .cancelled,
@@ -296,7 +313,9 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: nil
             ),
@@ -319,7 +338,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
     }
 
     func testPlainChatDoesNotReuseToolTaskJustBecauseItHadToolHistory() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
             title: "修复构建",
             status: .completed,
@@ -345,7 +365,9 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
             ),
@@ -367,7 +389,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         XCTAssertNotNil(store.state.selectedThread?.steps.first(where: { $0.kind == .userInput }))
     }
     func testStandaloneCapabilityQuestionDoesNotContinueSelectedTask() async throws {
-        let connector = ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
             title: "今天有什么 AI 新闻？",
             status: .completed,
@@ -391,7 +414,9 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 workflowRuns: [],
                 draftMessage: "",
                 isGenerating: false,
-                settings: .init(workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false, showDebugPanels: false),
+                settings: .init(
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
             ),

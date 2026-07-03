@@ -20,11 +20,11 @@ struct ToolbarButton: View {
                 .foregroundStyle(isHovered ? TextGrade.primary : TextGrade.muted)
                 .frame(width: 30, height: 30)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                         .fill(isHovered ? SurfaceGrade.hover : SurfaceGrade.elevated.opacity(0.72))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                         .strokeBorder(isHovered ? SurfaceGrade.border.opacity(0.8) : SurfaceGrade.hairline, lineWidth: 0.6)
                 )
                 .contentShape(Rectangle())
@@ -73,7 +73,7 @@ struct ThreadTimelineView: View {
         return ScrollViewReader { proxy in
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: AppSpace.xl) {
+                    LazyVStack(alignment: .leading, spacing: AppSpace.extraLarge) {
                         if thread.isExecution, let executionStats {
                             TaskSummaryCard(thread: thread, stats: executionStats, connectors: store.state.connectors)
                             if thread.status == .completed || thread.status == .failed {
@@ -167,7 +167,7 @@ struct ThreadTimelineView: View {
                 .frame(maxWidth: LayoutConst.conversationMaxWidth, alignment: .leading)
                 .padding(.horizontal, AppSpace.xxl)
                 .padding(.top, AppSpace.xxl)
-                .padding(.bottom, AppSpace.xl)
+                .padding(.bottom, AppSpace.extraLarge)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
             .coordinateSpace(name: "timeline-scroll")
@@ -175,14 +175,14 @@ struct ThreadTimelineView: View {
             .onAppear {
                 scrollToBottom(proxy)
             }
-            .onChange(of: thread.steps.count) { _ in scheduleScrollToBottom(proxy) }
-            .onChange(of: store.isThreadGenerating(thread.id)) { isGen in
+            .onChange(of: thread.steps.count) { _, _ in scheduleScrollToBottom(proxy) }
+            .onChange(of: store.isThreadGenerating(thread.id)) { _, isGen in
                 if isGen { userScrolledAway = false; scheduleScrollToBottom(proxy) }
             }
-            .onChange(of: thread.status) { newStatus in
+            .onChange(of: thread.status) { _, newStatus in
                 if newStatus == .running { userScrolledAway = false; scheduleScrollToBottom(proxy) }
             }
-            .onChange(of: streamingTextLength) { _ in scheduleScrollToBottom(proxy) }
+            .onChange(of: streamingTextLength) { _, _ in scheduleScrollToBottom(proxy) }
             .onReceive(NotificationCenter.default.publisher(for: .laicaiPanelToggled)) { _ in
                 userScrolledAway = false
                 Task { @MainActor in
@@ -203,7 +203,7 @@ struct ThreadTimelineView: View {
                             taskID: thread.id,
                             stepIDs: executionStats.pendingReviewIDs
                         )
-                        .padding(.bottom, AppSpace.xl)
+                        .padding(.bottom, AppSpace.extraLarge)
                         .padding(.trailing, AppSpace.xxl)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                     }
@@ -228,7 +228,7 @@ struct ThreadTimelineView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .padding(.bottom, AppSpace.xl)
+                    .padding(.bottom, AppSpace.extraLarge)
                     .padding(.trailing, AppSpace.xxl)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
@@ -307,8 +307,8 @@ private struct EmptyRunningThreadCard: View {
     let thread: Thread
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(spacing: AppSpace.medium) {
                 ZStack {
                     Circle()
                         .fill(Semantic.toolRunning.opacity(0.12))
@@ -336,13 +336,13 @@ private struct EmptyRunningThreadCard: View {
                     .lineLimit(3)
             }
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.84))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(Semantic.toolRunning.opacity(0.20), lineWidth: 0.7)
         )
     }
@@ -366,7 +366,7 @@ private struct TaskHistoryFoldCard: View {
     @Binding var showFullHistory: Bool
 
     var body: some View {
-        HStack(alignment: .center, spacing: AppSpace.sm) {
+        HStack(alignment: .center, spacing: AppSpace.small) {
             Image(systemName: "rectangle.compress.vertical")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(TextGrade.muted)
@@ -393,14 +393,14 @@ private struct TaskHistoryFoldCard: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, AppSpace.md)
-        .padding(.vertical, AppSpace.sm)
+        .padding(.horizontal, AppSpace.medium)
+        .padding(.vertical, AppSpace.small)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.elevated.opacity(0.45))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.8), lineWidth: 0.6)
         )
     }
@@ -410,8 +410,8 @@ private struct ThreadSummaryCard: View {
     let thread: ThreadRecord
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
-            HStack(spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: thread.isPinned ? "pin.fill" : agentIcon)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(thread.isPinned ? Semantic.warning : agentTint)
@@ -437,21 +437,21 @@ private struct ThreadSummaryCard: View {
                     .foregroundStyle(TextGrade.secondary)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(AppSpace.md)
+                    .padding(AppSpace.medium)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .fill(SurfaceGrade.panel.opacity(0.75))
                     )
             }
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.divider, lineWidth: 0.75)
         )
     }
@@ -513,10 +513,10 @@ private struct SessionStepCard: View {
 
     private func timelineSystemCard(icon: String, title: String, text: String, color: Color) -> some View {
         let display = text.count > 800 ? String(text.prefix(800)) + "\n\n… 共 \(text.count) 字，已折叠" : text
-        return HStack(alignment: .top, spacing: AppSpace.sm) {
+        return HStack(alignment: .top, spacing: AppSpace.small) {
             AvatarBadge(icon: icon, color: color)
 
-            VStack(alignment: .leading, spacing: AppSpace.xs) {
+            VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                 Text(title)
                     .font(AppFont.captionMedium)
                     .foregroundStyle(color)
@@ -525,14 +525,14 @@ private struct SessionStepCard: View {
                     .font(AppFont.body)
                     .foregroundStyle(TextGrade.secondary)
                     .lineLimit(8)
-                    .padding(AppSpace.md)
+                    .padding(AppSpace.medium)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .fill(SurfaceGrade.card)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                             .strokeBorder(color.opacity(0.18), lineWidth: 1)
                     )
             }
@@ -552,9 +552,9 @@ struct MultiAgentFlowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // ── Header ──
-            HStack(spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.medium) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                         .fill(Brand.purple.opacity(0.12))
                         .frame(width: 30, height: 30)
                     Image(systemName: "person.3.fill")
@@ -575,8 +575,8 @@ struct MultiAgentFlowView: View {
 
                 flowStatusPill(for: plan.status)
             }
-            .padding(.horizontal, AppSpace.xl)
-            .padding(.vertical, AppSpace.lg)
+            .padding(.horizontal, AppSpace.extraLarge)
+            .padding(.vertical, AppSpace.large)
 
             // ── Divider ──
             Rectangle()
@@ -603,8 +603,8 @@ struct MultiAgentFlowView: View {
                         }
                     }
                 }
-                .padding(.horizontal, AppSpace.xl)
-                .padding(.vertical, AppSpace.xl)
+                .padding(.horizontal, AppSpace.extraLarge)
+                .padding(.vertical, AppSpace.extraLarge)
             }
 
             // ── Selected Agent Detail ──
@@ -616,11 +616,11 @@ struct MultiAgentFlowView: View {
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.85))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
                 .strokeBorder(
                     LinearGradient(
                         colors: [Brand.purple.opacity(0.20), Brand.primary.opacity(0.10), Color.clear],
@@ -641,7 +641,7 @@ struct MultiAgentFlowView: View {
         let isRunning = agent.status == .running
         let nodeColor = flowColor(for: agent.status)
 
-        return VStack(spacing: AppSpace.sm) {
+        return VStack(spacing: AppSpace.small) {
             ZStack {
                 // Background circle
                 Circle()
@@ -696,10 +696,10 @@ struct MultiAgentFlowView: View {
             }
         }
         .frame(minWidth: 80)
-        .padding(.vertical, AppSpace.sm)
-        .padding(.horizontal, AppSpace.sm)
+        .padding(.vertical, AppSpace.small)
+        .padding(.horizontal, AppSpace.small)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(isSelected ? SurfaceGrade.elevated.opacity(0.5) : Color.clear)
         )
     }
@@ -722,7 +722,7 @@ struct MultiAgentFlowView: View {
             TextGrade.ghost.opacity(0.15)
         ]
 
-        return VStack(spacing: AppSpace.xs) {
+        return VStack(spacing: AppSpace.extraSmall) {
             ZStack {
                 // Connector line
                 RoundedRectangle(cornerRadius: 1)
@@ -758,8 +758,8 @@ struct MultiAgentFlowView: View {
     // ── Agent Detail Panel ──
 
     private func flowAgentDetail(agent: AgentNode) -> some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(spacing: AppSpace.medium) {
                 ZStack {
                     Circle()
                         .fill(flowColor(for: agent.status).opacity(0.12))
@@ -792,7 +792,7 @@ struct MultiAgentFlowView: View {
             }
 
             if !agent.input.isEmpty {
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                     Label("输入", systemImage: "arrow.down.circle")
                         .font(AppFont.micro)
                         .foregroundStyle(TextGrade.ghost)
@@ -800,17 +800,17 @@ struct MultiAgentFlowView: View {
                         .font(AppFont.body)
                         .foregroundStyle(TextGrade.secondary)
                         .lineLimit(4)
-                        .padding(AppSpace.md)
+                        .padding(AppSpace.medium)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
-                            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                 .fill(SurfaceGrade.sunken)
                         )
                 }
             }
 
             if !agent.output.isEmpty {
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                     Label("输出", systemImage: "arrow.up.circle")
                         .font(AppFont.micro)
                         .foregroundStyle(TextGrade.ghost)
@@ -819,17 +819,17 @@ struct MultiAgentFlowView: View {
                         .foregroundStyle(TextGrade.secondary)
                         .lineLimit(6)
                         .textSelection(.enabled)
-                        .padding(AppSpace.md)
+                        .padding(AppSpace.medium)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
-                            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                 .fill(SurfaceGrade.sunken)
                         )
                 }
             }
 
             if !agent.stepIDs.isEmpty {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: "list.bullet")
                         .font(.system(size: 10))
                     Text("\(agent.stepIDs.count) 个执行步骤")
@@ -838,7 +838,7 @@ struct MultiAgentFlowView: View {
                 .foregroundStyle(TextGrade.muted)
             }
         }
-        .padding(AppSpace.xl)
+        .padding(AppSpace.extraLarge)
     }
 
     // ── Helpers ──
@@ -869,8 +869,8 @@ struct MultiAgentFlowView: View {
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(flowColor(for: status))
         }
-        .padding(.horizontal, AppSpace.sm + 2)
-        .padding(.vertical, AppSpace.xs + 1)
+        .padding(.horizontal, AppSpace.small + 2)
+        .padding(.vertical, AppSpace.extraSmall + 1)
         .background(
             Capsule().fill(flowColor(for: status).opacity(0.10))
         )
@@ -953,7 +953,7 @@ struct PhaseGroupCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: onToggle) {
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Image(systemName: group.phase.icon)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Brand.primary)
@@ -979,24 +979,24 @@ struct PhaseGroupCard: View {
                         .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(TextGrade.ghost)
                 }
-                .padding(.horizontal, AppSpace.md)
-                .padding(.vertical, AppSpace.sm)
+                .padding(.horizontal, AppSpace.medium)
+                .padding(.vertical, AppSpace.small)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                         .fill(SurfaceGrade.card.opacity(0.55))
                 )
             }
             .buttonStyle(.plain)
 
             if !isCollapsed {
-                VStack(alignment: .leading, spacing: AppSpace.sm) {
+                VStack(alignment: .leading, spacing: AppSpace.small) {
                     ForEach(group.steps) { step in
                         TaskStepCard(step: step, taskID: taskID, isRunning: isRunning)
                             .id(step.id)
                     }
                 }
-                .padding(.leading, AppSpace.xl)
-                .padding(.top, AppSpace.xs)
+                .padding(.leading, AppSpace.extraLarge)
+                .padding(.top, AppSpace.extraSmall)
             }
         }
     }
@@ -1260,8 +1260,8 @@ private struct TaskSummaryCard: View {
     let connectors: [ConnectorProfile]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(alignment: .center, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(alignment: .center, spacing: AppSpace.medium) {
                 ZStack {
                     Circle()
                         .fill(thread.status.color.opacity(0.10))
@@ -1282,7 +1282,7 @@ private struct TaskSummaryCard: View {
                         .foregroundStyle(TextGrade.muted)
 
                     // Intent & connector pills
-                    HStack(spacing: AppSpace.xs) {
+                    HStack(spacing: AppSpace.extraSmall) {
                         intentPill
                         if let connectorName = resolvedConnectorName {
                             connectorPill(connectorName)
@@ -1291,13 +1291,13 @@ private struct TaskSummaryCard: View {
                     .padding(.top, 2)
 
                     if !stats.memoryPills.isEmpty {
-                        HStack(spacing: AppSpace.xs) {
+                        HStack(spacing: AppSpace.extraSmall) {
                             ForEach(stats.memoryPills.prefix(3), id: \.self) { pill in
                                 Text(pill)
                                     .font(AppFont.tiny)
                                     .foregroundStyle(TextGrade.secondary)
                                     .lineLimit(1)
-                                    .padding(.horizontal, AppSpace.sm)
+                                    .padding(.horizontal, AppSpace.small)
                                     .padding(.vertical, 3)
                                     .background(
                                         Capsule()
@@ -1314,13 +1314,13 @@ private struct TaskSummaryCard: View {
 
             phaseProgressBar
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.8))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(
                     LinearGradient(
                         colors: [thread.status.color.opacity(0.18), thread.status.color.opacity(0.06)],
@@ -1342,7 +1342,7 @@ private struct TaskSummaryCard: View {
         let currentIndex = phases.firstIndex(of: currentPhase) ?? 0
         let isRunning = thread.status == .running
 
-        return VStack(alignment: .leading, spacing: AppSpace.xs) {
+        return VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
             // Phase indicator row
             HStack(spacing: 2) {
                 ForEach(Array(phases.enumerated()), id: \.offset) { index, phase in
@@ -1351,7 +1351,7 @@ private struct TaskSummaryCard: View {
                     let isDone = index < currentIndex || (!isRunning && index <= currentIndex)
 
                     VStack(spacing: 2) {
-                        HStack(spacing: AppSpace.xs) {
+                        HStack(spacing: AppSpace.extraSmall) {
                             Image(systemName: isDone ? "checkmark.circle.fill" : phase.icon)
                                 .font(.system(size: 8, weight: .semibold))
                             Text(phase.title)
@@ -1363,10 +1363,10 @@ private struct TaskSummaryCard: View {
                             }
                         }
                         .foregroundStyle(index <= currentIndex ? Brand.primary : TextGrade.ghost)
-                        .padding(.horizontal, AppSpace.sm)
+                        .padding(.horizontal, AppSpace.small)
                         .padding(.vertical, 3)
                         .background(
-                            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                            RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                                 .fill(index <= currentIndex ? Brand.primary.opacity(0.12) : Color.clear)
                         )
                         .help(phaseTooltip(phase, stepCount: stepCount, tools: tools))
@@ -1476,7 +1476,7 @@ private struct TaskSummaryCard: View {
                 .fontWeight(.medium)
         }
         .foregroundStyle(intent.color)
-        .padding(.horizontal, AppSpace.sm)
+        .padding(.horizontal, AppSpace.small)
         .padding(.vertical, 3)
         .background(
             Capsule()
@@ -1494,7 +1494,7 @@ private struct TaskSummaryCard: View {
                 .lineLimit(1)
         }
         .foregroundStyle(TextGrade.secondary)
-        .padding(.horizontal, AppSpace.sm)
+        .padding(.horizontal, AppSpace.small)
         .padding(.vertical, 3)
         .background(
             Capsule()
@@ -1536,8 +1536,8 @@ private struct TypingIndicator: View {
     }
 
     var body: some View {
-        HStack(spacing: AppSpace.sm) {
-            HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
+            HStack(spacing: AppSpace.small) {
                 // Pulsing dot
                 Circle()
                     .fill(Brand.primary)
@@ -1562,8 +1562,8 @@ private struct TypingIndicator: View {
                         .foregroundStyle(Brand.primary)
                 }
             }
-            .padding(.horizontal, AppSpace.lg)
-            .padding(.vertical, AppSpace.sm + 2)
+            .padding(.horizontal, AppSpace.large)
+            .padding(.vertical, AppSpace.small + 2)
             .background(
                 Capsule()
                     .fill(SurfaceGrade.card)
@@ -1620,7 +1620,7 @@ struct BatchReviewBar: View {
     @State private var isRejecting = false
 
     var body: some View {
-        HStack(spacing: AppSpace.md) {
+        HStack(spacing: AppSpace.medium) {
             Image(systemName: "eye.fill")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Semantic.warning)
@@ -1638,7 +1638,7 @@ struct BatchReviewBar: View {
                 }
                 isApproving = false
             } label: {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     if isApproving {
                         ProgressView()
                             .scaleEffect(0.5)
@@ -1651,8 +1651,8 @@ struct BatchReviewBar: View {
                         .font(AppFont.captionMedium)
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, AppSpace.lg)
-                .padding(.vertical, AppSpace.sm + 2)
+                .padding(.horizontal, AppSpace.large)
+                .padding(.vertical, AppSpace.small + 2)
                 .background(Capsule().fill(Semantic.success))
             }
             .buttonStyle(.plain)
@@ -1665,31 +1665,31 @@ struct BatchReviewBar: View {
                 }
                 isRejecting = false
             } label: {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12, weight: .semibold))
                     Text("全部拒绝")
                         .font(AppFont.captionMedium)
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, AppSpace.lg)
-                .padding(.vertical, AppSpace.sm + 2)
+                .padding(.horizontal, AppSpace.large)
+                .padding(.vertical, AppSpace.small + 2)
                 .background(Capsule().fill(Semantic.error))
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, AppSpace.lg)
-        .padding(.vertical, AppSpace.md)
+        .padding(.horizontal, AppSpace.large)
+        .padding(.vertical, AppSpace.medium)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
                 .strokeBorder(Semantic.warning.opacity(0.30), lineWidth: 1)
         )
-        .padding(.horizontal, AppSpace.xl)
+        .padding(.horizontal, AppSpace.extraLarge)
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity, alignment: .center)
     }
@@ -1734,9 +1734,9 @@ private struct TaskCompletionSummaryCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             // Header
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: thread.status == .completed ? "checkmark.seal.fill" : "xmark.seal.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(thread.status == .completed ? Semantic.success : Semantic.error)
@@ -1753,8 +1753,8 @@ private struct TaskCompletionSummaryCard: View {
 
             // Changed files
             if !writtenFiles.isEmpty {
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
-                    HStack(spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
+                    HStack(spacing: AppSpace.extraSmall) {
                         Image(systemName: "doc.text.fill")
                             .font(.system(size: 10))
                             .foregroundStyle(TextGrade.secondary)
@@ -1763,7 +1763,7 @@ private struct TaskCompletionSummaryCard: View {
                             .foregroundStyle(TextGrade.secondary)
                     }
                     ForEach(writtenFiles.prefix(8), id: \.self) { path in
-                        HStack(spacing: AppSpace.xs) {
+                        HStack(spacing: AppSpace.extraSmall) {
                             Text("•")
                                 .foregroundStyle(Brand.primary)
                             Text(shortPath(path))
@@ -1778,17 +1778,17 @@ private struct TaskCompletionSummaryCard: View {
                             .foregroundStyle(TextGrade.ghost)
                     }
                 }
-                .padding(AppSpace.sm)
+                .padding(AppSpace.small)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .fill(SurfaceGrade.sunken.opacity(0.5))
                 )
             }
 
             // Failed items
             if !failedSteps.isEmpty {
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
-                    HStack(spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
+                    HStack(spacing: AppSpace.extraSmall) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 10))
                             .foregroundStyle(Semantic.error)
@@ -1797,7 +1797,7 @@ private struct TaskCompletionSummaryCard: View {
                             .foregroundStyle(Semantic.error)
                     }
                     ForEach(failedSteps.prefix(5), id: \.id) { step in
-                        HStack(spacing: AppSpace.xs) {
+                        HStack(spacing: AppSpace.extraSmall) {
                             Text("•")
                                 .foregroundStyle(Semantic.error)
                             Text(step.toolName ?? step.kind.title)
@@ -1812,16 +1812,16 @@ private struct TaskCompletionSummaryCard: View {
                         }
                     }
                 }
-                .padding(AppSpace.sm)
+                .padding(AppSpace.small)
                 .background(
-                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                         .fill(Semantic.errorMuted.opacity(0.5))
                 )
             }
 
             // Shell commands summary
             if !shellCommands.isEmpty {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: "terminal")
                         .font(.system(size: 10))
                         .foregroundStyle(TextGrade.secondary)
@@ -1832,7 +1832,7 @@ private struct TaskCompletionSummaryCard: View {
             }
 
             if verifyCount > 0 {
-                HStack(spacing: AppSpace.xs) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: "checkmark.shield")
                         .font(.system(size: 10))
                         .foregroundStyle(Semantic.success)
@@ -1842,14 +1842,14 @@ private struct TaskCompletionSummaryCard: View {
                 }
             }
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .frame(maxWidth: 580, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.8))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(
                     thread.status == .completed
                     ? Semantic.success.opacity(0.20)
@@ -1874,7 +1874,7 @@ private struct TaskRatingBar: View {
     let currentRating: Int
 
     var body: some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             Text("评价此结果")
                 .font(AppFont.caption)
                 .foregroundStyle(TextGrade.muted)
@@ -1897,8 +1897,8 @@ private struct TaskRatingBar: View {
             }
             Spacer()
         }
-        .padding(.horizontal, AppSpace.md)
-        .padding(.vertical, AppSpace.xs)
+        .padding(.horizontal, AppSpace.medium)
+        .padding(.vertical, AppSpace.extraSmall)
     }
 
     private var ratingLabel: String {

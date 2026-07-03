@@ -24,69 +24,22 @@ extension AppStore {
 
         plan.isEditable = false
         plan.status = .running
-        state.threads[idx].multiAgentPlan = plan
-        state.threads[idx].connectorID = connector.id
-        Self.markAgentRunning(
-            &state.threads[idx],
-            goal: state.threads[idx].goal ?? state.threads[idx].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[idx].title,
-            plan: Self.agentPlanLines(for: plan, message: state.threads[idx].goal ?? state.threads[idx].title)
-        )
-        state.threads[idx].updatedAt = .now
+        markPlanExecutionRunning(at: idx, plan: plan, connector: connector)
 
         let thread = state.threads[idx]
-        let message = thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title
 
         let epThreadID = thread.id
         let generationRunID = markGenerationStarted(for: epThreadID, activity: "正在执行编排计划…")
         generationTasks[epThreadID] = Task { [weak self] in
             guard let self else { return }
-            let orchestrator = MultiAgentOrchestrator(
-                config: .init(
-                    workspaceRoot: self.state.settings.workspacePath,
-                    contextMode: self.state.settings.contextMode
-                ),
-                runtime: self.environment.runtimeClient
-            )
-            do {
-                let completedTask = try await orchestrator.run(
-                    taskID: epThreadID,
-                    message: message,
-                    intent: .task,
-                    connector: connector,
-                    allConnectors: self.state.connectors,
-                    context: thread.context,
-                    plan: plan,
-                    onStep: { [weak self] step in
-                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID, runID: generationRunID) else { return }
-                        self.appendTaskStep(step, to: epThreadID)
-                    },
-                    onStreamDelta: { [weak self] delta in
-                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID, runID: generationRunID) else { return }
-                        self.appendStreamDelta(delta, to: epThreadID)
-                    },
-                    onPlanUpdate: { [weak self] updatedPlan in
-                        guard let self, self.shouldAcceptGenerationCallback(for: epThreadID, runID: generationRunID) else { return }
-                        self.updateMultiAgentPlan(updatedPlan, for: epThreadID)
-                    }
-                )
-                guard self.shouldAcceptGenerationCallback(for: epThreadID, runID: generationRunID) else { return }
-                self.flushStreamBuffer(for: epThreadID)
-                self.mergeCompletedTask(completedTask, into: epThreadID)
-                self.persistThreadsNow()
-            } catch {
-                guard self.shouldAcceptGenerationCallback(for: epThreadID, runID: generationRunID) else { return }
-                self.flushStreamBuffer(for: epThreadID)
-                if let idx = self.state.threads.firstIndex(where: { $0.id == epThreadID }) {
-                    self.state.threads[idx].steps.append(
-                        TaskStep(kind: .error, text: "多会话执行失败：\(error.localizedDescription)", isFailure: true, recoverable: true)
-                    )
-                    self.state.threads[idx].status = .failed
-                    self.syncAgentSnapshot(at: idx)
-                    self.state.threads[idx].updatedAt = .now
-                    self.persistThreadsNow()
-                }
-            }
-            self.finishGenerationTask(epThreadID, runID: generationRunID)
+            await self.runMultiAgentPlanExecution(MultiAgentPlanRun(
+                thread: thread,
+                plan: plan,
+                connector: connector,
+                threadID: epThreadID,
+                generationRunID: generationRunID,
+                failurePrefix: "多会话执行失败"
+            ))
         }
     }
 
@@ -102,77 +55,134 @@ extension AppStore {
             return
         }
 
-        for i in plan.agents.indices where plan.agents[i].status == .failed {
-            plan.agents[i].status = .queued
-            plan.agents[i].errorMessage = nil
-            plan.agents[i].retryCount = 0
-            plan.agents[i].updatedAt = .now
-        }
+        Self.resetFailedAgentsForResume(&plan)
         plan.status = .running
         plan.isEditable = false
-        state.threads[idx].multiAgentPlan = plan
-        state.threads[idx].connectorID = connector.id
-        Self.markAgentRunning(
-            &state.threads[idx],
-            goal: state.threads[idx].goal ?? state.threads[idx].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[idx].title,
-            plan: Self.agentPlanLines(for: plan, message: state.threads[idx].goal ?? state.threads[idx].title)
-        )
-        state.threads[idx].updatedAt = .now
+        markPlanExecutionRunning(at: idx, plan: plan, connector: connector)
 
         let thread = state.threads[idx]
-        let message = thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title
 
         let rpThreadID = thread.id
         let generationRunID = markGenerationStarted(for: rpThreadID, activity: "正在恢复编排计划…")
         generationTasks[rpThreadID] = Task { [weak self] in
             guard let self else { return }
-            let orchestrator = MultiAgentOrchestrator(
-                config: .init(
-                    workspaceRoot: self.state.settings.workspacePath,
-                    contextMode: self.state.settings.contextMode
-                ),
-                runtime: self.environment.runtimeClient
-            )
-            do {
-                let completedTask = try await orchestrator.run(
-                    taskID: rpThreadID,
-                    message: message,
+            await self.runMultiAgentPlanExecution(MultiAgentPlanRun(
+                thread: thread,
+                plan: plan,
+                connector: connector,
+                threadID: rpThreadID,
+                generationRunID: generationRunID,
+                failurePrefix: "多会话恢复执行失败"
+            ))
+        }
+    }
+
+    private func markPlanExecutionRunning(
+        at index: Int,
+        plan: MultiAgentPlan,
+        connector: ConnectorProfile
+    ) {
+        state.threads[index].multiAgentPlan = plan
+        state.threads[index].connectorID = connector.id
+        Self.markAgentRunning(
+            &state.threads[index],
+            goal: Self.threadGoal(for: state.threads[index]),
+            plan: Self.agentPlanLines(for: plan, message: state.threads[index].goal ?? state.threads[index].title)
+        )
+        state.threads[index].updatedAt = .now
+    }
+
+    private static func resetFailedAgentsForResume(_ plan: inout MultiAgentPlan) {
+        for index in plan.agents.indices where plan.agents[index].status == .failed {
+            plan.agents[index].status = .queued
+            plan.agents[index].errorMessage = nil
+            plan.agents[index].retryCount = 0
+            plan.agents[index].updatedAt = .now
+        }
+    }
+
+    private static func threadGoal(for thread: Thread) -> String {
+        thread.goal ?? thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title
+    }
+
+    private struct MultiAgentPlanRun {
+        let thread: Thread
+        let plan: MultiAgentPlan
+        let connector: ConnectorProfile
+        let threadID: UUID
+        let generationRunID: UUID
+        let failurePrefix: String
+    }
+
+    private func runMultiAgentPlanExecution(_ run: MultiAgentPlanRun) async {
+        do {
+            let completedTask = try await multiAgentOrchestrator().run(
+                MultiAgentOrchestrator.RunRequest(
+                    taskID: run.threadID,
+                    message: Self.threadGoal(for: run.thread),
                     intent: .task,
-                    connector: connector,
-                    allConnectors: self.state.connectors,
-                    context: thread.context,
-                    plan: plan,
-                    onStep: { [weak self] step in
-                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID, runID: generationRunID) else { return }
-                        self.appendTaskStep(step, to: rpThreadID)
-                    },
-                    onStreamDelta: { [weak self] delta in
-                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID, runID: generationRunID) else { return }
-                        self.appendStreamDelta(delta, to: rpThreadID)
-                    },
-                    onPlanUpdate: { [weak self] updatedPlan in
-                        guard let self, self.shouldAcceptGenerationCallback(for: rpThreadID, runID: generationRunID) else { return }
-                        self.updateMultiAgentPlan(updatedPlan, for: rpThreadID)
-                    }
-                )
-                guard self.shouldAcceptGenerationCallback(for: rpThreadID, runID: generationRunID) else { return }
-                self.flushStreamBuffer(for: rpThreadID)
-                self.mergeCompletedTask(completedTask, into: rpThreadID)
-                self.persistThreadsNow()
-            } catch {
-                guard self.shouldAcceptGenerationCallback(for: rpThreadID, runID: generationRunID) else { return }
-                self.flushStreamBuffer(for: rpThreadID)
-                if let idx = self.state.threads.firstIndex(where: { $0.id == rpThreadID }) {
-                    self.state.threads[idx].steps.append(
-                        TaskStep(kind: .error, text: "多会话恢复执行失败：\(error.localizedDescription)", isFailure: true, recoverable: true)
-                    )
-                    self.state.threads[idx].status = .failed
-                    self.syncAgentSnapshot(at: idx)
-                    self.state.threads[idx].updatedAt = .now
-                    self.persistThreadsNow()
+                    connectorSelection: .init(connector: run.connector, allConnectors: state.connectors),
+                    plan: run.plan,
+                    context: run.thread.context
+                ),
+                onStep: { [weak self] step in
+                    guard let self, self.shouldAcceptGenerationCallback(for: run.threadID, runID: run.generationRunID) else { return }
+                    self.appendTaskStep(step, to: run.threadID)
+                },
+                onStreamDelta: { [weak self] delta in
+                    guard let self, self.shouldAcceptGenerationCallback(for: run.threadID, runID: run.generationRunID) else { return }
+                    self.appendStreamDelta(delta, to: run.threadID)
+                },
+                onPlanUpdate: { [weak self] updatedPlan in
+                    guard let self, self.shouldAcceptGenerationCallback(for: run.threadID, runID: run.generationRunID) else { return }
+                    self.updateMultiAgentPlan(updatedPlan, for: run.threadID)
                 }
-            }
-            self.finishGenerationTask(rpThreadID, runID: generationRunID)
+            )
+            guard shouldAcceptGenerationCallback(for: run.threadID, runID: run.generationRunID) else { return }
+            completeMultiAgentPlanExecution(completedTask, threadID: run.threadID)
+        } catch {
+            failMultiAgentPlanExecution(
+                threadID: run.threadID,
+                generationRunID: run.generationRunID,
+                prefix: run.failurePrefix,
+                error: error
+            )
+        }
+        finishGenerationTask(run.threadID, runID: run.generationRunID)
+    }
+
+    private func multiAgentOrchestrator() -> MultiAgentOrchestrator {
+        MultiAgentOrchestrator(
+            config: .init(
+                workspaceRoot: state.settings.workspacePath,
+                contextMode: state.settings.contextMode
+            ),
+            runtime: environment.runtimeClient
+        )
+    }
+
+    private func completeMultiAgentPlanExecution(_ completedTask: AgentTask, threadID: UUID) {
+        flushStreamBuffer(for: threadID)
+        mergeCompletedTask(completedTask, into: threadID)
+        persistThreadsNow()
+    }
+
+    private func failMultiAgentPlanExecution(
+        threadID: UUID,
+        generationRunID: UUID,
+        prefix: String,
+        error: Error
+    ) {
+        guard shouldAcceptGenerationCallback(for: threadID, runID: generationRunID) else { return }
+        flushStreamBuffer(for: threadID)
+        if let idx = state.threads.firstIndex(where: { $0.id == threadID }) {
+            state.threads[idx].steps.append(
+                TaskStep(kind: .error, text: "\(prefix)：\(error.localizedDescription)", isFailure: true, recoverable: true)
+            )
+            state.threads[idx].status = .failed
+            syncAgentSnapshot(at: idx)
+            state.threads[idx].updatedAt = .now
+            persistThreadsNow()
         }
     }
 }

@@ -109,16 +109,16 @@ extension AgentLoop {
 
     // G9: Allow file edits on DIFFERENT files to run in parallel
     static func scheduledToolCallBatches(
-        _ calls: [(Int, TaskStep, String, String, String, [String: String])]
-    ) -> [[(Int, TaskStep, String, String, String, [String: String])]] {
-        var batches: [[(Int, TaskStep, String, String, String, [String: String])]] = []
-        var currentBatch: [(Int, TaskStep, String, String, String, [String: String])] = []
+        _ calls: [ToolCallEntry]
+    ) -> [[ToolCallEntry]] {
+        var batches: [[ToolCallEntry]] = []
+        var currentBatch: [ToolCallEntry] = []
         var currentBatchPaths: Set<String> = []
         var currentBatchIsReadOnly = true
 
         for call in calls {
-            let toolName = call.1.toolName ?? call.2
-            let params = call.5
+            let toolName = call.callStep.toolName ?? call.apiToolName
+            let params = call.toolParams
             let exclusivity = toolExclusivity(toolName: toolName, params: params)
 
             switch exclusivity {

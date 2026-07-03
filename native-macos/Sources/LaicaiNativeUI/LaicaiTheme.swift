@@ -34,50 +34,50 @@ private func hex(_ value: String) -> Color { Color(hex: value) }
 struct Brand {
     static let primary = Color(
         light: hex("2563EB"),
-        dark:  hex("8FB4FF")
+        dark: hex("8FB4FF")
     )
     static let primaryDark = Color(
         light: hex("1747B8"),
-        dark:  hex("B7CCFF")
+        dark: hex("B7CCFF")
     )
     static let primaryMuted = Color(
         light: hex("EAF1FF"),
-        dark:  hex("1B2742")
+        dark: hex("1B2742")
     )
     static let primaryHover = Color(
         light: hex("1D4ED8"),
-        dark:  hex("A8C3FF")
+        dark: hex("A8C3FF")
     )
     static let primaryLight = Color(
         light: hex("7AA2FF"),
-        dark:  hex("D4E1FF")
+        dark: hex("D4E1FF")
     )
 
     static let purple = Color(
         light: hex("7C3AED"),
-        dark:  hex("C4B5FD")
+        dark: hex("C4B5FD")
     )
     static let purpleMuted = Color(
         light: hex("F2EEFF"),
-        dark:  hex("2B2244")
+        dark: hex("2B2244")
     )
 
     static let teal = Color(
         light: hex("0F766E"),
-        dark:  hex("7DD3C7")
+        dark: hex("7DD3C7")
     )
     static let tealMuted = Color(
         light: hex("E7F7F4"),
-        dark:  hex("173B38")
+        dark: hex("173B38")
     )
 
     static let jade = Color(
         light: hex("10B981"),
-        dark:  hex("86EFAC")
+        dark: hex("86EFAC")
     )
     static let jadeMuted = Color(
         light: hex("E9FBF3"),
-        dark:  hex("173729")
+        dark: hex("173729")
     )
 
     static let gradientStart = primary
@@ -107,27 +107,27 @@ struct Brand {
 struct Semantic {
     static let success = Color(
         light: hex("059669"),
-        dark:  hex("34D399")
+        dark: hex("34D399")
     )
     static let successMuted = Color(
         light: hex("D1FAE5"),
-        dark:  hex("0F3D2C")
+        dark: hex("0F3D2C")
     )
     static let warning = Color(
         light: hex("C2670A"),
-        dark:  hex("F0AB4C")
+        dark: hex("F0AB4C")
     )
     static let warningMuted = Color(
         light: hex("FCEFD7"),
-        dark:  hex("3A2A12")
+        dark: hex("3A2A12")
     )
     static let error = Color(
         light: hex("DC2626"),
-        dark:  hex("F87171")
+        dark: hex("F87171")
     )
     static let errorMuted = Color(
         light: hex("FDE3E3"),
-        dark:  hex("3F1818")
+        dark: hex("3F1818")
     )
 
     static let purpleMuted = Brand.purpleMuted
@@ -142,11 +142,11 @@ struct Semantic {
 
     static let toolCall = Color(
         light: hex("64748B"),
-        dark:  hex("CBD5E1")
+        dark: hex("CBD5E1")
     )
     static let toolResult = Color(
         light: hex("475569"),
-        dark:  hex("AAB6C7")
+        dark: hex("AAB6C7")
     )
     static let toolRunning = Brand.jade
 }
@@ -190,19 +190,19 @@ struct SurfaceGrade {
     /// Translucent overlay — used for popovers and command palette.
     static var glass: Color {
         Color(light: hex("FFFFFF").opacity(0.78),
-              dark:  hex("222733").opacity(0.92))
+              dark: hex("222733").opacity(0.92))
     }
 
     static var hover: Color {
         Color(light: Color.black.opacity(0.04),
-              dark:  Color.white.opacity(0.06))
+              dark: Color.white.opacity(0.06))
     }
     static var selected: Color {
         Color(light: hex("E9EDF6"), dark: hex("253149"))
     }
     static var pressed: Color {
         Color(light: Color.black.opacity(0.07),
-              dark:  Color.white.opacity(0.10))
+              dark: Color.white.opacity(0.10))
     }
     static var active: Color { Brand.primary.opacity(0.10) }
 
@@ -252,11 +252,11 @@ struct AppFont {
 
 struct AppSpace {
     static let xxs: CGFloat = 2
-    static let xs: CGFloat = 4
-    static let sm: CGFloat = 8
-    static let md: CGFloat = 12
-    static let lg: CGFloat = 16
-    static let xl: CGFloat = 24
+    static let extraSmall: CGFloat = 4
+    static let small: CGFloat = 8
+    static let medium: CGFloat = 12
+    static let large: CGFloat = 16
+    static let extraLarge: CGFloat = 24
     static let xxl: CGFloat = 32
     static let xxxl: CGFloat = 48
 }
@@ -264,11 +264,11 @@ struct AppSpace {
 // MARK: - Radius — three real choices
 
 struct AppRadius {
-    static let xs: CGFloat = 4
-    static let sm: CGFloat = 6
-    static let md: CGFloat = 8
-    static let lg: CGFloat = 10
-    static let xl: CGFloat = 12
+    static let extraSmall: CGFloat = 4
+    static let small: CGFloat = 6
+    static let medium: CGFloat = 8
+    static let large: CGFloat = 10
+    static let extraLarge: CGFloat = 12
     static let xxl: CGFloat = 14
     static let pill: CGFloat = 999
 }
@@ -276,7 +276,7 @@ struct AppRadius {
 // MARK: - Shadow — calmer values; dark mode keeps them barely-there
 
 struct AppShadow {
-    static let sm = Shadow(color: Color.black.opacity(0.045), radius: 4, yOffset: 2)
+    static let small = Shadow(color: Color.black.opacity(0.045), radius: 4, yOffset: 2)
     static let card = Shadow(color: Color.black.opacity(0.065), radius: 14, yOffset: 6)
     static let toast = Shadow(color: Color.black.opacity(0.18), radius: 18, yOffset: 10)
     static let bubble = Shadow(color: Color.black.opacity(0.045), radius: 6, yOffset: 2)
@@ -333,7 +333,7 @@ struct LayoutConst {
 
 extension View {
     /// Standard surface card: 1 hairline border, very faint shadow.
-    func cardStyle(cornerRadius: CGFloat = AppRadius.xl) -> some View {
+    func cardStyle(cornerRadius: CGFloat = AppRadius.extraLarge) -> some View {
         self
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -346,7 +346,7 @@ extension View {
     }
 
     /// Floating popover-style surface with a touch more elevation.
-    func glassCard(cornerRadius: CGFloat = AppRadius.xl) -> some View {
+    func glassCard(cornerRadius: CGFloat = AppRadius.extraLarge) -> some View {
         self
             .background(SurfaceGrade.glass)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -365,9 +365,9 @@ extension View {
                     ? AnyShapeStyle(Semantic.userBubble)
                     : AnyShapeStyle(SurfaceGrade.card)
             )
-            .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
                     .strokeBorder(
                         isUser ? Brand.primary.opacity(0.22) : SurfaceGrade.hairline,
                         lineWidth: 0.6
@@ -380,8 +380,8 @@ extension View {
         self
             .font(AppFont.captionMedium)
             .foregroundStyle(color)
-            .padding(.horizontal, AppSpace.sm + 2)
-            .padding(.vertical, AppSpace.xs + 1)
+            .padding(.horizontal, AppSpace.small + 2)
+            .padding(.vertical, AppSpace.extraSmall + 1)
             .background(
                 Capsule()
                     .fill(color.opacity(0.12))
@@ -394,11 +394,11 @@ extension View {
 
     func innerShadow(color: Color = .black.opacity(0.4), radius: CGFloat = 4) -> some View {
         self.overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .stroke(color, lineWidth: 2)
                 .blur(radius: radius)
                 .mask(
-                    RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                         .fill(LinearGradient(
                             colors: [.black, .clear],
                             startPoint: .top,
@@ -424,7 +424,7 @@ extension View {
     func threadRailItem(isSelected: Bool = false, isHovering: Bool = false) -> some View {
         self
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .fill(
                         isSelected
                             ? SurfaceGrade.selected

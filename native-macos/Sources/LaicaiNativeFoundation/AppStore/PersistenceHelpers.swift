@@ -21,8 +21,9 @@ extension AppStore {
         lastPersistedAt = Date()
         updateSummaryCaches()
         let persistableThreads = state.threads.filter { !$0.isEmptyPlaceholder }
-        do { try environment.agentRepository.saveAgents(persistableThreads) }
-        catch { recordToolActivity(name: "agents.save", summary: "Agent 持久化失败", statusLine: error.localizedDescription, isFailure: true) }
+        do { try environment.agentRepository.saveAgents(persistableThreads) } catch {
+            recordToolActivity(name: "agents.save", summary: "Agent 持久化失败", statusLine: error.localizedDescription, isFailure: true)
+        }
     }
 
     func updateSummaryCaches() {
@@ -51,8 +52,19 @@ extension AppStore {
     }
 
     func persistConnectors() {
-        do { try environment.connectorRepository.saveConnectors(state.connectors, activeConnectorID: state.activeConnectorID) }
-        catch { recordToolActivity(name: "connectors.save", summary: "连接器持久化失败", statusLine: error.localizedDescription, isFailure: true) }
+        do {
+            try environment.connectorRepository.saveConnectors(
+                state.connectors,
+                activeConnectorID: state.activeConnectorID
+            )
+        } catch {
+            recordToolActivity(
+                name: "connectors.save",
+                summary: "连接器持久化失败",
+                statusLine: error.localizedDescription,
+                isFailure: true
+            )
+        }
     }
 
     func persistSettings() {

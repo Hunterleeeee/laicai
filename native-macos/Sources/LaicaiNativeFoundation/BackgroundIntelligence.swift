@@ -214,6 +214,10 @@ public final class NotificationManager {
 
 // MARK: - Background Task Manager
 
+public enum BackgroundTaskStatus: String, Sendable {
+    case running, completed, failed
+}
+
 @MainActor
 public final class BackgroundTaskManager: ObservableObject {
     public static let shared = BackgroundTaskManager()
@@ -228,14 +232,10 @@ public final class BackgroundTaskManager: ObservableObject {
     public struct BackgroundTask: Identifiable, Equatable {
         public let id: UUID
         public var title: String
-        public var status: Status
+        public var status: BackgroundTaskStatus
         public var createdAt: Date
         public var completedAt: Date?
         public var result: String?
-        
-        public enum Status: String, Sendable {
-            case running, completed, failed
-        }
     }
     
     public func startTask(title: String) -> UUID {
@@ -275,16 +275,26 @@ public struct ReportGenerator {
         let today = Calendar.current.startOfDay(for: Date())
         let todayThreads = threads.filter { $0.updatedAt >= today }
             .sorted { $0.updatedAt > $1.updatedAt }
-        let completedAgents = todayThreads.filter { $0.executionState == .completed }
-        let failedAgents = todayThreads.filter { $0.executionState == .failed || $0.executionState == .blocked }
-        let runningAgents = todayThreads.filter { $0.executionState == .running || $0.executionState == .planning }
 
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd (EEEE)"
         fmt.locale = Locale(identifier: "zh_CN")
 
-        var lines: [String] = [
-            "# 今日报告  \(fmt.string(from: Date()))",
+        var lines = dailyOverviewLines(todayThreads: todayThreads, dateText: fmt.string(from: Date()))
+        appendDailyActivity(to: &lines, threads: todayThreads)
+        appendDailyFileChangeSummary(to: &lines, threads: todayThreads)
+        appendDailyWikiSuggestions(to: &lines, threads: todayThreads)
+
+        return lines.joined(separator: "\n")
+    }
+
+    private static func dailyOverviewLines(todayThreads: [Thread], dateText: String) -> [String] {
+        let completedAgents = todayThreads.filter { $0.executionState == .completed }
+        let failedAgents = todayThreads.filter { $0.executionState == .failed || $0.executionState == .blocked }
+        let runningAgents = todayThreads.filter { $0.executionState == .running || $0.executionState == .planning }
+
+        return [
+            "# 今日报告  \(dateText)",
             "",
             "## 概览",
             "",
@@ -293,100 +303,123 @@ public struct ReportGenerator {
             "| 活跃会话| \(todayThreads.count) |",
             "| 会话状态 | ✅ \(completedAgents.count)　❌ \(failedAgents.count)　🔄 \(runningAgents.count) |",
             "| 工具调用 | \(countToolCalls(todayThreads)) 次 |",
-            "| 文件变更 | \(countFileChanges(todayThreads)) 个文件 |",
+            "| 文件变更 | \(countFileChanges(todayThreads)) 个文件 |"
         ]
+    }
 
-        // MARK: Activity Log
+    private static func appendDailyActivity(to lines: inout [String], threads: [Thread]) {
         lines += ["", "## 今天做了什么", ""]
-        if todayThreads.isEmpty {
+        guard !threads.isEmpty else {
             lines.append("_今天还没有活动记录。_")
-        } else {
-            let timeFmt = DateFormatter()
-            timeFmt.dateFormat = "HH:mm"
-            for thread in todayThreads {
-                let icon = agentStatusIcon(thread.executionState)
-                let time = timeFmt.string(from: thread.createdAt)
-                lines.append("### \(icon) \(thread.title)  `\(time)`")
-                lines.append("")
-
-                // User inputs
-                let userInputs = thread.steps.filter { $0.kind == .userInput }
-                if let first = userInputs.first {
-                    let preview = String(first.text.prefix(120)).replacingOccurrences(of: "\n", with: " ")
-                    lines.append("> \(preview)\(first.text.count > 120 ? "…" : "")")
-                    lines.append("")
-                }
-
-                // Tool calls summary
-                let toolCalls = thread.steps.filter { $0.kind == .toolCall }
-                if !toolCalls.isEmpty {
-                    let toolGroups = Dictionary(grouping: toolCalls, by: { $0.toolName ?? "unknown" })
-                    let toolSummary = toolGroups.map { "\($0.key) ×\($0.value.count)" }
-                        .sorted()
-                        .joined(separator: "、")
-                    lines.append("**工具调用**：\(toolSummary)")
-                }
-
-                // File changes
-                let changedFiles = extractChangedFiles(thread)
-                if !changedFiles.isEmpty {
-                    lines.append("**文件变更**：\(changedFiles.prefix(5).joined(separator: "、"))\(changedFiles.count > 5 ? " 等 \(changedFiles.count) 个文件" : "")")
-                }
-
-                // Key outputs / conclusions
-                let outputs = thread.steps.filter { $0.kind == .textOutput && !$0.text.isEmpty }
-                if let last = outputs.last {
-                    let preview = String(last.text.prefix(150)).replacingOccurrences(of: "\n", with: " ")
-                    lines.append("**结论**：\(preview)\(last.text.count > 150 ? "…" : "")")
-                }
-
-                // Errors
-                let errors = thread.steps.filter { $0.isFailure }
-                if !errors.isEmpty {
-                    lines.append("**⚠️ 错误**：\(errors.count) 个步骤失败")
-                }
-
-                lines.append("")
-            }
+            return
         }
 
-        // MARK: File Change Summary
-        let allChangedFiles = todayThreads.flatMap { extractChangedFiles($0) }
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "HH:mm"
+        for thread in threads {
+            appendDailyThread(thread, to: &lines, timeFormatter: timeFmt)
+        }
+    }
+
+    private static func appendDailyThread(
+        _ thread: Thread,
+        to lines: inout [String],
+        timeFormatter: DateFormatter
+    ) {
+        let icon = agentStatusIcon(thread.executionState)
+        let time = timeFormatter.string(from: thread.createdAt)
+        lines.append("### \(icon) \(thread.title)  `\(time)`")
+        lines.append("")
+
+        appendDailyUserInput(thread, to: &lines)
+        appendDailyToolSummary(thread, to: &lines)
+        appendDailyFileChanges(thread, to: &lines)
+        appendDailyConclusion(thread, to: &lines)
+        appendDailyErrors(thread, to: &lines)
+        lines.append("")
+    }
+
+    private static func appendDailyUserInput(_ thread: Thread, to lines: inout [String]) {
+        let userInputs = thread.steps.filter { $0.kind == .userInput }
+        guard let first = userInputs.first else { return }
+        let preview = String(first.text.prefix(120)).replacingOccurrences(of: "\n", with: " ")
+        lines.append("> \(preview)\(first.text.count > 120 ? "…" : "")")
+        lines.append("")
+    }
+
+    private static func appendDailyToolSummary(_ thread: Thread, to lines: inout [String]) {
+        let toolCalls = thread.steps.filter { $0.kind == .toolCall }
+        guard !toolCalls.isEmpty else { return }
+        let toolGroups = Dictionary(grouping: toolCalls, by: { $0.toolName ?? "unknown" })
+        let toolSummary = toolGroups.map { "\($0.key) ×\($0.value.count)" }
+            .sorted()
+            .joined(separator: "、")
+        lines.append("**工具调用**：\(toolSummary)")
+    }
+
+    private static func appendDailyFileChanges(_ thread: Thread, to lines: inout [String]) {
+        let changedFiles = extractChangedFiles(thread)
+        guard !changedFiles.isEmpty else { return }
+        lines.append("**文件变更**：\(dailyFileChangeText(changedFiles))")
+    }
+
+    private static func dailyFileChangeText(_ changedFiles: [String]) -> String {
+        let visibleFiles = changedFiles.prefix(5).joined(separator: "、")
+        guard changedFiles.count > 5 else { return visibleFiles }
+        return "\(visibleFiles) 等 \(changedFiles.count) 个文件"
+    }
+
+    private static func appendDailyConclusion(_ thread: Thread, to lines: inout [String]) {
+        let outputs = thread.steps.filter { $0.kind == .textOutput && !$0.text.isEmpty }
+        guard let last = outputs.last else { return }
+        let preview = String(last.text.prefix(150)).replacingOccurrences(of: "\n", with: " ")
+        lines.append("**结论**：\(preview)\(last.text.count > 150 ? "…" : "")")
+    }
+
+    private static func appendDailyErrors(_ thread: Thread, to lines: inout [String]) {
+        let errors = thread.steps.filter { $0.isFailure }
+        guard !errors.isEmpty else { return }
+        lines.append("**⚠️ 错误**：\(errors.count) 个步骤失败")
+    }
+
+    private static func appendDailyFileChangeSummary(to lines: inout [String], threads: [Thread]) {
+        let allChangedFiles = threads.flatMap { extractChangedFiles($0) }
         let uniqueFiles = Array(Set(allChangedFiles)).sorted()
-        if !uniqueFiles.isEmpty {
-            lines += ["## 文件变更汇总", ""]
-            for file in uniqueFiles.prefix(20) {
-                lines.append("- `\(file)`")
-            }
-            if uniqueFiles.count > 20 {
-                lines.append("- …共 \(uniqueFiles.count) 个文件")
-            }
+        guard !uniqueFiles.isEmpty else { return }
+        lines += ["## 文件变更汇总", ""]
+        for file in uniqueFiles.prefix(20) {
+            lines.append("- `\(file)`")
+        }
+        if uniqueFiles.count > 20 {
+            lines.append("- …共 \(uniqueFiles.count) 个文件")
+        }
+        lines.append("")
+    }
+
+    private static func appendDailyWikiSuggestions(to lines: inout [String], threads: [Thread]) {
+        let wikiSuggestions = extractWikiSuggestions(threads)
+        guard !wikiSuggestions.isEmpty else { return }
+        lines += ["## 📝 建议存入 Wiki", ""]
+        lines.append("以下内容来自今天的会话，可能值得沉淀为知识库条目：")
+        lines.append("")
+        for suggestion in wikiSuggestions {
+            appendDailyWikiSuggestion(suggestion, to: &lines)
+        }
+    }
+
+    private static func appendDailyWikiSuggestion(_ suggestion: WikiSuggestion, to lines: inout [String]) {
+        lines.append("### \(suggestion.topic)")
+        lines.append("")
+        lines.append("\(suggestion.reason)")
+        lines.append("")
+        if !suggestion.keyContent.isEmpty {
+            lines.append("**关键内容**：")
+            lines.append("")
+            lines.append("> \(suggestion.keyContent)")
             lines.append("")
         }
-
-        // MARK: Wiki Suggestions
-        let wikiSuggestions = extractWikiSuggestions(todayThreads)
-        if !wikiSuggestions.isEmpty {
-            lines += ["## 📝 建议存入 Wiki", ""]
-            lines.append("以下内容来自今天的会话，可能值得沉淀为知识库条目：")
-            lines.append("")
-            for suggestion in wikiSuggestions {
-                lines.append("### \(suggestion.topic)")
-                lines.append("")
-                lines.append("\(suggestion.reason)")
-                lines.append("")
-                if !suggestion.keyContent.isEmpty {
-                    lines.append("**关键内容**：")
-                    lines.append("")
-                    lines.append("> \(suggestion.keyContent)")
-                    lines.append("")
-                }
-                lines.append("**来源**：\(suggestion.sourceThread)")
-                lines.append("")
-            }
-        }
-
-        return lines.joined(separator: "\n")
+        lines.append("**来源**：\(suggestion.sourceThread)")
+        lines.append("")
     }
 
     // MARK: - Weekly Report
@@ -396,14 +429,25 @@ public struct ReportGenerator {
         let weekAgo = cal.date(byAdding: .day, value: -7, to: Date()) ?? Date()
         let weekThreads = threads.filter { $0.updatedAt >= weekAgo }
             .sorted { $0.updatedAt > $1.updatedAt }
-        let completedAgents = weekThreads.filter { $0.executionState == .completed }
-        let failedAgents = weekThreads.filter { $0.executionState == .failed || $0.executionState == .blocked }
 
         let fmt = DateFormatter()
         fmt.dateFormat = "MM/dd"
 
-        var lines: [String] = [
-            "# 周报  \(fmt.string(from: weekAgo)) – \(fmt.string(from: Date()))",
+        var lines = weeklyOverviewLines(weekThreads: weekThreads, title: "# 周报  \(fmt.string(from: weekAgo)) – \(fmt.string(from: Date()))")
+        appendWeeklyDailyBreakdown(to: &lines, calendar: cal, weekThreads: weekThreads)
+        appendWeeklyCompletedTasks(to: &lines, threads: weekThreads)
+        appendWeeklyFailedTasks(to: &lines, threads: weekThreads)
+        appendWeeklyWikiSuggestions(to: &lines, threads: weekThreads)
+
+        return lines.joined(separator: "\n")
+    }
+
+    private static func weeklyOverviewLines(weekThreads: [Thread], title: String) -> [String] {
+        let completedAgents = weekThreads.filter { $0.executionState == .completed }
+        let failedAgents = weekThreads.filter { $0.executionState == .failed || $0.executionState == .blocked }
+
+        return [
+            title,
             "",
             "## 概览",
             "",
@@ -413,65 +457,84 @@ public struct ReportGenerator {
             "| 完成会话 | \(completedAgents.count) |",
             "| 失败会话 | \(failedAgents.count) |",
             "| 工具调用 | \(countToolCalls(weekThreads)) 次 |",
-            "| 文件变更 | \(countFileChanges(weekThreads)) 个文件 |",
+            "| 文件变更 | \(countFileChanges(weekThreads)) 个文件 |"
         ]
+    }
 
-        // Daily breakdown
+    private static func appendWeeklyDailyBreakdown(
+        to lines: inout [String],
+        calendar: Calendar,
+        weekThreads: [Thread]
+    ) {
         lines += ["", "## 每日活动", ""]
         for dayOffset in (0...6).reversed() {
-            guard let day = cal.date(byAdding: .day, value: -dayOffset, to: Date()) else { continue }
-            let dayStart = cal.startOfDay(for: day)
-            guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { continue }
-            let dayThreads = weekThreads.filter { $0.updatedAt >= dayStart && $0.updatedAt < dayEnd }
-            guard !dayThreads.isEmpty else { continue }
-            let dayFmt = DateFormatter()
-            dayFmt.dateFormat = "MM/dd (E)"
-            dayFmt.locale = Locale(identifier: "zh_CN")
-            let dayCompleted = dayThreads.filter { $0.executionState == .completed }
-            lines.append("**\(dayFmt.string(from: day))**：\(dayThreads.count) 个会话，\(dayCompleted.count) 个完成")
-            for t in dayThreads.prefix(5) {
-                let icon = agentStatusIcon(t.executionState)
-                lines.append("  - \(icon) \(t.title)")
-            }
-            if dayThreads.count > 5 {
-                lines.append("  - …还有 \(dayThreads.count - 5) 项")
-            }
-            lines.append("")
+            appendWeeklyDay(dayOffset: dayOffset, to: &lines, calendar: calendar, weekThreads: weekThreads)
         }
+    }
 
-        // Completed tasks detail
-        if !completedAgents.isEmpty {
-            lines += ["## 完成的会话", ""]
-            for task in completedAgents.prefix(20) {
-                let files = extractChangedFiles(task)
-                let fileSuffix = files.isEmpty ? "" : "（涉及 \(files.count) 个文件）"
-                lines.append("- ✅ **\(task.title)**\(fileSuffix)")
-            }
-            lines.append("")
+    private static func appendWeeklyDay(
+        dayOffset: Int,
+        to lines: inout [String],
+        calendar: Calendar,
+        weekThreads: [Thread]
+    ) {
+        guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: Date()) else { return }
+        let dayStart = calendar.startOfDay(for: day)
+        guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return }
+        let dayThreads = weekThreads.filter { $0.updatedAt >= dayStart && $0.updatedAt < dayEnd }
+        guard !dayThreads.isEmpty else { return }
+
+        let dayFmt = DateFormatter()
+        dayFmt.dateFormat = "MM/dd (E)"
+        dayFmt.locale = Locale(identifier: "zh_CN")
+        let dayCompleted = dayThreads.filter { $0.executionState == .completed }
+        lines.append("**\(dayFmt.string(from: day))**：\(dayThreads.count) 个会话，\(dayCompleted.count) 个完成")
+        appendWeeklyDayThreads(dayThreads, to: &lines)
+        lines.append("")
+    }
+
+    private static func appendWeeklyDayThreads(_ dayThreads: [Thread], to lines: inout [String]) {
+        for thread in dayThreads.prefix(5) {
+            let icon = agentStatusIcon(thread.executionState)
+            lines.append("  - \(icon) \(thread.title)")
         }
-
-        // Failed tasks
-        if !failedAgents.isEmpty {
-            lines += ["## 失败/需关注", ""]
-            for task in failedAgents.prefix(10) {
-                let errorSteps = task.steps.filter { $0.isFailure }
-                let errorHint = errorSteps.first.map { "：" + String($0.text.prefix(80)) } ?? ""
-                lines.append("- ❌ **\(task.title)**\(errorHint)")
-            }
-            lines.append("")
+        if dayThreads.count > 5 {
+            lines.append("  - …还有 \(dayThreads.count - 5) 项")
         }
+    }
 
-        // Wiki suggestions for the week
-        let wikiSuggestions = extractWikiSuggestions(weekThreads)
-        if !wikiSuggestions.isEmpty {
-            lines += ["## 📝 建议存入 Wiki", ""]
-            for suggestion in wikiSuggestions {
-                lines.append("- **\(suggestion.topic)**：\(suggestion.reason)（来自「\(suggestion.sourceThread)」）")
-            }
-            lines.append("")
+    private static func appendWeeklyCompletedTasks(to lines: inout [String], threads: [Thread]) {
+        let completedAgents = threads.filter { $0.executionState == .completed }
+        guard !completedAgents.isEmpty else { return }
+        lines += ["## 完成的会话", ""]
+        for task in completedAgents.prefix(20) {
+            let files = extractChangedFiles(task)
+            let fileSuffix = files.isEmpty ? "" : "（涉及 \(files.count) 个文件）"
+            lines.append("- ✅ **\(task.title)**\(fileSuffix)")
         }
+        lines.append("")
+    }
 
-        return lines.joined(separator: "\n")
+    private static func appendWeeklyFailedTasks(to lines: inout [String], threads: [Thread]) {
+        let failedAgents = threads.filter { $0.executionState == .failed || $0.executionState == .blocked }
+        guard !failedAgents.isEmpty else { return }
+        lines += ["## 失败/需关注", ""]
+        for task in failedAgents.prefix(10) {
+            let errorSteps = task.steps.filter { $0.isFailure }
+            let errorHint = errorSteps.first.map { "：" + String($0.text.prefix(80)) } ?? ""
+            lines.append("- ❌ **\(task.title)**\(errorHint)")
+        }
+        lines.append("")
+    }
+
+    private static func appendWeeklyWikiSuggestions(to lines: inout [String], threads: [Thread]) {
+        let wikiSuggestions = extractWikiSuggestions(threads)
+        guard !wikiSuggestions.isEmpty else { return }
+        lines += ["## 📝 建议存入 Wiki", ""]
+        for suggestion in wikiSuggestions {
+            lines.append("- **\(suggestion.topic)**：\(suggestion.reason)（来自「\(suggestion.sourceThread)」）")
+        }
+        lines.append("")
     }
 
     // MARK: - Helpers
@@ -634,12 +697,12 @@ public struct ReportGenerator {
             ("ui", "UI/UX 设计"),
             ("ux", "UI/UX 设计"),
             ("架构", "系统架构"),
-            ("architecture", "系统架构"),
+            ("architecture", "系统架构")
         ]
         let lower = text.lowercased()
         var found: [String] = []
-        for kw in keywords where lower.contains(kw.pattern) {
-            if !found.contains(kw.topic) { found.append(kw.topic) }
+        for keyword in keywords where lower.contains(keyword.pattern) {
+            if !found.contains(keyword.topic) { found.append(keyword.topic) }
         }
         return Array(found.prefix(3))
     }
@@ -653,6 +716,10 @@ private extension String {
 }
 
 // MARK: - Project Change Monitor (FSEvents-based)
+
+public enum ProjectChangeKind: String, Sendable {
+    case modified, added, removed
+}
 
 @MainActor
 public final class ProjectChangeMonitor: ObservableObject {
@@ -668,12 +735,8 @@ public final class ProjectChangeMonitor: ObservableObject {
 
     public struct ProjectChange: Sendable {
         public let path: String
-        public let kind: Kind
+        public let kind: ProjectChangeKind
         public let timestamp: Date
-
-        public enum Kind: String, Sendable {
-            case modified, added, removed
-        }
     }
 
     private init() {}
@@ -701,12 +764,12 @@ public final class ProjectChangeMonitor: ObservableObject {
                 let monitor = Unmanaged<ProjectChangeMonitor>.fromOpaque(info).takeUnretainedValue()
                 guard let cfPaths = unsafeBitCast(eventPaths, to: NSArray.self) as? [String] else { return }
                 var changes: [ProjectChange] = []
-                for i in 0..<numEvents {
-                    let path = cfPaths[i]
+                for index in 0..<numEvents {
+                    let path = cfPaths[index]
                     let name = (path as NSString).lastPathComponent
                     if ProjectChangeMonitor.ignored.contains(name) { continue }
-                    let flags = Int(eventFlags[i])
-                    let kind: ProjectChange.Kind
+                    let flags = Int(eventFlags[index])
+                    let kind: ProjectChangeKind
                     if flags & kFSEventStreamEventFlagItemRemoved != 0 {
                         kind = .removed
                     } else if flags & kFSEventStreamEventFlagItemCreated != 0 || flags & kFSEventStreamEventFlagItemRenamed != 0 {

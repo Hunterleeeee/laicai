@@ -432,7 +432,9 @@ public final class MCPManager: ObservableObject {
     private let configFile: URL
 
     private init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let support =
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let laicaiDir = support.appendingPathComponent("Laicai", isDirectory: true)
         try? FileManager.default.createDirectory(at: laicaiDir, withIntermediateDirectories: true)
         self.configFile = laicaiDir.appendingPathComponent("mcp-servers.json")
@@ -572,6 +574,13 @@ public struct AnyCodable: Codable, Sendable, Equatable {
     }
 
     private static func jsonValue(from value: Any) -> JSONValue {
+        if let scalar = scalarJSONValue(from: value) { return scalar }
+        if let object = objectJSONValue(from: value) { return object }
+        if let array = arrayJSONValue(from: value) { return array }
+        return .null
+    }
+
+    private static func scalarJSONValue(from value: Any) -> JSONValue? {
         switch value {
         case let value as JSONValue:
             return value
@@ -579,6 +588,19 @@ public struct AnyCodable: Codable, Sendable, Equatable {
             return value.value
         case let value as String:
             return .string(value)
+        case let value as Bool:
+            return .bool(value)
+        case _ as NSNull:
+            return .null
+        case let value as Decimal:
+            return .number(NSDecimalNumber(decimal: value).doubleValue)
+        default:
+            return numericJSONValue(from: value)
+        }
+    }
+
+    private static func numericJSONValue(from value: Any) -> JSONValue? {
+        switch value {
         case let value as Int:
             return .number(Double(value))
         case let value as Int64:
@@ -591,18 +613,26 @@ public struct AnyCodable: Codable, Sendable, Equatable {
             return .number(Double(value))
         case let value as Double:
             return .number(value)
-        case let value as Decimal:
-            return .number(NSDecimalNumber(decimal: value).doubleValue)
-        case let value as Bool:
-            return .bool(value)
-        case _ as NSNull:
-            return .null
+        default:
+            return nil
+        }
+    }
+
+    private static func objectJSONValue(from value: Any) -> JSONValue? {
+        switch value {
         case let value as [String: AnyCodable]:
             return .object(value.mapValues(\.value))
         case let value as [String: JSONValue]:
             return .object(value)
         case let value as [String: Any]:
             return .object(value.mapValues(Self.jsonValue(from:)))
+        default:
+            return nil
+        }
+    }
+
+    private static func arrayJSONValue(from value: Any) -> JSONValue? {
+        switch value {
         case let value as [AnyCodable]:
             return .array(value.map(\.value))
         case let value as [JSONValue]:
@@ -610,7 +640,7 @@ public struct AnyCodable: Codable, Sendable, Equatable {
         case let value as [Any]:
             return .array(value.map(Self.jsonValue(from:)))
         default:
-            return .null
+            return nil
         }
     }
 

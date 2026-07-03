@@ -231,11 +231,14 @@ public struct WebFetchTool: LaicaiTool {
         }
 
         let rawURL = params.url.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: rawURL),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme) else {
-            return ToolResult(output: "请输入有效的 http/https 网页链接。", success: false, error: "invalid_url")
-        }
+          guard let url = URL(string: rawURL),
+                let scheme = url.scheme?.lowercased(),
+                ["http", "https"].contains(scheme) else {
+              return ToolResult(output: "请输入有效的 http/https 网页链接。", success: false, error: "invalid_url")
+          }
+          if Self.isBlockedHost(url.host) {
+              return ToolResult(output: "出于安全原因，不能读取本机、内网或云元数据地址：\(rawURL)", success: false, error: "blocked_private_host")
+          }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = NetworkDefaults.webFetch
@@ -278,7 +281,27 @@ public struct WebFetchTool: LaicaiTool {
         } catch {
             return ToolResult(output: "网页读取失败：\(error.localizedDescription)", success: false, error: "network_error")
         }
-    }
+      }
+
+      private static func isBlockedHost(_ host: String?) -> Bool {
+          guard let host = host?.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased(),
+                !host.isEmpty else { return true }
+          if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") {
+              return true
+          }
+          if ["::1", "0:0:0:0:0:0:0:1"].contains(host) { return true }
+          if host.hasPrefix("fe80:") || host.hasPrefix("fc") || host.hasPrefix("fd") { return true }
+          let parts = host.split(separator: ".").compactMap { Int($0) }
+          guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else { return false }
+          let firstOctet = parts[0]
+          let secondOctet = parts[1]
+          if firstOctet == 10 || firstOctet == 127 || firstOctet == 0 { return true }
+          if firstOctet == 169 && secondOctet == 254 { return true }
+          if firstOctet == 172 && (16...31).contains(secondOctet) { return true }
+          if firstOctet == 192 && secondOctet == 168 { return true }
+          if firstOctet == 100 && (64...127).contains(secondOctet) { return true }
+          return false
+      }
 
     public static func extractReadableText(fromHTML html: String, url: String, maxCharacters: Int) -> (title: String, content: String) {
         let title = firstMatch(pattern: #"<title[^>]*>(.*?)</title>"#, in: html)

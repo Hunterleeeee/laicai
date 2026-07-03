@@ -57,7 +57,7 @@ extension LaicaiNativeFoundationTestCase {
         note: String = "",
         toolCallingPolicy: ConnectorToolCallingPolicy? = nil,
         toolCallingCapability: ConnectorToolCallingCapability? = nil,
-        toolCallingCapabilitySource: ConnectorToolCallingCapabilityObservationSource? = nil,
+        toolCallingCapabilitySource: ConnectorToolCallObservationSource? = nil,
         toolCallingCapabilityLearnedAt: Date? = nil,
         health: ConnectorHealth = .ready
     ) -> ConnectorProfile {

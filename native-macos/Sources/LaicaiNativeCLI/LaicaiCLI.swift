@@ -82,41 +82,66 @@ struct CLIConfig {
     var autoApprove: Bool = false
     var contextMode: String = "balanced"
 
+    private static let booleanFlags: [String: WritableKeyPath<CLIConfig, Bool>] = [
+        "--help": \.showHelp,
+        "-h": \.showHelp,
+        "--version": \.showVersion,
+        "-v": \.showVersion,
+        "--interactive": \.interactive,
+        "-i": \.interactive,
+        "--yes": \.autoApprove,
+        "-y": \.autoApprove
+    ]
+
+    private static let valueFlags: [String: WritableKeyPath<CLIConfig, String?>] = [
+        "--workspace": \.workspaceRoot,
+        "-w": \.workspaceRoot,
+        "--endpoint": \.endpoint,
+        "-e": \.endpoint,
+        "--model": \.model,
+        "-m": \.model,
+        "--api-key": \.apiKey,
+        "-k": \.apiKey
+    ]
+
+    private static let contextFlags: [String: String] = [
+        "--deep": "deep",
+        "--economy": "economy"
+    ]
+
     static func parse(_ args: [String]) -> CLIConfig {
         var config = CLIConfig()
-        var i = 1
-        while i < args.count {
-            let arg = args[i]
-            switch arg {
-            case "--help", "-h":
-                config.showHelp = true
-            case "--version", "-v":
-                config.showVersion = true
-            case "--workspace", "-w":
-                i += 1; if i < args.count { config.workspaceRoot = args[i] }
-            case "--interactive", "-i":
-                config.interactive = true
-            case "--endpoint", "-e":
-                i += 1; if i < args.count { config.endpoint = args[i] }
-            case "--model", "-m":
-                i += 1; if i < args.count { config.model = args[i] }
-            case "--api-key", "-k":
-                i += 1; if i < args.count { config.apiKey = args[i] }
-            case "--yes", "-y":
-                config.autoApprove = true
-            case "--deep":
-                config.contextMode = "deep"
-            case "--economy":
-                config.contextMode = "economy"
-            default:
-                if !arg.hasPrefix("-") && config.message == nil {
-                    config.message = arg
-                }
-            }
-            i += 1
+        var index = 1
+        while index < args.count {
+            let arg = args[index]
+            config.consume(arg: arg, args: args, index: &index)
+            index += 1
         }
 
-        // Check for pipe input
+        config.pipeInput = readPipeInput()
+        return config
+    }
+
+    private mutating func consume(arg: String, args: [String], index: inout Int) {
+        if let flag = Self.booleanFlags[arg] {
+            self[keyPath: flag] = true
+            return
+        }
+        if let flag = Self.valueFlags[arg] {
+            index += 1
+            if index < args.count { self[keyPath: flag] = args[index] }
+            return
+        }
+        if let contextMode = Self.contextFlags[arg] {
+            self.contextMode = contextMode
+            return
+        }
+        if !arg.hasPrefix("-") && message == nil {
+            message = arg
+        }
+    }
+
+    private static func readPipeInput() -> String? {
         if isatty(STDIN_FILENO) == 0 {
             var pipeData = Data()
             while true {
@@ -127,11 +152,10 @@ struct CLIConfig {
             }
             if let input = String(data: pipeData, encoding: .utf8),
                !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                config.pipeInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
+                return input.trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
-
-        return config
+        return nil
     }
 }
 
@@ -285,8 +309,8 @@ final class CLISession {
                 .compactMap { $0.diffFilePath ?? $0.toolParams?["path"] }
             if !changedFiles.isEmpty {
                 print("\(Term.dim)  变更文件:\(Term.reset)")
-                for f in Set(changedFiles).sorted() {
-                    print("    \(Term.green)M\(Term.reset) \(f)")
+                for file in Set(changedFiles).sorted() {
+                    print("    \(Term.green)M\(Term.reset) \(file)")
                 }
             }
             print()
@@ -306,10 +330,7 @@ final class CLISession {
             break // Already shown as prompt input
 
         case .aiThinking:
-            let trimmed = step.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                print(Term.thinking(String(trimmed.prefix(120))))
-            }
+            renderThinking(step)
 
         case .toolCall:
             let name = step.toolName ?? "tool"
@@ -317,52 +338,16 @@ final class CLISession {
             print(Term.toolCall(name, detail))
 
         case .toolResult:
-            if step.isFailure {
-                print(Term.error("\(step.toolName ?? "tool"): \(String(step.text.prefix(200)))"))
-            } else if step.toolName == "shell.exec" || step.toolName == "verify.build" {
-                // Show terminal output compactly
-                let lines = step.text.components(separatedBy: "\n")
-                let display = lines.prefix(8).joined(separator: "\n")
-                if !display.isEmpty {
-                    print("\(Term.dim)\(display)\(Term.reset)")
-                    if lines.count > 8 {
-                        print("\(Term.dim)  ... +\(lines.count - 8) lines\(Term.reset)")
-                    }
-                }
-            }
+            renderToolResult(step)
 
         case .textOutput:
-            let trimmed = step.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty && lastKind != .textOutput {
-                print()
-            }
-            if !trimmed.isEmpty {
-                print(trimmed)
-            }
+            renderTextOutput(step, lastKind: lastKind)
 
         case .error:
             print(Term.error(step.text))
 
         case .reviewRequest:
-            print()
-            print("\(Term.bgYellow)\(Term.bold) 📋 需要审查 \(Term.reset)")
-            if let path = step.diffFilePath {
-                print("  \(Term.bold)文件:\(Term.reset) \(path)")
-            }
-            // Show diff summary
-            let lines = step.text.components(separatedBy: "\n")
-            for line in lines.prefix(20) {
-                if line.hasPrefix("+") {
-                    print("  \(Term.green)\(line)\(Term.reset)")
-                } else if line.hasPrefix("-") {
-                    print("  \(Term.red)\(line)\(Term.reset)")
-                } else {
-                    print("  \(Term.dim)\(line)\(Term.reset)")
-                }
-            }
-            if lines.count > 20 {
-                print("  \(Term.dim)... +\(lines.count - 20) lines\(Term.reset)")
-            }
+            renderReviewRequest(step)
 
         case .reviewResult:
             let approved = step.approved == true
@@ -370,13 +355,70 @@ final class CLISession {
         }
     }
 
+    private func renderThinking(_ step: TaskStep) {
+        let trimmed = step.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            print(Term.thinking(String(trimmed.prefix(120))))
+        }
+    }
+
+    private func renderToolResult(_ step: TaskStep) {
+        if step.isFailure {
+            print(Term.error("\(step.toolName ?? "tool"): \(String(step.text.prefix(200)))"))
+            return
+        }
+        guard step.toolName == "shell.exec" || step.toolName == "verify.build" else { return }
+        let lines = step.text.components(separatedBy: "\n")
+        let display = lines.prefix(8).joined(separator: "\n")
+        guard !display.isEmpty else { return }
+        print("\(Term.dim)\(display)\(Term.reset)")
+        if lines.count > 8 {
+            print("\(Term.dim)  ... +\(lines.count - 8) lines\(Term.reset)")
+        }
+    }
+
+    private func renderTextOutput(_ step: TaskStep, lastKind: TaskStepKind?) {
+        let trimmed = step.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty && lastKind != .textOutput {
+            print()
+        }
+        if !trimmed.isEmpty {
+            print(trimmed)
+        }
+    }
+
+    private func renderReviewRequest(_ step: TaskStep) {
+        print()
+        print("\(Term.bgYellow)\(Term.bold) 📋 需要审查 \(Term.reset)")
+        if let path = step.diffFilePath {
+            print("  \(Term.bold)文件:\(Term.reset) \(path)")
+        }
+        let lines = step.text.components(separatedBy: "\n")
+        for line in lines.prefix(20) {
+            renderReviewLine(line)
+        }
+        if lines.count > 20 {
+            print("  \(Term.dim)... +\(lines.count - 20) lines\(Term.reset)")
+        }
+    }
+
+    private func renderReviewLine(_ line: String) {
+        if line.hasPrefix("+") {
+            print("  \(Term.green)\(line)\(Term.reset)")
+        } else if line.hasPrefix("-") {
+            print("  \(Term.red)\(line)\(Term.reset)")
+        } else {
+            print("  \(Term.dim)\(line)\(Term.reset)")
+        }
+    }
+
     private func compactToolParams(_ params: [String: String]?) -> String {
-        guard let p = params else { return "" }
-        if let path = p["path"] { return path }
-        if let cmd = p["command"] { return String(cmd.prefix(60)) }
-        if let query = p["query"] { return "\"\(String(query.prefix(40)))\"" }
-        if let sub = p["subcommand"] { return sub }
-        return p.values.first.map { String($0.prefix(40)) } ?? ""
+        guard let params else { return "" }
+        if let path = params["path"] { return path }
+        if let cmd = params["command"] { return String(cmd.prefix(60)) }
+        if let query = params["query"] { return "\"\(String(query.prefix(40)))\"" }
+        if let sub = params["subcommand"] { return sub }
+        return params.values.first.map { String($0.prefix(40)) } ?? ""
     }
 
     // MARK: - Handle review approval

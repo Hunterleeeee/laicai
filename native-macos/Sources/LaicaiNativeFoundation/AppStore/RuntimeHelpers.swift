@@ -66,11 +66,11 @@ extension AppStore {
         var mentionedPaths: [String] = []
         let mentionPattern = #"@((?:/[\w./-]+)|(?:[\w./-]+\.[\w]+))"#
         if let regex = try? NSRegularExpression(pattern: mentionPattern) {
-            let ns = text as NSString
-            let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+            let nsString = text as NSString
+            let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
             for match in matches.reversed() {
                 let pathRange = match.range(at: 1)
-                var path = ns.substring(with: pathRange)
+                var path = nsString.substring(with: pathRange)
                 if !path.hasPrefix("/") {
                     let fullPath = (state.settings.workspacePath as NSString).appendingPathComponent(path)
                     if FileManager.default.fileExists(atPath: fullPath) {

@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Agents Panel (Agent Hub)
 
@@ -15,7 +15,7 @@ struct AgentsPanel: View {
     @State private var expandedRole: AgentRole?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.lg) {
+        VStack(alignment: .leading, spacing: AppSpace.large) {
             agentsOverview
             builtinRolesSection
             collaborationSection
@@ -26,53 +26,68 @@ struct AgentsPanel: View {
             agentReg.refresh(workspaceRoot: store.state.settings.workspacePath)
             toolReg.refresh(workspaceRoot: store.state.settings.workspacePath)
         }
-        .onChange(of: store.state.settings.workspacePath) { workspaceRoot in
+        .onChange(of: store.state.settings.workspacePath) { _, workspaceRoot in
             agentReg.refresh(workspaceRoot: workspaceRoot)
             toolReg.refresh(workspaceRoot: workspaceRoot)
         }
-        .sheet(isPresented: $showAgentSheet, onDismiss: { editingAgent = nil }) {
-            AgentEditorSheet(
-                agent: editingAgent,
-                toolNames: toolReg.allToolNames(),
-                workspaceRoot: store.state.settings.workspacePath,
-                connectorID: store.state.activeConnectorID,
-                onSave: { saved in
-                    do {
-                        if editingAgent != nil {
-                            try agentReg.update(saved, workspaceRoot: store.state.settings.workspacePath)
-                        } else {
-                            _ = try agentReg.create(
-                                name: saved.name, role: saved.role,
-                                systemPrompt: saved.systemPrompt, tools: saved.tools,
-                                preferredConnectorID: saved.preferredConnectorID,
-                                workspaceRoot: store.state.settings.workspacePath
-                            )
+        .sheet(
+            isPresented: $showAgentSheet,
+            onDismiss: { editingAgent = nil },
+            content: {
+                AgentEditorSheet(
+                    agent: editingAgent,
+                    toolNames: toolReg.allToolNames(),
+                    workspaceRoot: store.state.settings.workspacePath,
+                    connectorID: store.state.activeConnectorID,
+                    onSave: { saved in
+                        do {
+                            if editingAgent != nil {
+                                try agentReg.update(saved, workspaceRoot: store.state.settings.workspacePath)
+                            } else {
+                                _ = try agentReg.create(
+                                    CustomAgentCreateRequest(
+                                        name: saved.name,
+                                        role: saved.role,
+                                        systemPrompt: saved.systemPrompt,
+                                        tools: saved.tools,
+                                        preferredConnectorID: saved.preferredConnectorID,
+                                        workspaceRoot: store.state.settings.workspacePath
+                                    ))
+                            }
+                            ToastCenter.shared.success("已保存会话「\(saved.name)」")
+                        } catch {
+                            ToastCenter.shared.error(error.localizedDescription)
                         }
-                        ToastCenter.shared.success("已保存会话「\(saved.name)」")
-                    } catch { ToastCenter.shared.error(error.localizedDescription) }
-                    showAgentSheet = false
-                }
-            )
-            .frame(minWidth: 500, minHeight: 540)
-        }
-        .sheet(isPresented: $showToolSheet, onDismiss: { editingTool = nil }) {
-            ToolEditorSheet(
-                tool: editingTool,
-                workspaceRoot: store.state.settings.workspacePath,
-                onSave: { saved in
-                    do {
-                        if editingTool != nil {
-                            try toolReg.update(saved, workspaceRoot: store.state.settings.workspacePath)
-                        } else {
-                            _ = try toolReg.create(saved, workspaceRoot: store.state.settings.workspacePath)
+                        showAgentSheet = false
+                    }
+                )
+                .frame(minWidth: 500, minHeight: 540)
+            }
+        )
+        .sheet(
+            isPresented: $showToolSheet,
+            onDismiss: { editingTool = nil },
+            content: {
+                ToolEditorSheet(
+                    tool: editingTool,
+                    workspaceRoot: store.state.settings.workspacePath,
+                    onSave: { saved in
+                        do {
+                            if editingTool != nil {
+                                try toolReg.update(saved, workspaceRoot: store.state.settings.workspacePath)
+                            } else {
+                                _ = try toolReg.create(saved, workspaceRoot: store.state.settings.workspacePath)
+                            }
+                            ToastCenter.shared.success("已保存工具「\(saved.name)」")
+                        } catch {
+                            ToastCenter.shared.error(error.localizedDescription)
                         }
-                        ToastCenter.shared.success("已保存工具「\(saved.name)」")
-                    } catch { ToastCenter.shared.error(error.localizedDescription) }
-                    showToolSheet = false
-                }
-            )
-            .frame(minWidth: 460, minHeight: 420)
-        }
+                        showToolSheet = false
+                    }
+                )
+                .frame(minWidth: 460, minHeight: 420)
+            }
+        )
     }
 
     private var agentsOverview: some View {
@@ -82,7 +97,7 @@ struct AgentsPanel: View {
             subtitle: "\(AgentRole.allCases.count) 个内置角色 · \(agentReg.agents.count) 个自定义助手 · \(toolReg.tools.count) 个工具",
             tint: Brand.primary
         ) {
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 agentMetric(icon: "bolt.circle", value: "\(store.state.activeAgents.count)", label: "运行", tint: Brand.primary)
                 agentMetric(icon: "arrow.triangle.branch", value: "\(PlanTemplate.templates.count)", label: "协作", tint: Brand.purple)
                 agentMetric(icon: "tray.full", value: "\(store.state.completedAgents.count)", label: "完成", tint: Brand.teal)
@@ -92,7 +107,7 @@ struct AgentsPanel: View {
 
     private func agentMetric(icon: String, value: String, label: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 Image(systemName: icon)
                     .font(.system(size: 9, weight: .semibold))
                 Text(label)
@@ -104,18 +119,18 @@ struct AgentsPanel: View {
                 .foregroundStyle(TextGrade.primary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(AppSpace.sm)
-        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.66)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
+        .padding(AppSpace.small)
+        .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.66)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
     }
 
     // MARK: - 1. Built-in Roles Catalog
 
     private var builtinRolesSection: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             sectionHeader(icon: "person.3.fill", color: Brand.primary, title: "内置角色", subtitle: "按会话目标自动分工，也可以手动展开查看能力")
 
-            VStack(spacing: AppSpace.xs) {
+            VStack(spacing: AppSpace.extraSmall) {
                 ForEach(AgentRole.allCases) { role in
                     builtinRoleCard(role)
                 }
@@ -131,7 +146,7 @@ struct AgentsPanel: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             // Header row (always visible)
-            HStack(spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.medium) {
                 ZStack {
                     Circle()
                         .fill(
@@ -172,7 +187,7 @@ struct AgentsPanel: View {
 
             // Expanded detail
             if isExpanded {
-                VStack(alignment: .leading, spacing: AppSpace.sm) {
+                VStack(alignment: .leading, spacing: AppSpace.small) {
                     // Tools
                     Text("可用工具")
                         .font(.system(size: 9, weight: .semibold))
@@ -218,11 +233,11 @@ struct AgentsPanel: View {
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(isExpanded ? color.opacity(0.06) : SurfaceGrade.card.opacity(0.72))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(isExpanded ? color.opacity(0.18) : SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6)
         )
     }
@@ -230,18 +245,18 @@ struct AgentsPanel: View {
     // MARK: - 2. Collaboration Flow Templates
 
     private var collaborationSection: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             sectionHeader(icon: "arrow.triangle.branch", color: Brand.purple, title: "协作方案", subtitle: "复杂会话会自动组合多个角色")
 
-            VStack(spacing: AppSpace.sm) {
+            VStack(spacing: AppSpace.small) {
                 ForEach(PlanTemplate.templates) { tpl in
                     collaborationCard(tpl)
                 }
             }
 
             // Trigger keywords
-            VStack(alignment: .leading, spacing: AppSpace.sm) {
-                HStack(spacing: AppSpace.xs) {
+            VStack(alignment: .leading, spacing: AppSpace.small) {
+                HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: "text.bubble")
                         .font(.system(size: 9))
                         .foregroundStyle(TextGrade.ghost)
@@ -272,21 +287,21 @@ struct AgentsPanel: View {
                     .font(.system(size: 9))
                     .foregroundStyle(TextGrade.ghost)
             }
-            .padding(AppSpace.md)
+            .padding(AppSpace.medium)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .fill(SurfaceGrade.card.opacity(0.58))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6)
             )
         }
     }
 
     private func collaborationCard(_ template: PlanTemplate) -> some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
-            HStack(spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: template.icon)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color(hex: "8B5CF6"))
@@ -332,11 +347,11 @@ struct AgentsPanel: View {
         }
         .padding(10)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.72))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6)
         )
     }
@@ -344,11 +359,16 @@ struct AgentsPanel: View {
     // MARK: - 3. Custom Agents
 
     private var customAgentSection: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(spacing: AppSpace.sm) {
-                sectionHeader(icon: "person.crop.circle.badge.plus", color: Brand.teal, title: "自定义助手", subtitle: agentReg.agents.isEmpty ? "为常用目标配置专属助手" : "\(agentReg.agents.count) 个")
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(spacing: AppSpace.small) {
+                sectionHeader(
+                    icon: "person.crop.circle.badge.plus", color: Brand.teal, title: "自定义助手",
+                    subtitle: agentReg.agents.isEmpty ? "为常用目标配置专属助手" : "\(agentReg.agents.count) 个")
                 Spacer()
-                Button { editingAgent = nil; showAgentSheet = true } label: {
+                Button {
+                    editingAgent = nil
+                    showAgentSheet = true
+                } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "plus").font(.system(size: 9, weight: .bold))
                         Text("新建").font(.system(size: 10, weight: .medium))
@@ -364,15 +384,20 @@ struct AgentsPanel: View {
             if agentReg.agents.isEmpty {
                 workbenchEmptyState(icon: "person.crop.circle.badge.plus", title: "暂无自定义助手", hint: "创建后可以直接带入当前会话")
             } else {
-                VStack(spacing: AppSpace.sm) {
+                VStack(spacing: AppSpace.small) {
                     ForEach(agentReg.agents) { agent in
-                        AgentCard(agent: agent, onEdit: {
-                            editingAgent = agent; showAgentSheet = true
-                        }, onChat: {
-                            store.updateDraft("[Agent: \(agent.name)] ")
-                        }, onDelete: {
-                            agentReg.delete(agent, workspaceRoot: store.state.settings.workspacePath)
-                        })
+                        AgentCard(
+                            agent: agent,
+                            onEdit: {
+                                editingAgent = agent
+                                showAgentSheet = true
+                            },
+                            onChat: {
+                                store.updateDraft("[Agent: \(agent.name)] ")
+                            },
+                            onDelete: {
+                                agentReg.delete(agent, workspaceRoot: store.state.settings.workspacePath)
+                            })
                     }
                 }
             }
@@ -382,11 +407,16 @@ struct AgentsPanel: View {
     // MARK: - 4. Custom Tools
 
     private var customToolSection: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(spacing: AppSpace.sm) {
-                sectionHeader(icon: "wrench.and.screwdriver", color: Semantic.warning, title: "自定义工具", subtitle: toolReg.tools.isEmpty ? "连接外部动作与脚本" : "\(toolReg.tools.count) 个")
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(spacing: AppSpace.small) {
+                sectionHeader(
+                    icon: "wrench.and.screwdriver", color: Semantic.warning, title: "自定义工具",
+                    subtitle: toolReg.tools.isEmpty ? "连接外部动作与脚本" : "\(toolReg.tools.count) 个")
                 Spacer()
-                Button { editingTool = nil; showToolSheet = true } label: {
+                Button {
+                    editingTool = nil
+                    showToolSheet = true
+                } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "plus").font(.system(size: 9, weight: .bold))
                         Text("新建").font(.system(size: 10, weight: .medium))
@@ -402,13 +432,17 @@ struct AgentsPanel: View {
             if toolReg.tools.isEmpty {
                 workbenchEmptyState(icon: "wrench.and.screwdriver", title: "暂无自定义工具", hint: "给助手接入你常用的动作")
             } else {
-                VStack(spacing: AppSpace.xs) {
+                VStack(spacing: AppSpace.extraSmall) {
                     ForEach(toolReg.tools) { tool in
-                        ToolCard(tool: tool, onEdit: {
-                            editingTool = tool; showToolSheet = true
-                        }, onDelete: {
-                            toolReg.delete(tool, workspaceRoot: store.state.settings.workspacePath)
-                        })
+                        ToolCard(
+                            tool: tool,
+                            onEdit: {
+                                editingTool = tool
+                                showToolSheet = true
+                            },
+                            onDelete: {
+                                toolReg.delete(tool, workspaceRoot: store.state.settings.workspacePath)
+                            })
                     }
                 }
             }
@@ -418,7 +452,7 @@ struct AgentsPanel: View {
     // MARK: - Shared helpers
 
     private func sectionHeader(icon: String, color: Color, title: String, subtitle: String) -> some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(color.opacity(0.1))
@@ -472,7 +506,7 @@ struct AgentsPanel: View {
         "协同", "多agent", "先…然后…",
         "审查并修复", "写代码并测试",
         "搜索然后实现", "重构并验证",
-        "全面", "完整", "端到端",
+        "全面", "完整", "端到端"
     ]
 }
 // MARK: - Agent Card
@@ -488,7 +522,7 @@ private struct AgentCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.medium) {
                 // Gradient role icon
                 ZStack {
                     Circle()
@@ -537,11 +571,11 @@ private struct AgentCard: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(hovered ? SurfaceGrade.hover : SurfaceGrade.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(hovered ? roleColor.opacity(0.2) : SurfaceGrade.border.opacity(0.12), lineWidth: hovered ? 1 : 0.5)
         )
         .shadow(color: hovered ? roleColor.opacity(0.06) : .clear, radius: 8, y: 2)
@@ -576,7 +610,7 @@ private struct ToolCard: View {
     }
 
     var body: some View {
-        HStack(spacing: AppSpace.md) {
+        HStack(spacing: AppSpace.medium) {
             ZStack {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(Semantic.warning.opacity(0.1))
@@ -611,11 +645,11 @@ private struct ToolCard: View {
         }
         .padding(10)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(hovered ? SurfaceGrade.hover : SurfaceGrade.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(hovered ? Semantic.warning.opacity(0.15) : SurfaceGrade.border.opacity(0.08), lineWidth: 0.5)
         )
         .onHover { hovered = $0 }
@@ -625,7 +659,10 @@ private struct ToolCard: View {
 }
 
 private struct MiniBtn: View {
-    let icon: String; let color: Color; let tip: String; let action: () -> Void
+    let icon: String
+    let color: Color
+    let tip: String
+    let action: () -> Void
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
@@ -657,7 +694,7 @@ private struct AgentEditorSheet: View {
         ("通用助手", "你是{{name}}，一个专业的{{role}}。请根据当前会话目标推进，注重质量和效率。"),
         ("代码专家", "你是{{name}}，精通多种编程语言。分析代码时关注：架构设计、性能、安全性、可维护性。输出简洁、可执行的方案。"),
         ("研究分析", "你是{{name}}，负责深度研究和信息整合。先搜索、再验证、最后归纳。确保结论有数据支撑，标注来源。"),
-        ("严格审查", "你是{{name}}，负责代码审查。逐行检查变更，关注：逻辑错误、边界情况、风格一致性、安全漏洞。给出具体修改建议。"),
+        ("严格审查", "你是{{name}}，负责代码审查。逐行检查变更，关注：逻辑错误、边界情况、风格一致性、安全漏洞。给出具体修改建议。")
     ]
 
     var body: some View {
@@ -675,7 +712,9 @@ private struct AgentEditorSheet: View {
             Text(agent == nil ? "新建会话" : "编辑会话")
                 .font(AppFont.headline).foregroundStyle(TextGrade.primary)
             Spacer()
-            Button { dismiss() } label: {
+            Button {
+                dismiss()
+            } label: {
                 Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(TextGrade.muted)
                     .frame(width: 24, height: 24).background(Circle().fill(SurfaceGrade.elevated))
             }.buttonStyle(.plain)
@@ -705,11 +744,11 @@ private struct AgentEditorSheet: View {
                             .foregroundStyle(role == agentRole ? Brand.primary : TextGrade.muted)
                             .frame(width: 52, height: 48)
                             .background(
-                                RoundedRectangle(cornerRadius: AppRadius.md)
+                                RoundedRectangle(cornerRadius: AppRadius.medium)
                                     .fill(role == agentRole ? Brand.primaryMuted : SurfaceGrade.card)
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: AppRadius.md)
+                                RoundedRectangle(cornerRadius: AppRadius.medium)
                                     .strokeBorder(
                                         role == agentRole ? Brand.primary.opacity(0.3) : Color.clear,
                                         lineWidth: 1
@@ -730,7 +769,7 @@ private struct AgentEditorSheet: View {
                         }
                         .font(AppFont.tiny)
                         .padding(.horizontal, 6).padding(.vertical, 3)
-                        .background(RoundedRectangle(cornerRadius: AppRadius.sm).fill(SurfaceGrade.elevated))
+                        .background(RoundedRectangle(cornerRadius: AppRadius.small).fill(SurfaceGrade.elevated))
                         .buttonStyle(.plain)
                     }
                 }
@@ -746,8 +785,8 @@ private struct AgentEditorSheet: View {
                         .scrollContentBackground(.hidden)
                         .frame(minHeight: 120)
                 }
-                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline, lineWidth: 0.6))
+                .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline, lineWidth: 0.6))
             }
 
             fieldSection("可用工具（\(selectedTools.count) 已选）") {
@@ -789,8 +828,7 @@ private struct AgentEditorSheet: View {
                         FlowLayout(spacing: 4) {
                             ForEach(items, id: \.self) { tool in
                                 ToolChip(name: tool, isSelected: selectedTools.contains(tool)) {
-                                    if selectedTools.contains(tool) { selectedTools.remove(tool) }
-                                    else { selectedTools.insert(tool) }
+                                    if selectedTools.contains(tool) { selectedTools.remove(tool) } else { selectedTools.insert(tool) }
                                 }
                             }
                         }
@@ -821,7 +859,10 @@ private struct AgentEditorSheet: View {
     private func save() {
         let tools = selectedTools.isEmpty ? Array(role.allowedTools).sorted() : Array(selectedTools).sorted()
         var result = agent ?? CustomAgentDefinition(name: name, role: role, systemPrompt: prompt, tools: tools, preferredConnectorID: connectorID)
-        result.name = name; result.role = role; result.systemPrompt = prompt; result.tools = tools
+        result.name = name
+        result.role = role
+        result.systemPrompt = prompt
+        result.tools = tools
         result.preferredConnectorID = connectorID
         onSave(result)
     }
@@ -850,7 +891,9 @@ private struct ToolEditorSheet: View {
             HStack {
                 Text(tool == nil ? "新建工具" : "编辑工具").font(AppFont.headline).foregroundStyle(TextGrade.primary)
                 Spacer()
-                Button { dismiss() } label: {
+                Button {
+                    dismiss()
+                } label: {
                     Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(TextGrade.muted)
                         .frame(width: 24, height: 24).background(Circle().fill(SurfaceGrade.elevated))
                 }.buttonStyle(.plain)
@@ -880,7 +923,9 @@ private struct ToolEditorSheet: View {
                     case 1:
                         HStack {
                             Picker("", selection: $httpMethod) {
-                                Text("GET").tag("GET"); Text("POST").tag("POST"); Text("PUT").tag("PUT")
+                                Text("GET").tag("GET")
+                                Text("POST").tag("POST")
+                                Text("PUT").tag("PUT")
                             }.frame(width: 80)
                             TextField("URL 模板", text: $httpURL).textFieldStyle(.roundedBorder)
                         }
@@ -895,7 +940,9 @@ private struct ToolEditorSheet: View {
                         HStack {
                             Text("参数").font(AppFont.captionMedium).foregroundStyle(TextGrade.secondary)
                             Spacer()
-                            Button { params.append(.init(name: "", description: "")) } label: {
+                            Button {
+                                params.append(.init(name: "", description: ""))
+                            } label: {
                                 Label("添加", systemImage: "plus").font(AppFont.tiny)
                             }.buttonStyle(.plain).foregroundStyle(Brand.primary)
                         }
@@ -904,7 +951,9 @@ private struct ToolEditorSheet: View {
                                 TextField("名称", text: $params[paramIndex].name).textFieldStyle(.roundedBorder).frame(width: 80)
                                 TextField("描述", text: $params[paramIndex].description).textFieldStyle(.roundedBorder)
                                 Toggle("必填", isOn: $params[paramIndex].required).toggleStyle(.checkbox)
-                                Button { params.remove(at: paramIndex) } label: {
+                                Button {
+                                    params.remove(at: paramIndex)
+                                } label: {
                                     Image(systemName: "minus.circle").foregroundStyle(Semantic.error)
                                 }.buttonStyle(.plain)
                             }.font(AppFont.tiny)
@@ -956,7 +1005,10 @@ private struct ToolEditorSheet: View {
         default: mode = .script(path: scriptPath, interpreter: scriptInterpreter)
         }
         var result = tool ?? CustomToolDefinition(name: name, description: desc, parameters: params, executionMode: mode)
-        result.name = name; result.description = desc; result.parameters = params; result.executionMode = mode
+        result.name = name
+        result.description = desc
+        result.parameters = params
+        result.executionMode = mode
         onSave(result)
     }
 }
@@ -964,15 +1016,17 @@ private struct ToolEditorSheet: View {
 // MARK: - Tool Chip
 
 private struct ToolChip: View {
-    let name: String; let isSelected: Bool; let action: () -> Void
+    let name: String
+    let isSelected: Bool
+    let action: () -> Void
     var body: some View {
         Button(action: action) {
             Text(name)
                 .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? Brand.primary : TextGrade.muted)
                 .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(RoundedRectangle(cornerRadius: AppRadius.sm).fill(isSelected ? Brand.primaryMuted : SurfaceGrade.elevated))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.sm).strokeBorder(isSelected ? Brand.primary.opacity(0.3) : Color.clear, lineWidth: 0.6))
+                .background(RoundedRectangle(cornerRadius: AppRadius.small).fill(isSelected ? Brand.primaryMuted : SurfaceGrade.elevated))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.small).strokeBorder(isSelected ? Brand.primary.opacity(0.3) : Color.clear, lineWidth: 0.6))
         }.buttonStyle(.plain)
     }
 }

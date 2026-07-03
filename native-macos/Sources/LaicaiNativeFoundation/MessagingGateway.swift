@@ -215,8 +215,20 @@ public final class MessagingGateway: ObservableObject {
         }
 
         channel.onMessageReceived = { [weak self] message in
+            var metadata = message.metadata
+            metadata["channelID"] = id.uuidString
+            let routedMessage = IncomingMessage(
+                id: message.id,
+                channel: message.channel,
+                sender: message.sender,
+                senderName: message.senderName,
+                text: message.text,
+                timestamp: message.timestamp,
+                replyTo: message.replyTo,
+                metadata: metadata
+            )
             Task { @MainActor [weak self] in
-                await self?.handleIncomingMessage(message)
+                await self?.handleIncomingMessage(routedMessage)
             }
         }
 
@@ -240,8 +252,17 @@ public final class MessagingGateway: ObservableObject {
     // MARK: - Message Handling
 
     private func handleIncomingMessage(_ message: IncomingMessage) async {
+        let routedConfig: ChannelConfig? = {
+            if let channelID = message.metadata["channelID"],
+               let uuid = UUID(uuidString: channelID),
+               let config = channels.first(where: { $0.id == uuid }) {
+                return config
+            }
+            return channels.first(where: { $0.type == message.channel })
+        }()
+
         // Security: check allowed senders
-        if let config = channels.first(where: { $0.type == message.channel }),
+        if let config = routedConfig,
            !config.allowedSenders.isEmpty,
            !config.allowedSenders.contains(message.sender) {
             return // Reject unauthorized sender
@@ -255,7 +276,7 @@ public final class MessagingGateway: ObservableObject {
         let response = await processor(message)
 
         // Send reply
-        if let config = channels.first(where: { $0.type == message.channel }),
+        if let config = routedConfig,
            let channel = activeChannels[config.id] {
             try? await channel.sendMessage(response, to: message.sender)
         }
@@ -267,15 +288,42 @@ public final class MessagingGateway: ObservableObject {
         guard !persistPath.isEmpty,
               let data = try? Data(contentsOf: URL(fileURLWithPath: persistPath)),
               let loaded = try? JSONDecoder().decode([ChannelConfig].self, from: data) else { return }
-        channels = loaded
+        channels = loaded.map(Self.resolvingSecrets)
     }
 
     private func persist() {
         guard !persistPath.isEmpty else { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(channels) else { return }
+        guard let data = try? encoder.encode(channels.map(Self.persistableChannel)) else { return }
         try? data.write(to: URL(fileURLWithPath: persistPath), options: .atomic)
+    }
+
+    private static let secretConfigKeys: Set<String> = [
+        "bot_token", "app_secret", "secret", "corp_secret", "verification_token", "app_token"
+    ]
+
+    private static func resolvingSecrets(_ channel: ChannelConfig) -> ChannelConfig {
+        var resolved = channel
+        for key in secretConfigKeys {
+            if let value = resolved.config[key] {
+                resolved.config[key] = SecretStore.resolve(value)
+            }
+        }
+        return resolved
+    }
+
+    private static func persistableChannel(_ channel: ChannelConfig) -> ChannelConfig {
+        var persisted = channel
+        for key in secretConfigKeys {
+            guard let value = persisted.config[key], !value.isEmpty else { continue }
+            if SecretStore.isReference(value) { continue }
+            let ref = SecretStore.reference(for: "messaging", id: channel.id, field: key)
+            if SecretStore.save(value, reference: ref) {
+                persisted.config[key] = ref
+            }
+        }
+        return persisted
     }
 }
 
@@ -354,7 +402,7 @@ public final class TelegramChannel: MessagingChannel, Sendable {
         do {
             let (data, _) = try await NetworkDefaults.ephemeralSession.data(from: url)
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let ok = json["ok"] as? Bool, ok,
+                  let isOK = json["ok"] as? Bool, isOK,
                   let results = json["result"] as? [[String: Any]] else { return }
 
             for update in results {
@@ -452,10 +500,10 @@ public final class FeishuChannel: MessagingChannel, Sendable {
         guard let url = URL(string: wssURL) else {
             throw GatewayError.missingConfig("无效的 WebSocket URL")
         }
-        let ws = session.webSocketTask(with: url)
-        ws.resume()
+        let webSocket = session.webSocketTask(with: url)
+        webSocket.resume()
         state.withValue {
-            $0.wsTask = ws
+            $0.wsTask = webSocket
             $0.isConnected = true
             $0.autoReconnect = true
         }
@@ -563,8 +611,8 @@ public final class FeishuChannel: MessagingChannel, Sendable {
 
         // Apply server-pushed client config
         if let clientConfig = dataObj["ClientConfig"] as? [String: Any] {
-            if let pi = clientConfig["PingInterval"] as? Int, pi > 0 {
-                state.withValue { $0.pingInterval = TimeInterval(pi) }
+            if let pingInterval = clientConfig["PingInterval"] as? Int, pingInterval > 0 {
+                state.withValue { $0.pingInterval = TimeInterval(pingInterval) }
             }
         }
 
@@ -574,10 +622,10 @@ public final class FeishuChannel: MessagingChannel, Sendable {
     // MARK: - WebSocket Receive Loop
 
     private func receiveLoop() async {
-        guard let ws = state.withValue({ $0.wsTask }) else { return }
+        guard let webSocket = state.withValue({ $0.wsTask }) else { return }
         while !Task.isCancelled {
             do {
-                let message = try await ws.receive()
+                let message = try await webSocket.receive()
                 switch message {
                 case .data(let data):
                     handleBinaryFrame(data)
@@ -633,8 +681,8 @@ public final class FeishuChannel: MessagingChannel, Sendable {
             // May contain updated client config in payload
             if !frame.payload.isEmpty,
                let json = try? JSONSerialization.jsonObject(with: frame.payload) as? [String: Any],
-               let pi = json["PingInterval"] as? Int, pi > 0 {
-                state.withValue { $0.pingInterval = TimeInterval(pi) }
+               let pingInterval = json["PingInterval"] as? Int, pingInterval > 0 {
+                state.withValue { $0.pingInterval = TimeInterval(pingInterval) }
             }
         }
     }
@@ -825,6 +873,12 @@ public final class FeishuChannel: MessagingChannel, Sendable {
 /// Minimal protobuf wire format encoder/decoder for Feishu WebSocket frames.
 /// Field layout: 1=method(varint), 2=service(varint), 3=headers(repeated LDel of Header), 4=payload(bytes)
 /// Header sub-message: 1=key(string), 2=value(string)
+private struct FeishuProtobufTag {
+    let fieldNumber: Int
+    let wireType: Int
+    let newOffset: Int
+}
+
 private struct FeishuFrame {
     var method: Int32 = 0   // 0=control, 1=data
     var service: Int32 = 0
@@ -869,45 +923,55 @@ private struct FeishuFrame {
         let bytes = [UInt8](data)
 
         while offset < bytes.count {
-            guard let (fieldNumber, wireType, newOffset) = readTag(bytes, offset: offset) else { break }
+            guard let tag = readTag(bytes, offset: offset) else { break }
+            offset = tag.newOffset
+            guard let newOffset = decodeField(tag, bytes: bytes, offset: offset, frame: &frame) else { break }
             offset = newOffset
-
-            switch (fieldNumber, wireType) {
-            case (1, 0): // method: varint
-                guard let (val, newOff) = readVarint(bytes, offset: offset) else { break }
-                frame.method = Int32(val)
-                offset = newOff
-            case (2, 0): // service: varint
-                guard let (val, newOff) = readVarint(bytes, offset: offset) else { break }
-                frame.service = Int32(val)
-                offset = newOff
-            case (3, 2): // header: length-delimited
-                guard let (headerData, newOff) = readLDel(bytes, offset: offset) else { break }
-                offset = newOff
-                let header = decodeHeader(headerData)
-                frame.headers.append(header)
-            case (4, 2): // payload: length-delimited
-                guard let (payloadData, newOff) = readLDel(bytes, offset: offset) else { break }
-                frame.payload = Data(payloadData)
-                offset = newOff
-            default:
-                // Skip unknown field
-                if wireType == 0 {
-                    guard let (_, newOff) = readVarint(bytes, offset: offset) else { break }
-                    offset = newOff
-                } else if wireType == 2 {
-                    guard let (_, newOff) = readLDel(bytes, offset: offset) else { break }
-                    offset = newOff
-                } else if wireType == 5 {
-                    offset += 4
-                } else if wireType == 1 {
-                    offset += 8
-                } else {
-                    break // can't skip
-                }
-            }
         }
         return frame
+    }
+
+    private static func decodeField(
+        _ tag: FeishuProtobufTag,
+        bytes: [UInt8],
+        offset: Int,
+        frame: inout FeishuFrame
+    ) -> Int? {
+        switch (tag.fieldNumber, tag.wireType) {
+        case (1, 0): // method: varint
+            guard let (val, newOff) = readVarint(bytes, offset: offset) else { return nil }
+            frame.method = Int32(val)
+            return newOff
+        case (2, 0): // service: varint
+            guard let (val, newOff) = readVarint(bytes, offset: offset) else { return nil }
+            frame.service = Int32(val)
+            return newOff
+        case (3, 2): // header: length-delimited
+            guard let (headerData, newOff) = readLDel(bytes, offset: offset) else { return nil }
+            frame.headers.append(decodeHeader(headerData))
+            return newOff
+        case (4, 2): // payload: length-delimited
+            guard let (payloadData, newOff) = readLDel(bytes, offset: offset) else { return nil }
+            frame.payload = Data(payloadData)
+            return newOff
+        default:
+            return skipUnknownField(wireType: tag.wireType, bytes: bytes, offset: offset)
+        }
+    }
+
+    private static func skipUnknownField(wireType: Int, bytes: [UInt8], offset: Int) -> Int? {
+        switch wireType {
+        case 0:
+            return readVarint(bytes, offset: offset)?.1
+        case 2:
+            return readLDel(bytes, offset: offset)?.1
+        case 5:
+            return offset + 4
+        case 1:
+            return offset + 8
+        default:
+            return nil
+        }
     }
 
     private static func decodeHeader(_ bytes: [UInt8]) -> (String, String) {
@@ -915,13 +979,12 @@ private struct FeishuFrame {
         var value = ""
         var offset = 0
         while offset < bytes.count {
-            guard let (fieldNumber, wireType, newOffset) = readTag(bytes, offset: offset), wireType == 2 else { break }
-            offset = newOffset
+            guard let tag = readTag(bytes, offset: offset), tag.wireType == 2 else { break }
+            offset = tag.newOffset
             guard let (strBytes, newOff) = readLDel(bytes, offset: offset) else { break }
             offset = newOff
             let str = String(bytes: strBytes, encoding: .utf8) ?? ""
-            if fieldNumber == 1 { key = str }
-            else if fieldNumber == 2 {
+            if tag.fieldNumber == 1 { key = str } else if tag.fieldNumber == 2 {
                 value = str
             }
         }
@@ -930,11 +993,11 @@ private struct FeishuFrame {
 
     // MARK: Protobuf primitives
 
-    private static func readTag(_ bytes: [UInt8], offset: Int) -> (fieldNumber: Int, wireType: Int, newOffset: Int)? {
+    private static func readTag(_ bytes: [UInt8], offset: Int) -> FeishuProtobufTag? {
         guard let (val, newOff) = readVarint(bytes, offset: offset) else { return nil }
         let wireType = Int(val & 0x07)
         let fieldNumber = Int(val >> 3)
-        return (fieldNumber, wireType, newOff)
+        return FeishuProtobufTag(fieldNumber: fieldNumber, wireType: wireType, newOffset: newOff)
     }
 
     private static func readVarint(_ bytes: [UInt8], offset: Int) -> (UInt64, Int)? {
@@ -1015,21 +1078,24 @@ public final class WeComChannel: MessagingChannel, Sendable {
         self.agentID = config.config["agent_id"] ?? ""
     }
 
-    public func connect() async throws {
-        guard !corpID.isEmpty, !secret.isEmpty else {
-            throw GatewayError.missingConfig("企业微信 corp_id 或 secret 未配置")
-        }
-        let urlStr = "https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=\(corpID)&corpsecret=\(secret)"
-        guard let url = URL(string: urlStr) else { throw GatewayError.missingConfig("URL无效") }
+      public func connect() async throws {
+          guard !corpID.isEmpty, !secret.isEmpty else {
+              throw GatewayError.missingConfig("企业微信 corp_id 或 secret 未配置")
+          }
+          throw GatewayError.connectionFailed("企业微信入站消息接收尚未实现，请使用 Webhook 或飞书/Telegram。")
+          /*
+          let urlStr = "https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=\(corpID)&corpsecret=\(secret)"
+          guard let url = URL(string: urlStr) else { throw GatewayError.missingConfig("URL无效") }
         let (data, _) = try await NetworkDefaults.ephemeralSession.data(from: url)
         if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
            let token = json["access_token"] as? String {
             state.withValue {
                 $0.accessToken = token
                 $0.isConnected = true
-            }
-        }
-    }
+              }
+          }
+          */
+      }
 
     public func disconnect() async {
         state.withValue {
@@ -1077,12 +1143,12 @@ public final class SlackChannel: MessagingChannel, Sendable {
         self.botToken = config.config["bot_token"] ?? ""
     }
 
-    public func connect() async throws {
-        guard !botToken.isEmpty else {
-            throw GatewayError.missingConfig("Slack bot_token 未配置")
-        }
-        state.withValue { $0.isConnected = true }
-    }
+      public func connect() async throws {
+          guard !botToken.isEmpty else {
+              throw GatewayError.missingConfig("Slack bot_token 未配置")
+          }
+          throw GatewayError.connectionFailed("Slack 入站消息接收尚未实现，请使用 Webhook 或飞书/Telegram。")
+      }
 
     public func disconnect() async {
         state.withValue { $0.isConnected = false }
@@ -1128,7 +1194,7 @@ public final class GatewayHTTPServer: Sendable {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = in_port_t(port).bigEndian
-        addr.sin_addr.s_addr = INADDR_ANY.bigEndian
+        addr.sin_addr.s_addr = in_addr_t(INADDR_LOOPBACK).bigEndian
 
         let bindResult = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -1220,7 +1286,8 @@ public final class GatewayHTTPServer: Sendable {
                 let message = IncomingMessage(
                     channel: channelType,
                     sender: sender,
-                    text: text
+                    text: text,
+                    metadata: ["channelID": json["channel_id"] as? String ?? ""]
                 )
                 await handler(message)
             }

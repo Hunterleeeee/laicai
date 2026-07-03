@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 struct LoopingToolRuntime: ChatRuntimeClient {
     func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
@@ -118,9 +119,10 @@ final class WikiBuildWhenAvailableRuntime: ChatRuntimeClient {
 
     func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
         requests.append(request)
-        let hasWikiBuild = request.tools?.contains {
-            ToolNameCodec.canonicalName($0.function.name) == "wiki.build"
-        } == true
+        let hasWikiBuild =
+            request.tools?.contains {
+                ToolNameCodec.canonicalName($0.function.name) == "wiki.build"
+            } == true
         if hasWikiBuild && requests.count == 1 {
             return SendMessageResponse(
                 assistantText: "我会把已有输出沉淀到 Wiki。",
@@ -129,7 +131,9 @@ final class WikiBuildWhenAvailableRuntime: ChatRuntimeClient {
                         id: "call_wiki_save",
                         function: FunctionCallDetail(
                             name: "wiki_build",
-                            arguments: #"{"topic":"Vibe Coding 安全检查清单","mode":"atomic","save":true,"sourceTitle":"已整理输出","sourceText":"根据上一轮已读取的文章整理出的 Vibe Coding 产品上线安全检查清单。"}"#
+                            arguments:
+                                #"{"topic":"Vibe Coding 安全检查清单","mode":"atomic","save":true,"sourceTitle":"已整理输出","# +
+                                #""sourceText":"根据上一轮已读取的文章整理出的 Vibe Coding 产品上线安全检查清单。"}"#
                         )
                     )
                 ]
@@ -147,15 +151,15 @@ final class WikiPlanOnlyRuntime: ChatRuntimeClient {
         requests.append(request)
         return SendMessageResponse(
             assistantText: """
-            同意，建议沉淀成一篇 Wiki，定位为：
+                同意，建议沉淀成一篇 Wiki，定位为：
 
-            ```text
-            docs/wiki/vibe-coding-security-checklist.md
-            ```
+                ```text
+                docs/wiki/vibe-coding-security-checklist.md
+                ```
 
-            标题可以叫：
-            # Vibe Coding 产品上线安全检查清单
-            """
+                标题可以叫：
+                # Vibe Coding 产品上线安全检查清单
+                """
         )
     }
 }
@@ -189,7 +193,9 @@ final class InlineCommandJSONRuntime: ChatRuntimeClient {
     func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
         requests.append(request)
         return SendMessageResponse(
-            assistantText: #"我先查看一下当前工作区，了解需要修改/生成什么文件。{"cmd":"ls -la /tmp/laicai-pptx-smoke && find . -maxdepth 2 -type f","cwd":"/tmp/laicai-pptx-smoke","max_output_tokens":12000}可以整理成一段给 Gemini 的完整提示词。"#
+            assistantText:
+                #"我先查看一下当前工作区，了解需要修改/生成什么文件。{"cmd":"ls -la /tmp/laicai-pptx-smoke && find . "# +
+                    #"-maxdepth 2 -type f","cwd":"/tmp/laicai-pptx-smoke","max_output_tokens":12000}可以整理成一段给 Gemini 的完整提示词。"#
         )
     }
 }
@@ -202,7 +208,9 @@ final class FakeToolCallBlockThenToolRuntime: ChatRuntimeClient {
         requests.append(request)
         if requests.count == 1 {
             return SendMessageResponse(
-                assistantText: "我先查看目录。\n\n<|tool_call|>\n```json\n{\n  \"name\": \"list_directory\",\n  \"arguments\": {\"path\": \"/var/folders/aa/bb/T/demo\"}\n}\n```\n</|tool_call|>",
+                assistantText:
+                    "我先查看目录。\n\n<|tool_call|>\n```json\n{\n  \"name\": \"list_directory\",\n"
+                        + "  \"arguments\": {\"path\": \"/var/folders/aa/bb/T/demo\"}\n}\n```\n</|tool_call|>",
                 toolCalls: [
                     FunctionCallResponse(
                         id: "call_index",
@@ -355,8 +363,8 @@ final class StreamingRuntime: ChatRuntimeClient {
 
     func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
         requests.append(request)
-        await onChunk("你好，")
-        await onChunk("世界")
+        onChunk("你好，")
+        onChunk("世界")
         return SendMessageResponse(
             assistantText: "你好，世界",
             metrics: ResponseMetrics(
@@ -370,10 +378,25 @@ final class StreamingRuntime: ChatRuntimeClient {
     }
 }
 
+struct HealthCheckRequest {
+    let endpoint: String
+    let model: String
+    let apiKey: String
+    let kind: String
+}
+
+struct ConnectorProbeRequest {
+    let endpoint: String
+    let model: String
+    let apiKey: String
+    let kind: String
+    let probeToolCalling: Bool
+}
+
 @MainActor
 final class HealthRuntime: ChatRuntimeClient {
     let health: ConnectorHealth
-    var healthRequests: [(endpoint: String, model: String, apiKey: String, kind: String)] = []
+    var healthRequests: [HealthCheckRequest] = []
 
     init(health: ConnectorHealth) {
         self.health = health
@@ -384,7 +407,7 @@ final class HealthRuntime: ChatRuntimeClient {
     }
 
     func healthCheck(endpoint: String, model: String, apiKey: String, kind: String) async throws -> ConnectorHealth {
-        healthRequests.append((endpoint, model, apiKey, kind))
+        healthRequests.append(HealthCheckRequest(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind))
         return health
     }
 }
@@ -392,7 +415,7 @@ final class HealthRuntime: ChatRuntimeClient {
 @MainActor
 final class ProbeHealthRuntime: ChatRuntimeClient {
     let result: ConnectorProbeResult
-    var probeRequests: [(endpoint: String, model: String, apiKey: String, kind: String, probeToolCalling: Bool)] = []
+    var probeRequests: [ConnectorProbeRequest] = []
 
     init(result: ConnectorProbeResult) {
         self.result = result
@@ -403,7 +426,14 @@ final class ProbeHealthRuntime: ChatRuntimeClient {
     }
 
     func probeConnector(endpoint: String, model: String, apiKey: String, kind: String, probeToolCalling: Bool) async throws -> ConnectorProbeResult {
-        probeRequests.append((endpoint, model, apiKey, kind, probeToolCalling))
+        probeRequests.append(
+            ConnectorProbeRequest(
+                endpoint: endpoint,
+                model: model,
+                apiKey: apiKey,
+                kind: kind,
+                probeToolCalling: probeToolCalling
+            ))
         return ConnectorProbeResult(
             health: result.health,
             toolCallingCapability: probeToolCalling ? result.toolCallingCapability : nil
@@ -417,7 +447,7 @@ final class ProbeHealthRuntime: ChatRuntimeClient {
 
 @MainActor
 final class PausedHealthRuntime: ChatRuntimeClient {
-    var healthRequests: [(endpoint: String, model: String, apiKey: String, kind: String)] = []
+    var healthRequests: [HealthCheckRequest] = []
     private var continuations: [CheckedContinuation<ConnectorHealth, Error>] = []
 
     func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
@@ -425,7 +455,7 @@ final class PausedHealthRuntime: ChatRuntimeClient {
     }
 
     func healthCheck(endpoint: String, model: String, apiKey: String, kind: String) async throws -> ConnectorHealth {
-        healthRequests.append((endpoint, model, apiKey, kind))
+        healthRequests.append(HealthCheckRequest(endpoint: endpoint, model: model, apiKey: apiKey, kind: kind))
         return try await withCheckedThrowingContinuation { continuation in
             continuations.append(continuation)
         }

@@ -5,7 +5,9 @@ extension AgentLoop {
     /// Build a compact progress summary for auto-continuation rounds
     static func compactProgressSummary(task: AgentTask) -> String {
         var lines: [String] = []
-        let reads = task.steps.filter { $0.kind == .toolResult && ["file.read", "file.extract", "document.transform"].contains($0.toolName ?? "") && !$0.isFailure }
+        let reads = task.steps.filter {
+            $0.kind == .toolResult && ["file.read", "file.extract", "document.transform"].contains($0.toolName ?? "") && !$0.isFailure
+        }
         if !reads.isEmpty { lines.append("- 已读取 \(reads.count) 个文件") }
         let writes = task.steps.filter { step in
             step.kind == .toolResult && !step.isFailure && (isFileChangeTool(step.toolName ?? "") || isSuccessfulDocumentWrite(step))
@@ -17,7 +19,9 @@ extension AgentLoop {
         if !searches.isEmpty { lines.append("- 已搜索 \(searches.count) 次") }
         let failures = task.steps.filter { ($0.kind == .toolResult || $0.kind == .error || $0.kind == .aiThinking) && $0.isFailure }
         if !failures.isEmpty { lines.append("- \(failures.count) 次工具调用失败") }
-        if task.steps.contains(where: { $0.toolName == "file.read" && $0.isFailure && ($0.text.contains("unsupported_binary_file") || $0.text.contains("文档/表格")) }) {
+        if task.steps.contains(where: {
+            $0.toolName == "file.read" && $0.isFailure && ($0.text.contains("unsupported_binary_file") || $0.text.contains("文档/表格"))
+        }) {
             lines.append("- 表格/文档读取失败：阅读用 file_extract；要生成/翻译/改写 Office 文档用 document_transform")
         }
         // Include last meaningful output
@@ -29,7 +33,8 @@ extension AgentLoop {
     }
 
     static func compactSummaryText(_ text: String, limit: Int) -> String {
-        let cleaned = text
+        let cleaned =
+            text
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleaned.count > limit else { return cleaned }
@@ -48,7 +53,8 @@ extension AgentLoop {
             return "你还没有调用任何工具。请立即使用工具推进当前会话目标。先调 workspace_index 了解项目，然后用 file_read 读取关键文件。"
         }
         if !failures.isEmpty, let lastFail = failures.last {
-            if lastFail.toolName == "file.read", lastFail.text.contains("unsupported_binary_file") || lastFail.text.contains("文档/表格") || lastFail.text.contains("file_extract") {
+            if lastFail.toolName == "file.read",
+                lastFail.text.contains("unsupported_binary_file") || lastFail.text.contains("文档/表格") || lastFail.text.contains("file_extract") {
                 return "上一步用 file_read 读取表格/文档失败。若只是阅读请改用 file_extract；若用户要生成、翻译、改写或保存 Office 文档，请改用 document_transform(action=prepare/apply)。不要把失败当作最终答案。"
             }
             return "上一步失败了：\(String(lastFail.text.prefix(100)))。请换一种方法继续。不要用相同参数重试。"
@@ -105,48 +111,98 @@ extension AgentLoop {
         return true
     }
 
-    static func initialMessages(systemPrompt: String, message: String, priorSteps: [TaskStep], summaryCache: String? = nil, context: TaskContext = TaskContext(), imageAttachments: [ImageAttachment] = []) -> [ChatMessage] {
+    static func initialMessages(
+        systemPrompt: String,
+        message: String,
+        priorSteps: [TaskStep],
+        summaryCache: String? = nil,
+        context: TaskContext = TaskContext(),
+        imageAttachments: [ImageAttachment] = []
+    ) -> [ChatMessage] {
         var messages: [ChatMessage] = [ChatMessage(role: "system", content: systemPrompt)]
-        if let memory = structuredTaskMemory(from: priorSteps, context: context) {
-            messages.append(ChatMessage(
-                role: "user",
-                content: """
-                下面是当前会话 的结构化记忆。请优先使用它判断哪些文件已经读过、哪些工具失败过、目前阶段结论是什么；不要重复已经成功的读取或搜索。
+        appendStructuredMemory(to: &messages, priorSteps: priorSteps, context: context)
+        appendContinuationRecovery(to: &messages, message: message, priorSteps: priorSteps, context: context)
+        appendLastOutput(to: &messages, priorSteps: priorSteps)
+        appendFrustrationGuidance(to: &messages, message: message)
+        reinforcePositiveFeedback(message: message, context: context)
+        appendHistoryContext(to: &messages, priorSteps: priorSteps, summaryCache: summaryCache, context: context)
+        appendUserMessage(to: &messages, message: message, imageAttachments: imageAttachments)
+        return messages
+    }
 
-                \(memory)
-                """
-            ))
+    private static func appendStructuredMemory(
+        to messages: inout [ChatMessage],
+        priorSteps: [TaskStep],
+        context: TaskContext
+    ) {
+        if let memory = structuredTaskMemory(from: priorSteps, context: context) {
+            messages.append(
+                ChatMessage(
+                    role: "user",
+                    content: """
+                        下面是当前会话 的结构化记忆。请优先使用它判断哪些文件已经读过、哪些工具失败过、目前阶段结论是什么；不要重复已经成功的读取或搜索。
+
+                        \(memory)
+                        """
+                ))
         }
+    }
+
+    private static func appendContinuationRecovery(
+        to messages: inout [ChatMessage],
+        message: String,
+        priorSteps: [TaskStep],
+        context: TaskContext
+    ) {
         if let recoveryBrief = continuationRecoveryBrief(message: message, priorSteps: priorSteps, context: context) {
-            messages.append(ChatMessage(
-                role: "user",
-                content: recoveryBrief
-            ))
+            messages.append(
+                ChatMessage(
+                    role: "user",
+                    content: recoveryBrief
+                ))
         }
-        if let lastOutput = priorSteps.reversed().first(where: { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?.text {
+    }
+
+    private static func appendLastOutput(to messages: inout [ChatMessage], priorSteps: [TaskStep]) {
+        if let lastOutput = priorSteps.reversed().first(where: { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
+            .text {
             messages.append(ChatMessage(role: "assistant", content: compactHistoryText(lastOutput, limit: 2_000)))
         }
+    }
+
+    private static func appendFrustrationGuidance(to messages: inout [ChatMessage], message: String) {
         if UserFrustrationDetector.isFrustrated(message) {
-            messages.append(ChatMessage(
-                role: "user",
-                content: "用户当前在纠错或表达不满。\n\(UserFrustrationDetector.guidance)"
-            ))
+            messages.append(
+                ChatMessage(
+                    role: "user",
+                    content: "用户当前在纠错或表达不满。\n\(UserFrustrationDetector.guidance)"
+                ))
         }
-        // Positive feedback reinforcement: boost learned skill Q-value when user praises
+    }
+
+    private static func reinforcePositiveFeedback(message: String, context: TaskContext) {
         if UserFrustrationDetector.isPositive(message),
-           let skillID = context.metadata["learnedSkillID"].flatMap(Int.init) {
+            let skillID = context.metadata["learnedSkillID"].flatMap(Int.init) {
             SkillEvolutionEngine.shared.updateQ(skillID: skillID, outcomeScore: 90, succeeded: true)
         }
-        // Use summary cache for early steps if available, otherwise compact full history
-        if let cache = summaryCache, !cache.isEmpty {
-            messages.append(ChatMessage(
-                role: "user",
-                content: """
-                下面是当前会话 早期步骤的摘要缓存，省略了详细内容。请把本轮当作续接，不要重新开始，不要重复已经完成的搜索、读取或解释；只在证据不足时继续调用工具。
+    }
 
-                \(cache)
-                """
-            ))
+    private static func appendHistoryContext(
+        to messages: inout [ChatMessage],
+        priorSteps: [TaskStep],
+        summaryCache: String?,
+        context: TaskContext
+    ) {
+        if let cache = summaryCache, !cache.isEmpty {
+            messages.append(
+                ChatMessage(
+                    role: "user",
+                    content: """
+                        下面是当前会话 早期步骤的摘要缓存，省略了详细内容。请把本轮当作续接，不要重新开始，不要重复已经完成的搜索、读取或解释；只在证据不足时继续调用工具。
+
+                        \(cache)
+                        """
+                ))
             // Still include recent steps for precise context
             let recentHistory = compactHistoryMessages(from: Array(priorSteps.suffix(14)), contextMode: context.contextMode)
             if !recentHistory.isEmpty {
@@ -155,184 +211,264 @@ extension AgentLoop {
         } else {
             let history = compactHistoryMessages(from: priorSteps, contextMode: context.contextMode)
             if !history.isEmpty {
-                messages.append(ChatMessage(
-                    role: "user",
-                    content: "下面是当前会话 之前的关键上下文。请把本轮当作续接，不要重新开始，不要重复已经完成的搜索、读取或解释；只在证据不足时继续调用工具。"
-                ))
+                messages.append(
+                    ChatMessage(
+                        role: "user",
+                        content: "下面是当前会话 之前的关键上下文。请把本轮当作续接，不要重新开始，不要重复已经完成的搜索、读取或解释；只在证据不足时继续调用工具。"
+                    ))
                 messages.append(contentsOf: history)
             }
         }
-        // G12: Detect image file paths and convert to vision content parts
+    }
+
+    private static func appendUserMessage(
+        to messages: inout [ChatMessage],
+        message: String,
+        imageAttachments: [ImageAttachment]
+    ) {
+        let imageParts = imageContentParts(from: message) + imageAttachments.map { $0.toContentPart() }
+        guard !imageParts.isEmpty else {
+            messages.append(ChatMessage(role: "user", content: message))
+            return
+        }
+        var parts: [ContentPart] = [.text(message)]
+        parts.append(contentsOf: imageParts)
+        messages.append(ChatMessage(role: "user", contentParts: parts))
+    }
+
+    private static func imageContentParts(from message: String) -> [ContentPart] {
         let imagePathPattern = #"(?:^|\s|：)(/[^\s]+\.(?:png|jpg|jpeg|gif|webp|bmp|tiff))"#
         var imageParts: [ContentPart] = []
         if let regex = try? NSRegularExpression(pattern: imagePathPattern, options: .caseInsensitive) {
-            let ns = message as NSString
-            let matches = regex.matches(in: message, range: NSRange(location: 0, length: ns.length))
+            let nsString = message as NSString
+            let matches = regex.matches(in: message, range: NSRange(location: 0, length: nsString.length))
             for match in matches {
-                let path = ns.substring(with: match.range(at: 1))
+                let path = nsString.substring(with: match.range(at: 1))
                 if FileManager.default.fileExists(atPath: path),
-                   let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-                   data.count < 20_000_000 {  // Skip files > 20MB
-                    let ext = (path as NSString).pathExtension.lowercased()
-                    let mediaType = ext == "png" ? "image/png" : ext == "gif" ? "image/gif" : ext == "webp" ? "image/webp" : "image/jpeg"
-                    imageParts.append(.imageBase64(data: data, mediaType: mediaType))
+                    let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                    data.count < 20_000_000 {  // Skip files > 20MB
+                    imageParts.append(.imageBase64(data: data, mediaType: imageMediaType(path)))
                 }
             }
         }
+        return imageParts
+    }
 
-        // Merge user-pasted images from UI
-        for img in imageAttachments {
-            imageParts.append(img.toContentPart())
+    private static func imageMediaType(_ path: String) -> String {
+        switch (path as NSString).pathExtension.lowercased() {
+        case "png": return "image/png"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        default: return "image/jpeg"
         }
-
-        if !imageParts.isEmpty {
-            var parts: [ContentPart] = [.text(message)]
-            parts.append(contentsOf: imageParts)
-            messages.append(ChatMessage(role: "user", contentParts: parts))
-        } else {
-            messages.append(ChatMessage(role: "user", content: message))
-        }
-        return messages
     }
 
     static func continuationRecoveryBrief(message: String, priorSteps: [TaskStep], context: TaskContext) -> String? {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasContinuationMemory = context.memory.userDecisions.contains { $0.contains("[continuation]") }
-        let legacyContinuationPhrase = "继续处理当前" + "任务"
-        let isContinuation = isPureContinuationCommand(trimmed)
-            || trimmed.localizedCaseInsensitiveContains(legacyContinuationPhrase)
-            || trimmed.localizedCaseInsensitiveContains("继续处理当前会话")
-            || trimmed.localizedCaseInsensitiveContains("继续这个会话")
-            || trimmed.localizedCaseInsensitiveContains("从未完成处继续")
-            || hasContinuationMemory
-        guard isContinuation, !priorSteps.isEmpty else { return nil }
+        guard isContinuationRequest(trimmed, context: context), !priorSteps.isEmpty else { return nil }
 
-        let originalGoal = priorSteps.first {
-            $0.kind == .userInput
-                && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && !isPureContinuationCommand($0.text)
+        let evidence = ContinuationEvidence(
+            originalGoal: originalGoal(from: priorSteps),
+            recentUserGoal: recentUserGoal(from: priorSteps, excluding: trimmed),
+            successfulReads: successfulReads(from: priorSteps, context: context),
+            successfulWrites: successfulWrites(from: priorSteps),
+            recentFailures: recentFailures(from: priorSteps),
+            userDecisions: continuationUserDecisions(from: context)
+        )
+
+        let lines: [String] =
+            [
+                "## 续跑恢复现场",
+                "本轮用户是在续接当前会话，不是提出一个只包含「\(trimmed)」的新目标。请以原始目标和已有证据为准，继续推进到可验证交付。"
+            ] + continuationEvidenceLines(evidence)
+            + ["- 规则：不要把「继续」当作搜索词或命令；不要把「继续」「？」当作搜索词或命令；不要重复已经失败的空工具调用；如果需要工具，必须给出完整参数。"]
+        return lines.joined(separator: "\n")
+    }
+
+    private struct ContinuationEvidence {
+        let originalGoal: String?
+        let recentUserGoal: String?
+        let successfulReads: [String]
+        let successfulWrites: [String]
+        let recentFailures: [String]
+        let userDecisions: [String]
+    }
+
+    private static func isContinuationRequest(_ trimmed: String, context: TaskContext) -> Bool {
+        let phrases = [
+            "继续处理当前" + "任务",
+            "继续处理当前会话",
+            "继续这个会话",
+            "从未完成处继续"
+        ]
+        return isPureContinuationCommand(trimmed)
+            || phrases.contains { trimmed.localizedCaseInsensitiveContains($0) }
+            || context.memory.userDecisions.contains { $0.contains("[continuation]") }
+    }
+
+    private static func originalGoal(from priorSteps: [TaskStep]) -> String? {
+        priorSteps.first(where: isNonContinuationUserInput)?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func recentUserGoal(from priorSteps: [TaskStep], excluding trimmed: String) -> String? {
+        priorSteps.reversed().first {
+            isNonContinuationUserInput($0) && $0.text.trimmingCharacters(in: .whitespacesAndNewlines) != trimmed
         }?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
-        let recentUserGoal = priorSteps.reversed().first {
-            $0.kind == .userInput
-                && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && $0.text.trimmingCharacters(in: .whitespacesAndNewlines) != trimmed
-                && !isPureContinuationCommand($0.text)
-        }?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func isNonContinuationUserInput(_ step: TaskStep) -> Bool {
+        step.kind == .userInput
+            && !step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isPureContinuationCommand(step.text)
+    }
 
-        let successfulReads = uniqueValues(priorSteps
-            .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] } + context.memory.readFiles)
+    private static func successfulReads(from priorSteps: [TaskStep], context: TaskContext) -> [String] {
+        uniqueValues(
+            priorSteps
+                .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
+                .compactMap { $0.toolParams?["path"] } + context.memory.readFiles)
+    }
 
-        let successfulWrites = uniqueValues(priorSteps.compactMap { step -> String? in
-            guard step.kind == .toolResult || step.kind == .reviewRequest else { return nil }
-            guard !step.isFailure else { return nil }
-            if isSuccessfulDocumentWrite(step) { return step.toolParams?["outputPath"] ?? step.toolParams?["pdfPath"] }
-            guard isFileChangeTool(step.toolName ?? "") else { return nil }
-            return step.toolParams?["path"] ?? step.diffFilePath
-        })
+    private static func successfulWrites(from priorSteps: [TaskStep]) -> [String] {
+        uniqueValues(
+            priorSteps.compactMap { step -> String? in
+                guard step.kind == .toolResult || step.kind == .reviewRequest else { return nil }
+                guard !step.isFailure else { return nil }
+                if isSuccessfulDocumentWrite(step) { return step.toolParams?["outputPath"] ?? step.toolParams?["pdfPath"] }
+                guard isFileChangeTool(step.toolName ?? "") else { return nil }
+                return step.toolParams?["path"] ?? step.diffFilePath
+            })
+    }
 
-        let recentFailures = priorSteps
+    private static func recentFailures(from priorSteps: [TaskStep]) -> [String] {
+        priorSteps
             .filter { $0.kind == .toolResult && $0.isFailure || $0.kind == .error }
             .suffix(4)
             .map { step in
                 let tool = step.toolName ?? (step.kind == .error ? "error" : "tool")
                 return "- \(tool): \(compactSummaryText(step.text, limit: 180))"
             }
+    }
 
-        let userDecisions = context.memory.userDecisions
+    private static func continuationUserDecisions(from context: TaskContext) -> [String] {
+        context.memory.userDecisions
             .filter { $0.contains("[continuation]") }
             .suffix(2)
             .map { compactSummaryText($0, limit: 600) }
+    }
 
-        var lines: [String] = [
-            "## 续跑恢复现场",
-            "本轮用户是在续接当前会话，不是提出一个只包含「\(trimmed)」的新目标。请以原始目标和已有证据为准，继续推进到可验证交付。"
-        ]
-        if let originalGoal, !originalGoal.isEmpty {
-            lines.append("- 原始目标：\(compactSummaryText(originalGoal, limit: 500))")
+    private static func continuationEvidenceLines(_ evidence: ContinuationEvidence) -> [String] {
+        [
+            evidence.originalGoal.map { "- 原始目标：\(compactSummaryText($0, limit: 500))" },
+            recentGoalLine(evidence),
+            evidence.successfulReads.isEmpty ? nil : "- 已读文件：\(evidence.successfulReads.prefix(10).joined(separator: "、"))",
+            evidence.successfulWrites.isEmpty ? nil : "- 已写/交付文件：\(evidence.successfulWrites.prefix(10).joined(separator: "、"))",
+            evidence.recentFailures.isEmpty ? nil : "- 最近失败，下一步需恢复或换路：\n\(evidence.recentFailures.joined(separator: "\n"))",
+            evidence.userDecisions.isEmpty ? nil : "- 编排恢复摘要：\(evidence.userDecisions.joined(separator: " / "))"
+        ].compactMap { $0 }
+    }
+
+    private static func recentGoalLine(_ evidence: ContinuationEvidence) -> String? {
+        guard let recentUserGoal = evidence.recentUserGoal,
+            recentUserGoal != evidence.originalGoal
+        else {
+            return nil
         }
-        if let recentUserGoal, recentUserGoal != originalGoal {
-            lines.append("- 最近用户要求：\(compactSummaryText(recentUserGoal, limit: 500))")
-        }
-        if !successfulReads.isEmpty {
-            lines.append("- 已读文件：\(successfulReads.prefix(10).joined(separator: "、"))")
-        }
-        if !successfulWrites.isEmpty {
-            lines.append("- 已写/交付文件：\(successfulWrites.prefix(10).joined(separator: "、"))")
-        }
-        if !recentFailures.isEmpty {
-            lines.append("- 最近失败，下一步需恢复或换路：\n\(recentFailures.joined(separator: "\n"))")
-        }
-        if !userDecisions.isEmpty {
-            lines.append("- 编排恢复摘要：\(userDecisions.joined(separator: " / "))")
-        }
-        lines.append("- 规则：不要把「继续」当作搜索词或命令；不要把「继续」「？」当作搜索词或命令；不要重复已经失败的空工具调用；如果需要工具，必须给出完整参数。")
-        return lines.joined(separator: "\n")
+        return "- 最近用户要求：\(compactSummaryText(recentUserGoal, limit: 500))"
     }
 
     static func structuredTaskMemory(from steps: [TaskStep], context: TaskContext = TaskContext()) -> String? {
-        let readFiles = uniqueValues(
+        let snapshot = TaskMemorySnapshot(steps: steps, context: context)
+        let lines = ["结构化会话记忆"] + structuredTaskMemoryLines(snapshot)
+        guard lines.count > 1 else { return nil }
+        return lines.joined(separator: "\n")
+    }
+
+    private struct TaskMemorySnapshot {
+        let readFiles: [String]
+        let searchedQueries: [String]
+        let indexedWorkspace: Bool
+        let failedTools: [TaskStep]
+        let failureGroups: [String]
+        let recentConclusions: [String]
+        let checkpoints: [String]
+        let verificationStatus: String?
+        let pendingFiles: [String]
+        let userDecisions: [String]
+
+        @MainActor
+        init(steps: [TaskStep], context: TaskContext) {
+            readFiles = AgentLoop.memoryReadFiles(steps: steps, context: context)
+            searchedQueries = AgentLoop.memorySearchedQueries(steps: steps, context: context)
+            indexedWorkspace = steps.contains {
+                $0.toolName == "workspace.index" && $0.kind == .toolResult && !$0.isFailure
+            }
+            failedTools = steps.filter { $0.kind == .toolResult && $0.isFailure }
+            failureGroups = AgentLoop.memoryFailureGroups(failedTools: failedTools, context: context)
+            recentConclusions = AgentLoop.memoryRecentConclusions(steps: steps, context: context)
+            checkpoints = context.memory.checkpoints
+            verificationStatus = context.memory.verificationStatus?.trimmingCharacters(in: .whitespacesAndNewlines)
+            pendingFiles = context.memory.pendingFiles
+            userDecisions = context.memory.userDecisions
+        }
+    }
+
+    private static func memoryReadFiles(steps: [TaskStep], context: TaskContext) -> [String] {
+        uniqueValues(
             steps
                 .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
                 .compactMap { $0.toolParams?["path"] }
         ) + context.memory.readFiles.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let searchedQueries = uniqueValues(
+    }
+
+    private static func memorySearchedQueries(steps: [TaskStep], context: TaskContext) -> [String] {
+        uniqueValues(
             steps
                 .filter { $0.kind == .toolCall && $0.toolName == "code.search" }
                 .compactMap { $0.toolParams?["query"] }
         ) + context.memory.searchedQueries.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let indexedWorkspace = steps.contains {
-            $0.toolName == "workspace.index" && $0.kind == .toolResult && !$0.isFailure
-        }
-        let failedTools = steps.filter { $0.kind == .toolResult && $0.isFailure }
-        let failureGroups = Dictionary(grouping: failedTools, by: { $0.toolName ?? "tool" })
+    }
+
+    private static func memoryFailureGroups(failedTools: [TaskStep], context: TaskContext) -> [String] {
+        Dictionary(grouping: failedTools, by: { $0.toolName ?? "tool" })
             .map { "\($0.key) ×\($0.value.count)" }
             .sorted() + context.memory.failedTools
-        let recentConclusions = steps
+    }
+
+    private static func memoryRecentConclusions(steps: [TaskStep], context: TaskContext) -> [String] {
+        steps
             .filter { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .suffix(3)
             .map { compactSummaryText($0.text, limit: 260) } + context.memory.stageConclusions
-        // Note: deliberately do NOT pull "任务检查点" / "阶段总结" / "证据清单"
-        // aiThinking steps into memory. They are orchestration audits that contain
-        // boilerplate ("状态：仍需继续") and re-feeding them to the model encourages
-        // it to mimic the same internal audit format in user-visible output.
-        let checkpoints = context.memory.checkpoints
+    }
 
-        var lines = ["结构化会话记忆"]
-        if indexedWorkspace {
-            lines.append("- 已建立工作区索引：是")
-        }
-        if !readFiles.isEmpty {
-            lines.append("- 已读文件：\(uniqueValues(readFiles).prefix(12).joined(separator: "、"))")
-        }
-        if !searchedQueries.isEmpty {
-            lines.append("- 已搜索：\(uniqueValues(searchedQueries).prefix(8).joined(separator: "、"))")
-        }
-        if !failureGroups.isEmpty {
-            lines.append("- 失败工具：\(uniqueValues(failureGroups).joined(separator: "、"))")
-        }
-        if let lastFailure = failedTools.last?.text.trimmingCharacters(in: .whitespacesAndNewlines), !lastFailure.isEmpty {
-            lines.append("- 最近失败：\(compactSummaryText(lastFailure, limit: 260))")
-        }
-        if !recentConclusions.isEmpty {
-            lines.append("- 阶段结论：\(recentConclusions.joined(separator: " / "))")
-        }
-        if !checkpoints.isEmpty {
-            lines.append("- 最近检查点：\(uniqueValues(checkpoints).joined(separator: " / "))")
-        }
-        if let verification = context.memory.verificationStatus?.trimmingCharacters(in: .whitespacesAndNewlines), !verification.isEmpty {
-            lines.append("- 验证状态：\(verification)")
-        }
-        if !context.memory.pendingFiles.isEmpty {
-            lines.append("- 未读候选：\(uniqueValues(context.memory.pendingFiles).prefix(12).joined(separator: "、"))")
-        }
-        if !context.memory.userDecisions.isEmpty {
-            lines.append("- 用户决策：\(uniqueValues(context.memory.userDecisions).prefix(8).joined(separator: " / "))")
-        }
+    private static func structuredTaskMemoryLines(_ snapshot: TaskMemorySnapshot) -> [String] {
+        [
+            snapshot.indexedWorkspace ? "- 已建立工作区索引：是" : nil,
+            snapshot.readFiles.isEmpty ? nil : "- 已读文件：\(uniqueValues(snapshot.readFiles).prefix(12).joined(separator: "、"))",
+            snapshot.searchedQueries.isEmpty ? nil : "- 已搜索：\(uniqueValues(snapshot.searchedQueries).prefix(8).joined(separator: "、"))",
+            snapshot.failureGroups.isEmpty ? nil : "- 失败工具：\(uniqueValues(snapshot.failureGroups).joined(separator: "、"))",
+            lastFailureLine(snapshot.failedTools),
+            snapshot.recentConclusions.isEmpty ? nil : "- 阶段结论：\(snapshot.recentConclusions.joined(separator: " / "))",
+            snapshot.checkpoints.isEmpty ? nil : "- 最近检查点：\(uniqueValues(snapshot.checkpoints).joined(separator: " / "))",
+            verificationLine(snapshot.verificationStatus),
+            snapshot.pendingFiles.isEmpty ? nil : "- 未读候选：\(uniqueValues(snapshot.pendingFiles).prefix(12).joined(separator: "、"))",
+            snapshot.userDecisions.isEmpty ? nil : "- 用户决策：\(uniqueValues(snapshot.userDecisions).prefix(8).joined(separator: " / "))"
+        ].compactMap { $0 }
+    }
 
-        guard lines.count > 1 else { return nil }
-        return lines.joined(separator: "\n")
+    private static func lastFailureLine(_ failedTools: [TaskStep]) -> String? {
+        guard let lastFailure = failedTools.last?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+            !lastFailure.isEmpty
+        else {
+            return nil
+        }
+        return "- 最近失败：\(compactSummaryText(lastFailure, limit: 260))"
+    }
+
+    private static func verificationLine(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return "- 验证状态：\(value)"
     }
 
     static func uniqueValues(_ values: [String]) -> [String] {
@@ -348,7 +484,8 @@ extension AgentLoop {
     }
 
     static func compactHistoryMessages(from steps: [TaskStep], contextMode: ContextMode = .balanced) -> [ChatMessage] {
-        let history = steps
+        let history =
+            steps
             .filter { step in
                 switch step.kind {
                 case .userInput, .textOutput, .toolCall, .toolResult, .error, .reviewResult:
@@ -370,31 +507,30 @@ extension AgentLoop {
 
         return history.map { step in
             let role: String = step.kind == .userInput ? "user" : "assistant"
-            let prefix: String
-            let stepBudget: Int
-            switch step.kind {
-            case .toolCall:
-                prefix = "上一轮工具调用："
-                stepBudget = min(600, max(200, remainingBudget / 4))
-            case .toolResult:
-                prefix = step.isFailure ? "上一轮工具失败：" : "上一轮工具结果："
-                stepBudget = min(800, max(200, remainingBudget / 3))
-            case .error:
-                prefix = "上一轮出现错误："
-                stepBudget = min(600, max(200, remainingBudget / 4))
-            case .reviewResult:
-                prefix = "上一轮审查结果："
-                stepBudget = min(400, max(150, remainingBudget / 5))
-            case .userInput:
-                prefix = ""
-                stepBudget = min(1_400, max(400, remainingBudget / 2))
-            default:
-                prefix = ""
-                stepBudget = min(2_000, max(400, remainingBudget / 2))
-            }
-            let content = prefix + compactHistoryText(step.text, limit: stepBudget)
+            let presentation = historyPresentation(for: step, remainingBudget: remainingBudget)
+            let content = presentation.prefix + compactHistoryText(step.text, limit: presentation.budget)
             remainingBudget = max(0, remainingBudget - content.count)
             return ChatMessage(role: role, content: content)
+        }
+    }
+
+    private static func historyPresentation(
+        for step: TaskStep,
+        remainingBudget: Int
+    ) -> (prefix: String, budget: Int) {
+        switch step.kind {
+        case .toolCall:
+            return ("上一轮工具调用：", min(600, max(200, remainingBudget / 4)))
+        case .toolResult:
+            return (step.isFailure ? "上一轮工具失败：" : "上一轮工具结果：", min(800, max(200, remainingBudget / 3)))
+        case .error:
+            return ("上一轮出现错误：", min(600, max(200, remainingBudget / 4)))
+        case .reviewResult:
+            return ("上一轮审查结果：", min(400, max(150, remainingBudget / 5)))
+        case .userInput:
+            return ("", min(1_400, max(400, remainingBudget / 2)))
+        default:
+            return ("", min(2_000, max(400, remainingBudget / 2)))
         }
     }
 
@@ -416,7 +552,7 @@ extension AgentLoop {
         let firstUserIdx = messages.firstIndex(where: { $0.role == "user" }) ?? 1
 
         // Collect messages to compress (between first user and last N)
-        let keepRecent = maxMessages - result.count - 1 // -1 for first user
+        let keepRecent = maxMessages - result.count - 1  // -1 for first user
         let compressEnd = max(messages.count - keepRecent, firstUserIdx + 1)
 
         // Keep first user message
@@ -424,7 +560,25 @@ extension AgentLoop {
             result.append(messages[firstUserIdx])
         }
 
-        // Semantic extraction from compressed block
+        var summary = MidTaskCompressionSummary()
+        for index in (firstUserIdx + 1)..<compressEnd {
+            summary.record(messages[index])
+        }
+
+        if let summaryMessage = summary.message(compressedCount: compressEnd - firstUserIdx - 1) {
+            result.append(summaryMessage)
+        }
+
+        // Keep recent messages intact
+        for index in compressEnd..<messages.count {
+            result.append(messages[index])
+        }
+
+        return result
+    }
+
+    @MainActor
+    private struct MidTaskCompressionSummary {
         var filesRead: Set<String> = []
         var filesWritten: Set<String> = []
         var searchQueries: [String] = []
@@ -433,78 +587,86 @@ extension AgentLoop {
         var toolSuccessCount = 0
         var toolFailCount = 0
 
-        for i in (firstUserIdx + 1)..<compressEnd {
-            let msg = messages[i]
-            let content = msg.content ?? ""
-
-            if msg.role == "tool" || msg.toolCallId != nil {
-                let isFail = content.contains("❌") || content.contains("Error") || content.contains("失败")
-                if isFail {
-                    toolFailCount += 1
-                    errors.append(String(content.prefix(120)))
-                } else {
-                    toolSuccessCount += 1
-                }
-                // Extract file paths from tool results
-                if let path = extractPath(from: content) {
-                    if content.contains("已读取") || content.contains("file.read") {
-                        filesRead.insert(path)
-                    } else if content.contains("已写入") || content.contains("file_edit") || content.contains("file_write") {
-                        filesWritten.insert(path)
-                    }
-                }
-                if content.contains("搜索") || content.contains("code.search") {
-                    if let q = extractSearchQuery(from: content) { searchQueries.append(q) }
-                }
-            } else if msg.role == "assistant" {
-                // Extract key decisions/code changes only
-                if content.contains("```") || content.contains("file_edit") || content.contains("file_write") {
-                    // Extract the first meaningful line as a decision
-                    let firstLine = content.components(separatedBy: .newlines)
-                        .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty && !$0.hasPrefix("```") })
-                    if let line = firstLine {
-                        decisions.append(String(line.prefix(80)))
-                    }
-                }
+        mutating func record(_ message: ChatMessage) {
+            let content = message.content ?? ""
+            if message.role == "tool" || message.toolCallId != nil {
+                recordToolContent(content)
+            } else if message.role == "assistant" {
+                recordAssistantContent(content)
             }
-            // System messages are dropped entirely — they're already processed
         }
 
-        // Build compact structured summary
-        var summaryParts: [String] = []
-        if !filesRead.isEmpty {
-            summaryParts.append("已读: \(filesRead.sorted().map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", "))")
-        }
-        if !filesWritten.isEmpty {
-            summaryParts.append("已改: \(filesWritten.sorted().map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", "))")
-        }
-        if !searchQueries.isEmpty {
-            summaryParts.append("已搜索: \(searchQueries.prefix(5).joined(separator: ", "))")
-        }
-        if toolSuccessCount > 0 || toolFailCount > 0 {
-            summaryParts.append("工具: \(toolSuccessCount)成功 \(toolFailCount)失败")
-        }
-        if !errors.isEmpty {
-            summaryParts.append("错误: " + errors.prefix(3).joined(separator: "; "))
-        }
-        if !decisions.isEmpty {
-            summaryParts.append("决策: " + decisions.prefix(3).joined(separator: "; "))
+        mutating func recordToolContent(_ content: String) {
+            if content.contains("❌") || content.contains("Error") || content.contains("失败") {
+                toolFailCount += 1
+                errors.append(String(content.prefix(120)))
+            } else {
+                toolSuccessCount += 1
+            }
+            recordFilePath(from: content)
+            if content.contains("搜索") || content.contains("code.search"),
+                let query = AgentLoop.extractSearchQuery(from: content) {
+                searchQueries.append(query)
+            }
         }
 
-        if !summaryParts.isEmpty {
-            let summary = summaryParts.joined(separator: "\n")
-            result.append(ChatMessage(
+        mutating func recordFilePath(from content: String) {
+            guard let path = AgentLoop.extractPath(from: content) else { return }
+            if content.contains("已读取") || content.contains("file.read") {
+                filesRead.insert(path)
+            } else if content.contains("已写入") || content.contains("file_edit") || content.contains("file_write") {
+                filesWritten.insert(path)
+            }
+        }
+
+        mutating func recordAssistantContent(_ content: String) {
+            guard content.contains("```") || content.contains("file_edit") || content.contains("file_write") else { return }
+            let firstLine = content.components(separatedBy: .newlines)
+                .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty && !$0.hasPrefix("```") }
+            if let firstLine {
+                decisions.append(String(firstLine.prefix(80)))
+            }
+        }
+
+        func message(compressedCount: Int) -> ChatMessage? {
+            let parts = summaryParts()
+            guard !parts.isEmpty else { return nil }
+            return ChatMessage(
                 role: "user",
-                content: "[上下文摘要 · 已压缩 \(compressEnd - firstUserIdx - 1) 条消息]\n\(summary)\n\n请基于以上摘要和后续消息继续当前会话，不要重复已完成的步骤。"
-            ))
+                content: "[上下文摘要 · 已压缩 \(compressedCount) 条消息]\n\(parts.joined(separator: "\n"))\n\n请基于以上摘要和后续消息继续当前会话，不要重复已完成的步骤。"
+            )
         }
 
-        // Keep recent messages intact
-        for i in compressEnd..<messages.count {
-            result.append(messages[i])
+        private func summaryParts() -> [String] {
+            var parts: [String] = []
+            if !filesRead.isEmpty {
+                parts.append("已读: \(fileNames(filesRead).joined(separator: ", "))")
+            }
+            if !filesWritten.isEmpty {
+                parts.append("已改: \(fileNames(filesWritten).joined(separator: ", "))")
+            }
+            if !searchQueries.isEmpty {
+                parts.append("已搜索: \(searchQueries.prefix(5).joined(separator: ", "))")
+            }
+            if toolSuccessCount > 0 || toolFailCount > 0 {
+                parts.append("工具: \(toolSuccessCount)成功 \(toolFailCount)失败")
+            }
+            appendIssueParts(to: &parts)
+            return parts
         }
 
-        return result
+        private func appendIssueParts(to parts: inout [String]) {
+            if !errors.isEmpty {
+                parts.append("错误: " + errors.prefix(3).joined(separator: "; "))
+            }
+            if !decisions.isEmpty {
+                parts.append("决策: " + decisions.prefix(3).joined(separator: "; "))
+            }
+        }
+
+        private func fileNames(_ paths: Set<String>) -> [String] {
+            paths.sorted().map { URL(fileURLWithPath: $0).lastPathComponent }
+        }
     }
 
     /// Extract file path from tool result content
@@ -557,19 +719,19 @@ extension AgentLoop {
         let charBudget = maxTokens * 4
 
         // Truncate from oldest tool results first
-        for i in 0..<result.count {
+        for index in 0..<result.count {
             guard totalChars > charBudget else { break }
-            let msg = result[i]
+            let msg = result[index]
             guard let content = msg.content, content.count > 2000 else { continue }
             // Tool results have role "tool" or contain tool result patterns
             if msg.role == "tool" || msg.role == "assistant" && msg.toolCalls != nil && !msg.toolCalls!.isEmpty {
-                continue // Don't truncate tool call messages
+                continue  // Don't truncate tool call messages
             }
             if msg.role == "tool" || content.hasPrefix("[TOOL_RESULT]") || content.hasPrefix("工具结果") {
                 let truncated = String(content.prefix(800)) + "\n... [内容过长已截断，原始长度 \(content.count) 字符] ..."
                 let saved = content.count - truncated.count
                 totalChars -= saved
-                result[i] = ChatMessage(
+                result[index] = ChatMessage(
                     role: msg.role,
                     content: truncated,
                     reasoningContent: msg.reasoningContent,
@@ -607,10 +769,12 @@ extension AgentLoop {
         if syntaxMatches >= 2 { return true }
         if containsInlineCommandJSON(text) { return true }
         // Pattern 2: spam list of tool names (10+ mentions)
-        let toolNames = ["shell.exec", "file.read", "file.write", "file.edit", "diff.apply",
-                         "web.search", "web.fetch", "code.search", "workspace.index",
-                         "shell_exec", "file_read", "file_write", "file_edit", "diff_apply",
-                         "web_search", "web_fetch", "code_search", "workspace_index"]
+        let toolNames = [
+            "shell.exec", "file.read", "file.write", "file.edit", "diff.apply",
+            "web.search", "web.fetch", "code.search", "workspace.index",
+            "shell_exec", "file_read", "file_write", "file_edit", "diff_apply",
+            "web_search", "web_fetch", "code_search", "workspace_index"
+        ]
         let totalMentions = toolNames.reduce(0) { count, name in
             count + text.components(separatedBy: name).count - 1
         }
@@ -677,7 +841,9 @@ extension AgentLoop {
     }
 
     private static func inlineCommandJSONRanges(in text: String) -> [Range<String.Index>] {
-        let pattern = #"(?is)\{[\s\n\r]*"(cmd|command|tool|tool_name|name)"[\s\n\r]*:[\s\n\r]*"[^"]{1,4000}"(?:[\s\n\r]*,[\s\n\r]*"[^"]+"[\s\n\r]*:[\s\n\r]*(?:"[^"]*"|true|false|null|-?\d+(?:\.\d+)?|\[[\s\S]*?\]|\{[\s\S]*?\}))*[\s\n\r]*\}"#
+        let pattern =
+            #"(?is)\{[\s\n\r]*"(cmd|command|tool|tool_name|name)"[\s\n\r]*:[\s\n\r]*"[^"]{1,4000}""#
+            + #"([\s\n\r]*,[\s\n\r]*"[^"]+"[\s\n\r]*:[\s\n\r]*(?:"[^"]*"|true|false|null|-?\d+(\.\d+)?|\[[\s\S]*?\]|\{[\s\S]*?\}))*[\s\n\r]*\}"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let nsRange = NSRange(text.startIndex..., in: text)
         return regex.matches(in: text, options: [], range: nsRange).compactMap { match in
@@ -699,7 +865,8 @@ extension AgentLoop {
 
     private static func isLikelyLeakedToolCommandJSON(_ block: String) -> Bool {
         guard let data = block.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
         let keys = Set(json.keys.map { $0.lowercased() })
         if let tool = (json["tool"] ?? json["tool_name"] ?? json["name"]) as? String {
             let normalizedTool = tool.lowercased()
@@ -733,37 +900,30 @@ extension AgentLoop {
         let lowered = text.lowercased()
         // Only match if text is short (error messages are typically brief, not full answers)
         let isShort = text.count < 500
-        let hasErrorPrefix = text.hasPrefix("请求格式不被")
+        let hasErrorPrefix =
+            text.hasPrefix("请求格式不被")
             || text.hasPrefix("请求失败")
             || text.hasPrefix("无法连接")
-        let hasErrorKeyword = lowered.contains("invalid_request_error")
+        let hasErrorKeyword =
+            lowered.contains("invalid_request_error")
             || lowered.contains("provider returned")
         // URL pattern only counts as error if at start of text (error format: "...URL: http://...")
-        let hasErrorURL = isShort && (text.contains("URL: http://") || text.contains("URL: https://"))
+        let hasErrorURL =
+            isShort && (text.contains("URL: http://") || text.contains("URL: https://"))
             && (lowered.contains("返回") || lowered.contains("failed") || lowered.contains("error"))
         return hasErrorPrefix || hasErrorKeyword || hasErrorURL
     }
 
     static func isTransientError(_ error: Error) -> Bool {
         let desc = error.localizedDescription.lowercased()
-        // Network / connection errors
-        if desc.contains("timeout") || desc.contains("超时") { return true }
-        if desc.contains("connection") || desc.contains("连接") { return true }
-        if desc.contains("network") || desc.contains("网络") { return true }
-        if desc.contains("reset") || desc.contains("broken pipe") { return true }
-        // Rate limiting
-        if desc.contains("429") || desc.contains("rate limit") || desc.contains("限流") { return true }
-        if desc.contains("too many requests") { return true }
-        // Server errors (5xx)
-        if desc.contains("500") || desc.contains("502") || desc.contains("503") || desc.contains("504") { return true }
-        if desc.contains("server error") || desc.contains("服务不可用") { return true }
-        // Parse / decode errors (often transient — proxy returned bad data)
-        if desc.contains("cannot parse") || desc.contains("parse response") { return true }
-        if desc.contains("decode") && desc.contains("response") { return true }
-        // URLSession specific
-        if desc.contains("urlerror") || desc.contains("not connected") { return true }
-        if desc.contains("cannot find host") { return true }
-        return false
+        let transientKeywords = [
+            "timeout", "超时", "connection", "连接", "network", "网络",
+            "reset", "broken pipe", "429", "rate limit", "限流", "too many requests",
+            "500", "502", "503", "504", "server error", "服务不可用",
+            "cannot parse", "parse response", "urlerror", "not connected", "cannot find host"
+        ]
+        return transientKeywords.contains { desc.contains($0) }
+            || (desc.contains("decode") && desc.contains("response"))
     }
 
     static func fallbackConnector(after failed: ConnectorProfile, allConnectors: [ConnectorProfile]) -> ConnectorProfile? {
@@ -801,41 +961,45 @@ extension AgentLoop {
     // MARK: - Unified Error Recovery
 
     enum ErrorRecoveryAction {
-        case connectorFailover(to: ConnectorProfile)
+        case connectorFailover(connector: ConnectorProfile)
         case transientRetry(delaySeconds: Int)
         case fatal
     }
 
+    struct ErrorRecoveryContext {
+        let error: Error
+        let currentConnector: ConnectorProfile
+        let allConnectors: [ConnectorProfile]
+        let didConnectorFailover: Bool
+        let transientRetryCount: Int
+        let maxTransientRetries: Int
+        let iteration: Int
+        let effectiveMaxIterations: Int
+    }
+
     /// Unified error recovery: decides whether to failover, retry, or give up.
     /// Consolidates the duplicated logic that was scattered across `run()`.
-    static func resolveErrorRecovery(
-        error: Error,
-        currentConnector: ConnectorProfile,
-        allConnectors: [ConnectorProfile],
-        didConnectorFailover: Bool,
-        transientRetryCount: Int,
-        maxTransientRetries: Int,
-        iteration: Int,
-        effectiveMaxIterations: Int
-    ) -> ErrorRecoveryAction {
-        let isTransient = isTransientError(error)
+    static func resolveErrorRecovery(_ context: ErrorRecoveryContext) -> ErrorRecoveryAction {
+        let isTransient = isTransientError(context.error)
 
         // 1. Transient + haven't failovered yet → try another connector
-        if isTransient, !didConnectorFailover,
-           let fallback = fallbackConnector(after: currentConnector, allConnectors: allConnectors) {
-            return .connectorFailover(to: fallback)
+        if isTransient, !context.didConnectorFailover,
+            let fallback = fallbackConnector(after: context.currentConnector, allConnectors: context.allConnectors) {
+            return .connectorFailover(connector: fallback)
         }
 
         // 2. Transient + still have retries left → retry with backoff
-        if isTransient, transientRetryCount < maxTransientRetries, iteration < effectiveMaxIterations {
-            let delaySec = min(Int(pow(2.0, Double(transientRetryCount + 1))), 8)
+        if isTransient,
+            context.transientRetryCount < context.maxTransientRetries,
+            context.iteration < context.effectiveMaxIterations {
+            let delaySec = min(Int(pow(2.0, Double(context.transientRetryCount + 1))), 8)
             return .transientRetry(delaySeconds: delaySec)
         }
 
         // 3. Non-transient or retries exhausted + haven't failovered → try another connector
-        if !didConnectorFailover,
-           let fallback = fallbackConnector(after: currentConnector, allConnectors: allConnectors) {
-            return .connectorFailover(to: fallback)
+        if !context.didConnectorFailover,
+            let fallback = fallbackConnector(after: context.currentConnector, allConnectors: context.allConnectors) {
+            return .connectorFailover(connector: fallback)
         }
 
         // 4. Nothing left to try
@@ -902,15 +1066,18 @@ extension AgentLoop {
     static func normalizedCheckpointPaths(_ paths: [String], workspaceRoot: String) -> [String] {
         let rootURL = URL(fileURLWithPath: workspaceRoot).standardizedFileURL
         let rootPath = rootURL.path
-        return Array(Set(paths.compactMap { rawPath -> String? in
-            let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            let url = URL(fileURLWithPath: trimmed, relativeTo: trimmed.hasPrefix("/") ? nil : rootURL).standardizedFileURL
-            let path = url.path
-            guard path == rootPath || path.hasPrefix(rootPath + "/") else { return nil }
-            let relative = String(path.dropFirst(rootPath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            return relative.isEmpty ? nil : relative
-        })).sorted()
+        return Array(
+            Set(
+                paths.compactMap { rawPath -> String? in
+                    let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return nil }
+                    let url = URL(fileURLWithPath: trimmed, relativeTo: trimmed.hasPrefix("/") ? nil : rootURL).standardizedFileURL
+                    let path = url.path
+                    guard path == rootPath || path.hasPrefix(rootPath + "/") else { return nil }
+                    let relative = String(path.dropFirst(rootPath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                    return relative.isEmpty ? nil : relative
+                })
+        ).sorted()
     }
 
     // MARK: - Context Window Compression
@@ -933,16 +1100,16 @@ extension AgentLoop {
         var compressed: [ChatMessage] = Array(messages[0..<keepHead])
 
         // Group compressible messages and compress
-        var i = compressibleRange.lowerBound
-        while i < compressibleRange.upperBound {
-            let msg = messages[i]
+        var index = compressibleRange.lowerBound
+        while index < compressibleRange.upperBound {
+            let msg = messages[index]
             let content = msg.content ?? ""
 
             // Compress tool results: keep only summary
             if msg.role == "user" && content.hasPrefix("工具") && content.count > 500 {
                 let firstLine = content.components(separatedBy: "\n").first ?? content
                 compressed.append(ChatMessage(role: msg.role, content: String(firstLine.prefix(200)) + " [已压缩]"))
-                i += 1
+                index += 1
                 continue
             }
 
@@ -952,22 +1119,22 @@ extension AgentLoop {
                 let lines = content.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
                 let summary = lines.prefix(3).joined(separator: "\n")
                 compressed.append(ChatMessage(role: msg.role, content: String(summary.prefix(400)) + "\n[…已压缩]", toolCallId: msg.toolCallId))
-                i += 1
+                index += 1
                 continue
             }
 
             // Fold consecutive system messages into one
             if msg.role == "system" {
                 var combined = content
-                while i + 1 < compressibleRange.upperBound && messages[i + 1].role == "system" {
-                    i += 1
-                    combined += "\n" + (messages[i].content ?? "")
+                while index + 1 < compressibleRange.upperBound && messages[index + 1].role == "system" {
+                    index += 1
+                    combined += "\n" + (messages[index].content ?? "")
                 }
                 if combined.count > 600 {
                     combined = String(combined.prefix(600)) + " [已压缩]"
                 }
                 compressed.append(ChatMessage(role: "system", content: combined))
-                i += 1
+                index += 1
                 continue
             }
 
@@ -977,7 +1144,7 @@ extension AgentLoop {
             } else {
                 compressed.append(msg)
             }
-            i += 1
+            index += 1
         }
 
         // Append tail
@@ -994,26 +1161,26 @@ extension AgentLoop {
         var ascii = 0
         var other = 0
         for scalar in text.unicodeScalars {
-            let v = scalar.value
+            let scalarValue = scalar.value
             // ASCII printable + whitespace
-            if v < 0x80 {
+            if scalarValue < 0x80 {
                 ascii += 1
             }
             // CJK Unified Ideographs + Extensions A-F + Compatibility, Kana, Hangul, fullwidth
-            else if (0x3000...0x303F).contains(v)         // CJK punctuation
-                 || (0x3040...0x309F).contains(v)         // Hiragana
-                 || (0x30A0...0x30FF).contains(v)         // Katakana
-                 || (0x3400...0x4DBF).contains(v)         // CJK Ext A
-                 || (0x4E00...0x9FFF).contains(v)         // CJK Unified
-                 || (0xAC00...0xD7AF).contains(v)         // Hangul syllables
-                 || (0xF900...0xFAFF).contains(v)         // CJK Compatibility
-                 || (0xFF00...0xFFEF).contains(v)         // Halfwidth/Fullwidth
-                 || (0x20000...0x2A6DF).contains(v)       // CJK Ext B
-                 || (0x2A700...0x2B73F).contains(v)       // CJK Ext C
-                 || (0x2B740...0x2B81F).contains(v)       // CJK Ext D
-                 || (0x2B820...0x2CEAF).contains(v)       // CJK Ext E
-                 || (0x2CEB0...0x2EBEF).contains(v)       // CJK Ext F
-                 || (0x30000...0x3134F).contains(v) {     // CJK Ext G
+            else if (0x3000...0x303F).contains(scalarValue)  // CJK punctuation
+                || (0x3040...0x309F).contains(scalarValue)  // Hiragana
+                || (0x30A0...0x30FF).contains(scalarValue)  // Katakana
+                || (0x3400...0x4DBF).contains(scalarValue)  // CJK Ext A
+                || (0x4E00...0x9FFF).contains(scalarValue)  // CJK Unified
+                || (0xAC00...0xD7AF).contains(scalarValue)  // Hangul syllables
+                || (0xF900...0xFAFF).contains(scalarValue)  // CJK Compatibility
+                || (0xFF00...0xFFEF).contains(scalarValue)  // Halfwidth/Fullwidth
+                || (0x20000...0x2A6DF).contains(scalarValue)  // CJK Ext B
+                || (0x2A700...0x2B73F).contains(scalarValue)  // CJK Ext C
+                || (0x2B740...0x2B81F).contains(scalarValue)  // CJK Ext D
+                || (0x2B820...0x2CEAF).contains(scalarValue)  // CJK Ext E
+                || (0x2CEB0...0x2EBEF).contains(scalarValue)  // CJK Ext F
+                || (0x30000...0x3134F).contains(scalarValue) {  // CJK Ext G
                 cjk += 1
             } else {
                 other += 1

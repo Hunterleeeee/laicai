@@ -22,7 +22,7 @@ extension AppStore {
         }
         SchedulerEngine.shared.start(workspaceRoot: root)
 
-        GoalEngine.shared.onExecuteStep = { [weak self] message, threadID in
+        GoalEngine.shared.onExecuteStep = { [weak self] message, _ in
             guard let self else { return (false, "未初始化") }
             self.state.draftMessage = message
             self.sendDraft()
@@ -36,7 +36,7 @@ extension AppStore {
             return "已处理"
         }
 
-        SkillCompositionEngine.shared.onExecuteStep = { [weak self] message, skillName in
+        SkillCompositionEngine.shared.onExecuteStep = { [weak self] message, _ in
             guard let self else { return ("", false) }
             await MainActor.run {
                 self.state.draftMessage = message

@@ -210,7 +210,6 @@ extension AppStore {
         persistThreads()
     }
 
-
     public func rateThread(id: UUID, rating: Int) {
         guard let index = state.threads.firstIndex(where: { $0.id == id }) else { return }
         state.threads[index].userRating = rating

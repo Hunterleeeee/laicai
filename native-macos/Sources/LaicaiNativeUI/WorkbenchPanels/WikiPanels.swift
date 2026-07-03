@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Wiki Panel (Knowledge Base Browser + Generator)
 
@@ -13,25 +13,29 @@ struct WikiPanel: View {
     @State private var isRunning = false
     @State private var streamingText = ""
 
-    enum Mode { case browse, viewing(VaultNote), generating }
+    enum Mode {
+        case browse
+        case viewing(VaultNote)
+        case generating
+    }
     @State private var mode: Mode = .browse
     @State private var vaultNotes: [VaultNote] = []
     @State private var selectedNote: VaultNote?
 
     struct VaultNote: Identifiable, Hashable {
-        let id: String // relative path
+        let id: String  // relative path
         let title: String
         let folder: String
         let modifiedAt: Date
         let sizeBytes: Int
-        var content: String? = nil // lazy-loaded
+        var content: String?  // lazy-loaded
 
         func hash(into hasher: inout Hasher) { hasher.combine(id) }
         static func == (lhs: VaultNote, rhs: VaultNote) -> Bool { lhs.id == rhs.id }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
             wikiHeader
             wikiSearchBar
             wikiOptionBar
@@ -51,15 +55,15 @@ struct WikiPanel: View {
     // MARK: - Header
 
     private var wikiHeader: some View {
-        VStack(alignment: .leading, spacing: AppSpace.md) {
-            HStack(alignment: .top, spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.medium) {
+            HStack(alignment: .top, spacing: AppSpace.small) {
                 Image(systemName: "book.closed.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Brand.primary)
                     .frame(width: 34, height: 34)
                     .background(Circle().fill(Brand.primary.opacity(0.10)))
 
-                VStack(alignment: .leading, spacing: AppSpace.xs) {
+                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                     Text("Wiki")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(TextGrade.primary)
@@ -86,27 +90,27 @@ struct WikiPanel: View {
                 }
             }
 
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 wikiStat(icon: "doc.text", value: "\(vaultNotes.count)", label: "文档", tint: Brand.primary)
                 wikiStat(icon: useWeb ? "globe" : "network.slash", value: useWeb ? "开" : "关", label: "联网", tint: useWeb ? Brand.teal : TextGrade.ghost)
                 wikiStat(icon: "folder", value: vaultLabel, label: "位置", tint: Brand.purple)
             }
         }
-        .padding(AppSpace.lg)
+        .padding(AppSpace.large)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .fill(LinearGradient(colors: [SurfaceGrade.card, SurfaceGrade.elevated.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.9), lineWidth: 0.7)
         )
-        .shadow(color: AppShadow.sm.color, radius: AppShadow.sm.radius, y: AppShadow.sm.verticalOffset)
+        .shadow(color: AppShadow.small.color, radius: AppShadow.small.radius, y: AppShadow.small.verticalOffset)
     }
 
     private func wikiStat(icon: String, value: String, label: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: AppSpace.xs) {
+            HStack(spacing: AppSpace.extraSmall) {
                 Image(systemName: icon)
                     .font(.system(size: 9, weight: .semibold))
                 Text(label)
@@ -120,15 +124,15 @@ struct WikiPanel: View {
                 .minimumScaleFactor(0.72)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(AppSpace.sm)
-        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.card.opacity(0.66)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
+        .padding(AppSpace.small)
+        .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.66)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
     }
 
     // MARK: - Search bar (doubles as generator input)
 
     private var wikiSearchBar: some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundStyle(TextGrade.ghost)
@@ -141,7 +145,9 @@ struct WikiPanel: View {
             if isRunning {
                 ProgressView().controlSize(.small)
             } else if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button { handleSubmit() } label: {
+                Button {
+                    handleSubmit()
+                } label: {
                     Image(systemName: hasExactMatch ? "magnifyingglass" : "plus.circle.fill")
                         .font(.system(size: 16))
                         .foregroundStyle(Brand.primary)
@@ -150,14 +156,14 @@ struct WikiPanel: View {
                 .help(hasExactMatch ? "搜索" : "生成并保存新知识页")
             }
         }
-        .padding(.horizontal, AppSpace.md)
+        .padding(.horizontal, AppSpace.medium)
         .padding(.vertical, 7)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.card.opacity(0.78))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(SurfaceGrade.hairline.opacity(0.88), lineWidth: 0.75)
         )
     }
@@ -165,7 +171,7 @@ struct WikiPanel: View {
     // MARK: - Option bar
 
     private var wikiOptionBar: some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             wikiPill(label: "联网", icon: "globe", isOn: $useWeb)
 
             Spacer()
@@ -185,7 +191,9 @@ struct WikiPanel: View {
             .buttonStyle(.plain)
             .help("在 Finder 中打开 Vault")
 
-            Button { scanVault() } label: {
+            Button {
+                scanVault()
+            } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(TextGrade.ghost)
@@ -193,9 +201,9 @@ struct WikiPanel: View {
             .buttonStyle(.plain)
             .help("刷新")
         }
-        .padding(AppSpace.sm)
-        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(SurfaceGrade.elevated.opacity(0.58)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
+        .padding(AppSpace.small)
+        .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.elevated.opacity(0.58)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.72), lineWidth: 0.6))
     }
 
     // MARK: - File list (browse mode)
@@ -216,8 +224,8 @@ struct WikiPanel: View {
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(TextGrade.ghost)
                                 .textCase(.uppercase)
-                                .padding(.horizontal, AppSpace.sm)
-                                .padding(.top, AppSpace.md)
+                                .padding(.horizontal, AppSpace.small)
+                                .padding(.top, AppSpace.medium)
                                 .padding(.bottom, 2)
                         }
 
@@ -227,8 +235,8 @@ struct WikiPanel: View {
                     }
                 }
             }
-            .padding(.horizontal, AppSpace.sm)
-            .padding(.vertical, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
+            .padding(.vertical, AppSpace.small)
         }
     }
 
@@ -236,7 +244,7 @@ struct WikiPanel: View {
         Button {
             loadAndViewNote(note)
         } label: {
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: "doc.text")
                     .font(.system(size: 10))
                     .foregroundStyle(TextGrade.muted)
@@ -247,21 +255,24 @@ struct WikiPanel: View {
                         .font(AppFont.caption)
                         .foregroundStyle(TextGrade.primary)
                         .lineLimit(1)
-                    Text(RelativeTimeFormatter.string(for: note.modifiedAt) + " · \(ByteCountFormatter.string(fromByteCount: Int64(note.sizeBytes), countStyle: .file))")
-                        .font(.system(size: 9))
-                        .foregroundStyle(TextGrade.ghost)
+                    Text(
+                        RelativeTimeFormatter.string(for: note.modifiedAt)
+                            + " · \(ByteCountFormatter.string(fromByteCount: Int64(note.sizeBytes), countStyle: .file))"
+                    )
+                    .font(.system(size: 9))
+                    .foregroundStyle(TextGrade.ghost)
                 }
 
                 Spacer(minLength: 0)
             }
             .padding(.vertical, 4)
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                     .fill(selectedNote == note ? Brand.primary.opacity(0.10) : SurfaceGrade.card.opacity(0.46))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
                     .strokeBorder(selectedNote == note ? Brand.primary.opacity(0.18) : SurfaceGrade.hairline.opacity(0.55), lineWidth: 0.5)
             )
             .contentShape(Rectangle())
@@ -271,12 +282,16 @@ struct WikiPanel: View {
             Button {
                 let url = URL(fileURLWithPath: vaultRoot).appendingPathComponent(note.id)
                 NSWorkspace.shared.activateFileViewerSelecting([url])
-            } label: { Label("在 Finder 中显示", systemImage: "folder") }
+            } label: {
+                Label("在 Finder 中显示", systemImage: "folder")
+            }
 
             Button {
                 query = note.title
                 generateAndSave()
-            } label: { Label("用 AI 更新此页", systemImage: "arrow.triangle.2.circlepath") }
+            } label: {
+                Label("用 AI 更新此页", systemImage: "arrow.triangle.2.circlepath")
+            }
 
             Button {
                 let url = URL(fileURLWithPath: vaultRoot).appendingPathComponent(note.id)
@@ -285,7 +300,9 @@ struct WikiPanel: View {
                     NSPasteboard.general.setString(content, forType: .string)
                     ToastCenter.shared.success("已复制")
                 }
-            } label: { Label("复制内容", systemImage: "doc.on.doc") }
+            } label: {
+                Label("复制内容", systemImage: "doc.on.doc")
+            }
         }
     }
 
@@ -294,7 +311,7 @@ struct WikiPanel: View {
     private func wikiNoteViewer(_ note: VaultNote) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             // Toolbar
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 Text(note.title)
                     .font(AppFont.captionMedium)
                     .foregroundStyle(TextGrade.primary)
@@ -337,8 +354,8 @@ struct WikiPanel: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(TextGrade.muted)
             }
-            .padding(.horizontal, AppSpace.md)
-            .padding(.vertical, AppSpace.sm)
+            .padding(.horizontal, AppSpace.medium)
+            .padding(.vertical, AppSpace.small)
 
             Divider().opacity(0.2)
 
@@ -347,7 +364,7 @@ struct WikiPanel: View {
                 if let content = note.content {
                     MarkdownText(Self.stripFrontmatter(content), fontSize: 13)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(AppSpace.md)
+                        .padding(AppSpace.medium)
                 } else {
                     ProgressView()
                         .padding()
@@ -359,16 +376,16 @@ struct WikiPanel: View {
     // MARK: - Streaming (generation in progress)
 
     private var wikiStreamingView: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
-            HStack(spacing: AppSpace.xs) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
+            HStack(spacing: AppSpace.extraSmall) {
                 ProgressView().controlSize(.mini)
                 Text("正在生成… (\(streamingText.count) 字)")
                     .font(AppFont.tiny)
                     .foregroundStyle(TextGrade.muted)
                 Spacer()
             }
-            .padding(.horizontal, AppSpace.md)
-            .padding(.top, AppSpace.sm)
+            .padding(.horizontal, AppSpace.medium)
+            .padding(.top, AppSpace.small)
 
             ScrollView {
                 Text(streamingText)
@@ -376,20 +393,20 @@ struct WikiPanel: View {
                     .foregroundStyle(TextGrade.primary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(AppSpace.md)
+                    .padding(AppSpace.medium)
             }
             .background(
-                RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                     .fill(SurfaceGrade.card)
             )
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
         }
     }
 
     // MARK: - Empty state
 
     private var wikiEmptyState: some View {
-        VStack(spacing: AppSpace.md) {
+        VStack(spacing: AppSpace.medium) {
             if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Image(systemName: "book.closed")
                     .font(.system(size: 24, weight: .light))
@@ -418,21 +435,23 @@ struct WikiPanel: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, AppSpace.xl)
-        .background(RoundedRectangle(cornerRadius: AppRadius.lg).fill(SurfaceGrade.card.opacity(0.62)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.lg).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
+        .padding(.vertical, AppSpace.extraLarge)
+        .background(RoundedRectangle(cornerRadius: AppRadius.large).fill(SurfaceGrade.card.opacity(0.62)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.large).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
     }
 
     // MARK: - Pill toggle
 
     private func wikiPill(label: String, icon: String, isOn: Binding<Bool>) -> some View {
-        Button { isOn.wrappedValue.toggle() } label: {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
             HStack(spacing: 3) {
                 Image(systemName: icon).font(.system(size: 9))
                 Text(label).font(AppFont.tiny)
             }
             .foregroundStyle(isOn.wrappedValue ? Brand.primary : TextGrade.muted)
-            .padding(.horizontal, AppSpace.sm)
+            .padding(.horizontal, AppSpace.small)
             .padding(.vertical, 3)
             .background(Capsule().fill(isOn.wrappedValue ? Brand.primary.opacity(0.12) : SurfaceGrade.elevated.opacity(0.5)))
             .overlay(Capsule().strokeBorder(isOn.wrappedValue ? Brand.primary.opacity(0.3) : Color.clear, lineWidth: 0.5))
@@ -450,14 +469,14 @@ struct WikiPanel: View {
     private var vaultLabel: String { URL(fileURLWithPath: vaultRoot).lastPathComponent }
 
     private var hasExactMatch: Bool {
-        let q = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        return vaultNotes.contains { $0.title.lowercased() == q }
+        let normalizedQuery = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return vaultNotes.contains { $0.title.lowercased() == normalizedQuery }
     }
 
     private var filteredNotes: [VaultNote] {
-        let q = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return vaultNotes }
-        let terms = q.split(separator: " ").map(String.init)
+        let normalizedQuery = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty else { return vaultNotes }
+        let terms = normalizedQuery.split(separator: " ").map(String.init)
         return vaultNotes.filter { note in
             let hay = (note.title + " " + note.folder).lowercased()
             return terms.allSatisfy { hay.contains($0) }
@@ -475,8 +494,8 @@ struct WikiPanel: View {
     // MARK: - Actions
 
     private func handleSubmit() {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return }
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty else { return }
         // If there's a match, open it; otherwise generate
         if let match = filteredNotes.first {
             loadAndViewNote(match)
@@ -486,18 +505,21 @@ struct WikiPanel: View {
     }
 
     private func loadAndViewNote(_ note: VaultNote) {
-        var n = note
-        if n.content == nil {
+        var noteToView = note
+        if noteToView.content == nil {
             let url = URL(fileURLWithPath: vaultRoot).appendingPathComponent(note.id)
-            n.content = try? String(contentsOf: url, encoding: .utf8)
+            noteToView.content = try? String(contentsOf: url, encoding: .utf8)
         }
-        selectedNote = n
-        mode = .viewing(n)
+        selectedNote = noteToView
+        mode = .viewing(noteToView)
     }
 
     private func scanVault() {
         let root = URL(fileURLWithPath: vaultRoot)
-        guard FileManager.default.fileExists(atPath: root.path) else { vaultNotes = []; return }
+        guard FileManager.default.fileExists(atPath: root.path) else {
+            vaultNotes = []
+            return
+        }
 
         Task.detached(priority: .userInitiated) {
             var notes: [VaultNote] = []
@@ -565,7 +587,7 @@ private struct WikiSourceRow: View {
     let source: WikiSource
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.sm) {
+        HStack(alignment: .top, spacing: AppSpace.small) {
             Image(systemName: source.kind == "web" ? "globe" : "doc.text")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Brand.primary)
@@ -600,8 +622,8 @@ struct PipelineStatusCard: View {
     let onCancel: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.sm) {
-            HStack(spacing: AppSpace.sm) {
+        VStack(alignment: .leading, spacing: AppSpace.small) {
+            HStack(spacing: AppSpace.small) {
                 Image(systemName: "arrow.forward.circle.fill")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Semantic.toolRunning)
@@ -610,7 +632,9 @@ struct PipelineStatusCard: View {
                     .foregroundStyle(TextGrade.primary)
                     .lineLimit(1)
                 Spacer()
-                Button { onCancel() } label: {
+                Button {
+                    onCancel()
+                } label: {
                     Image(systemName: "xmark.circle")
                         .font(.system(size: 11))
                         .foregroundStyle(Semantic.error)
@@ -620,7 +644,7 @@ struct PipelineStatusCard: View {
             }
 
             ForEach(pipeline.steps) { step in
-                HStack(spacing: AppSpace.sm) {
+                HStack(spacing: AppSpace.small) {
                     Image(systemName: stepIcon(step.status))
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(stepColor(step.status))
@@ -641,13 +665,13 @@ struct PipelineStatusCard: View {
                 }
             }
         }
-        .padding(AppSpace.md)
+        .padding(AppSpace.medium)
         .background(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(Semantic.toolRunning.opacity(0.06))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .strokeBorder(Semantic.toolRunning.opacity(0.2), lineWidth: 0.75)
         )
     }
@@ -677,7 +701,7 @@ struct PipelineHistoryRow: View {
     let pipeline: SkillPipeline
 
     var body: some View {
-        HStack(spacing: AppSpace.sm) {
+        HStack(spacing: AppSpace.small) {
             Image(systemName: pipeline.status == .completed ? "checkmark.circle.fill" : "xmark.circle.fill")
                 .font(.system(size: 10))
                 .foregroundStyle(pipeline.status == .completed ? Semantic.success : Semantic.error)
@@ -697,6 +721,6 @@ struct PipelineHistoryRow: View {
                     .foregroundStyle(TextGrade.ghost)
             }
         }
-        .padding(.vertical, AppSpace.xs)
+        .padding(.vertical, AppSpace.extraSmall)
     }
 }

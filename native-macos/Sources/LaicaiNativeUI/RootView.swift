@@ -93,7 +93,7 @@ public struct RootView: View {
             }
             withAnimation(AppAnimation.spring) { showWorkbench = true }
         }
-        .onChange(of: store.state.notice?.id) { _ in
+        .onChange(of: store.state.notice?.id) { _, _ in
             guard let notice = store.state.notice else { return }
             switch notice.style {
             case .info:    ToastCenter.shared.show(notice.message, style: .info)
@@ -102,16 +102,16 @@ public struct RootView: View {
             case .error:   ToastCenter.shared.error(notice.message)
             }
         }
-        .onChange(of: store.state.activeConnectorID) { newID in
-            if let id = newID, let c = store.state.connectors.first(where: { $0.id == id }) {
-                ToastCenter.shared.success("已切换到 \(c.name)")
+        .onChange(of: store.state.activeConnectorID) { _, newID in
+            if let id = newID, let connector = store.state.connectors.first(where: { $0.id == id }) {
+                ToastCenter.shared.success("已切换到 \(connector.name)")
             }
         }
-        .onChange(of: showSidebar) { newVal in
+        .onChange(of: showSidebar) { _, newVal in
             withAnimation(AppAnimation.spring) { sidebarExpanded = newVal }
             NotificationCenter.default.post(name: .laicaiPanelToggled, object: nil)
         }
-        .onChange(of: showWorkbench) { _ in
+        .onChange(of: showWorkbench) { _, _ in
             NotificationCenter.default.post(name: .laicaiPanelToggled, object: nil)
         }
     }
@@ -134,8 +134,8 @@ public struct RootView: View {
                         withAnimation(AppAnimation.spring) { showWorkbench = false }
                     }
                 }
-                .padding(.horizontal, AppSpace.md)
-                .padding(.vertical, AppSpace.xs)
+                .padding(.horizontal, AppSpace.medium)
+                .padding(.vertical, AppSpace.extraSmall)
                 .background(SurfaceGrade.panel)
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(SurfaceGrade.divider.opacity(0.5)).frame(height: 0.5)
@@ -183,7 +183,7 @@ private struct AppTopBar: View {
 
     var body: some View {
         ZStack {
-            HStack(spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.medium) {
                 if !showSidebar {
                     ToolbarButton(icon: "sidebar.right", tooltip: "展开导航") {
                         showSidebar.toggle()
@@ -193,7 +193,7 @@ private struct AppTopBar: View {
                 Spacer()
                 actionButtons
             }
-            .padding(.horizontal, AppSpace.md)
+            .padding(.horizontal, AppSpace.medium)
 
             titleCluster
                 .frame(maxWidth: 560)
@@ -205,7 +205,7 @@ private struct AppTopBar: View {
 
     private var titleCluster: some View {
         VStack(alignment: .center, spacing: 2) {
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 Text(currentTitle)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(TextGrade.primary)
@@ -220,7 +220,7 @@ private struct AppTopBar: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
-            HStack(spacing: AppSpace.sm) {
+            HStack(spacing: AppSpace.small) {
                 Text(subtitle)
                     .font(AppFont.tiny)
                     .foregroundStyle(store.hasRunningGenerationTasks ? Semantic.toolRunning : TextGrade.muted)
@@ -239,7 +239,7 @@ private struct AppTopBar: View {
     }
 
     private var actionButtons: some View {
-        HStack(spacing: AppSpace.xs) {
+        HStack(spacing: AppSpace.extraSmall) {
             ToolbarButton(icon: "hammer", tooltip: "新任务") {
                 startNewTask()
             }
@@ -342,11 +342,11 @@ struct StatusBarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: AppSpace.md) {
+            HStack(spacing: AppSpace.medium) {
                 Spacer()
 
                 if store.hasRunningGenerationTasks {
-                    HStack(spacing: AppSpace.xs) {
+                    HStack(spacing: AppSpace.extraSmall) {
                         ProgressView()
                             .scaleEffect(0.55)
                             .frame(width: 12, height: 12)
@@ -356,7 +356,7 @@ struct StatusBarView: View {
                 }
 
                 // Right: command palette hint
-                HStack(spacing: AppSpace.md) {
+                HStack(spacing: AppSpace.medium) {
                     Text("⌘K")
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
@@ -371,7 +371,7 @@ struct StatusBarView: View {
                 }
             }
             .statusBarStyle()
-            .padding(.horizontal, AppSpace.lg)
+            .padding(.horizontal, AppSpace.large)
             .frame(height: LayoutConst.statusBarHeight)
             .background(SurfaceGrade.panel)
             .overlay(alignment: .top) {

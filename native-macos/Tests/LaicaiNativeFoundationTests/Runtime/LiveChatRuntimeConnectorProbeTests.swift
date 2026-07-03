@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
@@ -15,7 +16,7 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
                     httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"]
                 )!
-                return (response, #"{"data":[{"id":"target-model"}]}"#.data(using: .utf8)!)
+                return (response, Data(#"{"data":[{"id":"target-model"}]}"#.utf8))
             }
             if let body = request.httpBody.flatMap({ String(data: $0, encoding: .utf8) }) {
                 requestBodies.append(body)
@@ -26,7 +27,7 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
                 httpVersion: nil,
                 headerFields: ["Content-Type": "application/json"]
             )!
-            return (response, #"{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"#.data(using: .utf8)!)
+            return (response, Data(#"{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"#.utf8))
         }
         let runtime = LiveChatRuntime(session: session)
 
@@ -53,7 +54,7 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
                     httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"]
                 )!
-                return (response, #"{"data":[{"id":"target-model"}]}"#.data(using: .utf8)!)
+                return (response, Data(#"{"data":[{"id":"target-model"}]}"#.utf8))
             }
             let response = HTTPURLResponse(
                 url: url,
@@ -61,7 +62,7 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
                 httpVersion: nil,
                 headerFields: ["Content-Type": "application/json"]
             )!
-            return (response, #"{"error":{"message":"tools are not supported by this model"}}"#.data(using: .utf8)!)
+            return (response, Data(#"{"error":{"message":"tools are not supported by this model"}}"#.utf8))
         }
         let runtime = LiveChatRuntime(session: session)
 
@@ -86,7 +87,7 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
                 httpVersion: nil,
                 headerFields: ["Content-Type": "application/json"]
             )!
-            return (response, #"{"data":[{"id":"target-model"}]}"#.data(using: .utf8)!)
+            return (response, Data(#"{"data":[{"id":"target-model"}]}"#.utf8))
         }
         let runtime = LiveChatRuntime(session: session)
 
@@ -105,16 +106,19 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
     }
     func testLiveChatRuntimePreservesEmptyAssistantContentForOrchestratorRecovery() async throws {
         let session = makeStubbedSession(
-            body: #"{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}"#.data(using: .utf8)!
+            body: Data(#"{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}"#.utf8)
         )
         let runtime = LiveChatRuntime(session: session)
 
-        let response = try await runtime.sendMessage(SendMessageRequest(
-            sessionID: UUID(),
-            message: "ping",
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "https://api.example.com/v1/chat/completions", modelName: "test", note: "", health: .ready),
-            modeLabel: "测试"
-        ))
+        let response = try await runtime.sendMessage(
+            SendMessageRequest(
+                sessionID: UUID(),
+                message: "ping",
+                connector: ConnectorProfile(
+                    name: "Test", kind: "openai-compatible", endpoint: "https://api.example.com/v1/chat/completions", modelName: "test", note: "",
+                    health: .ready),
+                modeLabel: "测试"
+            ))
 
         XCTAssertEqual(response.assistantText, "")
         XCTAssertFalse(response.assistantText.contains("模型没有返回可显示内容"))
@@ -132,19 +136,20 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
         }
         let runtime = LiveChatRuntime(session: session)
 
-        let response = try await runtime.sendMessage(SendMessageRequest(
-            sessionID: UUID(),
-            message: "画一张图",
-            connector: ConnectorProfile(
-                name: "图片模型",
-                kind: "openai-compatible",
-                endpoint: "https://duckcu.tech/v1/chat/completions",
-                modelName: "gpt-image-2",
-                note: "",
-                health: .ready
-            ),
-            modeLabel: "测试"
-        ))
+        let response = try await runtime.sendMessage(
+            SendMessageRequest(
+                sessionID: UUID(),
+                message: "画一张图",
+                connector: ConnectorProfile(
+                    name: "图片模型",
+                    kind: "openai-compatible",
+                    endpoint: "https://duckcu.tech/v1/chat/completions",
+                    modelName: "gpt-image-2",
+                    note: "",
+                    health: .ready
+                ),
+                modeLabel: "测试"
+            ))
 
         XCTAssertTrue(response.assistantText.contains("图片生成模型"))
         XCTAssertTrue(response.assistantText.contains("不能作为通用会话模型使用"))
@@ -172,19 +177,20 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
         let runtime = LiveChatRuntime(session: session)
         var streamedText = ""
 
-        let response = try await runtime.sendMessageStream(SendMessageRequest(
-            sessionID: UUID(),
-            message: "画一张图",
-            connector: ConnectorProfile(
-                name: "图片模型",
-                kind: "openai-compatible",
-                endpoint: "https://duckcu.tech/v1/chat/completions",
-                modelName: "dall-e-3",
-                note: "",
-                health: .ready
-            ),
-            modeLabel: "测试"
-        ), onChunk: { streamedText += $0 })
+        let response = try await runtime.sendMessageStream(
+            SendMessageRequest(
+                sessionID: UUID(),
+                message: "画一张图",
+                connector: ConnectorProfile(
+                    name: "图片模型",
+                    kind: "openai-compatible",
+                    endpoint: "https://duckcu.tech/v1/chat/completions",
+                    modelName: "dall-e-3",
+                    note: "",
+                    health: .ready
+                ),
+                modeLabel: "测试"
+            ), onChunk: { streamedText += $0 })
 
         XCTAssertTrue(response.assistantText.contains("图片生成模型"))
         XCTAssertEqual(response.finishReason, "model_not_supported_for_chat")
@@ -202,23 +208,24 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
                 httpVersion: nil,
                 headerFields: ["Content-Type": "application/json"]
             )!
-            return (response, #"{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"#.data(using: .utf8)!)
+            return (response, Data(#"{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"#.utf8))
         }
         let runtime = LiveChatRuntime(session: session)
 
-        let response = try await runtime.sendMessage(SendMessageRequest(
-            sessionID: UUID(),
-            message: "ping",
-            connector: ConnectorProfile(
-                name: "本地",
-                kind: "ollama",
-                endpoint: "http://127.0.0.1:53759/v1",
-                modelName: "gpt-5.5",
-                note: "",
-                health: .ready
-            ),
-            modeLabel: "测试"
-        ))
+        let response = try await runtime.sendMessage(
+            SendMessageRequest(
+                sessionID: UUID(),
+                message: "ping",
+                connector: ConnectorProfile(
+                    name: "本地",
+                    kind: "ollama",
+                    endpoint: "http://127.0.0.1:53759/v1",
+                    modelName: "gpt-5.5",
+                    note: "",
+                    health: .ready
+                ),
+                modeLabel: "测试"
+            ))
 
         XCTAssertEqual(response.assistantText, "ok")
         XCTAssertEqual(capturedURL?.absoluteString, "http://127.0.0.1:53759/v1/chat/completions")
@@ -230,7 +237,8 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
         let sseBody = [
             #"data: {"choices":[{"delta":{"reasoning_content":"先看"},"finish_reason":null}]}"#,
             #"data: {"choices":[{"delta":{"content":"结"},"finish_reason":null}]}"#,
-            #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"file_read","arguments":"{\"path\":"}}]},"finish_reason":null}]}"#,
+            #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"file_read","# +
+                #""arguments":"{\"path\":"}}]},"finish_reason":null}]}"#,
             #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"README.md\"}"}}]},"finish_reason":"tool_calls"}]}"#,
             "data: [DONE]"
         ].joined(separator: "\n")

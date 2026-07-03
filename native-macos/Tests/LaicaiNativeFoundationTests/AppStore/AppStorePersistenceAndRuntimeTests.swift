@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
@@ -108,7 +109,8 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
             lastCheckedAt: Date(timeIntervalSince1970: 1_714_552_000)
         )
         try encoder.encode([session]).write(to: directory.appendingPathComponent("sessions.json"), options: [.atomic])
-        try encoder.encode(ConnectorCatalog(connectors: [connector], activeConnectorID: connectorID)).write(to: directory.appendingPathComponent("connectors.json"), options: [.atomic])
+        try encoder.encode(ConnectorCatalog(connectors: [connector], activeConnectorID: connectorID)).write(
+            to: directory.appendingPathComponent("connectors.json"), options: [.atomic])
 
         let sessions = try XCTUnwrap(LegacyJSONMigration.loadSessions(from: directory))
         let catalog = try XCTUnwrap(LegacyJSONMigration.loadConnectorCatalog(from: directory))
@@ -184,7 +186,7 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: base) }
 
-        var thread = Thread(
+        let thread = Thread(
             title: "历史会话",
             preview: "hello",
             updatedAt: Date(timeIntervalSince1970: 10)
@@ -201,17 +203,17 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
     func testThreadDecodingToleratesMissingMigrationFields() throws {
         let id = UUID()
         let json = """
-        {
-          "id": "\(id.uuidString)",
-          "title": "旧线程",
-          "preview": "旧预览",
-          "status": "completed",
-          "steps": [],
-          "context": {},
-          "createdAt": "2026-01-01T00:00:00Z",
-          "updatedAt": "2026-01-02T00:00:00Z"
-        }
-        """
+            {
+              "id": "\(id.uuidString)",
+              "title": "旧线程",
+              "preview": "旧预览",
+              "status": "completed",
+              "steps": [],
+              "context": {},
+              "createdAt": "2026-01-01T00:00:00Z",
+              "updatedAt": "2026-01-02T00:00:00Z"
+            }
+            """
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -226,16 +228,16 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
     func testThreadDecodingWithoutTitleDefaultsToNewSession() throws {
         let id = UUID()
         let json = """
-        {
-          "id": "\(id.uuidString)",
-          "preview": "旧预览",
-          "status": "completed",
-          "steps": [],
-          "context": {},
-          "createdAt": "2026-01-01T00:00:00Z",
-          "updatedAt": "2026-01-02T00:00:00Z"
-        }
-        """
+            {
+              "id": "\(id.uuidString)",
+              "preview": "旧预览",
+              "status": "completed",
+              "steps": [],
+              "context": {},
+              "createdAt": "2026-01-01T00:00:00Z",
+              "updatedAt": "2026-01-02T00:00:00Z"
+            }
+            """
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -453,7 +455,7 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         )
     }
     func testOpenAICompatibleHealthCheckRequiresRequestedModelWhenModelListIsAvailable() async throws {
-        let session = makeStubbedSession(body: #"{"data":[{"id":"other-model"}]}"#.data(using: .utf8)!)
+        let session = makeStubbedSession(body: Data(#"{"data":[{"id":"other-model"}]}"#.utf8))
         let runtime = LiveChatRuntime(session: session)
 
         let health = try await runtime.healthCheck(

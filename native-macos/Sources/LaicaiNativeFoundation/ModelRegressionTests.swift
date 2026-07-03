@@ -120,7 +120,7 @@ public final class ModelRegressionRunner: ObservableObject {
             model: "gpt-4o-mini",
             kind: "openai-compatible",
             checks: [.healthCheck, .basicChat, .streamingChat, .toolCalling, .chineseOutput]
-        ),
+        )
     ]
 
     public func runAll(tests: [ModelTestCase]? = nil) async {
@@ -177,17 +177,17 @@ public final class ModelRegressionRunner: ObservableObject {
             case .chineseOutput:
                 detail = try await checkChineseOutput(testCase)
             }
-            let ms = Int(Date().timeIntervalSince(start) * 1000)
-            return CheckResult(check: check, passed: true, latencyMs: ms, detail: detail)
+            let latencyMilliseconds = Int(Date().timeIntervalSince(start) * 1000)
+            return CheckResult(check: check, passed: true, latencyMs: latencyMilliseconds, detail: detail)
         } catch {
-            let ms = Int(Date().timeIntervalSince(start) * 1000)
-            return CheckResult(check: check, passed: false, latencyMs: ms, detail: "", error: error.localizedDescription)
+            let latencyMilliseconds = Int(Date().timeIntervalSince(start) * 1000)
+            return CheckResult(check: check, passed: false, latencyMs: latencyMilliseconds, detail: "", error: error.localizedDescription)
         }
     }
 
-    private func checkHealth(_ tc: ModelTestCase) async throws -> String {
+    private func checkHealth(_ testCase: ModelTestCase) async throws -> String {
         let result = try await runtime.probeConnector(
-            endpoint: tc.endpoint, model: tc.model, apiKey: tc.apiKey, kind: tc.kind, probeToolCalling: false
+            endpoint: testCase.endpoint, model: testCase.model, apiKey: testCase.apiKey, kind: testCase.kind, probeToolCalling: false
         )
         guard result.health == .ready else {
             throw RegressionError.healthCheckFailed(result.health)
@@ -195,8 +195,15 @@ public final class ModelRegressionRunner: ObservableObject {
         return "健康状态: ready"
     }
 
-    private func checkBasicChat(_ tc: ModelTestCase) async throws -> String {
-        let connector = ConnectorProfile(name: tc.name, kind: tc.kind, endpoint: tc.endpoint, modelName: tc.model, note: tc.apiKey, health: .ready)
+    private func checkBasicChat(_ testCase: ModelTestCase) async throws -> String {
+        let connector = ConnectorProfile(
+            name: testCase.name,
+            kind: testCase.kind,
+            endpoint: testCase.endpoint,
+            modelName: testCase.model,
+            note: testCase.apiKey,
+            health: .ready
+        )
         let request = SendMessageRequest(sessionID: UUID(), message: "请直接回复 ok。", connector: connector, modeLabel: "回归测试")
         let response = try await runtime.sendMessage(request)
         guard !response.assistantText.isEmpty, !response.toolActivities.contains(where: \.isFailure) else {
@@ -205,8 +212,15 @@ public final class ModelRegressionRunner: ObservableObject {
         return "回复长度: \(response.assistantText.count) 字符"
     }
 
-    private func checkStreamingChat(_ tc: ModelTestCase) async throws -> String {
-        let connector = ConnectorProfile(name: tc.name, kind: tc.kind, endpoint: tc.endpoint, modelName: tc.model, note: tc.apiKey, health: .ready)
+    private func checkStreamingChat(_ testCase: ModelTestCase) async throws -> String {
+        let connector = ConnectorProfile(
+            name: testCase.name,
+            kind: testCase.kind,
+            endpoint: testCase.endpoint,
+            modelName: testCase.model,
+            note: testCase.apiKey,
+            health: .ready
+        )
         let request = SendMessageRequest(sessionID: UUID(), message: "请用一句话介绍自己。", connector: connector, modeLabel: "回归测试")
         var chunks = 0
         let response = try await runtime.sendMessageStream(request) { _ in chunks += 1 }
@@ -216,8 +230,15 @@ public final class ModelRegressionRunner: ObservableObject {
         return "流式 chunks: \(chunks), 回复: \(response.assistantText.prefix(50))…"
     }
 
-    private func checkToolCalling(_ tc: ModelTestCase) async throws -> String {
-        let connector = ConnectorProfile(name: tc.name, kind: tc.kind, endpoint: tc.endpoint, modelName: tc.model, note: tc.apiKey, health: .ready)
+    private func checkToolCalling(_ testCase: ModelTestCase) async throws -> String {
+        let connector = ConnectorProfile(
+            name: testCase.name,
+            kind: testCase.kind,
+            endpoint: testCase.endpoint,
+            modelName: testCase.model,
+            note: testCase.apiKey,
+            health: .ready
+        )
         let tools = [ToolDefinition(function: FunctionDefinition(
             name: "get_weather",
             description: "获取天气",
@@ -232,8 +253,15 @@ public final class ModelRegressionRunner: ObservableObject {
         return "工具调用: \(names)"
     }
 
-    private func checkReasoning(_ tc: ModelTestCase) async throws -> String {
-        let connector = ConnectorProfile(name: tc.name, kind: tc.kind, endpoint: tc.endpoint, modelName: tc.model, note: tc.apiKey, health: .ready)
+    private func checkReasoning(_ testCase: ModelTestCase) async throws -> String {
+        let connector = ConnectorProfile(
+            name: testCase.name,
+            kind: testCase.kind,
+            endpoint: testCase.endpoint,
+            modelName: testCase.model,
+            note: testCase.apiKey,
+            health: .ready
+        )
         let request = SendMessageRequest(sessionID: UUID(), message: "请思考并回答：1+1等于几？", connector: connector, modeLabel: "回归测试")
         let response = try await runtime.sendMessage(request)
         if let reasoning = response.reasoningContent, !reasoning.isEmpty {
@@ -242,8 +270,15 @@ public final class ModelRegressionRunner: ObservableObject {
         return "模型未返回推理内容（可能不支持 reasoning_content 字段）"
     }
 
-    private func checkLongContext(_ tc: ModelTestCase) async throws -> String {
-        let connector = ConnectorProfile(name: tc.name, kind: tc.kind, endpoint: tc.endpoint, modelName: tc.model, note: tc.apiKey, health: .ready)
+    private func checkLongContext(_ testCase: ModelTestCase) async throws -> String {
+        let connector = ConnectorProfile(
+            name: testCase.name,
+            kind: testCase.kind,
+            endpoint: testCase.endpoint,
+            modelName: testCase.model,
+            note: testCase.apiKey,
+            health: .ready
+        )
         let longText = String(repeating: "这是一段很长的文本。", count: 500) // ~5000 chars
         let request = SendMessageRequest(sessionID: UUID(), message: "请总结以下内容：\n\(longText)", connector: connector, modeLabel: "回归测试")
         let response = try await runtime.sendMessage(request)
@@ -253,8 +288,15 @@ public final class ModelRegressionRunner: ObservableObject {
         return "长上下文接受，回复: \(response.assistantText.prefix(50))…"
     }
 
-    private func checkChineseOutput(_ tc: ModelTestCase) async throws -> String {
-        let connector = ConnectorProfile(name: tc.name, kind: tc.kind, endpoint: tc.endpoint, modelName: tc.model, note: tc.apiKey, health: .ready)
+    private func checkChineseOutput(_ testCase: ModelTestCase) async throws -> String {
+        let connector = ConnectorProfile(
+            name: testCase.name,
+            kind: testCase.kind,
+            endpoint: testCase.endpoint,
+            modelName: testCase.model,
+            note: testCase.apiKey,
+            health: .ready
+        )
         let request = SendMessageRequest(sessionID: UUID(), message: "请用中文回复：你好", connector: connector, modeLabel: "回归测试")
         let response = try await runtime.sendMessage(request)
         let hasChinese = response.assistantText.unicodeScalars.contains { $0.value >= 0x4E00 && $0.value <= 0x9FFF }
@@ -273,7 +315,7 @@ public final class ModelRegressionRunner: ObservableObject {
 
         var errorDescription: String? {
             switch self {
-            case .healthCheckFailed(let h): return "健康检查失败: \(h.rawValue)"
+            case .healthCheckFailed(let health): return "健康检查失败: \(health.rawValue)"
             case .emptyResponse: return "回复为空"
             case .noToolCalls: return "未返回工具调用"
             case .contextTooLong: return "长上下文被拒绝"
@@ -287,19 +329,19 @@ public final class ModelRegressionRunner: ObservableObject {
         var lines = ["# 来财模型回归测试报告", "", "时间: \(ISO8601DateFormatter().string(from: Date()))", ""]
         lines.append("| 模型 | 通过 | 失败 | 耗时(ms) | 结果 |")
         lines.append("|------|------|------|----------|------|")
-        for r in results {
-            let totalMs = r.results.map(\.latencyMs).reduce(0, +)
-            let status = r.overallPassed ? "✅" : "❌"
-            lines.append("| \(r.testCase.name) | \(r.passedCount) | \(r.failedCount) | \(totalMs) | \(status) |")
+        for regressionResult in results {
+            let totalMs = regressionResult.results.map(\.latencyMs).reduce(0, +)
+            let status = regressionResult.overallPassed ? "✅" : "❌"
+            lines.append("| \(regressionResult.testCase.name) | \(regressionResult.passedCount) | \(regressionResult.failedCount) | \(totalMs) | \(status) |")
         }
         lines.append("")
-        for r in results {
-            lines.append("## \(r.testCase.name)")
+        for regressionResult in results {
+            lines.append("## \(regressionResult.testCase.name)")
             lines.append("")
-            for cr in r.results {
-                let icon = cr.passed ? "✅" : "❌"
-                let err = cr.error.map { " — \($0)" } ?? ""
-                lines.append("- \(icon) \(cr.check.rawValue) (\(cr.latencyMs)ms) \(cr.detail)\(err)")
+            for caseResult in regressionResult.results {
+                let icon = caseResult.passed ? "✅" : "❌"
+                let errorDetail = caseResult.error.map { " — \($0)" } ?? ""
+                lines.append("- \(icon) \(caseResult.check.rawValue) (\(caseResult.latencyMs)ms) \(caseResult.detail)\(errorDetail)")
             }
             lines.append("")
         }

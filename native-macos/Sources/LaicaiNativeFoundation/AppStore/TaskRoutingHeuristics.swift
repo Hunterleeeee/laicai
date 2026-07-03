@@ -122,44 +122,47 @@ extension AppStore {
     static func shouldRouteChatFollowUpIntoSelectedTask(message: String, task: AgentTask) -> Bool {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }
+        if shouldForceRouteTaskFollowUp(normalized, task: task) { return true }
+        if shouldRejectTaskFollowUp(normalized) { return false }
+        if isExplicitTaskFollowUp(normalized) { return true }
+        return hasTaskSemanticOverlap(normalized, task: task)
+    }
+
+    private static let explicitTaskMarkers = [
+        "这个会话", "当前会话", "那个会话", "这个 agent", "当前 agent", "那个 agent", "继续会话", "继续 agent",
+        "这个任务", "那个任务", "这个会话", "那个会话", "当前会话", "这轮对话", "这条任务", "刚才", "最近的",
+        "最近这个", "上个", "上一轮", "前面", "上面", "上下文", "新会话", "丢失", "接着这个", "继续这个"
+    ]
+
+    private static let taskActionMarkers = [
+        "再读", "补读", "继续读", "总结", "列出", "修复", "修改", "优化", "跑一下", "测试一下", "重新跑", "重试",
+        "按这个", "基于这个", "把它", "沉淀", "保存到wiki", "写到wiki", "收进知识库", "在哪", "到哪", "在哪里",
+        "预览", "打开看看", "看一下", "看下", "文件在哪", "产物在哪", "干活", "干不明白", "没做", "没干", "只回答"
+    ]
+
+    private static let pronounOnlyMarkers = ["这个", "那个", "它", "这里", "上面的"]
+
+    private static func shouldForceRouteTaskFollowUp(_ normalized: String, task: AgentTask) -> Bool {
         if isWikiPersistenceFollowUp(normalized) { return true }
-        if taskHasTruncatedOutput(task), isTruncationContinuation(normalized) {
-            return true
-        }
-        if isStandaloneCapabilityOrConceptQuestion(normalized) {
-            return false
-        }
-        if isStandaloneGeneralQuestion(normalized) {
-            return false
-        }
-        if UserFrustrationDetector.shouldRecoverRecentTask(normalized) {
-            return true
-        }
-        if isTinyFollowUp(normalized) || isContinuationCommand(normalized) || isTaskStatusQuestion(normalized) {
-            return true
-        }
+        if taskHasTruncatedOutput(task), isTruncationContinuation(normalized) { return true }
+        if UserFrustrationDetector.shouldRecoverRecentTask(normalized) { return true }
+        return isTinyFollowUp(normalized) || isContinuationCommand(normalized) || isTaskStatusQuestion(normalized)
+    }
 
-        let explicitTaskMarkers = ["这个会话", "当前会话", "那个会话", "这个 agent", "当前 agent", "那个 agent", "继续会话", "继续 agent", "这个任务", "那个任务", "这个会话", "那个会话", "当前会话", "这轮对话", "这条任务", "刚才", "最近的", "最近这个", "上个", "上一轮", "前面", "上面", "上下文", "新会话", "丢失", "接着这个", "继续这个"]
-        if explicitTaskMarkers.contains(where: { normalized.contains($0) }) {
-            return true
-        }
+    private static func shouldRejectTaskFollowUp(_ normalized: String) -> Bool {
+        isStandaloneCapabilityOrConceptQuestion(normalized) || isStandaloneGeneralQuestion(normalized)
+    }
 
-        let taskActionMarkers = ["再读", "补读", "继续读", "总结", "列出", "修复", "修改", "优化", "跑一下", "测试一下", "重新跑", "重试", "按这个", "基于这个", "把它", "沉淀", "保存到wiki", "写到wiki", "收进知识库", "在哪", "到哪", "在哪里", "预览", "打开看看", "看一下", "看下", "文件在哪", "产物在哪", "干活", "干不明白", "没做", "没干", "只回答"]
-        if taskActionMarkers.contains(where: { normalized.contains($0) }) {
-            return true
-        }
+    private static func isExplicitTaskFollowUp(_ normalized: String) -> Bool {
+        if explicitTaskMarkers.contains(where: { normalized.contains($0) }) { return true }
+        if taskActionMarkers.contains(where: { normalized.contains($0) }) { return true }
+        return normalized.count <= 16 && pronounOnlyMarkers.contains(where: { normalized.contains($0) })
+    }
 
-        let pronounOnlyMarkers = ["这个", "那个", "它", "这里", "上面的"]
-        if normalized.count <= 16, pronounOnlyMarkers.contains(where: { normalized.contains($0) }) {
-            return true
-        }
-
+    private static func hasTaskSemanticOverlap(_ normalized: String, task: AgentTask) -> Bool {
         let lastUserInput = task.steps.reversed().first { $0.kind == .userInput }?.text ?? task.title
         let sharedKeywords = semanticOverlapKeywords(in: normalized).intersection(semanticOverlapKeywords(in: lastUserInput))
-        if sharedKeywords.count >= 2, isLikelyTaskFollowUp(normalized) || normalized.count <= 32 {
-            return true
-        }
-        return false
+        return sharedKeywords.count >= 2 && (isLikelyTaskFollowUp(normalized) || normalized.count <= 32)
     }
 
     static func isStandaloneInfoQuestion(_ message: String) -> Bool {
@@ -181,7 +184,8 @@ extension AppStore {
         ]
         let personalKnowledgeStarts = ["你了解", "你知道", "你熟悉", "你听说过"]
         let conceptStarts = ["什么是", "为什么", "怎么理解", "如何理解", "这个skill", "这个 skill", "skill都", "skill 都"]
-        let startsLikeStandalone = capabilityStarts.contains { normalized.hasPrefix($0) }
+        let startsLikeStandalone =
+            capabilityStarts.contains { normalized.hasPrefix($0) }
             || personalKnowledgeStarts.contains { normalized.hasPrefix($0) }
             || conceptStarts.contains { normalized.hasPrefix($0) }
             || normalized.localizedCaseInsensitiveContains("skill都能干嘛")
@@ -199,7 +203,8 @@ extension AppStore {
     static func isStandaloneGeneralQuestion(_ message: String) -> Bool {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }
-        let looksQuestion = normalized.hasSuffix("？")
+        let looksQuestion =
+            normalized.hasSuffix("？")
             || normalized.hasSuffix("?")
             || normalized.hasSuffix("吗")
             || normalized.hasSuffix("呢")
@@ -264,13 +269,17 @@ extension AppStore {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return false }
         let statusMarkers = ["什么情况", "怎么了", "哪里失败", "失败原因", "几个工具失败", "工具失败", "没完成", "卡住", "还在执行", "执行中", "进度", "状态"]
-        let whyAboutCurrentTask = (normalized.contains("为什么") || normalized.contains("为啥"))
+        let whyAboutCurrentTask =
+            (normalized.contains("为什么") || normalized.contains("为啥"))
             && ["失败", "没完成", "卡住", "中断", "会话", "agent", "新会话", "上下文", "任务", "工具"].contains { normalized.contains($0) }
-        let asksStatus = statusMarkers.contains { normalized.contains($0) }
+        let asksStatus =
+            statusMarkers.contains { normalized.contains($0) }
             || whyAboutCurrentTask
             || ["?", "？"].contains(normalized)
         guard asksStatus else { return false }
-        let actionMarkers = ["继续执行", "继续做", "继续任务", "继续会话", "继续 agent", "重试", "重新跑", "改", "修复", "写入", "读取", "搜索", "联网", "跑测试", "接着说", "继续输出", "没发完", "没写完", "没说完", "被截断"]
+        let actionMarkers = [
+            "继续执行", "继续做", "继续任务", "继续会话", "继续 agent", "重试", "重新跑", "改", "修复", "写入", "读取", "搜索", "联网", "跑测试", "接着说", "继续输出", "没发完", "没写完", "没说完", "被截断"
+        ]
         return !actionMarkers.contains { normalized.contains($0) }
     }
 

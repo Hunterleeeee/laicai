@@ -27,7 +27,7 @@ public enum ExecutionMode: String, CaseIterable, Equatable, Sendable, Codable {
     public var icon: String { "wand.and.stars" }
 
     public init(from decoder: Decoder) throws {
-        let _ = try decoder.singleValueContainer().decode(String.self)
+        _ = try decoder.singleValueContainer().decode(String.self)
         self = .auto
     }
 }

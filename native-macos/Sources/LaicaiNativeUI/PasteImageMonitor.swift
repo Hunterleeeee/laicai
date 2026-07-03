@@ -19,8 +19,8 @@ final class PasteImageMonitor {
                   !flags.contains(.control),
                   event.charactersIgnoringModifiers == "v" else { return event }
 
-            let pb = NSPasteboard.general
-            guard let pngData = extractPNG(from: pb) else { return event }
+            let pasteboard = NSPasteboard.general
+            guard let pngData = extractPNG(from: pasteboard) else { return event }
 
             guard let store = storeRef else { return event }
             Task { @MainActor in
@@ -36,15 +36,15 @@ final class PasteImageMonitor {
         }
     }
 
-    private static func extractPNG(from pb: NSPasteboard) -> Data? {
+    private static func extractPNG(from pasteboard: NSPasteboard) -> Data? {
         // 1) Raw PNG
-        if let data = pb.data(forType: .png), !data.isEmpty { return data }
+        if let data = pasteboard.data(forType: .png), !data.isEmpty { return data }
         // 2) TIFF → PNG
-        if let tiffData = pb.data(forType: .tiff), !tiffData.isEmpty,
+        if let tiffData = pasteboard.data(forType: .tiff), !tiffData.isEmpty,
            let rep = NSBitmapImageRep(data: tiffData),
            let png = rep.representation(using: .png, properties: [:]) { return png }
         // 3) NSImage(pasteboard:) — catches ALL formats (JPEG, HEIC, WebP, etc.)
-        if let image = NSImage(pasteboard: pb),
+        if let image = NSImage(pasteboard: pasteboard),
            let tiffData = image.tiffRepresentation,
            let rep = NSBitmapImageRep(data: tiffData),
            let png = rep.representation(using: .png, properties: [:]) { return png }

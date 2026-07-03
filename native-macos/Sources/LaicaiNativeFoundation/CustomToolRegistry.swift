@@ -82,22 +82,22 @@ public final class CustomToolRegistry: ObservableObject {
 
     @discardableResult
     public func create(_ tool: CustomToolDefinition, workspaceRoot: String) throws -> CustomToolDefinition {
-        var t = tool
-        t.updatedAt = .now
-        try save(t, workspaceRoot: workspaceRoot)
-        tools.append(t)
+        var updatedTool = tool
+        updatedTool.updatedAt = .now
+        try save(updatedTool, workspaceRoot: workspaceRoot)
+        tools.append(updatedTool)
         tools.sort { $0.name < $1.name }
-        return t
+        return updatedTool
     }
 
     public func update(_ tool: CustomToolDefinition, workspaceRoot: String) throws {
-        var t = tool
-        t.updatedAt = .now
-        try save(t, workspaceRoot: workspaceRoot)
-        if let idx = tools.firstIndex(where: { $0.id == t.id }) {
-            tools[idx] = t
+        var updatedTool = tool
+        updatedTool.updatedAt = .now
+        try save(updatedTool, workspaceRoot: workspaceRoot)
+        if let idx = tools.firstIndex(where: { $0.id == updatedTool.id }) {
+            tools[idx] = updatedTool
         } else {
-            tools.append(t)
+            tools.append(updatedTool)
         }
         tools.sort { $0.name < $1.name }
     }

@@ -13,6 +13,12 @@ public final class SessionPostMortem: Sendable {
     public static let shared = SessionPostMortem()
     private init() {}
 
+    private struct ToolCallHistoryEntry {
+        let index: Int
+        let name: String
+        let pathParam: String
+    }
+
     private static func isFileChangeTool(_ toolName: String?) -> Bool {
         guard let toolName else { return false }
         return ["file.write", "file.edit", "diff.apply"].contains(ToolNameCodec.canonicalName(toolName))
@@ -31,20 +37,20 @@ public final class SessionPostMortem: Sendable {
         case writeNoVerify        = "write_no_verify"
     }
 
+    public enum FindingSeverity: String, Sendable, Comparable {
+        case critical, warning, info
+        public static func < (lhs: Self, rhs: Self) -> Bool {
+            let order: [Self] = [.info, .warning, .critical]
+            return order.firstIndex(of: lhs)! < order.firstIndex(of: rhs)!
+        }
+    }
+
     public struct Finding: Sendable {
         public let pattern: PatternID
-        public let severity: Severity
+        public let severity: FindingSeverity
         public let description: String
         public let evidence: [EvidenceItem]
         public let suggestedFix: FixSuggestion
-
-        public enum Severity: String, Sendable, Comparable {
-            case critical, warning, info
-            public static func < (lhs: Self, rhs: Self) -> Bool {
-                let order: [Self] = [.info, .warning, .critical]
-                return order.firstIndex(of: lhs)! < order.firstIndex(of: rhs)!
-            }
-        }
     }
 
     public struct EvidenceItem: Sendable {
@@ -308,12 +314,12 @@ public final class SessionPostMortem: Sendable {
     /// P6: Same tool called 3+ times with similar params (retry loop)
     private func detectToolRetryLoop(steps: [TaskStep]) -> [Finding] {
         var findings: [Finding] = []
-        var toolCallHistory: [(index: Int, name: String, pathParam: String)] = []
+        var toolCallHistory: [ToolCallHistoryEntry] = []
 
         for (stepIndex, step) in steps.enumerated() {
             guard step.kind == .toolCall, let name = step.toolName else { continue }
             let pathParam = step.toolParams?["path"] ?? step.toolParams?["command"]?.prefix(60).description ?? ""
-            toolCallHistory.append((stepIndex, name, pathParam))
+            toolCallHistory.append(ToolCallHistoryEntry(index: stepIndex, name: name, pathParam: pathParam))
         }
 
         // Sliding window: detect 3+ identical (name, pathParam) in a window of 8 calls

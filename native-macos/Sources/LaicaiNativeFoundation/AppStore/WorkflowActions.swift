@@ -17,13 +17,15 @@ extension AppStore {
             notify("请先选择一个连接器", style: .error)
             return
         }
-        let plannerDecision = decision ?? PlannerDecision(
-            intent: .workflow(workflow.name),
-            confidence: 0.95,
-            reason: "用户手动选择了工作流。",
-            routeLabel: "会话 工作流",
-            expectedCapabilities: workflow.steps.map(\.name)
-        )
+        let plannerDecision =
+            decision
+            ?? PlannerDecision(
+                intent: .workflow(workflow.name),
+                confidence: 0.95,
+                reason: "用户手动选择了工作流。",
+                routeLabel: "会话 工作流",
+                expectedCapabilities: workflow.steps.map(\.name)
+            )
 
         let initialSteps = [
             TaskStep(kind: .userInput, text: message, isCollapsible: false, isCollapsed: false),
@@ -48,7 +50,8 @@ extension AppStore {
             state.threads[index].goal = message
             state.threads[index].currentPlan = plan
             state.threads[index].taskProtocol = Self.makeTaskProtocol(threadID: threadID, message: message, context: context, decision: plannerDecision)
-            state.threads[index].executionLedger = Self.makeExecutionLedger(threadID: threadID, message: message, context: context, decision: plannerDecision, plan: plan)
+            state.threads[index].executionLedger = Self.makeExecutionLedger(
+                threadID: threadID, message: message, context: context, decision: plannerDecision, plan: plan)
             state.threads[index].updatedAt = .now
         } else {
             let thread = Thread(
@@ -155,7 +158,7 @@ extension AppStore {
 
     public func useSkill(_ skill: SkillDefinition) {
         if let connector = ModelRouter.selectModel(for: skill, connectors: state.connectors, activeConnectorID: state.activeConnectorID),
-           connector.id != state.activeConnectorID {
+            connector.id != state.activeConnectorID {
             selectConnector(id: connector.id)
         }
 
