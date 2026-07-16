@@ -12,8 +12,11 @@ extension AgentLoop {
         let maxOutputTokens: Int
     }
 
-    static func completionCheckStep(for task: AgentTask, didComplete: Bool, hadFailure: Bool, wasTruncated: Bool = false, isReadOnlyRun: Bool = false)
-        -> TaskStep {
+    static func completionCheckStep(
+        for task: AgentTask, didComplete: Bool, hadFailure: Bool, wasTruncated: Bool = false, isReadOnlyRun: Bool = false
+    )
+        -> TaskStep
+    {
         let toolFailures = task.steps.filter { $0.kind == .toolResult && $0.isFailure }.count
         let hasRecoverySuccess = task.steps.contains {
             $0.kind == .toolResult && !$0.isFailure && $0.text.contains("自动恢复成功")
@@ -93,7 +96,8 @@ extension AgentLoop {
 
         // Check if any real execution happened
         let hasExecution = request.task.steps.contains { step in
-            step.kind == .toolCall && (isFileChangeTool(step.toolName ?? "") || step.toolName == "document.transform" || step.toolName == "shell.exec")
+            step.kind == .toolCall
+                && (isFileChangeTool(step.toolName ?? "") || step.toolName == "document.transform" || step.toolName == "shell.exec")
         }
 
         let prompt: String

@@ -28,31 +28,31 @@ private enum ProjectCache {
 public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var id: UUID
     public var name: String
-    public var rootPath: String               // absolute workspace path
+    public var rootPath: String  // absolute workspace path
     public var createdAt: Date
     public var lastOpenedAt: Date
 
     // Structured project knowledge (auto-maintained)
-    public var techStack: [String]            // ["Swift", "SwiftUI", "SQLite"]
-    public var architecture: String           // free-form: "MVVM + Clean Architecture"
-    public var conventions: [String]          // ["tabs for indentation", "Chinese comments"]
-    public var entryPoints: [String]          // key files: ["Sources/App/main.swift"]
-    public var buildCommand: String?          // "swift build", "npm run build"
-    public var testCommand: String?           // "swift test", "npm test"
-    public var setupScript: String?           // Codex-style: runs before each agent task
-    public var useWorktree: Bool              // Codex-style: use git worktree for parallel isolation
+    public var techStack: [String]  // ["Swift", "SwiftUI", "SQLite"]
+    public var architecture: String  // free-form: "MVVM + Clean Architecture"
+    public var conventions: [String]  // ["tabs for indentation", "Chinese comments"]
+    public var entryPoints: [String]  // key files: ["Sources/App/main.swift"]
+    public var buildCommand: String?  // "swift build", "npm run build"
+    public var testCommand: String?  // "swift test", "npm test"
+    public var setupScript: String?  // Codex-style: runs before each agent task
+    public var useWorktree: Bool  // Codex-style: use git worktree for parallel isolation
 
     // User-maintained project notes
-    public var notes: String                  // freeform project notes / goals
-    public var activeTasks: [ProjectTask]     // ongoing tasks/TODOs
+    public var notes: String  // freeform project notes / goals
+    public var activeTasks: [ProjectTask]  // ongoing tasks/TODOs
 
     // Stats
-    public var taskCount: Int                 // total tasks run in this project
-    public var lastTaskSummary: String?       // what was done last time
+    public var taskCount: Int  // total tasks run in this project
+    public var lastTaskSummary: String?  // what was done last time
 
     // Rolling project memory (cross-session continuity)
     public var recentTaskSummaries: [TaskSummaryEntry]  // last N task findings
-    public var discoveredIssues: [String]               // unresolved issues found during tasks
+    public var discoveredIssues: [String]  // unresolved issues found during tasks
 
     public init(
         name: String,
@@ -98,8 +98,8 @@ public struct TaskSummaryEntry: Codable, Identifiable, Equatable, Sendable {
     public var id: UUID
     public var date: Date
     public var title: String
-    public var summary: String       // what was done
-    public var conclusions: [String] // key findings
+    public var summary: String  // what was done
+    public var conclusions: [String]  // key findings
     public var filesModified: [String]
 
     public init(title: String, summary: String, conclusions: [String] = [], filesModified: [String] = []) {
@@ -150,11 +150,7 @@ public final class ProjectManager: ObservableObject {
     private let storePath: String
 
     private init() {
-        let appSupport =
-            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        let dir = appSupport.appendingPathComponent("Laicai", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = LaicaiStoragePaths.ensureDirectory(LaicaiStoragePaths.appDirectory)
         storePath = dir.appendingPathComponent("projects.json").path
         load()
     }
@@ -231,7 +227,8 @@ public final class ProjectManager: ObservableObject {
 
     public func completeTask(projectID: UUID, taskID: UUID) {
         guard let pIdx = projects.firstIndex(where: { $0.id == projectID }),
-              let tIdx = projects[pIdx].activeTasks.firstIndex(where: { $0.id == taskID }) else { return }
+            let tIdx = projects[pIdx].activeTasks.firstIndex(where: { $0.id == taskID })
+        else { return }
         projects[pIdx].activeTasks[tIdx].status = .completed
         projects[pIdx].activeTasks[tIdx].completedAt = Date()
         save()
@@ -508,7 +505,8 @@ public final class ProjectManager: ObservableObject {
 
     private func load() {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: storePath)),
-              let decoded = try? JSONDecoder().decode([Project].self, from: data) else { return }
+            let decoded = try? JSONDecoder().decode([Project].self, from: data)
+        else { return }
         projects = decoded
         // Auto-select last opened
         activeProjectID = projects.sorted(by: { $0.lastOpenedAt > $1.lastOpenedAt }).first?.id

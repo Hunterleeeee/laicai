@@ -10,8 +10,8 @@ public struct WikiSource: Equatable, Sendable {
 
 public enum WikiMode: String, Codable, Sendable {
     case atomic  // One concept per file → 02 Atomic/
-    case moc     // Map of Content index → 03 MOC/
-    case topic   // Legacy: big overview page → 03 MOC/ (backward compat)
+    case moc  // Map of Content index → 03 MOC/
+    case topic  // Legacy: big overview page → 03 MOC/ (backward compat)
 }
 
 public struct WikiBuildResult: Sendable, Identifiable {
@@ -86,7 +86,7 @@ public enum WikiEngine {
 
     private static let sourceStopwords: Set<String> = [
         "的", "了", "和", "是", "在", "有", "与", "对", "及", "等",
-        "the", "and", "for", "with", "this", "that", "from", "are", "was"
+        "the", "and", "for", "with", "this", "that", "from", "are", "was",
     ]
 
     /// Recent wiki build results, persisted in memory for the session
@@ -108,7 +108,8 @@ public enum WikiEngine {
     ) async -> WikiBuildResult {
         let cleanTopic = sanitizedTopic(topic)
         let root = URL(fileURLWithPath: vaultRoot)
-        let noteURL = root
+        let noteURL =
+            root
             .appendingPathComponent(noteSubdirectory(for: mode), isDirectory: true)
             .appendingPathComponent(cleanTopic + ".md")
         let previous = try? String(contentsOf: noteURL, encoding: .utf8)
@@ -120,25 +121,27 @@ public enum WikiEngine {
             vaultRoot: vaultRoot,
             useWeb: useWeb
         )
-        let rendered = await renderedWikiMarkdown(WikiRenderRequest(
-            topic: cleanTopic,
-            sources: sources,
-            previous: previous,
-            existingPages: existingPages,
-            mode: mode,
-            connector: connector,
-            runtime: runtime,
-            onChunk: onChunk
-        ))
-        let saveOutcome = await saveWikiNoteIfNeeded(WikiSaveRequest(
-            shouldSave: save,
-            rendered: rendered,
-            topic: cleanTopic,
-            noteURL: noteURL,
-            root: root,
-            mode: mode,
-            existingPages: existingPages
-        ))
+        let rendered = await renderedWikiMarkdown(
+            WikiRenderRequest(
+                topic: cleanTopic,
+                sources: sources,
+                previous: previous,
+                existingPages: existingPages,
+                mode: mode,
+                connector: connector,
+                runtime: runtime,
+                onChunk: onChunk
+            ))
+        let saveOutcome = await saveWikiNoteIfNeeded(
+            WikiSaveRequest(
+                shouldSave: save,
+                rendered: rendered,
+                topic: cleanTopic,
+                noteURL: noteURL,
+                root: root,
+                mode: mode,
+                existingPages: existingPages
+            ))
 
         let result = WikiBuildResult(
             topic: cleanTopic,
@@ -203,7 +206,10 @@ public enum WikiEngine {
 
     private static func saveWikiNoteIfNeeded(_ request: WikiSaveRequest) async -> WikiSaveOutcome {
         guard request.shouldSave else { return WikiSaveOutcome() }
-        if let securityError = await SecurityManager.shared.checkWrite(path: request.noteURL.path) {
+        if let securityError = await SecurityManager.shared.checkWrite(
+            path: request.noteURL.path,
+            workspaceRoot: request.root.path
+        ) {
             return WikiSaveOutcome(saveError: securityError)
         }
         do {
@@ -271,45 +277,45 @@ public enum WikiEngine {
         let systemPrompt: String
         if mode == .atomic {
             systemPrompt = """
-            你是知识图谱写作助手。写一篇关于单一概念的**原子笔记**。
+                你是知识图谱写作助手。写一篇关于单一概念的**原子笔记**。
 
-            ## 规则
-            - 一个文件只讲一个概念/实体/产品，不要把多个概念混在一起
-            - 用 Markdown 格式：# 标题 → ## 定义（一段话精准定义） → ## 核心要点（每条信息密度高，禁止水话） → ## 实际应用/案例 → ## 关联概念 → ## 来源
-            - **必须使用 [[双链]]** 引用已有知识库中的相关页面
-            - **信息密度要求**：不写"众所周知"、"值得注意的是"等废话；每个要点必须包含具体事实、数字或技术细节
-            - **证据溯源**：每个要点尽量标注来源编号 [1][2]，来源不足时标注 [待验证]
-            - 如果有已有内容，只补充新信息和修正错误，保留原有结构和已有要点
-            - 不要输出 frontmatter，系统会自动添加
-            - 直接输出文章内容，不要包裹在代码块中
-            """
+                ## 规则
+                - 一个文件只讲一个概念/实体/产品，不要把多个概念混在一起
+                - 用 Markdown 格式：# 标题 → ## 定义（一段话精准定义） → ## 核心要点（每条信息密度高，禁止水话） → ## 实际应用/案例 → ## 关联概念 → ## 来源
+                - **必须使用 [[双链]]** 引用已有知识库中的相关页面
+                - **信息密度要求**：不写"众所周知"、"值得注意的是"等废话；每个要点必须包含具体事实、数字或技术细节
+                - **证据溯源**：每个要点尽量标注来源编号 [1][2]，来源不足时标注 [待验证]
+                - 如果有已有内容，只补充新信息和修正错误，保留原有结构和已有要点
+                - 不要输出 frontmatter，系统会自动添加
+                - 直接输出文章内容，不要包裹在代码块中
+                """
         } else {
             systemPrompt = """
-            你是知识图谱写作助手。写一篇**索引页（MOC）**，汇总某个领域下所有相关概念。
+                你是知识图谱写作助手。写一篇**索引页（MOC）**，汇总某个领域下所有相关概念。
 
-            ## 规则
-            - 用 [[双链]] 列出该领域下所有相关原子笔记
-            - 按子主题分组，每组用 ## 小标题
-            - 每个条目用一句话概括核心价值，后跟 [[页面名]]
-            - 条目之间体现逻辑关系（上下游、包含、对比）
-            - 不写具体内容，只做导航和索引
-            - 不要输出 frontmatter，系统会自动添加
-            - 直接输出文章内容，不要包裹在代码块中
-            """
+                ## 规则
+                - 用 [[双链]] 列出该领域下所有相关原子笔记
+                - 按子主题分组，每组用 ## 小标题
+                - 每个条目用一句话概括核心价值，后跟 [[页面名]]
+                - 条目之间体现逻辑关系（上下游、包含、对比）
+                - 不写具体内容，只做导航和索引
+                - 不要输出 frontmatter，系统会自动添加
+                - 直接输出文章内容，不要包裹在代码块中
+                """
         }
 
         let backlinkHint = relatedPages.isEmpty ? "" : "\n\n知识库中已有的页面（请在文中用 [[页面名]] 引用相关项）：\n\(relatedPages)"
 
         let userPrompt = """
-        主题：\(topic)
+            主题：\(topic)
 
-        参考材料：
-        \(sourceMaterial.isEmpty ? "暂无参考材料，请根据你的知识写作。" : sourceMaterial)\(existingNote)\(backlinkHint)
-        """
+            参考材料：
+            \(sourceMaterial.isEmpty ? "暂无参考材料，请根据你的知识写作。" : sourceMaterial)\(existingNote)\(backlinkHint)
+            """
 
         let messages = [
             ChatMessage(role: "system", content: systemPrompt),
-            ChatMessage(role: "user", content: userPrompt)
+            ChatMessage(role: "user", content: userPrompt),
         ]
         let messageRequest = SendMessageRequest(
             sessionID: UUID(),
@@ -349,14 +355,14 @@ public enum WikiEngine {
             // Prepend frontmatter
             let now = ISO8601DateFormatter().string(from: Date())
             let frontmatter = """
-            ---
-            type: "\(mode == .atomic ? "atomic" : "moc")"
-            topic: "\(frontmatterValue(topic))"
-            updated: "\(now)"
-            source_count: "\(sources.count)"
-            mode: "\(mode.rawValue)"
-            ---
-            """
+                ---
+                type: "\(mode == .atomic ? "atomic" : "moc")"
+                topic: "\(frontmatterValue(topic))"
+                updated: "\(now)"
+                source_count: "\(sources.count)"
+                mode: "\(mode.rawValue)"
+                ---
+                """
             return frontmatter + "\n" + text
         } catch {
             // Fallback to template on LLM failure
@@ -431,7 +437,8 @@ public enum WikiEngine {
             guard score > 0.1 else { return nil }
             return (score, vaultSource(doc: doc, terms: terms))
         }
-        return ranked
+        return
+            ranked
             .sorted { $0.score > $1.score }
             .prefix(limit)
             .map(\.source)
@@ -445,12 +452,13 @@ public enum WikiEngine {
         totalDocs: Double
     ) -> Double {
         var score = terms.reduce(0.0) { partial, term in
-            partial + vaultTermScore(
-                doc: doc,
-                term: term,
-                termDocumentFrequency: documentFrequency[term] ?? 0,
-                totalDocs: totalDocs
-            )
+            partial
+                + vaultTermScore(
+                    doc: doc,
+                    term: term,
+                    termDocumentFrequency: documentFrequency[term] ?? 0,
+                    totalDocs: totalDocs
+                )
         }
         let title = extractTitle(doc.text, fallback: (doc.file as NSString).deletingPathExtension)
         if title.lowercased().contains(topic.lowercased()) {
@@ -491,7 +499,8 @@ public enum WikiEngine {
 
     private static func sanitizedTopic(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = trimmed
+        let normalized =
+            trimmed
             .replacingOccurrences(of: #"[/:\\]+"#, with: " - ", options: .regularExpression)
             .replacingOccurrences(of: #"[?%*|\"<>]+"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
@@ -611,7 +620,7 @@ public enum WikiEngine {
             "## Summary",
             isAtomic
                 ? "这是关于 **\(topic)** 的原子笔记草稿，由本地 Vault 笔记和可选网页来源整理而来。"
-                : "这是 **\(topic)** 的 MOC 索引草稿，用于连接相关原子笔记和来源。"
+                : "这是 **\(topic)** 的 MOC 索引草稿，用于连接相关原子笔记和来源。",
         ]
 
         if sources.isEmpty {
@@ -705,7 +714,7 @@ public enum WikiEngine {
 
     private struct MarkdownSection {
         var header: String  // e.g. "## 核心要点"
-        var body: String    // content under the header
+        var body: String  // content under the header
     }
 
     private static func extractSections(_ text: String) -> [MarkdownSection] {
@@ -790,7 +799,7 @@ public struct WikiBuildTool: LaicaiTool {
                     "topK": FunctionProperty(type: "integer", description: "最多使用的本地笔记数量"),
                     "sourceTitle": FunctionProperty(type: "string", description: "可选：当前会话 已读取或提取的来源标题"),
                     "sourcePath": FunctionProperty(type: "string", description: "可选：当前会话 已读取或提取的来源路径"),
-                    "sourceText": FunctionProperty(type: "string", description: "可选：当前会话 已读取或提取的正文材料，优先用于生成笔记")
+                    "sourceText": FunctionProperty(type: "string", description: "可选：当前会话 已读取或提取的正文材料，优先用于生成笔记"),
                 ],
                 required: ["topic"]
             )
@@ -813,14 +822,15 @@ public struct WikiBuildTool: LaicaiTool {
         let wantedSave = params.save ?? false
         let action = Self.actionText(result: result, wantedSave: wantedSave)
         let success = !wantedSave || result.saved
-        await Self.recordAudit(WikiAuditRequest(
-            tool: name,
-            topic: topic,
-            mode: mode,
-            action: action,
-            result: result,
-            success: success
-        ))
+        await Self.recordAudit(
+            WikiAuditRequest(
+                tool: name,
+                topic: topic,
+                mode: mode,
+                action: action,
+                result: result,
+                success: success
+            ))
 
         return ToolResult(
             output: Self.outputText(result: result, mode: mode, topic: topic, action: action),
@@ -900,7 +910,7 @@ public struct WikiBuildTool: LaicaiTool {
     private static func saveProvidedSourceResult(_ original: WikiBuildResult, root: String) async -> WikiBuildResult {
         var result = original
         let target = URL(fileURLWithPath: root).appendingPathComponent(result.notePath)
-        if let securityError = await SecurityManager.shared.checkWrite(path: target.path) {
+        if let securityError = await SecurityManager.shared.checkWrite(path: target.path, workspaceRoot: root) {
             result.saved = false
             result.saveError = securityError
             return result
@@ -945,15 +955,15 @@ public struct WikiBuildTool: LaicaiTool {
         let truncated = result.renderedMarkdown.count > 500 ? "\n\n... （共 \(result.renderedMarkdown.count) 字，完整内容见 Wiki 面板）" : ""
         let sources = sourceLines(for: result)
         return """
-        \(action)：\(result.notePath)（\(mode == .atomic ? "原子笔记" : "索引页")）
-        \(result.diffSummary)
+            \(action)：\(result.notePath)（\(mode == .atomic ? "原子笔记" : "索引页")）
+            \(result.diffSummary)
 
-        来源：
-        \(sources.isEmpty ? "- 暂无来源" : sources)\(extraInfo(result: result, topic: topic))
+            来源：
+            \(sources.isEmpty ? "- 暂无来源" : sources)\(extraInfo(result: result, topic: topic))
 
-        预览：
-        \(preview)\(truncated)
-        """
+            预览：
+            \(preview)\(truncated)
+            """
     }
 
     private static func extraInfo(result: WikiBuildResult, topic: String) -> String {
@@ -978,7 +988,7 @@ public struct WikiBuildTool: LaicaiTool {
             "diffSummary": result.diffSummary,
             "backlinksAdded": "\(result.backlinksAdded.count)",
             "mocUpdated": result.mocUpdated ?? "",
-            "saveError": result.saveError ?? ""
+            "saveError": result.saveError ?? "",
         ]
     }
 
@@ -986,14 +996,16 @@ public struct WikiBuildTool: LaicaiTool {
         await AuditLog.shared.record(
             tool: request.tool,
             input: "\(request.topic) [\(request.mode.rawValue)]",
-            output: "\(request.action) \(request.result.notePath)，来源 \(request.result.sources.count) 条，双链 \(request.result.backlinksAdded.count) 个",
+            output:
+                "\(request.action) \(request.result.notePath)，来源 \(request.result.sources.count) 条，双链 \(request.result.backlinksAdded.count) 个",
             success: request.success
         )
     }
 
     private static func providedSource(from params: Params) -> WikiSource? {
         guard let sourceText = params.sourceText?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !sourceText.isEmpty else {
+            !sourceText.isEmpty
+        else {
             return nil
         }
         let path = params.sourcePath?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1017,7 +1029,8 @@ public struct WikiBuildTool: LaicaiTool {
 
         let now = ISO8601DateFormatter().string(from: Date())
         let heading = mode == .atomic ? "# \(topic)" : "# \(topic) MOC"
-        let points = provided
+        let points =
+            provided
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -1028,34 +1041,34 @@ public struct WikiBuildTool: LaicaiTool {
         let sourceLine = source.map { "- \($0.title)：\($0.path)" } ?? "- 当前会话 材料"
 
         return """
-        ---
-        type: "\(mode == .atomic ? "atomic" : "moc")"
-        topic: "\(frontmatterString(topic))"
-        updated: "\(now)"
-        mode: "\(mode.rawValue)"
-        source_count: "\(sources.count)"
-        ---
+            ---
+            type: "\(mode == .atomic ? "atomic" : "moc")"
+            topic: "\(frontmatterString(topic))"
+            updated: "\(now)"
+            mode: "\(mode.rawValue)"
+            source_count: "\(sources.count)"
+            ---
 
-        \(heading)
+            \(heading)
 
-        ## Summary
-        这篇笔记由当前会话 读取/提取的真实材料整理而来，用于沉淀到本地 Wiki。
+            ## Summary
+            这篇笔记由当前会话 读取/提取的真实材料整理而来，用于沉淀到本地 Wiki。
 
-        ## Key Points
-        \(points.isEmpty ? "- 已读取材料，但未提取到可展示的行级要点。" : points)
+            ## Key Points
+            \(points.isEmpty ? "- 已读取材料，但未提取到可展示的行级要点。" : points)
 
-        ## Source
-        \(sourceLine)
+            ## Source
+            \(sourceLine)
 
-        ## Raw Material
-        ```text
-        \(String(provided.prefix(12000)))
-        ```
+            ## Raw Material
+            ```text
+            \(String(provided.prefix(12000)))
+            ```
 
-        ## Related Notes
-        \(sources.filter { $0.kind != "task" }.prefix(8).map { "- [[\(WikiEngine.wikilinkTarget(for: $0))]]" }.joined(separator: "\n"))
+            ## Related Notes
+            \(sources.filter { $0.kind != "task" }.prefix(8).map { "- [[\(WikiEngine.wikilinkTarget(for: $0))]]" }.joined(separator: "\n"))
 
-        """
+            """
     }
 
     private static func frontmatterString(_ value: String) -> String {

@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 struct WorkbenchView: View {
     @EnvironmentObject private var store: AppStore

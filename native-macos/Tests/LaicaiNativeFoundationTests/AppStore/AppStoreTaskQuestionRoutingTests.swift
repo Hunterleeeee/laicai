@@ -12,7 +12,9 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
             TaskStep(
                 kind: .toolCall, text: "document.transform prepare", toolName: "document.transform",
                 toolParams: ["action": "prepare", "sourcePath": "/tmp/demo.pptx"]),
-            TaskStep(kind: .toolResult, text: "缺少 translationsJSON", toolName: "document.transform", toolParams: ["action": "apply"], isFailure: true)
+            TaskStep(
+                kind: .toolResult, text: "缺少 translationsJSON", toolName: "document.transform", toolParams: ["action": "apply"],
+                isFailure: true),
         ]
         var context = TaskContext(workspaceRoot: "/tmp")
         context.memory.appendDecision("[continuation] 已准备 PPT 工作区，但 apply 参数失败。")
@@ -41,7 +43,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .userInput, text: "读取项目"),
                 TaskStep(kind: .toolCall, text: "find", toolName: "shell.exec"),
                 TaskStep(kind: .toolResult, text: "失败：exit_15", toolName: "shell.exec", isFailure: true),
-                TaskStep(kind: .textOutput, text: "阶段性输出")
+                TaskStep(kind: .textOutput, text: "阶段性输出"),
             ],
             updatedAt: .now
         )
@@ -60,7 +62,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
@@ -92,7 +95,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
             status: .completed,
             steps: [
                 TaskStep(kind: .userInput, text: "读取本地项目"),
-                TaskStep(kind: .textOutput, text: "完成")
+                TaskStep(kind: .textOutput, text: "完成"),
             ],
             updatedAt: .now
         )
@@ -111,7 +114,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
@@ -147,7 +151,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                     TaskStep(kind: .userInput, text: "读取本地项目"),
                     TaskStep(kind: .toolCall, text: "搜索 AppStore", toolName: "code.search"),
                     TaskStep(kind: .toolResult, text: "命中 AppStore.swift", toolName: "code.search"),
-                    TaskStep(kind: .textOutput, text: "完成")
+                    TaskStep(kind: .textOutput, text: "完成"),
                 ],
                 updatedAt: .now
             )
@@ -166,7 +170,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                     draftMessage: "",
                     isGenerating: false,
                     settings: .init(
-                        workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                        workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                        compactComposer: false,
                         showDebugPanels: false),
                     tasks: [task],
                     selectedTaskID: task.id
@@ -200,7 +205,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .userInput, text: "参考 Dumate 升级 UI"),
                 TaskStep(kind: .toolCall, text: "读取 SidebarView", toolName: "file.read"),
                 TaskStep(kind: .toolResult, text: "已读取", toolName: "file.read"),
-                TaskStep(kind: .textOutput, text: "已完成初版")
+                TaskStep(kind: .textOutput, text: "已完成初版"),
             ],
             updatedAt: .now
         )
@@ -219,7 +224,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
@@ -252,7 +258,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .userInput, text: "全量体验，我感觉不好用 你看看"),
                 TaskStep(kind: .toolCall, text: "读取 RootView", toolName: "file.read"),
                 TaskStep(kind: .toolResult, text: "已读取", toolName: "file.read"),
-                TaskStep(kind: .textOutput, text: "初步看完入口体验")
+                TaskStep(kind: .textOutput, text: "初步看完入口体验"),
             ],
             connectorID: connector.id,
             context: TaskContext(workspaceRoot: LaicaiNativeFoundationTestCase.safeTestWorkspacePath),
@@ -295,7 +301,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
             status: .cancelled,
             steps: [
                 TaskStep(kind: .userInput, text: "修复继续按钮"),
-                TaskStep(kind: .error, text: "上次运行被中断，已自动标记为已暂停。", isFailure: false, recoverable: true, retryAction: "继续")
+                TaskStep(kind: .error, text: "上次运行被中断，已自动标记为已暂停。", isFailure: false, recoverable: true, retryAction: "继续"),
             ],
             updatedAt: .now
         )
@@ -314,7 +320,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: nil
@@ -333,7 +340,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertNotNil(store.state.selectedThreadID)
         XCTAssertEqual(store.state.threads.count, 1)
-        XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .userInput }.last?.text, "继续处理，并优先基于当前证据形成结论；不要重复已经完成的读取、搜索或执行步骤。")
+        XCTAssertEqual(
+            store.state.selectedThread?.steps.filter { $0.kind == .userInput }.last?.text, "继续处理，并优先基于当前证据形成结论；不要重复已经完成的读取、搜索或执行步骤。")
         XCTAssertFalse(runtime.requests.isEmpty)
     }
 
@@ -347,7 +355,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .userInput, text: "修复构建"),
                 TaskStep(kind: .toolCall, text: "运行构建", toolName: "shell.exec", toolParams: ["command": "swift build"]),
                 TaskStep(kind: .toolResult, text: "BUILD SUCCESS", toolName: "shell.exec", toolParams: ["command": "swift build"]),
-                TaskStep(kind: .textOutput, text: "构建修好了")
+                TaskStep(kind: .textOutput, text: "构建修好了"),
             ],
             updatedAt: .now
         )
@@ -366,7 +374,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
@@ -396,7 +405,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
             status: .completed,
             steps: [
                 TaskStep(kind: .userInput, text: "今天有什么 AI 新闻？"),
-                TaskStep(kind: .textOutput, text: "AI 新闻内容")
+                TaskStep(kind: .textOutput, text: "AI 新闻内容"),
             ],
             updatedAt: .now
         )
@@ -415,7 +424,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id

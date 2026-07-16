@@ -17,7 +17,7 @@ public struct LSPTool: LaicaiTool {
                     "file": FunctionProperty(type: "string", description: "文件路径"),
                     "line": FunctionProperty(type: "integer", description: "行号（1-based）"),
                     "column": FunctionProperty(type: "integer", description: "列号（1-based）"),
-                    "symbol": FunctionProperty(type: "string", description: "符号名称（symbols 模式用）")
+                    "symbol": FunctionProperty(type: "string", description: "符号名称（symbols 模式用）"),
                 ],
                 required: ["action"]
             )
@@ -63,7 +63,8 @@ public struct LSPTool: LaicaiTool {
             return await symbolSearch(query: query, root: root)
 
         default:
-            return ToolResult(output: "未知 action：\(params.action)。支持：definition, references, symbols", success: false, error: "unknown_action")
+            return ToolResult(
+                output: "未知 action：\(params.action)。支持：definition, references, symbols", success: false, error: "unknown_action")
         }
     }
 
@@ -85,7 +86,7 @@ public struct LSPTool: LaicaiTool {
                         "class \\b\(symbolResult)\\b",
                         "struct \\b\(symbolResult)\\b",
                         "protocol \\b\(symbolResult)\\b",
-                        "enum \\b\(symbolResult)\\b"
+                        "enum \\b\(symbolResult)\\b",
                     ].joined(separator: "|")
                     let grepCommand = """
                         cd \(Self.shellEscape(root)) && rg -n '\(swiftPatterns)' \
@@ -111,7 +112,7 @@ public struct LSPTool: LaicaiTool {
             "struct \\b\(symbolAtPos)\\b",
             "def \\b\(symbolAtPos)\\b",
             "interface \\b\(symbolAtPos)\\b",
-            "type \\b\(symbolAtPos)\\b"
+            "type \\b\(symbolAtPos)\\b",
         ].joined(separator: "|")
         let definitionCommand = """
             cd \(Self.shellEscape(root)) && rg -n '\(defPatterns)' \
@@ -140,7 +141,8 @@ public struct LSPTool: LaicaiTool {
         return result.isEmpty
             ? ToolResult(output: "未找到 '\(symbol)' 的引用", data: ["symbol": symbol])
             : ToolResult(
-                output: "符号 '\(symbol)' 的引用（\(result.components(separatedBy: "\n").filter { !$0.isEmpty }.count) 处）：\n\(String(result.prefix(8000)))",
+                output:
+                    "符号 '\(symbol)' 的引用（\(result.components(separatedBy: "\n").filter { !$0.isEmpty }.count) 处）：\n\(String(result.prefix(8000)))",
                 data: ["symbol": symbol])
     }
 
@@ -158,7 +160,7 @@ public struct LSPTool: LaicaiTool {
             "def \\b\(query)",
             "interface \\b\(query)",
             "type \\b\(query)",
-            "export.*\\b\(query)"
+            "export.*\\b\(query)",
         ].joined(separator: "|")
         let searchCommand = """
             cd \(Self.shellEscape(root)) && rg -n '\(patterns)' \
@@ -191,18 +193,14 @@ public struct LSPTool: LaicaiTool {
     }
 
     static func runShell(_ command: String, cwd: String) -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-c", command]
-        if !cwd.isEmpty { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
         do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: ["-c", command],
+                currentDirectoryURL: cwd.isEmpty ? nil : URL(fileURLWithPath: cwd),
+                timeout: 20
+            )
+            return result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
             return ""
         }
@@ -228,7 +226,7 @@ public struct DiffApplyTool: LaicaiTool {
             parameters: FunctionParameters(
                 properties: [
                     "path": FunctionProperty(type: "string", description: "文件路径"),
-                    "diff": FunctionProperty(type: "string", description: "unified diff 格式的补丁内容（以 --- 和 +++ 开头）")
+                    "diff": FunctionProperty(type: "string", description: "unified diff 格式的补丁内容（以 --- 和 +++ 开头）"),
                 ],
                 required: ["path", "diff"]
             )
@@ -252,7 +250,10 @@ public struct DiffApplyTool: LaicaiTool {
         let fullPath = params.path.hasPrefix("/") ? params.path : (context.workspaceRoot as NSString).appendingPathComponent(params.path)
 
         // Security check
-        if let securityError = await SecurityManager.shared.checkWrite(path: fullPath) {
+        if let securityError = await SecurityManager.shared.checkWrite(
+            path: fullPath,
+            workspaceRoot: context.workspaceRoot
+        ) {
             return ToolResult(output: securityError, success: false, error: "security_denied")
         }
 
@@ -288,7 +289,7 @@ public struct DiffApplyTool: LaicaiTool {
                 "diffNew": newContent,
                 "addedLines": "\(max(0, addedLines))",
                 "removedLines": "\(max(0, -addedLines))",
-                "createDirectories": "false"
+                "createDirectories": "false",
             ],
             success: true
         )
@@ -324,7 +325,8 @@ public struct DiffApplyTool: LaicaiTool {
                     if diffLine.hasPrefix("@@")
                         || diffLine.hasPrefix("diff ")
                         || diffLine.hasPrefix("---")
-                        || diffLine.hasPrefix("+++") {
+                        || diffLine.hasPrefix("+++")
+                    {
                         break
                     }
                     if diffLine.hasPrefix("-") {
@@ -388,7 +390,7 @@ public struct SkillManageTool: LaicaiTool {
                             数据/data、商业/business、分析/analysis、编辑/editing、执行/execution、
                             研究/research、流程/workflow、元技能/meta
                             """
-                    )
+                    ),
                 ],
                 required: ["action"]
             )
@@ -417,8 +419,7 @@ public struct SkillManageTool: LaicaiTool {
         let root = context.workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
         let skillDir =
             root.isEmpty
-            ? ((FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory()) as NSString)
-                .appendingPathComponent("Laicai/skills")
+            ? LaicaiStoragePaths.appDirectory.appendingPathComponent("skills", isDirectory: true).path
             : (root as NSString).appendingPathComponent(".laicai/skills")
         try? FileManager.default.createDirectory(atPath: skillDir, withIntermediateDirectories: true)
 
@@ -468,7 +469,8 @@ public struct SkillManageTool: LaicaiTool {
         await SkillRegistry.shared.register(skill)
 
         return ToolResult(
-            output: "技能已创建：\(name)\n分类：\(categoryDisplayName(category))\n路径：\(mdPath)\n工具：\(tools.joined(separator: ", "))\n已写入结构化分类，Skill Hub 刷新后会显示在对应分类。",
+            output:
+                "技能已创建：\(name)\n分类：\(categoryDisplayName(category))\n路径：\(mdPath)\n工具：\(tools.joined(separator: ", "))\n已写入结构化分类，Skill Hub 刷新后会显示在对应分类。",
             data: ["action": "create", "path": mdPath, "name": name, "category": category]
         )
     }
@@ -516,7 +518,8 @@ public struct SkillManageTool: LaicaiTool {
             content = contentWithSkillCategory(category, content: content)
         }
         if let instructions = params.instructions,
-            let range = content.range(of: "## 执行步骤") {
+            let range = content.range(of: "## 执行步骤")
+        {
             content = String(content[content.startIndex..<range.lowerBound]) + "## 执行步骤\n\n\(instructions)\n"
         }
         return content
@@ -581,7 +584,7 @@ public struct SkillManageTool: LaicaiTool {
         let categoryNames: [String: String] = [
             "general": "通用/开发", "marketing": "营销", "product": "产品",
             "content": "内容", "design": "设计", "data": "数据",
-            "business": "商业", "knowledge": "知识", "meta": "元技能"
+            "business": "商业", "knowledge": "知识", "meta": "元技能",
         ]
         for category in categoryOrder {
             guard let names = categoryGroups[category], !names.isEmpty else { continue }
@@ -627,7 +630,7 @@ public struct SkillManageTool: LaicaiTool {
             "execution": "执行",
             "research": "研究",
             "workflow": "流程",
-            "meta": "元技能"
+            "meta": "元技能",
         ][category] ?? category
     }
 

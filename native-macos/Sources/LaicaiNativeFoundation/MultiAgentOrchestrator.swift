@@ -56,7 +56,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
         }
     }
 
-    private let config: Config
+    let config: Config
     private let runtime: any ChatRuntimeClient
     private let toolRegistry: ToolRegistry
 
@@ -296,7 +296,7 @@ public final class MultiAgentOrchestrator: ObservableObject {
             "写入", "实现", "修复", "重构", "部署", "搭建", "开发", "落盘", "保存",
             "优化", "改进", "增强", "完善", "调整", "重做", "重写", "重新设计", "美化",
             "create", "write", "edit", "modify", "fix", "refactor", "implement", "build",
-            "optimize", "improve", "redesign", "revamp"
+            "optimize", "improve", "redesign", "revamp",
         ]
         return mutationMarkers.contains { message.contains($0) }
     }
@@ -305,10 +305,12 @@ public final class MultiAgentOrchestrator: ObservableObject {
         let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalizedText.contains("规划") || normalizedText.contains("分析") || normalizedText.contains("拆解") { return .planner }
         if normalizedText.contains("搜索") || normalizedText.contains("调研")
-            || normalizedText.contains("查找") || normalizedText.contains("了解") {
+            || normalizedText.contains("查找") || normalizedText.contains("了解")
+        {
             return .researcher
         }
-        let writesCode = normalizedText.contains("写") || normalizedText.contains("实现")
+        let writesCode =
+            normalizedText.contains("写") || normalizedText.contains("实现")
             || normalizedText.contains("修改") || normalizedText.contains("编辑")
             || normalizedText.contains("创建") || normalizedText.contains("新建")
             || normalizedText.contains("维护") || normalizedText.contains("修复")
@@ -413,10 +415,11 @@ public final class MultiAgentOrchestrator: ObservableObject {
             title: String(request.message.prefix(50)),
             status: .running,
             connectorID: request.connectorSelection.connector.id,
-            context: request.context ?? AutoContextEngine.buildContext(
-                workspaceRoot: config.workspaceRoot,
-                userInput: request.message
-            ),
+            context: request.context
+                ?? AutoContextEngine.buildContext(
+                    workspaceRoot: config.workspaceRoot,
+                    userInput: request.message
+                ),
             multiAgentPlan: request.plan
         )
     }
@@ -447,9 +450,10 @@ public final class MultiAgentOrchestrator: ObservableObject {
     }
 
     private func completedArtifacts(from plan: MultiAgentPlan) -> [UUID: String] {
-        Dictionary(uniqueKeysWithValues: plan.agents.compactMap { agent in
-            agent.status == .completed ? (agent.id, agent.output) : nil
-        })
+        Dictionary(
+            uniqueKeysWithValues: plan.agents.compactMap { agent in
+                agent.status == .completed ? (agent.id, agent.output) : nil
+            })
     }
 
     private func executeAgentPlanLoop(
@@ -618,29 +622,32 @@ public final class MultiAgentOrchestrator: ObservableObject {
         task.steps.append(repairStep)
         callbacks.onStep(repairStep)
 
-        let blockerArtifacts = failedQualityAgents
+        let blockerArtifacts =
+            failedQualityAgents
             .map { node -> String in
                 let output = artifacts[node.id] ?? node.output
                 return "\(node.role.title)：\(output.isEmpty ? node.errorMessage ?? "失败但无输出" : output)"
             }
             .joined(separator: "\n")
 
-        let coderConnector = ModelRouter.selectModel(
-            forRole: .coder,
-            connectors: execution.allConnectors,
-            activeConnectorID: connector.id
-        ) ?? connector
+        let coderConnector =
+            ModelRouter.selectModel(
+                forRole: .coder,
+                connectors: execution.allConnectors,
+                activeConnectorID: connector.id
+            ) ?? connector
         var repairNode = AgentNode(role: .coder, connectorID: coderConnector.id)
         repairNode.input = """
-        修复上一轮测试/审查发现的问题。必须直接读写项目文件，修复后运行 verify_build 或最接近的 shell_exec 验证。
+            修复上一轮测试/审查发现的问题。必须直接读写项目文件，修复后运行 verify_build 或最接近的 shell_exec 验证。
 
-        失败反馈：
-        \(blockerArtifacts)
-        """
+            失败反馈：
+            \(blockerArtifacts)
+            """
         plan.agents.append(repairNode)
-        plan.handoffs.append(contentsOf: failedQualityAgents.map {
-            AgentHandoff(fromAgentID: $0.id, toAgentID: repairNode.id, artifact: String((artifacts[$0.id] ?? $0.output).prefix(500)))
-        })
+        plan.handoffs.append(
+            contentsOf: failedQualityAgents.map {
+                AgentHandoff(fromAgentID: $0.id, toAgentID: repairNode.id, artifact: String((artifacts[$0.id] ?? $0.output).prefix(500)))
+            })
         task.multiAgentPlan = plan
         callbacks.onPlanUpdate(plan)
 
@@ -661,7 +668,8 @@ public final class MultiAgentOrchestrator: ObservableObject {
         )
 
         guard let repairIndex = plan.agents.firstIndex(where: { $0.id == repairNode.id }),
-              plan.agents[repairIndex].status == .completed else { return }
+            plan.agents[repairIndex].status == .completed
+        else { return }
 
         for failedNode in failedQualityAgents {
             guard let idx = plan.agents.firstIndex(where: { $0.id == failedNode.id }) else { continue }
@@ -670,11 +678,12 @@ public final class MultiAgentOrchestrator: ObservableObject {
             plan.agents[idx].retryCount = 0
             plan.agents[idx].dependsOn = [repairNode.id]
             plan.agents[idx].updatedAt = .now
-            plan.handoffs.append(AgentHandoff(
-                fromAgentID: repairNode.id,
-                toAgentID: failedNode.id,
-                artifact: String((artifacts[repairNode.id] ?? "").prefix(500))
-            ))
+            plan.handoffs.append(
+                AgentHandoff(
+                    fromAgentID: repairNode.id,
+                    toAgentID: failedNode.id,
+                    artifact: String((artifacts[repairNode.id] ?? "").prefix(500))
+                ))
 
             await runSingleAgent(
                 node: plan.agents[idx],
@@ -828,7 +837,8 @@ public final class MultiAgentOrchestrator: ObservableObject {
             // Connector failover: on retry, try a different healthy connector
             let agentConnector: ConnectorProfile
             if attempt == 0 {
-                agentConnector = request.execution.allConnectors.first(where: { $0.id == node.connectorID })
+                agentConnector =
+                    request.execution.allConnectors.first(where: { $0.id == node.connectorID })
                     ?? request.execution.connector
             } else {
                 agentConnector = selectFailoverConnector(
@@ -1036,7 +1046,8 @@ public final class MultiAgentOrchestrator: ObservableObject {
             )
 
             let steps: [TaskStep] = agentTask.steps
-            let output = steps
+            let output =
+                steps
                 .filter { $0.kind == .textOutput }
                 .map { $0.text }
                 .joined(separator: "\n")
@@ -1089,7 +1100,8 @@ public final class MultiAgentOrchestrator: ObservableObject {
         // Include artifacts from completed agents
         for depID in node.dependsOn {
             if let artifact = artifacts[depID],
-               let depNode = plan.agents.first(where: { $0.id == depID }) {
+                let depNode = plan.agents.first(where: { $0.id == depID })
+            {
                 let preview = String(artifact.prefix(1500))
                 parts.append("\n\(depNode.role.title)的工作成果：\n\(preview)")
             }
@@ -1104,129 +1116,21 @@ public final class MultiAgentOrchestrator: ObservableObject {
             parts.append("\n协同会话：\(otherAgents)")
         }
         if [.coder, .tester, .reviewer].contains(role) {
-            parts.append("""
+            parts.append(
+                """
 
-            项目维护要求：
-            - 你运行在真实工作区 `\(config.workspaceRoot)`，需要像 coding agent 一样直接读写、验证项目。
-            - 优先用 workspace_index / code_search 找上下文，再 file_read 关键文件。
-            - 只有编码员可以写入项目文件；测试员和审查员只能运行验证、读取证据并输出问题。
-            - 编码员的代码任务必须落到文件变更；不能只输出方案或伪代码。
-            - 输出必须列出实际修改/检查过的文件和验证结果。
-            """)
+                项目维护要求：
+                - 你运行在真实工作区 `\(config.workspaceRoot)`，需要像 coding agent 一样直接读写、验证项目。
+                - 优先用 workspace_index / code_search 找上下文，再 file_read 关键文件。
+                - 只有编码员可以写入项目文件；测试员和审查员只能运行验证、读取证据并输出问题。
+                - 编码员的代码任务必须落到文件变更；不能只输出方案或伪代码。
+                - 输出必须列出实际修改/检查过的文件和验证结果。
+                """)
         }
 
         return parts.joined(separator: "\n\n")
     }
 
-    private func roleInstruction(for role: AgentRole) -> String {
-        switch role {
-        case .planner:
-            return """
-            你是规划员。你的任务是分析用户需求，理解项目结构，制定执行计划。
-            重点：读取关键文件、建立项目索引、梳理依赖关系，并明确哪些文件需要创建/编辑。
-            输出：清晰的任务分解、待修改文件、验证命令和风险点，供后续会话参考。不要停在泛泛建议，不要让编码员猜路径。不得写入项目文件。
-            """
-        case .coder:
-            return """
-            你是编码员。你的任务是根据计划实现代码修改。
-            重点：必须使用 file_read / file_edit / file_write / diff_apply 真实创建、编辑、维护项目文件；必要时用 shell_exec / verify_build 验证。
-            流程：先确认路径与现状，再写入变更；已有文件优先 file_edit，失败后 file_read → file_write 完整写回；新文件用 file_write。
-            输出：已修改的文件、验证结果和变更说明。没有工具成功写入时，不准声称已完成。
-            """
-        case .reviewer:
-            return """
-            你是审查员。你的任务是审查其他会话的工作成果。
-            重点：读取 diff/关键文件，检查代码质量、潜在回归、测试缺口；必要时运行 verify_build 或 shell_exec。
-            输出：按严重程度列出问题；没有发现问题要明确说明剩余风险。不得写入项目文件。
-            """
-        case .researcher:
-            return """
-            你是研究员。你的任务是收集和整理相关信息。
-            重点：搜索代码库、查阅文档、联网获取最新资料。
-            输出：整理好的参考资料和分析结论，供其他会话使用。不得写入项目文件。
-            """
-        case .tester:
-            return """
-            你是测试员。你的任务是验证变更的正确性。
-            重点：使用 verify_build 或 shell_exec 运行项目构建/测试/静态检查，必要时读取失败文件定位原因。
-            输出：测试结果和发现的问题；失败时必须给编码员可执行的修复线索（文件/命令/关键错误）。不得写入项目文件。
-            """
-        }
-    }
-
-    private func roleSystemPrompt(for role: AgentRole) -> String {
-        var prompt = roleInstruction(for: role)
-        switch role {
-        case .coder:
-            prompt += """
-
-            ## 编码员执行纪律
-            - 你有真实项目文件读写能力。创建文件用 file_write，修改已有文件优先 file_edit，复杂补丁可用 diff_apply。
-            - 不要只给代码片段或建议；除非用户只问方案，否则必须把变更写入工作区。
-            - 如果要维护项目结构，允许创建目录/文件、更新配置、调整测试或文档，但必须保持改动范围清晰。
-            - 修改后读取关键文件或运行 verify_build / shell_exec 验证。
-            - 如果 file_edit 匹配失败，先 file_read 最新内容，再用 file_write 写回完整正确内容。
-            - 最终只总结真实成功的工具结果。
-            """
-        case .tester:
-            prompt += """
-
-            ## 测试员执行纪律
-            - 优先调用 verify_build；没有构建系统时再用项目脚本或 shell_exec 做最接近的验证。
-            - 验证失败时，读取相关文件定位原因，并输出“失败命令 / 关键错误 / 建议修改文件”。
-            - 不要因为环境命令缺失而宣布代码失败；要区分环境问题和代码问题。
-            """
-        case .reviewer:
-            prompt += """
-
-            ## 审查员执行纪律
-            - 以代码审查口吻输出问题，优先具体文件和行为风险。
-            - 可以运行 verify_build 辅助确认，但不要把“没有运行测试”说成“已通过”。
-            - 不直接写入文件；如果发现问题，明确交回编码员处理。
-            """
-        default:
-            break
-        }
-        return prompt
-    }
-
-    private func maxIterations(for role: AgentRole) -> Int {
-        let base: Int
-        switch role {
-        case .planner: base = 6
-        case .coder: base = 12
-        case .reviewer: base = 6
-        case .researcher: base = 8
-        case .tester: base = 8
-        }
-        // Scale with context mode: deep gets 2x, economy stays at base
-        switch config.contextMode {
-        case .economy: return base
-        case .balanced: return Int(Double(base) * 1.5)
-        case .deep: return base * 2
-        }
-    }
-
-    private func buildSummary(plan: MultiAgentPlan, artifacts: [UUID: String]) -> String {
-        var parts: [String] = []
-        let completed = plan.agents.filter { $0.status == .completed }.count
-        let allCompleted = completed == plan.agents.count
-        parts.append(allCompleted ? "## 多会话协同完成报告\n" : "## 多会话协同执行报告\n")
-        parts.append("**流程：**\(plan.title)\n")
-        if !allCompleted {
-            parts.append("**状态：**任务未完成，\(plan.agents.count - completed) 个会话失败。请以上方失败工具和错误步骤为准，不要把部分输出当成交付结果。\n")
-        }
-
-        for agent in plan.agents {
-            let status = agent.status == .completed ? "✅" : "❌"
-            let output = agent.output.isEmpty ? "无输出" : agent.output
-            parts.append("**\(status) \(agent.role.title)：**\(output)\n")
-        }
-
-        parts.append("\n完成 \(completed)/\(plan.agents.count) 个会话")
-
-        return parts.joined(separator: "\n")
-    }
 }
 
 // MARK: - ModelRouter Extension for Agent Roles
@@ -1243,13 +1147,12 @@ extension ModelRouter {
         switch role {
         case .planner, .reviewer:
             return connectors.first(where: {
-                $0.modelName.contains("gpt-4") || $0.modelName.contains("claude") ||
-                $0.modelName.contains("opus") || $0.modelName.contains("max")
+                $0.modelName.contains("gpt-4") || $0.modelName.contains("claude") || $0.modelName.contains("opus")
+                    || $0.modelName.contains("max")
             }) ?? active
         case .coder:
             return connectors.first(where: {
-                $0.modelName.contains("code") || $0.modelName.contains("coder") ||
-                $0.modelName.contains("deepseek")
+                $0.modelName.contains("code") || $0.modelName.contains("coder") || $0.modelName.contains("deepseek")
             }) ?? active
         case .researcher:
             return active
@@ -1263,8 +1166,8 @@ extension ModelRouter {
 
 // MARK: - Array Safe Subscript
 
-private extension Array {
-    subscript(safe index: Int) -> Element? {
+extension Array {
+    fileprivate subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
 }

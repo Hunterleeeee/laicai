@@ -13,7 +13,8 @@ extension AppStore {
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == targetThreadID }) else { return }
         if state.threads[threadIndex].executionLedger == nil {
             state.threads[threadIndex].executionLedger = AgentExecutionLedger(
-                originalRequest: state.threads[threadIndex].steps.first(where: { $0.kind == .userInput })?.text ?? state.threads[threadIndex].title,
+                originalRequest: state.threads[threadIndex].steps.first(where: { $0.kind == .userInput })?.text
+                    ?? state.threads[threadIndex].title,
                 goal: state.threads[threadIndex].goal ?? state.threads[threadIndex].title,
                 state: .executing,
                 plan: state.threads[threadIndex].currentPlan
@@ -32,11 +33,11 @@ extension AppStore {
         guard !existing.isEmpty else { return incoming }
         guard existing != incoming else { return existing }
         return """
-        \(existing)
+            \(existing)
 
-        追加补充：
-        \(incoming)
-        """
+            追加补充：
+            \(incoming)
+            """
     }
 
     public func submitFollowUp() {
@@ -55,14 +56,16 @@ extension AppStore {
         state.pendingFollowUp = nil
         state.draftMessage = ""
         if let agentID = state.selectedAgentID,
-           let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }) {
+            let threadIndex = state.threads.firstIndex(where: { $0.id == agentID })
+        {
             state.threads[threadIndex].executionLedger?.pendingFollowUp = nil
             persistThreads()
         }
     }
 
     public func addDraftAttachments(_ paths: [String]) {
-        let cleaned = paths
+        let cleaned =
+            paths
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard !cleaned.isEmpty else { return }

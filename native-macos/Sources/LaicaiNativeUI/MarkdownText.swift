@@ -87,10 +87,12 @@ struct MarkdownText: View {
         case .heading(let level, let text):
             VStack(alignment: .leading, spacing: 0) {
                 Text(Self.inlineAttributed(text))
-                    .font(.system(
-                        size: Self.headingSize(level: level, base: fontSize),
-                        weight: Self.headingWeight(level: level)
-                    ))
+                    .font(
+                        .system(
+                            size: Self.headingSize(level: level, base: fontSize),
+                            weight: Self.headingWeight(level: level)
+                        )
+                    )
                     .foregroundStyle(level <= 3 ? TextGrade.primary : TextGrade.secondary)
                     .selectableText(enablesTextSelection)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -470,12 +472,14 @@ struct MarkdownText: View {
                     || next.hasPrefix(">")
                     || (next.hasPrefix("|") && next.hasSuffix("|"))
                     || next.range(of: "^[-*+]\\s+", options: .regularExpression) != nil
-                    || next.range(of: "^\\d+[\\.)]\\s+", options: .regularExpression) != nil {
+                    || next.range(of: "^\\d+[\\.)]\\s+", options: .regularExpression) != nil
+                {
                     break
                 }
                 // Break paragraph when next line starts with a CJK label (e.g. "计划：", "结论：")
                 if next.range(of: "^[\\p{Han}\\p{Katakana}\\p{Hiragana}].*[：:]", options: .regularExpression) != nil
-                    && paraLines.count >= 1 {
+                    && paraLines.count >= 1
+                {
                     break
                 }
                 paraLines.append(next)
@@ -496,7 +500,7 @@ struct MarkdownText: View {
             consumeHeading,
             consumeBlockquote,
             consumeUnorderedList,
-            consumeOrderedList
+            consumeOrderedList,
         ]
 
         while index < lines.count {
@@ -678,15 +682,15 @@ private struct TableBlockView: View {
     }
 }
 
-private extension Array {
-    subscript(safe index: Int) -> Element? {
+extension Array {
+    fileprivate subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
 }
 
-private extension View {
+extension View {
     @ViewBuilder
-    func selectableText(_ enabled: Bool) -> some View {
+    fileprivate func selectableText(_ enabled: Bool) -> some View {
         if enabled {
             self.textSelection(.enabled)
         } else {

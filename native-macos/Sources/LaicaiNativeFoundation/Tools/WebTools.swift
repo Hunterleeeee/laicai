@@ -14,7 +14,7 @@ public struct WebSearchTool: LaicaiTool {
             parameters: FunctionParameters(
                 properties: [
                     "query": FunctionProperty(type: "string", description: "搜索关键词，包含必要的日期或来源限定"),
-                    "maxResults": FunctionProperty(type: "integer", description: "最大结果数（可选，默认5）")
+                    "maxResults": FunctionProperty(type: "integer", description: "最大结果数（可选，默认5）"),
                 ],
                 required: ["query"]
             )
@@ -121,7 +121,7 @@ public struct WebSearchTool: LaicaiTool {
         components.queryItems = [
             URLQueryItem(name: "query", value: query),
             URLQueryItem(name: "tags", value: "story"),
-            URLQueryItem(name: "hitsPerPage", value: "\(limit)")
+            URLQueryItem(name: "hitsPerPage", value: "\(limit)"),
         ]
         guard let url = components.url else { return [] }
 
@@ -150,7 +150,8 @@ public struct WebSearchTool: LaicaiTool {
 
     private static func parseDuckDuckGoHTML(_ html: String, limit: Int) -> [SearchResult] {
         let titlePattern = #"<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#
-        let snippetPattern = #"<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>|<div[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</div>"#
+        let snippetPattern =
+            #"<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>|<div[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</div>"#
 
         let titleMatches = matches(pattern: titlePattern, in: html)
         let snippets = matches(pattern: snippetPattern, in: html).map { match in
@@ -209,7 +210,7 @@ public struct WebFetchTool: LaicaiTool {
             parameters: FunctionParameters(
                 properties: [
                     "url": FunctionProperty(type: "string", description: "要读取的 http/https 网页 URL"),
-                    "maxCharacters": FunctionProperty(type: "integer", description: "最多返回字符数，默认8000")
+                    "maxCharacters": FunctionProperty(type: "integer", description: "最多返回字符数，默认8000"),
                 ],
                 required: ["url"]
             )
@@ -231,14 +232,15 @@ public struct WebFetchTool: LaicaiTool {
         }
 
         let rawURL = params.url.trimmingCharacters(in: .whitespacesAndNewlines)
-          guard let url = URL(string: rawURL),
-                let scheme = url.scheme?.lowercased(),
-                ["http", "https"].contains(scheme) else {
-              return ToolResult(output: "请输入有效的 http/https 网页链接。", success: false, error: "invalid_url")
-          }
-          if Self.isBlockedHost(url.host) {
-              return ToolResult(output: "出于安全原因，不能读取本机、内网或云元数据地址：\(rawURL)", success: false, error: "blocked_private_host")
-          }
+        guard let url = URL(string: rawURL),
+            let scheme = url.scheme?.lowercased(),
+            ["http", "https"].contains(scheme)
+        else {
+            return ToolResult(output: "请输入有效的 http/https 网页链接。", success: false, error: "invalid_url")
+        }
+        if Self.isBlockedHost(url.host) {
+            return ToolResult(output: "出于安全原因，不能读取本机、内网或云元数据地址：\(rawURL)", success: false, error: "blocked_private_host")
+        }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = NetworkDefaults.webFetch
@@ -251,7 +253,8 @@ public struct WebFetchTool: LaicaiTool {
                 return ToolResult(output: "网页读取失败（HTTP \(statusCode)）：\(rawURL)", success: false, error: "http_\(statusCode)")
             }
 
-            let html = String(data: data, encoding: .utf8)
+            let html =
+                String(data: data, encoding: .utf8)
                 ?? String(data: data, encoding: .unicode)
                 ?? ""
             let readable = Self.extractReadableText(fromHTML: html, url: rawURL, maxCharacters: params.maxCharacters ?? 8000)
@@ -264,53 +267,56 @@ public struct WebFetchTool: LaicaiTool {
             )
 
             let output = """
-            标题：\(readable.title)
-            URL：\(rawURL)
+                标题：\(readable.title)
+                URL：\(rawURL)
 
-            \(readable.content)
-            """
+                \(readable.content)
+                """
             return ToolResult(
                 output: output,
                 data: [
                     "url": rawURL,
                     "title": readable.title,
-                    "size": "\(readable.content.count)"
+                    "size": "\(readable.content.count)",
                 ],
                 success: true
             )
         } catch {
             return ToolResult(output: "网页读取失败：\(error.localizedDescription)", success: false, error: "network_error")
         }
-      }
+    }
 
-      private static func isBlockedHost(_ host: String?) -> Bool {
-          guard let host = host?.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased(),
-                !host.isEmpty else { return true }
-          if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") {
-              return true
-          }
-          if ["::1", "0:0:0:0:0:0:0:1"].contains(host) { return true }
-          if host.hasPrefix("fe80:") || host.hasPrefix("fc") || host.hasPrefix("fd") { return true }
-          let parts = host.split(separator: ".").compactMap { Int($0) }
-          guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else { return false }
-          let firstOctet = parts[0]
-          let secondOctet = parts[1]
-          if firstOctet == 10 || firstOctet == 127 || firstOctet == 0 { return true }
-          if firstOctet == 169 && secondOctet == 254 { return true }
-          if firstOctet == 172 && (16...31).contains(secondOctet) { return true }
-          if firstOctet == 192 && secondOctet == 168 { return true }
-          if firstOctet == 100 && (64...127).contains(secondOctet) { return true }
-          return false
-      }
+    private static func isBlockedHost(_ host: String?) -> Bool {
+        guard let host = host?.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased(),
+            !host.isEmpty
+        else { return true }
+        if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") {
+            return true
+        }
+        if ["::1", "0:0:0:0:0:0:0:1"].contains(host) { return true }
+        if host.hasPrefix("fe80:") || host.hasPrefix("fc") || host.hasPrefix("fd") { return true }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else { return false }
+        let firstOctet = parts[0]
+        let secondOctet = parts[1]
+        if firstOctet == 10 || firstOctet == 127 || firstOctet == 0 { return true }
+        if firstOctet == 169 && secondOctet == 254 { return true }
+        if firstOctet == 172 && (16...31).contains(secondOctet) { return true }
+        if firstOctet == 192 && secondOctet == 168 { return true }
+        if firstOctet == 100 && (64...127).contains(secondOctet) { return true }
+        return false
+    }
 
     public static func extractReadableText(fromHTML html: String, url: String, maxCharacters: Int) -> (title: String, content: String) {
-        let title = firstMatch(pattern: #"<title[^>]*>(.*?)</title>"#, in: html)
+        let title =
+            firstMatch(pattern: #"<title[^>]*>(.*?)</title>"#, in: html)
             .map(cleanHTML(_:))
             .flatMap { $0.isEmpty ? nil : $0 }
             ?? URL(string: url)?.host
             ?? "网页"
 
-        var body = html
+        var body =
+            html
             .replacingOccurrences(of: #"(?is)<script[^>]*>.*?</script>"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"(?is)<style[^>]*>.*?</style>"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"(?is)<nav[^>]*>.*?</nav>"#, with: " ", options: .regularExpression)
@@ -330,8 +336,9 @@ public struct WebFetchTool: LaicaiTool {
         }
         let nsRange = NSRange(text.startIndex..., in: text)
         guard let match = regex.firstMatch(in: text, options: [], range: nsRange),
-              match.numberOfRanges > 1,
-              let range = Range(match.range(at: 1), in: text) else {
+            match.numberOfRanges > 1,
+            let range = Range(match.range(at: 1), in: text)
+        else {
             return nil
         }
         return String(text[range])
@@ -353,8 +360,8 @@ public struct WebFetchTool: LaicaiTool {
     }
 }
 
-private extension Array {
-    subscript(safe index: Int) -> Element? {
+extension Array {
+    fileprivate subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
 }

@@ -30,7 +30,7 @@ public struct MemoryTool: LaicaiTool {
                     "kind": FunctionProperty(type: "string", description: "记忆类型：fact/preference/outcome/skill/note（默认 fact）"),
                     "tags": FunctionProperty(type: "string", description: "标签，逗号分隔"),
                     "key": FunctionProperty(type: "string", description: "偏好键名（preference 动作时用）"),
-                    "value": FunctionProperty(type: "string", description: "偏好值（preference 动作时用）")
+                    "value": FunctionProperty(type: "string", description: "偏好值（preference 动作时用）"),
                 ],
                 required: ["action"]
             )
@@ -60,7 +60,8 @@ public struct MemoryTool: LaicaiTool {
             return ToolResult(output: "记忆统计：共 \(stats.total) 条（知识 \(stats.facts)，历史 \(stats.outcomes)，偏好 \(stats.preferences)）")
 
         default:
-            return ToolResult(output: "未知动作 '\(params.action)'，支持：store / recall / search / preference / stats", success: false, error: "unknown_action")
+            return ToolResult(
+                output: "未知动作 '\(params.action)'，支持：store / recall / search / preference / stats", success: false, error: "unknown_action")
         }
     }
 

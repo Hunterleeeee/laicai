@@ -1,5 +1,5 @@
-import Foundation
 import Darwin
+import Foundation
 import LaicaiNativeDomain
 
 // MARK: - Plugin System
@@ -17,10 +17,10 @@ public struct PluginManifest: Codable, Sendable, Identifiable, Equatable {
     public var version: String
     public var type: PluginType
     public var parameters: [PluginParam]
-    public var command: String?         // for shell type
-    public var mcpServer: String?       // for mcp type — server config name
-    public var endpoint: String?        // for http type
-    public var httpMethod: String?      // for http type
+    public var command: String?  // for shell type
+    public var mcpServer: String?  // for mcp type — server config name
+    public var endpoint: String?  // for http type
+    public var httpMethod: String?  // for http type
     public var enabled: Bool
 
     public enum PluginType: String, Codable, Sendable {
@@ -32,7 +32,7 @@ public struct PluginManifest: Codable, Sendable, Identifiable, Equatable {
     public struct PluginParam: Codable, Sendable, Equatable {
         public var name: String
         public var description: String
-        public var type: String         // "string", "number", "boolean"
+        public var type: String  // "string", "number", "boolean"
         public var required: Bool
 
         public init(name: String, description: String, type: String = "string", required: Bool = true) {
@@ -73,9 +73,10 @@ public struct PluginToolAdapter: LaicaiTool {
     public var description: String { manifest.description }
 
     public var functionDefinition: FunctionDefinition {
-        let properties = Dictionary(uniqueKeysWithValues: manifest.parameters.map { param in
-            (param.name, FunctionProperty(type: param.type, description: param.description))
-        })
+        let properties = Dictionary(
+            uniqueKeysWithValues: manifest.parameters.map { param in
+                (param.name, FunctionProperty(type: param.type, description: param.description))
+            })
         let required = manifest.parameters.filter(\.required).map(\.name)
 
         return FunctionDefinition(
@@ -110,37 +111,18 @@ public struct PluginToolAdapter: LaicaiTool {
             command = command.replacingOccurrences(of: "{{\(key)}}", with: "\(value)")
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", command]
-        process.currentDirectoryURL = URL(fileURLWithPath: context.workspaceRoot)
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        try process.run()
-        if !Self.waitForExit(process, timeoutSeconds: 60) {
-            process.terminate()
-            if !Self.waitForExit(process, timeoutSeconds: 2) {
-                Darwin.kill(process.processIdentifier, SIGKILL)
-                _ = Self.waitForExit(process, timeoutSeconds: 1)
-            }
+        let result = try await ProcessRunner.runAsync(
+            executableURL: URL(fileURLWithPath: "/bin/zsh"),
+            arguments: ["-lc", command],
+            currentDirectoryURL: URL(fileURLWithPath: context.workspaceRoot),
+            timeout: 60
+        )
+        if result.timedOut {
             return ToolResult(output: "插件执行超时", success: false, error: "plugin_timeout")
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
-        return ToolResult(output: String(output.prefix(8000)), success: process.terminationStatus == 0)
-    }
-
-    private static func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) -> Bool {
-        let semaphore = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in semaphore.signal() }
-        if !process.isRunning { return true }
-        let result = semaphore.wait(timeout: .now() + timeoutSeconds)
-        process.terminationHandler = nil
-        return result == .success || !process.isRunning
+        let output = result.stdoutString + result.stderrString
+        return ToolResult(output: String(output.prefix(8000)), success: result.exitCode == 0)
     }
 
     private func executeHTTP(params: [String: Any]) async throws -> ToolResult {
@@ -199,7 +181,8 @@ public final class PluginRegistry: ObservableObject {
         for file in files where file.hasSuffix(".json") {
             let path = (pluginDir as NSString).appendingPathComponent(file)
             guard let data = fileManager.contents(atPath: path),
-                  let manifest = try? JSONDecoder().decode(PluginManifest.self, from: data) else {
+                let manifest = try? JSONDecoder().decode(PluginManifest.self, from: data)
+            else {
                 continue
             }
             loaded.append(manifest)

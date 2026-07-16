@@ -33,7 +33,8 @@ struct BootstrapEngine {
     ) async throws -> Bool {
         // Handle truncated output continuation
         if AgentLoop.shouldContinueTruncatedOutputOnly(message: state.message, priorSteps: state.priorSteps),
-            let previousText = AgentLoop.lastTextOutput(in: state.priorSteps) {
+            let previousText = AgentLoop.lastTextOutput(in: state.priorSteps)
+        {
             try await handleTruncatedContinuation(
                 state: &state,
                 config: config,
@@ -96,7 +97,8 @@ struct BootstrapEngine {
                 runtime: runtime,
                 maxOutputTokens: config.maxTokensPerTurn,
                 originalStepID: originalStepID
-            )) {
+            ))
+        {
             state.task.steps.append(continuationStep)
             onStep(continuationStep)
             wasTruncated = continuationStep.text.contains("回复仍被截断")
@@ -163,8 +165,10 @@ struct BootstrapEngine {
         )
         let instruction =
             toolResult.success
-            ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWebFetch, baseline: "我已读取用户提供的网页。请基于网页正文和当前会话目标继续工作，必要时再搜索或读取项目文件；不要声称无法访问该链接。")
-            : PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWebFetch + "_fail", baseline: "我尝试读取用户提供的网页但失败。请明确说明失败原因，不能编造网页内容。")
+            ? PromptRegistry.shared.prompt(
+                for: PromptRegistry.tagBootstrapWebFetch, baseline: "我已读取用户提供的网页。请基于网页正文和当前会话目标继续工作，必要时再搜索或读取项目文件；不要声称无法访问该链接。")
+            : PromptRegistry.shared.prompt(
+                for: PromptRegistry.tagBootstrapWebFetch + "_fail", baseline: "我尝试读取用户提供的网页但失败。请明确说明失败原因，不能编造网页内容。")
         state.messages.append(
             ChatMessage(
                 role: "user",
@@ -238,8 +242,10 @@ struct BootstrapEngine {
         )
         let instruction =
             toolResult.success
-            ? PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapFileRead, baseline: "我已直接读取用户提供的本地路径。请基于真实读取结果继续推进当前会话目标；如果这是目录，先根据目录清单判断下一步该读哪些文件。")
-            : PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapFileRead + "_fail", baseline: "我尝试读取用户提供的本地路径但失败。请明确说明失败原因，不能编造文件内容。")
+            ? PromptRegistry.shared.prompt(
+                for: PromptRegistry.tagBootstrapFileRead, baseline: "我已直接读取用户提供的本地路径。请基于真实读取结果继续推进当前会话目标；如果这是目录，先根据目录清单判断下一步该读哪些文件。")
+            : PromptRegistry.shared.prompt(
+                for: PromptRegistry.tagBootstrapFileRead + "_fail", baseline: "我尝试读取用户提供的本地路径但失败。请明确说明失败原因，不能编造文件内容。")
         state.messages.append(
             ChatMessage(
                 role: "user",
@@ -288,9 +294,11 @@ struct BootstrapEngine {
             toolResult.success
             ? PromptRegistry.shared.prompt(
                 for: PromptRegistry.tagBootstrapWorkspaceIndex,
-                baseline: "我已先建立工作区索引。请基于索引里的入口候选、测试候选、配置候选和风险候选判断项目结构；下一步优先读取 README/项目指令/配置/入口/测试文件，必要时用 code_search 精确补充，不要自由拼 shell find。")
+                baseline:
+                    "我已先建立工作区索引。请基于索引里的入口候选、测试候选、配置候选和风险候选判断项目结构；下一步优先读取 README/项目指令/配置/入口/测试文件，必要时用 code_search 精确补充，不要自由拼 shell find。")
             : PromptRegistry.shared.prompt(
-                for: PromptRegistry.tagBootstrapWorkspaceIndex + "_fail", baseline: "我尝试建立工作区索引但失败。请说明失败原因，必要时再使用 code_search 或 file_read 降级。")
+                for: PromptRegistry.tagBootstrapWorkspaceIndex + "_fail",
+                baseline: "我尝试建立工作区索引但失败。请说明失败原因，必要时再使用 code_search 或 file_read 降级。")
         state.messages.append(
             ChatMessage(
                 role: "user",
@@ -332,10 +340,12 @@ struct BootstrapEngine {
         // Auto-read first result
         var autoReadBlock = ""
         if toolResult.success,
-            let path = AgentLoop.firstReadablePath(inSearchOutput: toolResult.output, workspaceRoot: state.taskContext.workspaceRoot) {
+            let path = AgentLoop.firstReadablePath(inSearchOutput: toolResult.output, workspaceRoot: state.taskContext.workspaceRoot)
+        {
             if AgentLoop.shouldBootstrapExtract(path: path),
                 isToolAllowed("file.extract", config: config),
-                let extractTool = toolRegistry.tool(named: "file_extract") ?? toolRegistry.tool(named: "file.extract") {
+                let extractTool = toolRegistry.tool(named: "file_extract") ?? toolRegistry.tool(named: "file.extract")
+            {
                 let extract = await AgentLoop.runBootstrapFileExtract(
                     AgentLoop.BootstrapFileExtractRequest(
                         path: path,
@@ -374,7 +384,8 @@ struct BootstrapEngine {
             ? PromptRegistry.shared.prompt(
                 for: PromptRegistry.tagBootstrapWorkspaceSearch,
                 baseline: "我已先搜索工作区，并尽量自动读取首个高相关文件片段。请基于这些真实线索继续推进当前会话目标；如果线索不足，再调用 file_read/code_search 等工具，不要凭空猜文件内容。")
-            : PromptRegistry.shared.prompt(for: PromptRegistry.tagBootstrapWorkspaceSearch + "_fail", baseline: "我尝试先搜索工作区但失败。请明确说明失败原因，必要时让用户检查工作区路径。")
+            : PromptRegistry.shared.prompt(
+                for: PromptRegistry.tagBootstrapWorkspaceSearch + "_fail", baseline: "我尝试先搜索工作区但失败。请明确说明失败原因，必要时让用户检查工作区路径。")
         state.messages.append(
             ChatMessage(
                 role: "user",

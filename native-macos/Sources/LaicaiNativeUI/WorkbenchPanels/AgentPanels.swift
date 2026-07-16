@@ -506,7 +506,7 @@ struct AgentsPanel: View {
         "协同", "多agent", "先…然后…",
         "审查并修复", "写代码并测试",
         "搜索然后实现", "重构并验证",
-        "全面", "完整", "端到端"
+        "全面", "完整", "端到端",
     ]
 }
 // MARK: - Agent Card
@@ -694,7 +694,7 @@ private struct AgentEditorSheet: View {
         ("通用助手", "你是{{name}}，一个专业的{{role}}。请根据当前会话目标推进，注重质量和效率。"),
         ("代码专家", "你是{{name}}，精通多种编程语言。分析代码时关注：架构设计、性能、安全性、可维护性。输出简洁、可执行的方案。"),
         ("研究分析", "你是{{name}}，负责深度研究和信息整合。先搜索、再验证、最后归纳。确保结论有数据支撑，标注来源。"),
-        ("严格审查", "你是{{name}}，负责代码审查。逐行检查变更，关注：逻辑错误、边界情况、风格一致性、安全漏洞。给出具体修改建议。")
+        ("严格审查", "你是{{name}}，负责代码审查。逐行检查变更，关注：逻辑错误、边界情况、风格一致性、安全漏洞。给出具体修改建议。"),
     ]
 
     var body: some View {
@@ -858,7 +858,8 @@ private struct AgentEditorSheet: View {
 
     private func save() {
         let tools = selectedTools.isEmpty ? Array(role.allowedTools).sorted() : Array(selectedTools).sorted()
-        var result = agent ?? CustomAgentDefinition(name: name, role: role, systemPrompt: prompt, tools: tools, preferredConnectorID: connectorID)
+        var result =
+            agent ?? CustomAgentDefinition(name: name, role: role, systemPrompt: prompt, tools: tools, preferredConnectorID: connectorID)
         result.name = name
         result.role = role
         result.systemPrompt = prompt
@@ -1026,7 +1027,9 @@ private struct ToolChip: View {
                 .foregroundStyle(isSelected ? Brand.primary : TextGrade.muted)
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .background(RoundedRectangle(cornerRadius: AppRadius.small).fill(isSelected ? Brand.primaryMuted : SurfaceGrade.elevated))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.small).strokeBorder(isSelected ? Brand.primary.opacity(0.3) : Color.clear, lineWidth: 0.6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppRadius.small).strokeBorder(
+                        isSelected ? Brand.primary.opacity(0.3) : Color.clear, lineWidth: 0.6))
         }.buttonStyle(.plain)
     }
 }

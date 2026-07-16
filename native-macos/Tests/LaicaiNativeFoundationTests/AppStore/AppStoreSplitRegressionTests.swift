@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
@@ -18,7 +19,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             status: .running,
             steps: [
                 TaskStep(kind: .toolCall, text: "读取文件", toolName: "file.read"),
-                TaskStep(kind: .reviewRequest, text: "修改 AppState", diffFilePath: "AppState.swift")
+                TaskStep(kind: .reviewRequest, text: "修改 AppState", diffFilePath: "AppState.swift"),
             ],
             connectorID: connector.id,
             context: TaskContext(workspaceRoot: "/tmp", metadata: ["expectedIterations": "4"])
@@ -41,9 +42,11 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
 
     func testFilteredThreadRecordSummariesUsesLightweightIndex() {
         let session = ChatSession(title: "闲聊", preview: "你好", modelName: "test")
-        let task = AgentTask(title: "任务", steps: [
-            TaskStep(kind: .toolResult, text: "发现 SplitRegressionNeedle")
-        ])
+        let task = AgentTask(
+            title: "任务",
+            steps: [
+                TaskStep(kind: .toolResult, text: "发现 SplitRegressionNeedle")
+            ])
         var state = testState(sessions: [session], tasks: [task])
 
         state.searchText = "SplitRegressionNeedle"
@@ -149,17 +152,18 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             title: "规划 → 编码",
             agents: [
                 AgentNode(role: .planner, connectorID: connector.id),
-                AgentNode(role: .coder, connectorID: connector.id)
+                AgentNode(role: .coder, connectorID: connector.id),
             ]
         )
 
-        store.executeMultiAgent(MultiAgentExecutionRequest(
-            message: "优化项目 UI 并运行验证",
-            context: TaskContext(workspaceRoot: "/tmp/laicai-project"),
-            connector: connector,
-            plan: plan,
-            decision: decision
-        ))
+        store.executeMultiAgent(
+            MultiAgentExecutionRequest(
+                message: "优化项目 UI 并运行验证",
+                context: TaskContext(workspaceRoot: "/tmp/laicai-project"),
+                connector: connector,
+                plan: plan,
+                decision: decision
+            ))
 
         XCTAssertEqual(store.state.selectedThread?.steps.first?.kind, .userInput)
         XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .aiThinking && $0.text.contains("多会话协同已创建") } == true)
@@ -207,7 +211,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             title: "规划 → 编码",
             agents: [
                 AgentNode(role: .planner, connectorID: connector.id),
-                AgentNode(role: .coder, connectorID: connector.id)
+                AgentNode(role: .coder, connectorID: connector.id),
             ],
             status: .queued,
             isEditable: false
@@ -248,7 +252,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             title: "规划 → 编码",
             agents: [
                 AgentNode(role: .planner),
-                AgentNode(role: .coder)
+                AgentNode(role: .coder),
             ],
             status: .queued,
             isEditable: false
@@ -289,7 +293,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             title: "规划 → 编码",
             agents: [
                 AgentNode(role: .planner),
-                AgentNode(role: .coder)
+                AgentNode(role: .coder),
             ],
             status: .queued,
             isEditable: false
@@ -329,7 +333,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             title: "规划 → 编码",
             agents: [
                 AgentNode(role: .planner, connectorID: connector.id),
-                AgentNode(role: .coder, connectorID: connector.id)
+                AgentNode(role: .coder, connectorID: connector.id),
             ],
             status: .queued,
             isEditable: true
@@ -374,7 +378,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             title: "规划 → 编码",
             agents: [
                 AgentNode(role: .planner),
-                AgentNode(role: .coder)
+                AgentNode(role: .coder),
             ],
             status: .queued,
             isEditable: true
@@ -878,7 +882,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             "command": "echo second",
             "text": "second\n",
             "isFinal": true,
-            "isFailure": false
+            "isFailure": false,
         ])
 
         let updatedFirst = try XCTUnwrap(store.state.threads.first(where: { $0.id == first.id }))
@@ -936,7 +940,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             status: .failed,
             steps: [
                 TaskStep(kind: .userInput, text: "生成一个雪碧的介绍图"),
-                TaskStep(kind: .toolCall, text: "生成图片", toolName: "image.generate")
+                TaskStep(kind: .toolCall, text: "生成图片", toolName: "image.generate"),
             ]
         )
         let environment = makeTestEnvironment(threadRepository: FixedThreadRepository(threads: [historical]))
@@ -954,7 +958,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
             status: .completed,
             steps: [
                 TaskStep(kind: .userInput, text: "你好"),
-                TaskStep(kind: .textOutput, text: "你好")
+                TaskStep(kind: .textOutput, text: "你好"),
             ],
             projectID: projectID
         )

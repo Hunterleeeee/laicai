@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WARN_LIMIT="${SWIFT_FILE_WARN_LIMIT:-2500}"
-FAIL_LIMIT="${SWIFT_FILE_FAIL_LIMIT:-5500}"
+WARN_LIMIT="${SWIFT_FILE_WARN_LIMIT:-1200}"
+FAIL_LIMIT="${SWIFT_FILE_FAIL_LIMIT:-2500}"
 STATUS=0
 
 while IFS= read -r -d '' file; do

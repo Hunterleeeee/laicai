@@ -125,12 +125,15 @@ public final class AgentRegistry: ObservableObject {
 
     public static func loadLocalAgents(workspaceRoot: String) -> [CustomAgentDefinition] {
         let dir = agentsDirectory(workspaceRoot: workspaceRoot)
-        guard let urls = try? FileManager.default.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-        return urls
+        guard
+            let urls = try? FileManager.default.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+        else { return [] }
+        return
+            urls
             .filter { $0.pathExtension.lowercased() == "json" }
             .compactMap { url -> CustomAgentDefinition? in
                 guard let data = try? Data(contentsOf: url) else { return nil }
@@ -148,7 +151,8 @@ public final class AgentRegistry: ObservableObject {
     }
 
     private static func slug(_ value: String) -> String {
-        let slug = value
+        let slug =
+            value
             .lowercased()
             .replacingOccurrences(of: #"[^a-z0-9\u{4e00}-\u{9fa5}]+"#, with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))

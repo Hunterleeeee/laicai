@@ -73,7 +73,8 @@ struct ResponseHandler {
                 text: text,
                 toolCallCount: toolCallCount,
                 config: request.config
-            ), state: &state, onStep: onStep) {
+            ), state: &state, onStep: onStep)
+        {
             return .continueLoop
         }
         let requiresToolEvidence =
@@ -284,7 +285,9 @@ struct ResponseHandler {
         state.messages.append(
             ChatMessage(
                 role: "system",
-                content: "当前是会话执行任务，但你没有调用任何工具就给出了结论。不要裸答。请先调用 workspace_index、code_search、file_read、web_search 或更合适的工具取得真实证据；如果任务需要修改或验证，继续执行对应工具。"))
+                content:
+                    "当前是会话执行任务，但你没有调用任何工具就给出了结论。不要裸答。请先调用 workspace_index、code_search、file_read、web_search 或更合适的工具取得真实证据；如果任务需要修改或验证，继续执行对应工具。"
+            ))
         appendDebugStepIfNeeded(
             TaskStep(kind: .aiThinking, text: "执行质量门：尚未调用工具取证，继续执行。", isCollapsible: true, isCollapsed: true),
             config: request.config,
@@ -415,7 +418,9 @@ struct ResponseHandler {
         state.messages.append(
             ChatMessage(
                 role: "system",
-                content: "用户要求整理到 Wiki/知识库，但当前没有任何 wiki_build(save=true) 或文件写入成功记录。不要输出计划或道歉，立即基于已读材料调用 wiki_build 保存原子笔记；材料不足就先用 file_read/file_extract 继续读取。")
+                content:
+                    "用户要求整理到 Wiki/知识库，但当前没有任何 wiki_build(save=true) 或文件写入成功记录。不要输出计划或道歉，立即基于已读材料调用 wiki_build 保存原子笔记；材料不足就先用 file_read/file_extract 继续读取。"
+            )
         )
         state.didComplete = false
         return true
@@ -549,7 +554,8 @@ struct ResponseHandler {
             )
             state.task.steps.append(stripStep)
             onStep(stripStep)
-            state.messages.append(ChatMessage(role: "system", content: "上一轮模型没有返回任何可见内容或工具调用。已临时移除工具 schema，请直接用文字给出基于已有材料的结论；如果用户要求保存/写入但工具不可用，请明确说明尚未保存。"))
+            state.messages.append(
+                ChatMessage(role: "system", content: "上一轮模型没有返回任何可见内容或工具调用。已临时移除工具 schema，请直接用文字给出基于已有材料的结论；如果用户要求保存/写入但工具不可用，请明确说明尚未保存。"))
             return .continueLoop
         }
 
@@ -561,7 +567,7 @@ struct ResponseHandler {
                 "请至少调用",
                 "你已经完成搜索",
                 "完成质量门",
-                "已临时移除工具 schema"
+                "已临时移除工具 schema",
             ]
             var peeled = 0
             while peeled < 2, state.messages.count > 2 {

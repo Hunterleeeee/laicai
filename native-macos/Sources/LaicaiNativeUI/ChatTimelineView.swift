@@ -1,7 +1,7 @@
 import AppKit
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 public typealias Thread = LaicaiThread
 
@@ -78,7 +78,9 @@ struct ThreadTimelineView: View {
                             TaskSummaryCard(thread: thread, stats: executionStats, connectors: store.state.connectors)
                             if thread.status == .completed || thread.status == .failed {
                                 TaskCompletionSummaryCard(thread: thread)
-                                TaskRatingBar(threadID: thread.id, currentRating: store.state.threads.first(where: { $0.id == thread.id })?.userRating ?? 0)
+                                TaskRatingBar(
+                                    threadID: thread.id,
+                                    currentRating: store.state.threads.first(where: { $0.id == thread.id })?.userRating ?? 0)
                             }
                             if let plan = thread.multiAgentPlan {
                                 if plan.isEditable {
@@ -105,96 +107,102 @@ struct ThreadTimelineView: View {
                                     MultiAgentFlowView(plan: plan)
                                     ResumePlanButton(plan: plan) {
                                         store.resumeFailedPlan(threadID: thread.id)
-                                }
-                            }
-                        }
-                        if showsEmptyRunningState {
-                            EmptyRunningThreadCard(thread: thread)
-                        }
-                        if shouldCompact(thread) {
-                            TaskHistoryFoldCard(
-                                hiddenCount: hiddenStepCount(thread),
-                                showFullHistory: $showFullHistory
-                            )
-                        }
-                        ForEach(phaseGroups(for: executionSteps)) { group in
-                            if group.isToolPhase {
-                                PhaseGroupCard(
-                                    group: group,
-                                    taskID: thread.id,
-                                    isRunning: thread.status == .running,
-                                    isCollapsed: !expandedPhases.contains(group.id),
-                                    onToggle: {
-                                        if expandedPhases.contains(group.id) {
-                                            expandedPhases.remove(group.id)
-                                        } else {
-                                            expandedPhases.insert(group.id)
-                                        }
                                     }
-                                )
-                            } else {
-                                ForEach(group.steps) { step in
-                                    TaskStepCard(
-                                        step: step,
-                                        taskID: thread.id,
-                                        isRunning: thread.status == .running
-                                    )
-                                    .id(step.id)
                                 }
                             }
+                            if showsEmptyRunningState {
+                                EmptyRunningThreadCard(thread: thread)
+                            }
+                            if shouldCompact(thread) {
+                                TaskHistoryFoldCard(
+                                    hiddenCount: hiddenStepCount(thread),
+                                    showFullHistory: $showFullHistory
+                                )
+                            }
+                            ForEach(phaseGroups(for: executionSteps)) { group in
+                                if group.isToolPhase {
+                                    PhaseGroupCard(
+                                        group: group,
+                                        taskID: thread.id,
+                                        isRunning: thread.status == .running,
+                                        isCollapsed: !expandedPhases.contains(group.id),
+                                        onToggle: {
+                                            if expandedPhases.contains(group.id) {
+                                                expandedPhases.remove(group.id)
+                                            } else {
+                                                expandedPhases.insert(group.id)
+                                            }
+                                        }
+                                    )
+                                } else {
+                                    ForEach(group.steps) { step in
+                                        TaskStepCard(
+                                            step: step,
+                                            taskID: thread.id,
+                                            isRunning: thread.status == .running
+                                        )
+                                        .id(step.id)
+                                    }
+                                }
+                            }
+                        } else {
+                            if shouldCompact(thread) {
+                                TaskHistoryFoldCard(
+                                    hiddenCount: hiddenStepCount(thread),
+                                    showFullHistory: $showFullHistory
+                                )
+                            }
+                            ForEach(sessionSteps) { step in
+                                SessionStepCard(step: step)
+                                    .id(step.id)
+                            }
                         }
-                    } else {
-                        if shouldCompact(thread) {
-                            TaskHistoryFoldCard(
-                                hiddenCount: hiddenStepCount(thread),
-                                showFullHistory: $showFullHistory
-                            )
-                        }
-                        ForEach(sessionSteps) { step in
-                            SessionStepCard(step: step)
-                                .id(step.id)
-                        }
-                    }
 
-                    if store.isThreadGenerating(thread.id) {
-                        TypingIndicator(threadID: thread.id)
-                    }
+                        if store.isThreadGenerating(thread.id) {
+                            TypingIndicator(threadID: thread.id)
+                        }
 
-                    Color.clear
-                        .frame(height: 1)
-                        .id(bottomID)
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomID)
+                    }
+                    .frame(maxWidth: LayoutConst.conversationMaxWidth, alignment: .leading)
+                    .padding(.horizontal, AppSpace.xxl)
+                    .padding(.top, AppSpace.xxl)
+                    .padding(.bottom, AppSpace.extraLarge)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
-                .frame(maxWidth: LayoutConst.conversationMaxWidth, alignment: .leading)
-                .padding(.horizontal, AppSpace.xxl)
-                .padding(.top, AppSpace.xxl)
-                .padding(.bottom, AppSpace.extraLarge)
-                .frame(maxWidth: .infinity, alignment: .center)
-            }
-            .coordinateSpace(name: "timeline-scroll")
-            .background(SurfaceGrade.base)
-            .onAppear {
-                scrollToBottom(proxy)
-            }
-            .onChange(of: thread.steps.count) { _, _ in scheduleScrollToBottom(proxy) }
-            .onChange(of: store.isThreadGenerating(thread.id)) { _, isGen in
-                if isGen { userScrolledAway = false; scheduleScrollToBottom(proxy) }
-            }
-            .onChange(of: thread.status) { _, newStatus in
-                if newStatus == .running { userScrolledAway = false; scheduleScrollToBottom(proxy) }
-            }
-            .onChange(of: streamingTextLength) { _, _ in scheduleScrollToBottom(proxy) }
-            .onReceive(NotificationCenter.default.publisher(for: .laicaiPanelToggled)) { _ in
-                userScrolledAway = false
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(150))
-                    guard !userScrolledAway else { return }
+                .coordinateSpace(name: "timeline-scroll")
+                .background(SurfaceGrade.base)
+                .onAppear {
+                    scrollToBottom(proxy)
+                }
+                .onChange(of: thread.steps.count) { _, _ in scheduleScrollToBottom(proxy) }
+                .onChange(of: store.isThreadGenerating(thread.id)) { _, isGen in
+                    if isGen {
+                        userScrolledAway = false
+                        scheduleScrollToBottom(proxy)
+                    }
+                }
+                .onChange(of: thread.status) { _, newStatus in
+                    if newStatus == .running {
+                        userScrolledAway = false
+                        scheduleScrollToBottom(proxy)
+                    }
+                }
+                .onChange(of: streamingTextLength) { _, _ in scheduleScrollToBottom(proxy) }
+                .onReceive(NotificationCenter.default.publisher(for: .laicaiPanelToggled)) { _ in
+                    userScrolledAway = false
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(150))
+                        guard !userScrolledAway else { return }
+                        proxy.scrollTo(bottomID, anchor: .bottom)
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .laicaiScrollToBottom)) { _ in
+                    userScrolledAway = false
                     proxy.scrollTo(bottomID, anchor: .bottom)
                 }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .laicaiScrollToBottom)) { _ in
-                userScrolledAway = false
-                proxy.scrollTo(bottomID, anchor: .bottom)
-            }
                 // Batch review floating bar
                 if let executionStats {
                     if executionStats.pendingReviewIDs.count >= 2 {
@@ -354,7 +362,8 @@ private struct EmptyRunningThreadCard: View {
     }
 
     private var visibleGoal: String? {
-        let raw = thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw =
+            thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? thread.executionLedger?.goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let raw, !raw.isEmpty else { return nil }
         return raw
@@ -495,13 +504,15 @@ private struct SessionStepCard: View {
         case .userInput:
             UserInputCard(text: step.text)
         case .textOutput:
-            TextOutputCard(text: step.text, metrics: step.metrics, isRunning: step.metrics == nil && step.toolCallId == AppStore.streamingOutputID)
+            TextOutputCard(
+                text: step.text, metrics: step.metrics, isRunning: step.metrics == nil && step.toolCallId == AppStore.streamingOutputID)
         case .aiThinking:
             ThinkingCard(text: step.text, reasoningContent: step.reasoningContent, isRunning: false)
         case .toolCall:
             timelineSystemCard(icon: "wrench.and.screwdriver.fill", title: "工具调用", text: step.text, color: Semantic.toolCall)
         case .toolResult:
-            timelineSystemCard(icon: "checkmark.circle.fill", title: "工具结果", text: step.text, color: step.isFailure ? Semantic.error : Semantic.success)
+            timelineSystemCard(
+                icon: "checkmark.circle.fill", title: "工具结果", text: step.text, color: step.isFailure ? Semantic.error : Semantic.success)
         case .reviewRequest:
             timelineSystemCard(icon: "eye.fill", title: "审查", text: step.text, color: Semantic.warning)
         case .reviewResult:
@@ -538,355 +549,6 @@ private struct SessionStepCard: View {
             }
 
             Spacer()
-        }
-    }
-}
-
-// MARK: - Multi-Agent Flow View
-
-struct MultiAgentFlowView: View {
-    let plan: MultiAgentPlan
-    @State private var selectedAgentID: UUID?
-    @State private var pulsePhase = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // ── Header ──
-            HStack(spacing: AppSpace.medium) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
-                        .fill(Brand.purple.opacity(0.12))
-                        .frame(width: 30, height: 30)
-                    Image(systemName: "person.3.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Brand.purple)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("多会话协同编排")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(TextGrade.primary)
-                    Text("\(plan.agents.count) 个会话 · \(plan.progress)")
-                        .font(AppFont.caption)
-                        .foregroundStyle(TextGrade.muted)
-                }
-
-                Spacer()
-
-                flowStatusPill(for: plan.status)
-            }
-            .padding(.horizontal, AppSpace.extraLarge)
-            .padding(.vertical, AppSpace.large)
-
-            // ── Divider ──
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.clear, Brand.purple.opacity(0.15), Color.clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(height: 0.5)
-
-            // ── Flow Pipeline ──
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(Array(plan.agents.enumerated()), id: \.element.id) { index, agent in
-                        flowNodeCard(agent: agent, index: index)
-                            .onTapGesture {
-                                selectedAgentID = selectedAgentID == agent.id ? nil : agent.id
-                            }
-
-                        if index < plan.agents.count - 1 {
-                            flowConnector(from: agent, toIndex: index + 1)
-                        }
-                    }
-                }
-                .padding(.horizontal, AppSpace.extraLarge)
-                .padding(.vertical, AppSpace.extraLarge)
-            }
-
-            // ── Selected Agent Detail ──
-            if let selectedID = selectedAgentID,
-               let agent = plan.agents.first(where: { $0.id == selectedID }) {
-                Rectangle().fill(SurfaceGrade.divider).frame(height: 0.5)
-                flowAgentDetail(agent: agent)
-                    .transition(.opacity)
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
-                .fill(SurfaceGrade.card.opacity(0.85))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [Brand.purple.opacity(0.20), Brand.primary.opacity(0.10), Color.clear],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.5
-                )
-        )
-        .shadow(color: Brand.purple.opacity(0.035), radius: 6, y: 2)
-        .onAppear { pulsePhase = true }
-    }
-
-    // ── Node Card ──
-
-    private func flowNodeCard(agent: AgentNode, index: Int) -> some View {
-        let isSelected = selectedAgentID == agent.id
-        let isRunning = agent.status == .running
-        let nodeColor = flowColor(for: agent.status)
-
-        return VStack(spacing: AppSpace.small) {
-            ZStack {
-                // Background circle
-                Circle()
-                    .fill(nodeColor.opacity(0.10))
-                    .frame(width: 52, height: 52)
-
-                if isRunning {
-                    Circle()
-                        .stroke(nodeColor.opacity(0.35), lineWidth: 2)
-                        .frame(width: 52, height: 52)
-                }
-
-                // Completed checkmark ring
-                if agent.status == .completed {
-                    Circle()
-                        .stroke(nodeColor.opacity(0.25), lineWidth: 2)
-                        .frame(width: 52, height: 52)
-                }
-
-                // Selected ring
-                if isSelected && !isRunning {
-                    Circle()
-                        .stroke(nodeColor.opacity(0.35), lineWidth: 1.5)
-                        .frame(width: 56, height: 56)
-                }
-
-                // Icon
-                Image(systemName: agent.role.icon)
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(nodeColor)
-            }
-
-            // Label
-            VStack(spacing: 2) {
-                Text(agent.role.title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(isSelected ? TextGrade.primary : TextGrade.secondary)
-
-                flowStatusLabel(agent.status)
-            }
-
-            // Step count
-            if !agent.stepIDs.isEmpty {
-                Text("\(agent.stepIDs.count) 步")
-                    .font(AppFont.micro)
-                    .foregroundStyle(TextGrade.ghost)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule().fill(SurfaceGrade.elevated.opacity(0.6))
-                    )
-            }
-        }
-        .frame(minWidth: 80)
-        .padding(.vertical, AppSpace.small)
-        .padding(.horizontal, AppSpace.small)
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .fill(isSelected ? SurfaceGrade.elevated.opacity(0.5) : Color.clear)
-        )
-    }
-
-    // ── Connector ──
-
-    private func flowConnector(from agent: AgentNode, toIndex: Int) -> some View {
-        let handoff = plan.handoffs.first(where: {
-            $0.fromAgentID == agent.id && toIndex < plan.agents.count && $0.toAgentID == plan.agents[toIndex].id
-        })
-        let hasArtifact = !(handoff?.artifact.isEmpty ?? true)
-        let isDone = agent.status == .completed
-        let isActive = agent.status == .running
-        let completedColors = [
-            flowColor(for: .completed).opacity(0.5),
-            flowColor(for: .completed).opacity(0.2)
-        ]
-        let idleColors = [
-            TextGrade.ghost.opacity(0.3),
-            TextGrade.ghost.opacity(0.15)
-        ]
-
-        return VStack(spacing: AppSpace.extraSmall) {
-            ZStack {
-                // Connector line
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(
-                        isDone
-                        ? LinearGradient(colors: completedColors, startPoint: .leading, endPoint: .trailing)
-                        : LinearGradient(colors: idleColors, startPoint: .leading, endPoint: .trailing)
-                    )
-                    .frame(width: 32, height: 2)
-
-                if isActive {
-                    Circle()
-                        .fill(Brand.primary)
-                        .frame(width: 6, height: 6)
-                }
-
-                // Arrow head
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(isDone ? flowColor(for: .completed).opacity(0.6) : TextGrade.ghost.opacity(0.4))
-                    .offset(x: 20)
-            }
-            .frame(width: 48)
-
-            if hasArtifact {
-                Text("数据")
-                    .font(AppFont.micro)
-                    .foregroundStyle(Brand.primary.opacity(0.7))
-            }
-        }
-    }
-
-    // ── Agent Detail Panel ──
-
-    private func flowAgentDetail(agent: AgentNode) -> some View {
-        VStack(alignment: .leading, spacing: AppSpace.medium) {
-            HStack(spacing: AppSpace.medium) {
-                ZStack {
-                    Circle()
-                        .fill(flowColor(for: agent.status).opacity(0.12))
-                        .frame(width: 32, height: 32)
-                    Image(systemName: agent.role.icon)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(flowColor(for: agent.status))
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(agent.role.title)
-                        .font(AppFont.headline)
-                        .foregroundStyle(TextGrade.primary)
-                    Text(agent.status.title)
-                        .font(AppFont.caption)
-                        .foregroundStyle(flowColor(for: agent.status))
-                }
-
-                Spacer()
-
-                if !agent.output.isEmpty {
-                    HStack(spacing: 3) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 10))
-                        Text("已产出")
-                            .font(AppFont.captionMedium)
-                    }
-                    .foregroundStyle(Semantic.success)
-                }
-            }
-
-            if !agent.input.isEmpty {
-                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
-                    Label("输入", systemImage: "arrow.down.circle")
-                        .font(AppFont.micro)
-                        .foregroundStyle(TextGrade.ghost)
-                    Text(agent.input)
-                        .font(AppFont.body)
-                        .foregroundStyle(TextGrade.secondary)
-                        .lineLimit(4)
-                        .padding(AppSpace.medium)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                                .fill(SurfaceGrade.sunken)
-                        )
-                }
-            }
-
-            if !agent.output.isEmpty {
-                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
-                    Label("输出", systemImage: "arrow.up.circle")
-                        .font(AppFont.micro)
-                        .foregroundStyle(TextGrade.ghost)
-                    Text(agent.output)
-                        .font(AppFont.body)
-                        .foregroundStyle(TextGrade.secondary)
-                        .lineLimit(6)
-                        .textSelection(.enabled)
-                        .padding(AppSpace.medium)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                                .fill(SurfaceGrade.sunken)
-                        )
-                }
-            }
-
-            if !agent.stepIDs.isEmpty {
-                HStack(spacing: AppSpace.extraSmall) {
-                    Image(systemName: "list.bullet")
-                        .font(.system(size: 10))
-                    Text("\(agent.stepIDs.count) 个执行步骤")
-                        .font(AppFont.caption)
-                }
-                .foregroundStyle(TextGrade.muted)
-            }
-        }
-        .padding(AppSpace.extraLarge)
-    }
-
-    // ── Helpers ──
-
-    private func flowStatusLabel(_ status: TaskStatus) -> some View {
-        Text(status.title)
-            .font(.system(size: 9, weight: .medium))
-            .foregroundStyle(flowColor(for: status))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(
-                Capsule().fill(flowColor(for: status).opacity(0.10))
-            )
-    }
-
-    private func flowStatusPill(for status: TaskStatus) -> some View {
-        HStack(spacing: 4) {
-            if status == .running {
-                Circle()
-                    .fill(flowColor(for: status))
-                    .frame(width: 6, height: 6)
-            } else {
-                Circle()
-                    .fill(flowColor(for: status))
-                    .frame(width: 6, height: 6)
-            }
-            Text(status.title)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(flowColor(for: status))
-        }
-        .padding(.horizontal, AppSpace.small + 2)
-        .padding(.vertical, AppSpace.extraSmall + 1)
-        .background(
-            Capsule().fill(flowColor(for: status).opacity(0.10))
-        )
-        .overlay(
-            Capsule().strokeBorder(flowColor(for: status).opacity(0.15), lineWidth: 0.5)
-        )
-    }
-
-    private func flowColor(for status: TaskStatus) -> Color {
-        switch status {
-        case .queued: return TextGrade.muted
-        case .running: return Brand.primary
-        case .waitingReview: return Semantic.warning
-        case .completed: return Semantic.success
-        case .failed: return Semantic.error
-        case .cancelled: return TextGrade.ghost
         }
     }
 }
@@ -1042,8 +704,9 @@ private struct TaskStepStats {
 
     fileprivate static func isSuccessfulDocumentTransform(_ step: TaskStep, canonicalToolName: String) -> Bool {
         guard step.kind == .toolResult,
-              canonicalToolName == "document.transform",
-              !step.isFailure else { return false }
+            canonicalToolName == "document.transform",
+            !step.isFailure
+        else { return false }
         let action = step.toolParams?["action"] ?? ""
         guard ["apply", "copy", "render"].contains(action) else { return false }
         let path: String?
@@ -1177,7 +840,8 @@ private struct TaskStepStatsAccumulator {
 
     private mutating func recordFileChange(_ step: TaskStep, toolName: String) {
         if Self.fileMutationTools.contains(toolName)
-            || TaskStepStats.isSuccessfulDocumentTransform(step, canonicalToolName: toolName) {
+            || TaskStepStats.isSuccessfulDocumentTransform(step, canonicalToolName: toolName)
+        {
             hasFileChange = true
         }
     }
@@ -1511,404 +1175,5 @@ private struct TaskSummaryCard: View {
         }
         parts.append(RelativeTimeFormatter.string(for: thread.updatedAt))
         return parts.joined(separator: " · ")
-    }
-}
-
-// MARK: - Typing Indicator
-
-private struct TypingIndicator: View {
-    @EnvironmentObject private var store: AppStore
-    let threadID: UUID
-    @State private var phase: Int = 0
-    @State private var tick: Int = 0  // drives 1-second refresh
-    @State private var pulseTimer: Timer?
-    @State private var tickTimer: Timer?
-
-    private var activityText: String {
-        let text = store.liveActivity(for: threadID)
-        return text.isEmpty ? "正在处理…" : text
-    }
-
-    private var elapsed: Int {
-        guard let start = store.generationStartedAt(for: threadID) else { return 0 }
-        _ = tick  // subscribe to tick so label updates every second
-        return max(0, Int(Date().timeIntervalSince(start)))
-    }
-
-    var body: some View {
-        HStack(spacing: AppSpace.small) {
-            HStack(spacing: AppSpace.small) {
-                // Pulsing dot
-                Circle()
-                    .fill(Brand.primary)
-                    .frame(width: 7, height: 7)
-                    .scaleEffect(phase == 0 ? 1.0 : 0.7)
-                    .opacity(phase == 0 ? 1.0 : 0.5)
-
-                Text(activityText)
-                    .font(AppFont.captionMedium)
-                    .foregroundStyle(TextGrade.secondary)
-                    .lineLimit(1)
-
-                if elapsed > 0 {
-                    Text(elapsedLabel)
-                        .font(AppFont.tiny)
-                        .foregroundStyle(TextGrade.ghost)
-                }
-
-                if let progress = store.estimatedProgress(for: threadID) {
-                    Text("\(Int(progress * 100))%")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Brand.primary)
-                }
-            }
-            .padding(.horizontal, AppSpace.large)
-            .padding(.vertical, AppSpace.small + 2)
-            .background(
-                Capsule()
-                    .fill(SurfaceGrade.card)
-                    .overlay(Capsule().strokeBorder(Brand.primary.opacity(0.12), lineWidth: 1))
-            )
-            .shadow(color: .black.opacity(0.035), radius: 3, y: 1)
-
-            Spacer()
-        }
-        .onAppear { startTimers() }
-        .onDisappear { stopTimers() }
-    }
-
-    private var elapsedLabel: String {
-        let elapsedSeconds = elapsed
-        if elapsedSeconds < 60 { return "\(elapsedSeconds)s" }
-        return "\(elapsedSeconds / 60)m\(elapsedSeconds % 60)s"
-    }
-
-    private func startTimers() {
-        guard pulseTimer == nil else { return }
-        pulseTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { _ in
-            phase = phase == 0 ? 1 : 0
-        }
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            tick += 1
-        }
-    }
-
-    private func stopTimers() {
-        pulseTimer?.invalidate()
-        pulseTimer = nil
-        tickTimer?.invalidate()
-        tickTimer = nil
-    }
-}
-
-// TaskStepCard, UserInputCard, ThinkingCard, ToolCallCard, ToolResultCard,
-// TextOutputCard, PausedCard, FailedCard, ReviewCard, ReviewResultCard,
-// AvatarBadge, DiffPreviewCard, ProgressGlyph, ContinuationStrategyBar
-// → TimelineCards.swift
-
-// Step Cards → TimelineCards.swift
-// WelcomeView → WelcomePage.swift
-
-// MARK: - Batch Review Bar
-
-struct BatchReviewBar: View {
-    @EnvironmentObject private var store: AppStore
-    let pendingCount: Int
-    let taskID: UUID
-    let stepIDs: [UUID]
-    @State private var isApproving = false
-    @State private var isRejecting = false
-
-    var body: some View {
-        HStack(spacing: AppSpace.medium) {
-            Image(systemName: "eye.fill")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Semantic.warning)
-
-            Text("\(pendingCount) 个变更待审查")
-                .font(AppFont.subheadline)
-                .foregroundStyle(TextGrade.primary)
-
-            Spacer()
-
-            Button {
-                isApproving = true
-                for stepID in stepIDs {
-                    store.approveReview(taskID: taskID, stepID: stepID)
-                }
-                isApproving = false
-            } label: {
-                HStack(spacing: AppSpace.extraSmall) {
-                    if isApproving {
-                        ProgressView()
-                            .scaleEffect(0.5)
-                            .frame(width: 12, height: 12)
-                    } else {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    Text("全部批准")
-                        .font(AppFont.captionMedium)
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, AppSpace.large)
-                .padding(.vertical, AppSpace.small + 2)
-                .background(Capsule().fill(Semantic.success))
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut("a", modifiers: [.command, .shift])
-
-            Button {
-                isRejecting = true
-                for stepID in stepIDs {
-                    store.rejectReview(taskID: taskID, stepID: stepID)
-                }
-                isRejecting = false
-            } label: {
-                HStack(spacing: AppSpace.extraSmall) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("全部拒绝")
-                        .font(AppFont.captionMedium)
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, AppSpace.large)
-                .padding(.vertical, AppSpace.small + 2)
-                .background(Capsule().fill(Semantic.error))
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, AppSpace.large)
-        .padding(.vertical, AppSpace.medium)
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.extraLarge, style: .continuous)
-                .strokeBorder(Semantic.warning.opacity(0.30), lineWidth: 1)
-        )
-        .padding(.horizontal, AppSpace.extraLarge)
-        .frame(maxWidth: 640)
-        .frame(maxWidth: .infinity, alignment: .center)
-    }
-}
-
-// MARK: - Task Completion Summary Card
-
-private struct TaskCompletionSummaryCard: View {
-    let thread: Thread
-
-    private var writtenFiles: [String] {
-        let reviewApproved = thread.steps.filter { $0.kind == .reviewRequest && $0.approved == true }
-            .compactMap { $0.diffFilePath }
-        let directWrites = thread.steps.filter { $0.kind == .toolResult && $0.toolName == "file.write" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] }
-        let edits = thread.steps.filter { $0.kind == .toolResult && $0.toolName == "file.edit" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] }
-        let patches = thread.steps.filter { $0.kind == .toolResult && $0.toolName == "diff.apply" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] ?? $0.toolParams?["file"] }
-        return Array(Set(reviewApproved + directWrites + edits + patches)).sorted()
-    }
-
-    private var failedSteps: [TaskStep] {
-        thread.steps.filter { ($0.isFailure || $0.kind == .error) && $0.kind != .userInput }
-    }
-
-    private var shellCommands: [String] {
-        thread.steps.filter { $0.kind == .toolCall && $0.toolName == "shell.exec" }
-            .compactMap { $0.toolParams?["command"] }
-    }
-
-    private var verifyCount: Int {
-        thread.steps.filter { $0.kind == .toolResult && $0.toolName == "verify.build" }.count
-    }
-
-    private var duration: String? {
-        let interval = thread.updatedAt.timeIntervalSince(thread.createdAt)
-        guard interval > 1 else { return nil }
-        if interval < 60 { return "\(Int(interval))秒" }
-        if interval < 3600 { return "\(Int(interval / 60))分\(Int(interval.truncatingRemainder(dividingBy: 60)))秒" }
-        return "\(Int(interval / 3600))时\(Int((interval.truncatingRemainder(dividingBy: 3600)) / 60))分"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.medium) {
-            // Header
-            HStack(spacing: AppSpace.small) {
-                Image(systemName: thread.status == .completed ? "checkmark.seal.fill" : "xmark.seal.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(thread.status == .completed ? Semantic.success : Semantic.error)
-                Text(thread.executionState == .completed || thread.status == .completed ? "会话完成" : "会话失败")
-                    .font(AppFont.subheadline)
-                    .foregroundStyle(thread.status == .completed ? Semantic.success : Semantic.error)
-                if let dur = duration {
-                    Text("· \(dur)")
-                        .font(AppFont.caption)
-                        .foregroundStyle(TextGrade.muted)
-                }
-                Spacer()
-            }
-
-            // Changed files
-            if !writtenFiles.isEmpty {
-                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
-                    HStack(spacing: AppSpace.extraSmall) {
-                        Image(systemName: "doc.text.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(TextGrade.secondary)
-                        Text("变更文件（\(writtenFiles.count)）")
-                            .font(AppFont.captionMedium)
-                            .foregroundStyle(TextGrade.secondary)
-                    }
-                    ForEach(writtenFiles.prefix(8), id: \.self) { path in
-                        HStack(spacing: AppSpace.extraSmall) {
-                            Text("•")
-                                .foregroundStyle(Brand.primary)
-                            Text(shortPath(path))
-                                .font(AppFont.caption)
-                                .foregroundStyle(TextGrade.primary)
-                                .lineLimit(1)
-                        }
-                    }
-                    if writtenFiles.count > 8 {
-                        Text("+\(writtenFiles.count - 8) 个文件…")
-                            .font(AppFont.tiny)
-                            .foregroundStyle(TextGrade.ghost)
-                    }
-                }
-                .padding(AppSpace.small)
-                .background(
-                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                        .fill(SurfaceGrade.sunken.opacity(0.5))
-                )
-            }
-
-            // Failed items
-            if !failedSteps.isEmpty {
-                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
-                    HStack(spacing: AppSpace.extraSmall) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Semantic.error)
-                        Text("失败项（\(failedSteps.count)）")
-                            .font(AppFont.captionMedium)
-                            .foregroundStyle(Semantic.error)
-                    }
-                    ForEach(failedSteps.prefix(5), id: \.id) { step in
-                        HStack(spacing: AppSpace.extraSmall) {
-                            Text("•")
-                                .foregroundStyle(Semantic.error)
-                            Text(step.toolName ?? step.kind.title)
-                                .font(AppFont.caption)
-                                .foregroundStyle(TextGrade.primary)
-                            if !step.text.isEmpty {
-                                Text("— \(String(step.text.prefix(60)))")
-                                    .font(AppFont.tiny)
-                                    .foregroundStyle(TextGrade.muted)
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-                }
-                .padding(AppSpace.small)
-                .background(
-                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                        .fill(Semantic.errorMuted.opacity(0.5))
-                )
-            }
-
-            // Shell commands summary
-            if !shellCommands.isEmpty {
-                HStack(spacing: AppSpace.extraSmall) {
-                    Image(systemName: "terminal")
-                        .font(.system(size: 10))
-                        .foregroundStyle(TextGrade.secondary)
-                    Text("执行了 \(shellCommands.count) 条命令")
-                        .font(AppFont.caption)
-                        .foregroundStyle(TextGrade.muted)
-                }
-            }
-
-            if verifyCount > 0 {
-                HStack(spacing: AppSpace.extraSmall) {
-                    Image(systemName: "checkmark.shield")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Semantic.success)
-                    Text("验证了 \(verifyCount) 次")
-                        .font(AppFont.caption)
-                        .foregroundStyle(TextGrade.muted)
-                }
-            }
-        }
-        .padding(AppSpace.large)
-        .frame(maxWidth: 580, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .fill(SurfaceGrade.card.opacity(0.8))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .strokeBorder(
-                    thread.status == .completed
-                    ? Semantic.success.opacity(0.20)
-                    : Semantic.error.opacity(0.20),
-                    lineWidth: 0.7
-                )
-        )
-    }
-
-    private func shortPath(_ path: String) -> String {
-        let components = path.components(separatedBy: "/")
-        if components.count <= 2 { return path }
-        return components.suffix(2).joined(separator: "/")
-    }
-}
-
-// MARK: - Task Rating Bar
-
-private struct TaskRatingBar: View {
-    @EnvironmentObject private var store: AppStore
-    let threadID: UUID
-    let currentRating: Int
-
-    var body: some View {
-        HStack(spacing: AppSpace.small) {
-            Text("评价此结果")
-                .font(AppFont.caption)
-                .foregroundStyle(TextGrade.muted)
-            HStack(spacing: 2) {
-                ForEach(1...5, id: \.self) { star in
-                    Button {
-                        store.rateThread(id: threadID, rating: star)
-                    } label: {
-                        Image(systemName: star <= currentRating ? "star.fill" : "star")
-                            .font(.system(size: 13))
-                            .foregroundStyle(star <= currentRating ? Color.yellow : TextGrade.muted.opacity(0.4))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            if currentRating > 0 {
-                Text(ratingLabel)
-                    .font(AppFont.tiny)
-                    .foregroundStyle(TextGrade.secondary)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, AppSpace.medium)
-        .padding(.vertical, AppSpace.extraSmall)
-    }
-
-    private var ratingLabel: String {
-        switch currentRating {
-        case 1: return "很差"
-        case 2: return "不太好"
-        case 3: return "一般"
-        case 4: return "不错"
-        case 5: return "很棒"
-        default: return ""
-        }
     }
 }

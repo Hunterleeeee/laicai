@@ -153,7 +153,9 @@ public struct SkillHubView: View {
         if skill.tools.contains("file.write") || skill.tools.contains("file.edit") || skill.tools.contains("batch.apply") {
             return .editing
         }
-        if skill.tools.contains("code.search") || skill.tools.contains("file.read") || skill.tools.contains("workspace.index") || skill.tools.contains("git") {
+        if skill.tools.contains("code.search") || skill.tools.contains("file.read") || skill.tools.contains("workspace.index")
+            || skill.tools.contains("git")
+        {
             return .analysis
         }
         return .general
@@ -311,7 +313,9 @@ struct SkillCard: View {
         if description.contains("ppt") || description.contains("slide") || description.contains("演示") || description.contains("汇报") {
             return "rectangle.on.rectangle.angled"
         }
-        if description.contains("ui") || description.contains("ux") || description.contains("界面") || description.contains("设计") { return "paintpalette" }
+        if description.contains("ui") || description.contains("ux") || description.contains("界面") || description.contains("设计") {
+            return "paintpalette"
+        }
         if description.contains("网站") || description.contains("web") || description.contains("html") { return "globe" }
         if description.contains("数据") || description.contains("data") || description.contains("报表") { return "chart.bar" }
         if description.contains("邮件") || description.contains("email") { return "envelope" }

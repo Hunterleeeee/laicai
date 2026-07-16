@@ -22,7 +22,8 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false)
             ))
 
@@ -192,7 +193,7 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
             status: .completed,
             steps: [
                 TaskStep(kind: .userInput, text: "读取项目"),
-                TaskStep(kind: .textOutput, text: "完成")
+                TaskStep(kind: .textOutput, text: "完成"),
             ],
             updatedAt: Date(timeIntervalSince1970: 30)
         )
@@ -238,7 +239,8 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
         defer { try? FileManager.default.removeItem(at: vault) }
         let notes = vault.appendingPathComponent("02 Notes", isDirectory: true)
         try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
-        try "# Python\nPython is useful for automation.".write(to: notes.appendingPathComponent("python.md"), atomically: true, encoding: .utf8)
+        try "# Python\nPython is useful for automation.".write(
+            to: notes.appendingPathComponent("python.md"), atomically: true, encoding: .utf8)
 
         let preview = try await WikiBuildTool().execute(
             argumentsJSON: #"{"topic":"Python","save":false}"#,
@@ -311,16 +313,19 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .userInput, text: "整理到 wiki\n请读取这个附件：/tmp/a.xlsx"),
                 TaskStep(kind: .toolCall, text: "读取", toolName: "file.read", toolParams: ["path": "/tmp/a.xlsx"]),
                 TaskStep(kind: .toolResult, text: "已读取目录", toolName: "file.read"),
-                TaskStep(kind: .textOutput, text: "我会整理成 Wiki。")
+                TaskStep(kind: .textOutput, text: "我会整理成 Wiki。"),
             ]
         )
 
-        XCTAssertFalse(AgentLoop.meetsCompletionCriteria(task: task, intent: .task, didComplete: true, hadFailure: false, wasTruncated: false))
+        XCTAssertFalse(
+            AgentLoop.meetsCompletionCriteria(task: task, intent: .task, didComplete: true, hadFailure: false, wasTruncated: false))
 
         var saved = task
         saved.steps.append(TaskStep(kind: .toolCall, text: "保存 Wiki", toolName: "wiki.build", toolParams: ["topic": "迁移", "save": "true"]))
-        saved.steps.append(TaskStep(kind: .toolResult, text: "已保存 Wiki：迁移 → 02 Atomic/迁移.md", toolName: "wiki.build", toolParams: ["save": "true"]))
+        saved.steps.append(
+            TaskStep(kind: .toolResult, text: "已保存 Wiki：迁移 → 02 Atomic/迁移.md", toolName: "wiki.build", toolParams: ["save": "true"]))
 
-        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(task: saved, intent: .task, didComplete: true, hadFailure: false, wasTruncated: false))
+        XCTAssertTrue(
+            AgentLoop.meetsCompletionCriteria(task: saved, intent: .task, didComplete: true, hadFailure: false, wasTruncated: false))
     }
 }

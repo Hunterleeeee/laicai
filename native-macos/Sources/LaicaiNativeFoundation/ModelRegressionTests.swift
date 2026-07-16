@@ -15,13 +15,13 @@ public struct ModelTestCase: Codable, Sendable, Identifiable {
     public var checks: [Check]
 
     public enum Check: String, Codable, Sendable {
-        case healthCheck          // /models or /api/tags reachable
-        case basicChat            // non-streaming text response
-        case streamingChat        // streaming SSE response
-        case toolCalling          // function calling round-trip
-        case reasoning            // reasoning_content field present
-        case longContext          // > 4k input tokens accepted
-        case chineseOutput        // response contains Chinese
+        case healthCheck  // /models or /api/tags reachable
+        case basicChat  // non-streaming text response
+        case streamingChat  // streaming SSE response
+        case toolCalling  // function calling round-trip
+        case reasoning  // reasoning_content field present
+        case longContext  // > 4k input tokens accepted
+        case chineseOutput  // response contains Chinese
     }
 
     public init(
@@ -120,7 +120,7 @@ public final class ModelRegressionRunner: ObservableObject {
             model: "gpt-4o-mini",
             kind: "openai-compatible",
             checks: [.healthCheck, .basicChat, .streamingChat, .toolCalling, .chineseOutput]
-        )
+        ),
     ]
 
     public func runAll(tests: [ModelTestCase]? = nil) async {
@@ -239,11 +239,15 @@ public final class ModelRegressionRunner: ObservableObject {
             note: testCase.apiKey,
             health: .ready
         )
-        let tools = [ToolDefinition(function: FunctionDefinition(
-            name: "get_weather",
-            description: "获取天气",
-            parameters: FunctionParameters(properties: ["city": FunctionProperty(type: "string", description: "城市名")], required: ["city"])
-        ))]
+        let tools = [
+            ToolDefinition(
+                function: FunctionDefinition(
+                    name: "get_weather",
+                    description: "获取天气",
+                    parameters: FunctionParameters(
+                        properties: ["city": FunctionProperty(type: "string", description: "城市名")], required: ["city"])
+                ))
+        ]
         let request = SendMessageRequest(sessionID: UUID(), message: "北京今天天气怎么样？", connector: connector, modeLabel: "回归测试", tools: tools)
         let response = try await runtime.sendMessage(request)
         guard response.hasToolCalls else {
@@ -279,7 +283,7 @@ public final class ModelRegressionRunner: ObservableObject {
             note: testCase.apiKey,
             health: .ready
         )
-        let longText = String(repeating: "这是一段很长的文本。", count: 500) // ~5000 chars
+        let longText = String(repeating: "这是一段很长的文本。", count: 500)  // ~5000 chars
         let request = SendMessageRequest(sessionID: UUID(), message: "请总结以下内容：\n\(longText)", connector: connector, modeLabel: "回归测试")
         let response = try await runtime.sendMessage(request)
         guard !response.toolActivities.contains(where: \.isFailure) else {
@@ -332,7 +336,9 @@ public final class ModelRegressionRunner: ObservableObject {
         for regressionResult in results {
             let totalMs = regressionResult.results.map(\.latencyMs).reduce(0, +)
             let status = regressionResult.overallPassed ? "✅" : "❌"
-            lines.append("| \(regressionResult.testCase.name) | \(regressionResult.passedCount) | \(regressionResult.failedCount) | \(totalMs) | \(status) |")
+            lines.append(
+                "| \(regressionResult.testCase.name) | \(regressionResult.passedCount) | \(regressionResult.failedCount) | \(totalMs) | \(status) |"
+            )
         }
         lines.append("")
         for regressionResult in results {

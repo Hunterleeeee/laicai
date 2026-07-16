@@ -14,7 +14,7 @@ extension AgentLoop {
         let freshnessMarkers = [
             "今天", "今日", "最新", "新闻", "资讯", "趋势", "热点", "实时",
             "价格", "股价", "汇率", "天气", "版本", "发布", "更新",
-            "today", "latest", "news", "current", "recent"
+            "today", "latest", "news", "current", "recent",
         ]
         if freshnessMarkers.contains(where: { text.localizedCaseInsensitiveContains($0) }) {
             return true
@@ -26,7 +26,7 @@ extension AgentLoop {
         // Market survey / recommendation patterns
         let explorationMarkers = [
             "市面上", "市场上", "有什么好用", "有什么有用", "有哪些好的", "有哪些有用",
-            "都有什么", "都有哪些", "推荐", "哪个好", "选哪个", "用哪个"
+            "都有什么", "都有哪些", "推荐", "哪个好", "选哪个", "用哪个",
         ]
         if explorationMarkers.contains(where: { text.localizedCaseInsensitiveContains($0) }) {
             return true
@@ -34,7 +34,7 @@ extension AgentLoop {
 
         let webActionMarkers = [
             "搜索一下", "搜一下", "搜搜", "查一下", "查找", "联网搜索", "上网查", "网页资料",
-            "访问一下", "打开这个", "看看这个链接", "site:", "http://", "https://"
+            "访问一下", "打开这个", "看看这个链接", "site:", "http://", "https://",
         ]
         return webActionMarkers.contains { text.localizedCaseInsensitiveContains($0) }
     }
@@ -56,7 +56,7 @@ extension AgentLoop {
             "继续", "接着", "接着说", "继续输出", "继续说",
             "没发完", "没写完", "没说完", "被截断", "后面呢", "剩下的",
             "接着写", "接着输出", "说完", "写完", "继续吧", "go on",
-            "continue", "keep going"
+            "continue", "keep going",
         ]
         return continuations.contains(where: { cleaned.localizedCaseInsensitiveContains($0) })
     }
@@ -87,27 +87,33 @@ extension AgentLoop {
         let query = bootstrapWebSearchQuery(for: message)
         let payload: [String: Any] = [
             "query": query,
-            "maxResults": 5
+            "maxResults": 5,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let json = String(data: data, encoding: .utf8) else {
+            let json = String(data: data, encoding: .utf8)
+        else {
             return #"{"query":"\#(query)","maxResults":5}"#
         }
         return json
     }
 
     static func bootstrapWebSearchMessage(for message: String, priorSteps: [TaskStep]) -> String {
-        let cleaned = message
+        let cleaned =
+            message
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard isGenericWebFollowUp(cleaned),
-              let subject = priorSteps
+            let subject =
+                priorSteps
                 .filter({ $0.kind == .userInput })
                 .map(\.text)
-                .last(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) != message.trimmingCharacters(in: .whitespacesAndNewlines) })?
+                .last(where: {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines) != message.trimmingCharacters(in: .whitespacesAndNewlines)
+                })?
                 .replacingOccurrences(of: "\n", with: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines),
-              !subject.isEmpty else {
+            !subject.isEmpty
+        else {
             return message
         }
         return "\(subject) \(cleaned)"
@@ -119,10 +125,11 @@ extension AgentLoop {
         let payload: [String: Any] = [
             "query": query,
             "scope": scope,
-            "maxResults": 8
+            "maxResults": 8,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let json = String(data: data, encoding: .utf8) else {
+            let json = String(data: data, encoding: .utf8)
+        else {
             return #"{"query":"\#(query)","scope":"\#(scope)","maxResults":8}"#
         }
         return json
@@ -136,10 +143,11 @@ extension AgentLoop {
         let payload: [String: Any] = [
             "path": path,
             "offset": 1,
-            "limit": 160
+            "limit": 160,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let json = String(data: data, encoding: .utf8) else {
+            let json = String(data: data, encoding: .utf8)
+        else {
             return #"{"path":"\#(path)","offset":1,"limit":160}"#
         }
         return json
@@ -148,10 +156,11 @@ extension AgentLoop {
     static func bootstrapExtractArgumentsJSON(for path: String) -> String {
         let payload: [String: Any] = [
             "path": path,
-            "limit": 60_000
+            "limit": 60_000,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let json = String(data: data, encoding: .utf8) else {
+            let json = String(data: data, encoding: .utf8)
+        else {
             return #"{"path":"\#(path)","limit":60000}"#
         }
         return json
@@ -159,11 +168,15 @@ extension AgentLoop {
 
     static func firstReadablePath(inSearchOutput output: String, workspaceRoot: String) -> String? {
         let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
-        let ignoredExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "pdf", "zip", "gz", "dmg", "app",
-                                               "ico", "svg", "woff", "woff2", "ttf", "eot", "map"]
+        let ignoredExtensions: Set<String> = [
+            "png", "jpg", "jpeg", "gif", "webp", "pdf", "zip", "gz", "dmg", "app",
+            "ico", "svg", "woff", "woff2", "ttf", "eot", "map",
+        ]
         // Skip auto-generated, minified, vendor, and HTML-resource files
-        let ignoredPatterns = ["_files/", "node_modules/", ".min.js", ".min.css", ".bundle.js",
-                               "vendor/", "dist/", "DerivedData/", ".build/", "target/debug/", "target/release/"]
+        let ignoredPatterns = [
+            "_files/", "node_modules/", ".min.js", ".min.css", ".bundle.js",
+            "vendor/", "dist/", "DerivedData/", ".build/", "target/debug/", "target/release/",
+        ]
         for rawLine in output.components(separatedBy: .newlines) {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !line.isEmpty, !line.hasPrefix("未找到") else { continue }
@@ -186,7 +199,8 @@ extension AgentLoop {
     }
 
     static func bootstrapWorkspaceSearchQuery(for message: String) -> String {
-        let cleaned = message
+        let cleaned =
+            message
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return "" }
@@ -210,14 +224,16 @@ extension AgentLoop {
 
         let stopWords: Set<String> = [
             "请", "帮我", "帮忙", "继续", "一下", "这个", "那个", "代码", "项目",
-            "实现", "修复", "修改", "重构", "搜索", "查找", "看看", "解释", "说明"
+            "实现", "修复", "修改", "重构", "搜索", "查找", "看看", "解释", "说明",
         ]
-        let normalized = cleaned
+        let normalized =
+            cleaned
             .replacingOccurrences(of: "，", with: " ")
             .replacingOccurrences(of: "。", with: " ")
             .replacingOccurrences(of: "？", with: " ")
             .replacingOccurrences(of: "?", with: " ")
-        let candidates = normalized
+        let candidates =
+            normalized
             .split(whereSeparator: { $0.isWhitespace || "/\\:：,.;；()[]{}<>「」『』".contains($0) })
             .map(String.init)
             .map { token in stopWords.reduce(token) { $0.replacingOccurrences(of: $1, with: "") } }
@@ -231,21 +247,23 @@ extension AgentLoop {
         guard !text.isEmpty else { return false }
         if firstLocalPath(in: text) != nil { return true }
         if firstMatch(in: text, pattern: #"`[^`]{2,80}`"#) != nil { return true }
-        if firstMatch(in: text, pattern: #"[A-Za-z0-9_./-]+\.(swift|py|ts|tsx|js|jsx|md|json|yaml|yml|toml|txt|html|css|scss|xml|plist)"#) != nil {
+        if firstMatch(in: text, pattern: #"[A-Za-z0-9_./-]+\.(swift|py|ts|tsx|js|jsx|md|json|yaml|yml|toml|txt|html|css|scss|xml|plist)"#)
+            != nil
+        {
             return true
         }
         let workspaceMarkers = [
             "项目", "代码", "文件", "目录", "路径", "工作区", "仓库", "repo", "repository",
             "模块", "函数", "类", "组件", "接口", "配置", "源码", "测试", "构建", "编译",
             "readme", "package.json", "xcodeproj", "workspace", "swift", "typescript",
-            "搜索项目", "搜索代码", "查找文件", "读取文件", "打开文件", "定位"
+            "搜索项目", "搜索代码", "查找文件", "读取文件", "打开文件", "定位",
         ]
         guard workspaceMarkers.contains(where: { text.localizedCaseInsensitiveContains($0) }) else {
             return false
         }
         let generalNonWorkspaceMarkers = [
             "股票", "股价", "涨到", "下午", "易经", "梅花易数", "大小六壬", "算命",
-            "skill都能干嘛", "技能都能干嘛", "数据不对", "我只要结果"
+            "skill都能干嘛", "技能都能干嘛", "数据不对", "我只要结果",
         ]
         return !generalNonWorkspaceMarkers.contains { text.localizedCaseInsensitiveContains($0) }
     }
@@ -277,14 +295,16 @@ extension AgentLoop {
         }
         let nsRange = NSRange(message.startIndex..., in: message)
         guard let match = regex.firstMatch(in: message, options: [], range: nsRange),
-              let range = Range(match.range, in: message) else {
+            let range = Range(match.range, in: message)
+        else {
             return nil
         }
         let raw = String(message[range])
         let separators = CharacterSet(charactersIn: "，,。；;）)]}<>")
-        let trimmed = raw.split(whereSeparator: { scalar in
-            scalar.unicodeScalars.allSatisfy { separators.contains($0) }
-        }).first.map(String.init) ?? raw
+        let trimmed =
+            raw.split(whereSeparator: { scalar in
+                scalar.unicodeScalars.allSatisfy { separators.contains($0) }
+            }).first.map(String.init) ?? raw
         return trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "。，、；;）)]}"))
     }
 
@@ -292,13 +312,14 @@ extension AgentLoop {
     static func extractSearchKeywords(from message: String) -> String? {
         let patterns = [
             #"(?:搜索|查找|找一下|search\s+(?:for\s+)?|grep\s+)[\s：:]*(.+)"#,
-            #"(?:搜|找|查)\s*[\s：:][\s]*(.+)"#
+            #"(?:搜|找|查)\s*[\s：:][\s]*(.+)"#,
         ]
         for pattern in patterns {
             if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-               let match = regex.firstMatch(in: message, range: NSRange(message.startIndex..., in: message)),
-               match.numberOfRanges > 1,
-               let range = Range(match.range(at: 1), in: message) {
+                let match = regex.firstMatch(in: message, range: NSRange(message.startIndex..., in: message)),
+                match.numberOfRanges > 1,
+                let range = Range(match.range(at: 1), in: message)
+            {
                 let keywords = String(message[range]).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !keywords.isEmpty && keywords.count < 100 { return keywords }
             }
@@ -326,7 +347,8 @@ extension AgentLoop {
         }
         let nsRange = NSRange(message.startIndex..., in: message)
         guard let match = regex.firstMatch(in: message, options: [], range: nsRange),
-              let range = Range(match.range, in: message) else {
+            let range = Range(match.range, in: message)
+        else {
             return nil
         }
         return String(message[range]).trimmingCharacters(in: CharacterSet(charactersIn: "。，、；;）)]}>\"'"))
@@ -335,17 +357,19 @@ extension AgentLoop {
     static func bootstrapWebFetchArgumentsJSON(for url: String) -> String {
         let payload: [String: Any] = [
             "url": url,
-            "maxCharacters": 8000
+            "maxCharacters": 8000,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.withoutEscapingSlashes]),
-              let json = String(data: data, encoding: .utf8) else {
+            let json = String(data: data, encoding: .utf8)
+        else {
             return #"{"url":"\#(url)","maxCharacters":8000}"#
         }
         return json
     }
 
     static func bootstrapWebSearchQuery(for message: String) -> String {
-        let cleaned = message
+        let cleaned =
+            message
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let needsDate = ["今天", "今日", "最新", "新闻", "趋势", "today", "latest", "news"]
@@ -362,7 +386,8 @@ extension AgentLoop {
     }
 
     private static func isGenericWebFollowUp(_ message: String) -> Bool {
-        let normalized = message
+        let normalized =
+            message
             .replacingOccurrences(of: "，", with: " ")
             .replacingOccurrences(of: "。", with: " ")
             .replacingOccurrences(of: "！", with: " ")
@@ -372,7 +397,7 @@ extension AgentLoop {
         guard !words.isEmpty else { return false }
         let genericMarkers = [
             "联网", "搜索", "搜", "搜一下", "搜搜", "查", "查一下", "上网",
-            "另外", "如果", "可以", "输出", "一条", "两条", "不完", "直接", "继续"
+            "另外", "如果", "可以", "输出", "一条", "两条", "不完", "直接", "继续",
         ]
         let topicLike = words.filter { word in
             !genericMarkers.contains(where: { word.contains($0) })

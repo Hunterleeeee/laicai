@@ -100,7 +100,8 @@ struct PipelineConfig {
         self.startTime = startTime
         self.dependencies = dependencies ?? PipelineDependencies.shared
 
-        self.needsPlanning = intent != .chat
+        self.needsPlanning =
+            intent != .chat
             && priorSteps.isEmpty
             && !AgentLoop.isPureContinuationCommand(message)
             && message.count > 10
@@ -110,7 +111,8 @@ struct PipelineConfig {
         let isAllowed: (String) -> Bool = { name in
             canonicalAllowedTools?.contains(ToolNameCodec.canonicalName(name)) ?? false
         }
-        self.isReadOnlyRun = config.allowedTools != nil
+        self.isReadOnlyRun =
+            config.allowedTools != nil
             && !isAllowed("file.write")
             && !isAllowed("file.edit")
             && !isAllowed("diff.apply")

@@ -82,14 +82,15 @@ extension AgentLoop {
             result: result,
             limit: config.maxTokensPerTurn
         )
-        messages.append(ChatMessage(
-            role: "user",
-            content: """
-            自动恢复工具 \(canonicalName) 执行结果如下。请基于这些真实结果继续推进当前会话目标，不要重复已经失败的工具路径。
+        messages.append(
+            ChatMessage(
+                role: "user",
+                content: """
+                    自动恢复工具 \(canonicalName) 执行结果如下。请基于这些真实结果继续推进当前会话目标，不要重复已经失败的工具路径。
 
-            \(resultContent)
-            """
-        ))
+                    \(resultContent)
+                    """
+            ))
         return result.success
     }
 }

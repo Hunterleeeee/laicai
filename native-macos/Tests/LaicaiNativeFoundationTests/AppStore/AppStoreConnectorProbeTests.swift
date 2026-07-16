@@ -7,7 +7,8 @@ import XCTest
 final class AppStoreConnectorProbeTests: LaicaiNativeFoundationTestCase {
     func testCheckConnectorHealthMarksReady() async throws {
         let connector = ConnectorProfile(
-            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .offline)
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key",
+            health: .offline)
         let runtime = HealthRuntime(health: .ready)
         let store = AppStore(
             state: testState(connectors: [connector], activeConnectorID: connector.id),
@@ -28,7 +29,8 @@ final class AppStoreConnectorProbeTests: LaicaiNativeFoundationTestCase {
     }
     func testExplicitConnectorHealthProbeLearnsUnsupportedToolCallingCapability() async throws {
         let connector = ConnectorProfile(
-            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .offline)
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key",
+            health: .offline)
         let runtime = ProbeHealthRuntime(result: .init(health: .ready, toolCallingCapability: .unsupported))
         let store = AppStore(
             state: testState(connectors: [connector], activeConnectorID: connector.id),
@@ -66,7 +68,8 @@ final class AppStoreConnectorProbeTests: LaicaiNativeFoundationTestCase {
             )
         )
         let connector = ConnectorProfile(
-            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .attention)
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key",
+            health: .attention)
 
         store.addConnector(connector)
         try await waitForConnectorHealth(store, id: connector.id, health: .ready)
@@ -87,7 +90,8 @@ final class AppStoreConnectorProbeTests: LaicaiNativeFoundationTestCase {
             )
         )
         let connector = ConnectorProfile(
-            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .attention)
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key",
+            health: .attention)
 
         store.addConnector(connector)
         try await waitForConnectorHealth(store, id: connector.id, health: .ready)
@@ -97,7 +101,8 @@ final class AppStoreConnectorProbeTests: LaicaiNativeFoundationTestCase {
     }
     func testUpdateConnectorAutomaticallyRechecksHealthWhenConfigurationChanges() async throws {
         let connector = ConnectorProfile(
-            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .ready)
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key",
+            health: .ready)
         let runtime = HealthRuntime(health: .ready)
         let store = AppStore(
             state: testState(connectors: [connector], activeConnectorID: connector.id),
@@ -127,7 +132,8 @@ final class AppStoreConnectorProbeTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(runtime.healthRequests.first?.endpoint, "https://example.com/v2")
     }
     func testSelectingAttentionConnectorAutomaticallyChecksHealth() async throws {
-        let first = ConnectorProfile(name: "A", kind: "openai-compatible", endpoint: "https://example.com/a", modelName: "model-a", note: "key", health: .ready)
+        let first = ConnectorProfile(
+            name: "A", kind: "openai-compatible", endpoint: "https://example.com/a", modelName: "model-a", note: "key", health: .ready)
         let second = ConnectorProfile(
             name: "B", kind: "openai-compatible", endpoint: "https://example.com/b", modelName: "model-b", note: "key", health: .attention)
         let runtime = HealthRuntime(health: .ready)
@@ -151,7 +157,8 @@ final class AppStoreConnectorProbeTests: LaicaiNativeFoundationTestCase {
     }
     func testInFlightHealthCheckRetriesAgainstUpdatedConnectorConfiguration() async throws {
         let connector = ConnectorProfile(
-            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .attention)
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key",
+            health: .attention)
         let runtime = PausedHealthRuntime()
         let store = AppStore(
             state: testState(connectors: [connector], activeConnectorID: connector.id),

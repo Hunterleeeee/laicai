@@ -55,10 +55,8 @@ public final class AuditLog: ObservableObject {
     // MARK: - SQLite Persistence
 
     private func openDB() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory()
-        let dir = (base as NSString).appendingPathComponent("Laicai")
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        let path = (dir as NSString).appendingPathComponent("audit.sqlite3")
+        let directory = LaicaiStoragePaths.ensureDirectory(LaicaiStoragePaths.appDirectory)
+        let path = directory.appendingPathComponent("audit.sqlite3").path
         if sqlite3_open(path, &database) != SQLITE_OK {
             database = nil
             return
@@ -84,7 +82,9 @@ public final class AuditLog: ObservableObject {
         var stmt: OpaquePointer?
         guard
             sqlite3_prepare_v2(
-                database, "SELECT id, timestamp, action, tool, input, output, success, user_id FROM audit_log ORDER BY timestamp DESC LIMIT ?", -1, &stmt, nil)
+                database,
+                "SELECT id, timestamp, action, tool, input, output, success, user_id FROM audit_log ORDER BY timestamp DESC LIMIT ?", -1,
+                &stmt, nil)
                 == SQLITE_OK
         else { return }
         sqlite3_bind_int(stmt, 1, Int32(maxEntries))
@@ -98,7 +98,10 @@ public final class AuditLog: ObservableObject {
             let output = String(cString: sqlite3_column_text(stmt, 5))
             let success = sqlite3_column_int(stmt, 6) != 0
             let userID = String(cString: sqlite3_column_text(stmt, 7))
-            loaded.append(AuditEntry(id: id, timestamp: timestamp, action: action, tool: tool, input: input, output: output, success: success, userID: userID))
+            loaded.append(
+                AuditEntry(
+                    id: id, timestamp: timestamp, action: action, tool: tool, input: input, output: output, success: success, userID: userID
+                ))
         }
         sqlite3_finalize(stmt)
         entries = loaded
@@ -113,14 +116,14 @@ public final class AuditLog: ObservableObject {
             """
         var insertStmt: OpaquePointer?
         guard sqlite3_prepare_v2(database, insertSQL, -1, &insertStmt, nil) == SQLITE_OK else { return }
-        sqlite3_bind_text_safe(insertStmt, 1, entry.id.uuidString)
+        sqlite3BindTextSafe(insertStmt, 1, entry.id.uuidString)
         sqlite3_bind_double(insertStmt, 2, entry.timestamp.timeIntervalSince1970)
-        sqlite3_bind_text_safe(insertStmt, 3, entry.action)
-        sqlite3_bind_text_safe(insertStmt, 4, entry.tool)
-        sqlite3_bind_text_safe(insertStmt, 5, entry.input)
-        sqlite3_bind_text_safe(insertStmt, 6, entry.output)
+        sqlite3BindTextSafe(insertStmt, 3, entry.action)
+        sqlite3BindTextSafe(insertStmt, 4, entry.tool)
+        sqlite3BindTextSafe(insertStmt, 5, entry.input)
+        sqlite3BindTextSafe(insertStmt, 6, entry.output)
         sqlite3_bind_int(insertStmt, 7, entry.success ? 1 : 0)
-        sqlite3_bind_text_safe(insertStmt, 8, entry.userID)
+        sqlite3BindTextSafe(insertStmt, 8, entry.userID)
         let stepResult = sqlite3_step(insertStmt)
         if stepResult != SQLITE_DONE && stepResult != SQLITE_ROW {
             let errMsg = String(cString: sqlite3_errmsg(database))
@@ -129,8 +132,11 @@ public final class AuditLog: ObservableObject {
         sqlite3_finalize(insertStmt)
         // Prune old entries
         var pruneStmt: OpaquePointer?
-        if sqlite3_prepare_v2(database, "DELETE FROM audit_log WHERE id NOT IN (SELECT id FROM audit_log ORDER BY timestamp DESC LIMIT ?)", -1, &pruneStmt, nil)
-            == SQLITE_OK {
+        if sqlite3_prepare_v2(
+            database, "DELETE FROM audit_log WHERE id NOT IN (SELECT id FROM audit_log ORDER BY timestamp DESC LIMIT ?)", -1, &pruneStmt,
+            nil)
+            == SQLITE_OK
+        {
             sqlite3_bind_int(pruneStmt, 1, Int32(maxEntries))
             sqlite3_step(pruneStmt)
         }
@@ -223,17 +229,255 @@ public struct SandboxPolicy: Sendable {
             return false
         }
         guard !allowedShellCommands.isEmpty else { return true }
-        return allowedShellCommands.contains { prefix in
-            let allowed = prefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard !allowed.isEmpty else { return false }
-            return normalized == allowed
-                || normalized.hasPrefix(allowed + " ")
-                || normalized.hasPrefix(allowed + "\t")
-        }
+        return ShellCommandAllowlistValidator.validate(
+            command,
+            allowedCommands: allowedShellCommands
+        )
     }
 
     public func isFileSizeAllowed(_ size: Int) -> Bool {
         size <= maxFileSize
+    }
+}
+
+private enum ShellCommandAllowlistValidator {
+    private struct CommandInvocation {
+        let executable: String
+        let arguments: [String]
+    }
+
+    private struct CommandTokenizer {
+        private var segments: [[String]] = []
+        private var tokens: [String] = []
+        private var token = ""
+        private var quote: Character?
+        private var escaped = false
+
+        mutating func tokenize(_ command: String) -> [[String]]? {
+            let characters = Array(command)
+            for index in characters.indices {
+                let next = index + 1 < characters.count ? characters[index + 1] : nil
+                guard consume(characters[index], next: next) else { return nil }
+            }
+
+            guard quote == nil, !escaped else { return nil }
+            flushSegment()
+            return segments
+        }
+
+        private mutating func consume(_ character: Character, next: Character?) -> Bool {
+            if escaped {
+                token.append(character)
+                escaped = false
+                return true
+            }
+            if character == "\\" && quote != "'" {
+                escaped = true
+                return true
+            }
+            if quote != "'", isCommandSubstitutionStart(character, next: next) {
+                return false
+            }
+            if let activeQuote = quote {
+                return consumeQuoted(character, activeQuote: activeQuote)
+            }
+            return consumeUnquoted(character, next: next)
+        }
+
+        private mutating func consumeQuoted(_ character: Character, activeQuote: Character) -> Bool {
+            if character == activeQuote {
+                quote = nil
+            } else {
+                token.append(character)
+            }
+            return true
+        }
+
+        private mutating func consumeUnquoted(_ character: Character, next: Character?) -> Bool {
+            if character == "'" || character == "\"" {
+                quote = character
+                return true
+            }
+            if character == "(" || character == ")" || (character == "<" && next == "<") {
+                return false
+            }
+            if character.isWhitespace {
+                consumeWhitespace(character)
+                return true
+            }
+            if character == ";" || character == "|" {
+                flushSegment()
+                return true
+            }
+            if character == "&" {
+                consumeAmpersand()
+                return true
+            }
+            token.append(character)
+            return true
+        }
+
+        private func isCommandSubstitutionStart(_ character: Character, next: Character?) -> Bool {
+            character == "`" || (character == "$" && next == "(")
+        }
+
+        private mutating func consumeWhitespace(_ character: Character) {
+            if character == "\n" || character == "\r" {
+                flushSegment()
+            } else {
+                flushToken()
+            }
+        }
+
+        private mutating func consumeAmpersand() {
+            if token.hasSuffix(">") {
+                token.append("&")
+            } else {
+                flushSegment()
+            }
+        }
+
+        private mutating func flushToken() {
+            guard !token.isEmpty else { return }
+            tokens.append(token)
+            token.removeAll(keepingCapacity: true)
+        }
+
+        private mutating func flushSegment() {
+            flushToken()
+            guard !tokens.isEmpty else { return }
+            segments.append(tokens)
+            tokens.removeAll(keepingCapacity: true)
+        }
+    }
+
+    static func validate(_ command: String, allowedCommands: Set<String>) -> Bool {
+        guard let invocations = invocations(in: command), !invocations.isEmpty else {
+            return false
+        }
+        let allowed = Set(
+            allowedCommands.compactMap { entry -> String? in
+                let token = entry.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
+                guard !token.isEmpty else { return nil }
+                return executableName(token)
+            })
+        return invocations.allSatisfy { invocation in
+            allowed.contains(invocation.executable)
+                && !usesInlineEvaluation(invocation)
+                && !usesUnsafeRedirection(invocation)
+                && !usesDirectMutation(invocation)
+        }
+    }
+
+    private static func invocations(in command: String) -> [CommandInvocation]? {
+        guard let segments = commandSegments(command) else { return nil }
+        var result: [CommandInvocation] = []
+        for segment in segments where !segment.isEmpty {
+            guard let invocation = invocation(from: segment) else { return nil }
+            result.append(invocation)
+        }
+        return result
+    }
+
+    /// Tokenizes only enough shell syntax to validate every command in a chain.
+    /// Unsupported constructs are rejected instead of being guessed at.
+    private static func commandSegments(_ command: String) -> [[String]]? {
+        var tokenizer = CommandTokenizer()
+        return tokenizer.tokenize(command)
+    }
+
+    private static func invocation(from tokens: [String]) -> CommandInvocation? {
+        var index = 0
+        while index < tokens.count, isEnvironmentAssignment(tokens[index]) {
+            index += 1
+        }
+        guard index < tokens.count else { return nil }
+
+        var executable = executableName(tokens[index])
+        if executable == "env" {
+            index += 1
+            while index < tokens.count, isEnvironmentAssignment(tokens[index]) {
+                index += 1
+            }
+            if index == tokens.count {
+                return CommandInvocation(executable: "env", arguments: [])
+            }
+            guard !tokens[index].hasPrefix("-") else { return nil }
+            executable = executableName(tokens[index])
+        }
+        return CommandInvocation(
+            executable: executable,
+            arguments: Array(tokens.dropFirst(index + 1))
+        )
+    }
+
+    private static func executableName(_ token: String) -> String {
+        (token as NSString).lastPathComponent.lowercased()
+    }
+
+    private static func isEnvironmentAssignment(_ token: String) -> Bool {
+        token.range(
+            of: #"^[A-Za-z_][A-Za-z0-9_]*=.*$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func usesInlineEvaluation(_ invocation: CommandInvocation) -> Bool {
+        let flags = Set(invocation.arguments)
+        switch invocation.executable {
+        case "python", "python3", "ruby":
+            return flags.contains("-c") || flags.contains("-e")
+        case "node", "deno", "bun":
+            return !flags.isDisjoint(with: ["-e", "--eval", "-p", "--print"])
+        default:
+            return false
+        }
+    }
+
+    private static func usesUnsafeRedirection(_ invocation: CommandInvocation) -> Bool {
+        invocation.arguments.contains { argument in
+            guard argument.contains(">") || argument.contains("<") else { return false }
+            let allowedDescriptorRedirect =
+                argument.range(
+                    of: #"^[012]?[<>]&[012]$"#,
+                    options: .regularExpression
+                ) != nil
+            let allowedNullRedirect =
+                argument.range(
+                    of: #"^[012]?[<>]/dev/null$"#,
+                    options: .regularExpression
+                ) != nil
+            return !allowedDescriptorRedirect && !allowedNullRedirect
+        }
+    }
+
+    private static func usesDirectMutation(_ invocation: CommandInvocation) -> Bool {
+        let arguments = invocation.arguments.map { $0.lowercased() }
+        switch invocation.executable {
+        case "sed":
+            return arguments.contains { $0 == "-i" || $0.hasPrefix("-i") }
+        case "find":
+            return arguments.contains { ["-delete", "-exec", "-execdir", "-ok", "-okdir"].contains($0) }
+        case "awk":
+            return arguments.contains { $0.contains("system(") }
+        case "curl":
+            return arguments.contains { ["-o", "--output", "--remote-name"].contains($0) }
+        case "git":
+            return isMutatingGitInvocation(arguments)
+        default:
+            return false
+        }
+    }
+
+    private static func isMutatingGitInvocation(_ arguments: [String]) -> Bool {
+        guard let subcommand = arguments.first(where: { !$0.hasPrefix("-") }) else {
+            return false
+        }
+        let readOnly = Set([
+            "status", "diff", "log", "show", "rev-parse", "grep", "ls-files",
+            "describe", "remote", "tag", "blame", "shortlog",
+        ])
+        return !readOnly.contains(subcommand)
     }
 }
 
@@ -277,6 +521,22 @@ public final class SecurityManager: ObservableObject {
         if let boundaryError = WorkspaceSandbox.shared.enforceWorkspaceBoundary(path: path) {
             return boundaryError
         }
+        return checkWritePolicy(path: path)
+    }
+
+    /// Check a write against the task's explicit workspace. Tool executions must use
+    /// this overload so a previous task's global sandbox state cannot leak into them.
+    public func checkWrite(path: String, workspaceRoot: String) -> String? {
+        if let boundaryError = WorkspaceSandbox.shared.enforceWorkspaceBoundary(
+            path: path,
+            workspaceRoot: workspaceRoot
+        ) {
+            return boundaryError
+        }
+        return checkWritePolicy(path: path)
+    }
+
+    private func checkWritePolicy(path: String) -> String? {
         if !policy.isPathAllowed(path) {
             return "路径不在允许列表中或包含敏感关键词"
         }
@@ -308,7 +568,7 @@ public final class SecurityManager: ObservableObject {
         let projectTraversalPatterns = [
             #"(^|[;&|]\s*)find\s+\.($|\s)"#,  // find . (unbounded from cwd)
             #"(^|[;&|]\s*)ls\s+(-[a-z]*r[a-z]*|-r)"#,  // ls -R
-            #"(^|[;&|]\s*)tree(\s|$)"#  // tree
+            #"(^|[;&|]\s*)tree(\s|$)"#,  // tree
         ]
         if !hasBoundedFind && projectTraversalPatterns.contains(where: { normalized.range(of: $0, options: .regularExpression) != nil }) {
             return "工具策略拦截：不要用 shell 遍历项目结构。请先使用 workspace.index 建立项目地图，再用 file.read 或 code.search 精确读取。"
@@ -316,7 +576,8 @@ public final class SecurityManager: ObservableObject {
 
         if normalized.contains("sed 's#^./##'")
             || normalized.contains("head -300")
-            || normalized.contains("head -200") {
+            || normalized.contains("head -200")
+        {
             return "工具策略拦截：这看起来是在用 shell 生成文件清单。请改用 workspace.index。"
         }
         return nil
@@ -551,14 +812,15 @@ public func shellSecurityCheck(command: String, policy: SandboxPolicy) -> String
         #"(^|[;&|]\s*)find\s+\.($|\s)"#,
         #"(^|[;&|]\s*)find\s+\S+\s+-type\s+f"#,
         #"(^|[;&|]\s*)ls\s+(-[a-z]*r[a-z]*|-r)"#,
-        #"(^|[;&|]\s*)tree(\s|$)"#
+        #"(^|[;&|]\s*)tree(\s|$)"#,
     ]
     if projectTraversalPatterns.contains(where: { normalizedCmd.range(of: $0, options: .regularExpression) != nil }) {
         return "工具策略拦截：不要用 shell 遍历项目结构。请先使用 workspace.index 建立项目地图，再用 file.read 或 code.search 精确读取。"
     }
     if normalizedCmd.contains("sed 's#^./##'")
         || normalizedCmd.contains("head -300")
-        || normalizedCmd.contains("head -200") {
+        || normalizedCmd.contains("head -200")
+    {
         return "工具策略拦截：这看起来是在用 shell 生成文件清单。请改用 workspace.index。"
     }
     return nil
@@ -586,7 +848,7 @@ public enum DangerousOperationGuard {
             #"(^|[;&|]\s*)brew\s+(install|uninstall|upgrade|tap|services)(\s|$)"#,
             #"(^|[;&|]\s*)curl\s+[^|;&]+[|]\s*(sh|bash|zsh)(\s|$)"#,
             #"(^|[;&|]\s*)wget\s+[^|;&]+[|]\s*(sh|bash|zsh)(\s|$)"#,
-            #">\s*(/etc/|/usr/|/bin/|/sbin/|/var/|/private/|~/.ssh|.*\.env)"#
+            #">\s*(/etc/|/usr/|/bin/|/sbin/|/var/|/private/|~/.ssh|.*\.env)"#,
         ]
         if exactOrPrefixPatterns.contains(where: { normalized.range(of: $0, options: .regularExpression) != nil }) {
             return "危险操作已拦截：删除、重置、系统安装、强制发布、密钥/系统路径写入等操作需要用户明确审查，不能由会话自动执行。"
@@ -597,7 +859,9 @@ public enum DangerousOperationGuard {
     public static func writeViolation(path: String, oldContent: String, context: TaskContext) -> String? {
         let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
         let lower = standardized.lowercased()
-        let sensitiveMarkers = ["/.ssh/", "/.gnupg/", "/keychain", ".env", "secret", "token", "credential", "id_rsa", "id_ed25519", ".pem", ".key"]
+        let sensitiveMarkers = [
+            "/.ssh/", "/.gnupg/", "/keychain", ".env", "secret", "token", "credential", "id_rsa", "id_ed25519", ".pem", ".key",
+        ]
         if sensitiveMarkers.contains(where: { lower.contains($0) }) {
             return "危险写入已拦截：目标看起来包含密钥、凭据或敏感配置，默认不允许会话自动准备覆盖。"
         }
@@ -606,7 +870,8 @@ public enum DangerousOperationGuard {
             !standardized.hasPrefix("/var/folders/"),
             !standardized.hasPrefix("/var/tmp/"),
             !standardized.hasPrefix("/private/var/folders/"),
-            !standardized.hasPrefix("/private/var/tmp/") {
+            !standardized.hasPrefix("/private/var/tmp/")
+        {
             return "危险写入已拦截：目标位于系统目录，必须由用户手动确认处理。"
         }
         let fileExists = FileManager.default.fileExists(atPath: standardized)
@@ -621,7 +886,8 @@ public enum DangerousOperationGuard {
                 }
                 : readKeys.contains { context.memory.readFiles.contains($0) }
             if !hasCurrentRead {
-                return "工作区保护已拦截：\(relativePath(standardized, workspaceRoot: context.workspaceRoot)) 已有未提交改动。请先用 file.read 读取当前磁盘内容，再基于最新内容生成 diff，避免覆盖用户改动。"
+                return
+                    "工作区保护已拦截：\(relativePath(standardized, workspaceRoot: context.workspaceRoot)) 已有未提交改动。请先用 file.read 读取当前磁盘内容，再基于最新内容生成 diff，避免覆盖用户改动。"
             }
         }
         return nil
@@ -645,18 +911,14 @@ public enum DangerousOperationGuard {
         guard !root.isEmpty, GitTool.isGitRepository(root) else { return false }
         let relative = relativePath(path, workspaceRoot: root)
         guard !relative.isEmpty else { return false }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "-C", root, "status", "--porcelain", "--", relative]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
         do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return false }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git", "-C", root, "status", "--porcelain", "--", relative],
+                timeout: 10
+            )
+            guard result.exitCode == 0, !result.timedOut else { return false }
+            let output = result.stdoutString
             return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         } catch {
             return false

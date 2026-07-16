@@ -33,27 +33,27 @@ extension AgentLoop {
         }
 
         let planPrompt = """
-        你是执行计划生成器。用户的\(modeLabel)请求如下：
+            你是执行计划生成器。用户的\(modeLabel)请求如下：
 
-        「\(message)」
-        \(fileContext)
+            「\(message)」
+            \(fileContext)
 
-        请用 3-6 行输出一个精简的执行计划，格式：
-        1. [具体动作] — [目标文件或工具]
-        2. …
+            请用 3-6 行输出一个精简的执行计划，格式：
+            1. [具体动作] — [目标文件或工具]
+            2. …
 
-        规则：
-        - 每步必须是具体可执行的动作（读取X文件、搜索Y、编辑Z函数、运行命令W）
-        - 不要写"理解需求"、"制定计划"这类废话
-        - 如果请求是继续/追问/修复已有会话，不要重新探索全项目；先沿用已有检查点、最近失败和已读文件，从断点推进
-        - 如果用户问“为什么/还有什么/哪里不对”，先基于当前会话 现场解释或补一小步验证，不要新开目标
-        - 优先 file_edit 而非 file_write
-        - 最后一步必须是验证或总结
-        """
+            规则：
+            - 每步必须是具体可执行的动作（读取X文件、搜索Y、编辑Z函数、运行命令W）
+            - 不要写"理解需求"、"制定计划"这类废话
+            - 如果请求是继续/追问/修复已有会话，不要重新探索全项目；先沿用已有检查点、最近失败和已读文件，从断点推进
+            - 如果用户问“为什么/还有什么/哪里不对”，先基于当前会话 现场解释或补一小步验证，不要新开目标
+            - 优先 file_edit 而非 file_write
+            - 最后一步必须是验证或总结
+            """
 
         let planMessages = [
             ChatMessage(role: "system", content: "你是计划生成器，只输出执行步骤，不要解释。"),
-            ChatMessage(role: "user", content: planPrompt)
+            ChatMessage(role: "user", content: planPrompt),
         ]
 
         let request = SendMessageRequest(
@@ -72,7 +72,7 @@ extension AgentLoop {
                 try await runtime.sendMessage(request)
             }
             group.addTask {
-                try await Task.sleep(nanoseconds: 8_000_000_000) // 8s timeout
+                try await Task.sleep(nanoseconds: 8_000_000_000)  // 8s timeout
                 throw CancellationError()
             }
             let result = try await group.next()!
@@ -112,9 +112,10 @@ extension AgentLoop {
     static func stageSummaryStep(for task: AgentTask, didComplete: Bool, hadFailure: Bool, wasTruncated: Bool) -> TaskStep {
         let toolCalls = task.steps.filter { $0.kind == .toolCall }.count
         let failedTools = task.steps.filter { $0.kind == .toolResult && $0.isFailure }.count
-        let readFiles = Set(task.steps
-            .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] })
+        let readFiles = Set(
+            task.steps
+                .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
+                .compactMap { $0.toolParams?["path"] })
         var lines = ["阶段总结"]
         lines.append("Plan：已建立执行路径。")
         lines.append("Execute：执行 \(toolCalls) 次工具调用，读取 \(readFiles.count) 个文件。")
@@ -137,7 +138,9 @@ extension AgentLoop {
         )
     }
 
-    static func shouldEmitStageSummary(for task: AgentTask, hasPlan: Bool, hadFailure: Bool, wasTruncated: Bool, isReadOnlyRun: Bool = false) -> Bool {
+    static func shouldEmitStageSummary(
+        for task: AgentTask, hasPlan: Bool, hadFailure: Bool, wasTruncated: Bool, isReadOnlyRun: Bool = false
+    ) -> Bool {
         if hasPlan || hadFailure || wasTruncated {
             return true
         }
@@ -145,54 +148,66 @@ extension AgentLoop {
             return false
         }
         return task.steps.contains { step in
-            isFileChangeTool(step.toolName ?? "") || ["document.transform", "shell.exec", "verify.build"].contains(step.toolName ?? "") || step.kind == .error
+            isFileChangeTool(step.toolName ?? "") || ["document.transform", "shell.exec", "verify.build"].contains(step.toolName ?? "")
+                || step.kind == .error
         }
     }
 
-    static func evidenceChecklistStep(for task: AgentTask, didComplete: Bool, hadFailure: Bool, wasTruncated: Bool, isReadOnlyRun: Bool = false) -> TaskStep? {
+    static func evidenceChecklistStep(
+        for task: AgentTask, didComplete: Bool, hadFailure: Bool, wasTruncated: Bool, isReadOnlyRun: Bool = false
+    ) -> TaskStep? {
         let toolCalls = task.steps.filter { $0.kind == .toolCall }
         guard !toolCalls.isEmpty || hadFailure || wasTruncated else { return nil }
         let hasPlan = task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("执行计划") }
-        guard shouldEmitEvidenceChecklist(
-            toolCalls: toolCalls,
-            hadFailure: hadFailure,
-            wasTruncated: wasTruncated,
-            hasPlan: hasPlan,
-            isReadOnlyRun: isReadOnlyRun
-        ) else { return nil }
+        guard
+            shouldEmitEvidenceChecklist(
+                toolCalls: toolCalls,
+                hadFailure: hadFailure,
+                wasTruncated: wasTruncated,
+                hasPlan: hasPlan,
+                isReadOnlyRun: isReadOnlyRun
+            )
+        else { return nil }
 
-        let readFiles = uniqueValues(task.steps
-            .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] })
-        let searchQueries = uniqueValues(toolCalls
-            .filter { $0.toolName == "code.search" || $0.toolName == "web.search" }
-            .compactMap { $0.toolParams?["query"] })
+        let readFiles = uniqueValues(
+            task.steps
+                .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
+                .compactMap { $0.toolParams?["path"] })
+        let searchQueries = uniqueValues(
+            toolCalls
+                .filter { $0.toolName == "code.search" || $0.toolName == "web.search" }
+                .compactMap { $0.toolParams?["query"] })
         let indexed = task.steps.contains { $0.kind == .toolResult && $0.toolName == "workspace.index" && !$0.isFailure }
-        let commands = uniqueValues(toolCalls
-            .filter { $0.toolName == "shell.exec" || $0.toolName == "verify.build" }
-            .compactMap { $0.toolParams?["command"] })
-        let documents = uniqueValues(task.steps
-            .filter { $0.kind == .toolResult && $0.toolName == "document.transform" && !$0.isFailure }
-            .compactMap { $0.toolParams?["outputPath"] ?? $0.toolParams?["sourcePath"] ?? $0.toolParams?["path"] })
+        let commands = uniqueValues(
+            toolCalls
+                .filter { $0.toolName == "shell.exec" || $0.toolName == "verify.build" }
+                .compactMap { $0.toolParams?["command"] })
+        let documents = uniqueValues(
+            task.steps
+                .filter { $0.kind == .toolResult && $0.toolName == "document.transform" && !$0.isFailure }
+                .compactMap { $0.toolParams?["outputPath"] ?? $0.toolParams?["sourcePath"] ?? $0.toolParams?["path"] })
         let writeReviews = task.steps.filter { $0.kind == .reviewRequest }.compactMap(\.diffFilePath)
         let failedTools = Dictionary(grouping: task.steps.filter { $0.kind == .toolResult && $0.isFailure }, by: { $0.toolName ?? "tool" })
             .map { "\($0.key) ×\($0.value.count)" }
             .sorted()
 
-        var lines = [
-            "证据清单",
-            "状态：\(didComplete && !hadFailure && !wasTruncated ? "已形成结果" : "仍需继续")"
-        ] + evidenceDetailLines(EvidenceDetailInput(
-            indexed: indexed,
-            readFiles: readFiles,
-            searchQueries: searchQueries,
-            commands: commands,
-            documents: documents,
-            writeReviews: writeReviews,
-            failedTools: failedTools,
-            wasTruncated: wasTruncated,
-            hadFailure: hadFailure
-        ))
+        var lines =
+            [
+                "证据清单",
+                "状态：\(didComplete && !hadFailure && !wasTruncated ? "已形成结果" : "仍需继续")",
+            ]
+            + evidenceDetailLines(
+                EvidenceDetailInput(
+                    indexed: indexed,
+                    readFiles: readFiles,
+                    searchQueries: searchQueries,
+                    commands: commands,
+                    documents: documents,
+                    writeReviews: writeReviews,
+                    failedTools: failedTools,
+                    wasTruncated: wasTruncated,
+                    hadFailure: hadFailure
+                ))
         if lines.count == 2 && !indexed {
             lines.append("已调用工具：\(uniqueValues(toolCalls.compactMap(\.toolName)).joined(separator: "、"))")
         }
@@ -248,7 +263,7 @@ extension AgentLoop {
             input.writeReviews.isEmpty ? nil : "待审查/已审查文件：\(uniqueValues(input.writeReviews).prefix(8).joined(separator: "、"))",
             input.failedTools.isEmpty ? nil : "失败工具：\(input.failedTools.joined(separator: "、"))",
             input.wasTruncated ? "未验证：输出仍可能被截断，需要沿用当前会话 继续。" : nil,
-            input.hadFailure ? "未验证：存在未恢复失败，需要重试或换路径。" : nil
+            input.hadFailure ? "未验证：存在未恢复失败，需要重试或换路径。" : nil,
         ].compactMap { $0 }
     }
 

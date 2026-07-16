@@ -13,10 +13,7 @@ public final class PromptRegistry {
     private let queue = DispatchQueue(label: "laicai.prompt")
 
     private init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let dir = support.appendingPathComponent("Laicai", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = LaicaiStoragePaths.ensureDirectory(LaicaiStoragePaths.appDirectory)
         self.fileURL = dir.appendingPathComponent("prompt_overrides.json")
         self.versionFileURL = dir.appendingPathComponent("prompt_versions.json")
         load()
@@ -27,7 +24,8 @@ public final class PromptRegistry {
     public func load() {
         queue.sync {
             guard let data = try? Data(contentsOf: fileURL),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: String]
+            else {
                 self.overrides = [:]
                 return
             }
@@ -88,8 +86,9 @@ public final class PromptRegistry {
     public func compare(tagA: String, tagB: String, days: Int = 7) -> PromptComparison? {
         let stats = TaskOutcomeRecorder.shared.promptTagStats(days: days)
         guard let firstStats = stats.first(where: { $0.tag == tagA }),
-              let secondStats = stats.first(where: { $0.tag == tagB }),
-              firstStats.total >= 3, secondStats.total >= 3 else { return nil }
+            let secondStats = stats.first(where: { $0.tag == tagB }),
+            firstStats.total >= 3, secondStats.total >= 3
+        else { return nil }
         let winner = firstStats.score > secondStats.score ? tagA : tagB
         let diff = abs(firstStats.score - secondStats.score)
         return PromptComparison(
@@ -103,7 +102,8 @@ public final class PromptRegistry {
     private func loadVersions() {
         queue.sync {
             guard let data = try? Data(contentsOf: versionFileURL),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Int] else {
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Int]
+            else {
                 self.versions = [:]
                 return
             }

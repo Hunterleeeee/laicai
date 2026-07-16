@@ -71,7 +71,7 @@ extension LaicaiNativeFoundationTestCase {
                   </sheetData>
                 </worksheet>
                 """
-            )
+            ),
         ]
         for (path, content) in relFiles {
             let file = temp.appendingPathComponent(path)

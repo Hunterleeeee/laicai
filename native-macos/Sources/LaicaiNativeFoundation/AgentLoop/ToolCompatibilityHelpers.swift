@@ -18,7 +18,7 @@ extension AgentLoop {
         if isLocalOllama {
             let coreTools: Set<String> = [
                 "file_read", "file_write", "file_edit", "code_search",
-                "shell_exec", "workspace_index"
+                "shell_exec", "workspace_index",
             ]
             return
                 defs
@@ -105,7 +105,7 @@ extension AgentLoop {
             "写入", "写到", "保存", "存到", "落地", "记录到", "追加到",
             "修改", "改一下", "改成", "更新", "替换", "重写", "插入",
             "新建", "创建", "创建文件", "生成", "生成文件", "输出", "输出到", "放到", "添加到",
-            "整理到", "归档到", "导出", "导出到"
+            "整理到", "归档到", "导出", "导出到",
         ]
         return writeMarkers.contains { message.contains($0) }
     }
@@ -115,7 +115,7 @@ extension AgentLoop {
             "写入", "写到", "保存", "存到", "落地", "记录到", "追加到",
             "修改", "改一下", "改成", "更新", "替换", "重写", "插入",
             "新建", "创建", "创建文件", "生成文件", "输出到", "放到", "添加到",
-            "整理到", "归档到", "导出", "导出到"
+            "整理到", "归档到", "导出", "导出到",
         ]
         return markers.contains { message.contains($0) }
     }
@@ -144,7 +144,7 @@ extension AgentLoop {
 
         let lower = context.message.lowercased()
         let explicitReadOnlyMarkers = [
-            "只分析", "先别改", "不要改", "别改", "不用改", "只给建议", "不要执行", "先不执行", "只要方案"
+            "只分析", "先别改", "不要改", "别改", "不用改", "只给建议", "不要执行", "先不执行", "只要方案",
         ]
         guard !explicitReadOnlyMarkers.contains(where: { lower.contains($0) }) else {
             return false
@@ -155,7 +155,7 @@ extension AgentLoop {
             "卡顿", "卡死", "很卡", "各种卡", "性能", "优化", "修复", "调整", "改进",
             "实现", "创建", "生成", "修改", "读取", "查看", "检查", "排查", "诊断",
             "最新进展", "进展", "继续", "接着", "没反应", "不生效",
-            "workspace", "code", "file", "bug", "error", "fix", "implement", "optimize", "performance"
+            "workspace", "code", "file", "bug", "error", "fix", "implement", "optimize", "performance",
         ]
         return actionMarkers.contains { lower.contains($0) } || expectsWriteOutput(context.message)
     }
@@ -172,7 +172,7 @@ extension AgentLoop {
             "已添加", "已新增",
             "已创建", "已经创建",
             "已整理到", "已归档",
-            "已完成"
+            "已完成",
         ]
         return claims.contains { text.contains($0) }
     }
@@ -230,7 +230,8 @@ extension AgentLoop {
     ) -> Bool {
         if ["file.read", "file.write", "file.edit", "diff.apply", "document.transform", "document_transform"].contains(toolName),
             let path = dict["path"] as? String,
-            !path.hasPrefix("/") && !workspaceRoot.isEmpty {
+            !path.hasPrefix("/") && !workspaceRoot.isEmpty
+        {
             dict["path"] = (workspaceRoot as NSString).appendingPathComponent(path)
             return true
         }

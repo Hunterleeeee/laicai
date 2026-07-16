@@ -1,7 +1,7 @@
 import Foundation
 
 #if canImport(SQLite3)
-import SQLite3
+    import SQLite3
 #endif
 
 // MARK: - SQLite Helpers
@@ -9,7 +9,7 @@ import SQLite3
 /// Safe text binding that copies the string immediately (SQLITE_TRANSIENT).
 /// Prevents use-after-free when Swift temporaries are freed before sqlite3_step.
 @discardableResult
-func sqlite3_bind_text_safe(_ stmt: OpaquePointer?, _ index: Int32, _ value: String) -> Int32 {
+func sqlite3BindTextSafe(_ stmt: OpaquePointer?, _ index: Int32, _ value: String) -> Int32 {
     sqlite3_bind_text(stmt, index, value, -1, SQLiteSupport.transientDestructor)
 }
 
@@ -45,7 +45,8 @@ enum SQLiteSupport {
 
     static func openDatabase(at path: String, readOnly: Bool) -> OpaquePointer? {
         var database: OpaquePointer?
-        let flags = readOnly
+        let flags =
+            readOnly
             ? (SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX)
             : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX)
         guard sqlite3_open_v2(path, &database, flags, nil) == SQLITE_OK, let opened = database else {

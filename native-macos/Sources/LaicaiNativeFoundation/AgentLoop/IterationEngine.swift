@@ -69,10 +69,11 @@ struct IterationEngine {
 
     private static func appendToolAvailabilityUpdate(state: inout PipelineState) {
         let names = state.toolDefs.map(\.function.name).sorted().joined(separator: "、")
-        state.messages.append(ChatMessage(
-            role: "system",
-            content: "[工具可用性更新] 阶段切换到「\(state.currentPhase.title)」，当前真实可用工具：\(names)。以这份为准，不要引用更早的工具列表。"
-        ))
+        state.messages.append(
+            ChatMessage(
+                role: "system",
+                content: "[工具可用性更新] 阶段切换到「\(state.currentPhase.title)」，当前真实可用工具：\(names)。以这份为准，不要引用更早的工具列表。"
+            ))
     }
 
     private static func compressPhaseTransitionIfNeeded(state: inout PipelineState, oldPhase: TaskPhase) {
@@ -98,12 +99,13 @@ struct IterationEngine {
         allConnectors: [ConnectorProfile]
     ) {
         guard !allConnectors.isEmpty,
-              let routed = ModelRouter.selectModel(
+            let routed = ModelRouter.selectModel(
                 forPhase: state.currentPhase,
                 connectors: allConnectors,
                 activeConnectorID: state.connector.id
-              ),
-              routed.id != state.connector.id else { return }
+            ),
+            routed.id != state.connector.id
+        else { return }
         state.connector = routed
         state.task.connectorID = routed.id
         state.usesOllamaChat = AgentLoop.usesOllamaChat(routed)
@@ -188,8 +190,9 @@ struct IterationEngine {
 
     private static func injectWorkingSetIfNeeded(state: inout PipelineState) {
         guard state.iteration > 1,
-              !state.taskContext.memory.readFiles.isEmpty,
-              !state.didInjectWorkingSet else { return }
+            !state.taskContext.memory.readFiles.isEmpty,
+            !state.didInjectWorkingSet
+        else { return }
         let workingSet = state.taskContext.memory.readFiles.prefix(8).map { path -> String in
             let name = URL(fileURLWithPath: path).lastPathComponent
             if let summary = state.taskContext.memory.fileSummaries[path], !summary.isEmpty {
@@ -259,8 +262,9 @@ struct IterationEngine {
             return "\(path) 是目录不是文件。用 shell_exec ls 或 workspace_index 查看目录内容。"
         }
         if ["file.read", "file.extract"].contains(toolName),
-           !result.success,
-           ["unsupported_binary_file", "unsupported_file_type"].contains(result.error ?? "") {
+            !result.success,
+            ["unsupported_binary_file", "unsupported_file_type"].contains(result.error ?? "")
+        {
             let target = step.toolParams?["path"] ?? "目标文件"
             return "`\(toolName)` 对 `\(target)` 是确定性失败，不要重复同参数调用。请换成受支持的提取方式或 shell_exec/系统工具；如果用户要求生成交付文件，必须真实创建目标文件后再总结。"
         }
@@ -295,7 +299,8 @@ struct IterationEngine {
         var notes: [String] = []
         for (signature, count) in failedCounts where count >= 3 && !state.circuitBrokenTools.contains(signature) {
             state.circuitBrokenTools.insert(signature)
-            notes.append(recordCircuitBreaker(signature: signature, count: count, allToolResults: allToolResults, state: state, config: config))
+            notes.append(
+                recordCircuitBreaker(signature: signature, count: count, allToolResults: allToolResults, state: state, config: config))
         }
         return notes
     }
@@ -310,7 +315,7 @@ struct IterationEngine {
         let parts = splitToolSignature(signature)
         let lastError = allToolResults.filter { $0.isFailure && $0.toolName == parts.tool }.last?.text ?? "unknown"
         let rootCause = "\(parts.tool) 对 \(parts.target) 连续失败 \(count) 次: \(String(lastError.prefix(200)))"
-        FailurePatternDB.shared.record(
+        state.config.dependencies.failurePatternDB.record(
             intent: String(describing: state.intent),
             triggerTools: [parts.tool],
             triggerKeywords: [String(parts.target.prefix(30))],
@@ -318,9 +323,8 @@ struct IterationEngine {
             preemptiveInstruction: preemptiveInstruction(for: parts.tool),
             modelName: config.modelName
         )
-        return "🔴 熔断：`\(parts.tool)` 对 `\(parts.target)` 已失败 \(count) 次。编排层将自动降级修复（file.edit→file.write, code.search→grep）。" +
-            "\n后续如果再调用该组合，编排层会直接拦截并自动执行替代方案。" +
-            "\n你只需告诉编排层要做什么（目标文件+内容），不必关心用什么工具。"
+        return "🔴 熔断：`\(parts.tool)` 对 `\(parts.target)` 已失败 \(count) 次。编排层将自动降级修复（file.edit→file.write, code.search→grep）。"
+            + "\n后续如果再调用该组合，编排层会直接拦截并自动执行替代方案。" + "\n你只需告诉编排层要做什么（目标文件+内容），不必关心用什么工具。"
     }
 
     private static func preemptiveInstruction(for toolName: String) -> String {
@@ -370,7 +374,8 @@ struct IterationEngine {
         // Only nudge verify when: code was written, no verify yet, build system exists,
         // AND we haven't already had verify failures (0% success rate indicates broken setup)
         let previousVerifyFailed = state.task.steps.contains { $0.toolName == "verify.build" && $0.isFailure == true }
-        if batchHadCodeWrite && !batchHadVerify && isToolAllowed("verify.build", config: config) && hasBuildSystem && !previousVerifyFailed {
+        if batchHadCodeWrite && !batchHadVerify && isToolAllowed("verify.build", config: config) && hasBuildSystem && !previousVerifyFailed
+        {
             let verifyNudge = "代码文件已修改。建议调用 verify_build 验证编译是否通过。如果失败，根据错误信息修复。"
             state.messages.append(ChatMessage(role: "user", content: verifyNudge))
         }
@@ -398,7 +403,8 @@ struct IterationEngine {
             return !codeExtensions.contains(ext) && !ext.isEmpty
         }
         if (batchHadWrite && batchVerifyPassed) || (batchHadNonCodeWrite && !hasBuildSystem) {
-            state.messages.append(ChatMessage(role: "system", content: "会话目标已完成：文件已成功写入\(batchVerifyPassed ? "且编译验证通过" : "")。请输出简短的完成总结，不要调用更多工具。"))
+            state.messages.append(
+                ChatMessage(role: "system", content: "会话目标已完成：文件已成功写入\(batchVerifyPassed ? "且编译验证通过" : "")。请输出简短的完成总结，不要调用更多工具。"))
         }
     }
 
@@ -441,7 +447,8 @@ struct IterationEngine {
         stateLines.append("⏱ 迭代预算：已用 \(state.iteration)/\(state.effectiveMaxIterations)，剩余 \(remaining)")
 
         if !stateLines.isEmpty {
-            state.messages.append(ChatMessage(role: "system", content: "##会话状态（第 \(state.iteration) 轮）\n" + stateLines.joined(separator: "\n")))
+            state.messages.append(
+                ChatMessage(role: "system", content: "##会话状态（第 \(state.iteration) 轮）\n" + stateLines.joined(separator: "\n")))
         }
     }
 

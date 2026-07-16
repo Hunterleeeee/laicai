@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class MultiAgentContractTests: LaicaiNativeFoundationTestCase {
@@ -38,22 +39,26 @@ final class MultiAgentContractTests: LaicaiNativeFoundationTestCase {
     }
 
     func testAutomaticMultiAgentRequiresExplicitCollaborationOrPipeline() {
-        XCTAssertFalse(MultiAgentOrchestrator.shouldUseMultiAgent(
-            message: "优化一下这个项目",
-            intent: .task
-        ))
-        XCTAssertFalse(MultiAgentOrchestrator.shouldUseMultiAgent(
-            message: "看看这个界面哪里不好用",
-            intent: .task
-        ))
-        XCTAssertTrue(MultiAgentOrchestrator.shouldUseMultiAgent(
-            message: "优化项目性能，修改代码，运行测试并审查结果",
-            intent: .task
-        ))
-        XCTAssertTrue(MultiAgentOrchestrator.shouldUseMultiAgent(
-            message: "让多个 Agent 分工协同处理这个问题",
-            intent: .task
-        ))
+        XCTAssertFalse(
+            MultiAgentOrchestrator.shouldUseMultiAgent(
+                message: "优化一下这个项目",
+                intent: .task
+            ))
+        XCTAssertFalse(
+            MultiAgentOrchestrator.shouldUseMultiAgent(
+                message: "看看这个界面哪里不好用",
+                intent: .task
+            ))
+        XCTAssertTrue(
+            MultiAgentOrchestrator.shouldUseMultiAgent(
+                message: "优化项目性能，修改代码，运行测试并审查结果",
+                intent: .task
+            ))
+        XCTAssertTrue(
+            MultiAgentOrchestrator.shouldUseMultiAgent(
+                message: "让多个 Agent 分工协同处理这个问题",
+                intent: .task
+            ))
     }
 
     func testAllRolesUseCodexFullPath() {

@@ -20,16 +20,20 @@ struct TaskFinalizer {
         }
 
         // ── Evidence-based finalization ──
-        let hasFinalOutput = state.task.steps.contains { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let hasFinalOutput = state.task.steps.contains {
+            $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
         if !state.didComplete && !state.hadFailure && !state.wasTruncated && !hasFinalOutput {
-            if let summaryStep = try? await AgentLoop.finalizeFromCollectedEvidence(AgentLoop.EvidenceFinalizationRequest(
-                task: state.task,
-                originalMessage: state.message,
-                connector: state.connector,
-                runtime: runtime,
-                systemPrompt: systemPrompt,
-                maxOutputTokens: config.maxTokensPerTurn
-            )) {
+            if let summaryStep = try? await AgentLoop.finalizeFromCollectedEvidence(
+                AgentLoop.EvidenceFinalizationRequest(
+                    task: state.task,
+                    originalMessage: state.message,
+                    connector: state.connector,
+                    runtime: runtime,
+                    systemPrompt: systemPrompt,
+                    maxOutputTokens: config.maxTokensPerTurn
+                ))
+            {
                 state.task.steps.append(summaryStep)
                 onStep(summaryStep)
                 state.didComplete = true
@@ -54,14 +58,15 @@ struct TaskFinalizer {
         emitDiagnosticAudit(state: &state, onStep: onStep)
 
         // ── Final status ──
-        let finalStatus: TaskStatus = AgentLoop.meetsCompletionCriteria(
-            task: state.task,
-            intent: state.intent,
-            didComplete: state.didComplete,
-            hadFailure: state.hadFailure,
-            wasTruncated: state.wasTruncated,
-            isReadOnlyRun: state.isReadOnlyRun
-        ) ? .completed : .failed
+        let finalStatus: TaskStatus =
+            AgentLoop.meetsCompletionCriteria(
+                task: state.task,
+                intent: state.intent,
+                didComplete: state.didComplete,
+                hadFailure: state.hadFailure,
+                wasTruncated: state.wasTruncated,
+                isReadOnlyRun: state.isReadOnlyRun
+            ) ? .completed : .failed
         state.task.status = finalStatus
         state.task.updatedAt = .now
         updateExecutionLedger(state: &state, finalStatus: finalStatus)
@@ -92,7 +97,8 @@ struct TaskFinalizer {
         // ── Persist task memory ──
         state.task.context = state.taskContext
         TaskMemoryStore.save(state.taskContext.memory, workspaceRoot: config.workspaceRoot)
-        TaskMemoryStore.appendHistory(memory: state.taskContext.memory, workspaceRoot: config.workspaceRoot, taskDescription: state.task.title)
+        TaskMemoryStore.appendHistory(
+            memory: state.taskContext.memory, workspaceRoot: config.workspaceRoot, taskDescription: state.task.title)
 
         // ── Update project knowledge ──
         if !config.workspaceRoot.isEmpty {
@@ -116,7 +122,8 @@ struct TaskFinalizer {
     // MARK: - Private Helpers
 
     private static func emitStageAudit(state: inout PipelineState, onStep: @MainActor (TaskStep) -> Void) {
-        let hasPlan = state.task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("执行计划") }
+        let hasPlan =
+            state.task.steps.contains { $0.kind == .aiThinking && $0.text.hasPrefix("执行计划") }
             || state.taskContext.memory.userDecisions.contains { $0.hasPrefix("执行计划：") }
         if AgentLoop.shouldEmitStageSummary(
             for: state.task,
@@ -252,13 +259,15 @@ struct TaskFinalizer {
 
     private static func recordDocumentArtifact(_ step: TaskStep, in ledger: inout AgentExecutionLedger) {
         guard step.toolName == "document.transform",
-              let path = step.toolParams?["outputPath"] ?? step.toolParams?["pdfPath"] ?? step.diffFilePath else { return }
+            let path = step.toolParams?["outputPath"] ?? step.toolParams?["pdfPath"] ?? step.diffFilePath
+        else { return }
         ledger.appendUnique(path, to: \.artifacts)
     }
 
     private static func recordCommand(_ step: TaskStep, in ledger: inout AgentExecutionLedger) {
         guard step.toolName == "shell.exec" || step.toolName == "verify.build",
-              let command = step.toolParams?["command"] else { return }
+            let command = step.toolParams?["command"]
+        else { return }
         ledger.appendUnique(command, to: \.commands)
     }
 
@@ -329,17 +338,22 @@ struct TaskFinalizer {
         guard finalStatus == .completed, !state.taskContext.workspaceRoot.isEmpty, let repo = AgentLoop.sharedRepository else { return }
 
         for (path, summary) in state.taskContext.memory.fileSummaries.prefix(10) {
-            repo.saveMemory(workspace: state.taskContext.workspaceRoot, category: "file_structure", key: path, value: String(summary.prefix(200)))
+            repo.saveMemory(
+                workspace: state.taskContext.workspaceRoot, category: "file_structure", key: path, value: String(summary.prefix(200)))
         }
         if let verifyStep = state.task.steps.first(where: { $0.toolName == "verify.build" && !$0.isFailure }),
-           let cmd = verifyStep.toolParams?["command"] ?? verifyStep.text.components(separatedBy: "命令：").last?.components(separatedBy: "\n").first {
-            repo.saveMemory(workspace: state.taskContext.workspaceRoot, category: "build", key: "build_command", value: String(cmd.prefix(200)))
+            let cmd = verifyStep.toolParams?["command"]
+                ?? verifyStep.text.components(separatedBy: "命令：").last?.components(separatedBy: "\n").first
+        {
+            repo.saveMemory(
+                workspace: state.taskContext.workspaceRoot, category: "build", key: "build_command", value: String(cmd.prefix(200)))
         }
     }
 
     private static func recordToolPatterns(state: PipelineState, config: AgentLoop.Config, finalStatus: TaskStatus) {
         guard finalStatus == .completed && state.iteration <= 5 && !state.taskContext.workspaceRoot.isEmpty,
-              let repo = AgentLoop.sharedRepository else { return }
+            let repo = AgentLoop.sharedRepository
+        else { return }
 
         let toolSequence = state.task.steps
             .filter { $0.kind == .toolCall }
@@ -360,26 +374,27 @@ struct TaskFinalizer {
         let toolCalls = state.task.steps.filter { $0.kind == .toolCall }.count
         let toolFailures = state.task.steps.filter { $0.kind == .toolResult && $0.isFailure }.count
         let userFollowups = state.task.steps.filter { $0.kind == .userInput && $0.text != state.message }.count
-        let promptTag = PromptRegistry.shared.versionTag(for: PromptRegistry.tagContinueTask)
+        let promptTag = state.config.dependencies.promptRegistry.versionTag(for: PromptRegistry.tagContinueTask)
 
-        TaskOutcomeRecorder.shared.record(TaskOutcomeRecord(
-            taskID: state.task.id.uuidString,
-            intent: state.intentString,
-            routeLabel: "会话 执行",
-            executionMode: executionModeLabel(state: state, config: config),
-            iterations: state.iteration,
-            status: finalStatus,
-            hadFailure: state.hadFailure,
-            wasCancelled: false,
-            wasTruncated: state.wasTruncated,
-            toolCalls: toolCalls,
-            toolFailures: toolFailures,
-            durationSeconds: duration,
-            userFollowupCount: userFollowups,
-            promptTag: promptTag,
-            userRating: 0,
-            modelName: config.modelName
-        ))
+        state.config.dependencies.taskOutcomeRecorder.record(
+            TaskOutcomeRecord(
+                taskID: state.task.id.uuidString,
+                intent: state.intentString,
+                routeLabel: "会话 执行",
+                executionMode: executionModeLabel(state: state, config: config),
+                iterations: state.iteration,
+                status: finalStatus,
+                hadFailure: state.hadFailure,
+                wasCancelled: false,
+                wasTruncated: state.wasTruncated,
+                toolCalls: toolCalls,
+                toolFailures: toolFailures,
+                durationSeconds: duration,
+                userFollowupCount: userFollowups,
+                promptTag: promptTag,
+                userRating: 0,
+                modelName: config.modelName
+            ))
     }
 
     static func executionModeLabel(state: PipelineState, config: AgentLoop.Config) -> String {
@@ -387,18 +402,21 @@ struct TaskFinalizer {
         return "codexFull"
     }
 
-    private static func computeOutcomeScore(state: PipelineState, config: AgentLoop.Config, finalStatus: TaskStatus, duration: Double) -> Int {
+    private static func computeOutcomeScore(state: PipelineState, config: AgentLoop.Config, finalStatus: TaskStatus, duration: Double)
+        -> Int
+    {
         let userFollowups = state.task.steps.filter { $0.kind == .userInput && $0.text != state.message }.count
-        return ResultEvaluator.score(ResultEvaluator.ScoreRequest(
-            status: finalStatus,
-            iterations: state.iteration,
-            maxIterations: state.effectiveMaxIterations,
-            hadFailure: state.hadFailure,
-            wasCancelled: false,
-            wasTruncated: state.wasTruncated,
-            durationSeconds: duration,
-            userFollowupCount: userFollowups
-        ))
+        return ResultEvaluator.score(
+            ResultEvaluator.ScoreRequest(
+                status: finalStatus,
+                iterations: state.iteration,
+                maxIterations: state.effectiveMaxIterations,
+                hadFailure: state.hadFailure,
+                wasCancelled: false,
+                wasTruncated: state.wasTruncated,
+                durationSeconds: duration,
+                userFollowupCount: userFollowups
+            ))
     }
 
     private static func learnFromFailures(state: PipelineState, config: AgentLoop.Config, finalStatus: TaskStatus, outcomeScore: Int) {
@@ -429,7 +447,7 @@ struct TaskFinalizer {
             instructionText = "遇到类似意图时，优先确认用户需求范围，避免过度执行。"
         }
 
-        FailurePatternDB.shared.record(
+        state.config.dependencies.failurePatternDB.record(
             intent: state.intentString,
             triggerTools: Array(Set(recentTools)),
             triggerKeywords: [state.message],
@@ -443,7 +461,7 @@ struct TaskFinalizer {
         // Close the loop: if patterns were injected and task succeeded, mark them as effective
         if finalStatus == .completed && !state.injectedPatternHashes.isEmpty {
             for hash in state.injectedPatternHashes {
-                FailurePatternDB.shared.markSuccess(patternHash: hash)
+                state.config.dependencies.failurePatternDB.markSuccess(patternHash: hash)
             }
         }
 
@@ -459,26 +477,27 @@ struct TaskFinalizer {
                 return orderedTools.filter { seen.insert($0).inserted }
             }()
             let strategy = dedupedSequence.isEmpty ? "工具辅助完成" : dedupedSequence.prefix(8).joined(separator: " → ")
-            SkillEvolutionEngine.shared.extractSkill(SkillExtractionRequest(
-                taskTitle: state.task.title,
-                intent: state.intentString,
-                toolsUsed: uniqueTools,
-                modelName: config.modelName,
-                outcomeScore: outcomeScore,
-                strategy: strategy
-            ))
+            state.config.dependencies.skillEvolutionEngine.extractSkill(
+                SkillExtractionRequest(
+                    taskTitle: state.task.title,
+                    intent: state.intentString,
+                    toolsUsed: uniqueTools,
+                    modelName: config.modelName,
+                    outcomeScore: outcomeScore,
+                    strategy: strategy
+                ))
         }
 
         // Update Q-value if a learned skill was used
         if let usedSkillID = state.task.context.metadata["learnedSkillID"].flatMap(Int.init) {
             if finalStatus == .completed {
-                SkillEvolutionEngine.shared.updateQ(
+                state.config.dependencies.skillEvolutionEngine.updateQ(
                     skillID: usedSkillID,
                     outcomeScore: outcomeScore,
                     succeeded: true
                 )
             } else {
-                SkillEvolutionEngine.shared.penalize(skillID: usedSkillID)
+                state.config.dependencies.skillEvolutionEngine.penalize(skillID: usedSkillID)
             }
         }
     }
@@ -489,14 +508,18 @@ struct TaskFinalizer {
                 var entry: [String: String] = [
                     "kind": step.kind == .toolCall ? "call" : "result",
                     "tool": step.toolName ?? "",
-                    "text": String(step.text.prefix(200))
+                    "text": String(step.text.prefix(200)),
                 ]
                 if step.isFailure { entry["failure"] = "true" }
                 return entry
             }
         if let traceData = try? JSONSerialization.data(withJSONObject: traceEntries),
-           let traceJSON = String(data: traceData, encoding: .utf8) {
-            TaskOutcomeRecorder.shared.storeTrace(taskID: state.task.id.uuidString, traceJSON: traceJSON)
+            let traceJSON = String(data: traceData, encoding: .utf8)
+        {
+            state.config.dependencies.taskOutcomeRecorder.storeTrace(
+                taskID: state.task.id.uuidString,
+                traceJSON: traceJSON
+            )
         }
     }
 
@@ -508,22 +531,19 @@ struct TaskFinalizer {
         let workRoot = state.taskContext.metadata["worktreeOriginalRoot"] ?? config.workspaceRoot
         guard !workRoot.isEmpty, state.intent != .chat else { return }
 
-        let diffProc = Process()
-        diffProc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        diffProc.arguments = ["diff", "--stat"]
-        diffProc.currentDirectoryURL = URL(fileURLWithPath: workRoot)
-        let diffPipe = Pipe()
-        diffProc.standardOutput = diffPipe
-        diffProc.standardError = diffPipe
-
+        let result: ProcessRunResult
         do {
-            try diffProc.run()
+            result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                arguments: ["diff", "--stat"],
+                currentDirectoryURL: URL(fileURLWithPath: workRoot),
+                timeout: 15
+            )
         } catch {
             return
         }
-        diffProc.waitUntilExit()
-
-        let diffOutput = String(data: diffPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard result.exitCode == 0, !result.timedOut else { return }
+        let diffOutput = result.stdoutString
         guard !diffOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
         let diffStep = TaskStep(

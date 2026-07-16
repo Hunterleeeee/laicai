@@ -82,10 +82,8 @@ public final class SkillEvolutionEngine {
     private let maxSkills: Int = 200
 
     public init(path: String? = nil) {
-        let base = path ?? (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory())
-        let dir = (base as NSString).appendingPathComponent("Laicai")
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        self.path = (dir as NSString).appendingPathComponent("skill_evolution.sqlite3")
+        let directory = LaicaiStoragePaths.appDirectory(basePath: path)
+        self.path = directory.appendingPathComponent("skill_evolution.sqlite3").path
         open()
         migrate()
     }
@@ -147,8 +145,8 @@ public final class SkillEvolutionEngine {
                 """
             var checkStmt: OpaquePointer?
             guard sqlite3_prepare_v2(database, checkSQL, -1, &checkStmt, nil) == SQLITE_OK else { return }
-            sqlite3_bind_text_safe(checkStmt, 1, request.intent)
-            sqlite3_bind_text_safe(checkStmt, 2, request.modelName)
+            sqlite3BindTextSafe(checkStmt, 1, request.intent)
+            sqlite3BindTextSafe(checkStmt, 2, request.modelName)
 
             var existingID: Int?
             while sqlite3_step(checkStmt) == SQLITE_ROW {
@@ -196,11 +194,11 @@ public final class SkillEvolutionEngine {
                     """
                 var insertStmt: OpaquePointer?
                 guard sqlite3_prepare_v2(database, insertSQL, -1, &insertStmt, nil) == SQLITE_OK else { return }
-                sqlite3_bind_text_safe(insertStmt, 1, skillName)
-                sqlite3_bind_text_safe(insertStmt, 2, request.intent)
-                sqlite3_bind_text_safe(insertStmt, 3, toolStr)
-                sqlite3_bind_text_safe(insertStmt, 4, request.strategy)
-                sqlite3_bind_text_safe(insertStmt, 5, request.modelName)
+                sqlite3BindTextSafe(insertStmt, 1, skillName)
+                sqlite3BindTextSafe(insertStmt, 2, request.intent)
+                sqlite3BindTextSafe(insertStmt, 3, toolStr)
+                sqlite3BindTextSafe(insertStmt, 4, request.strategy)
+                sqlite3BindTextSafe(insertStmt, 5, request.modelName)
                 sqlite3_bind_double(insertStmt, 6, Double(request.outcomeScore) / 100.0)
                 sqlite3_bind_double(insertStmt, 7, now)
                 sqlite3_bind_double(insertStmt, 8, now)
@@ -230,10 +228,10 @@ public final class SkillEvolutionEngine {
             """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        sqlite3_bind_text_safe(stmt, 1, intent)
+        sqlite3BindTextSafe(stmt, 1, intent)
         sqlite3_bind_double(stmt, 2, minQ)
-        sqlite3_bind_text_safe(stmt, 3, modelName)
-        sqlite3_bind_text_safe(stmt, 4, modelName)
+        sqlite3BindTextSafe(stmt, 3, modelName)
+        sqlite3BindTextSafe(stmt, 4, modelName)
 
         var candidates: [LearnedSkill] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -270,7 +268,8 @@ public final class SkillEvolutionEngine {
         return
             pool
             .map { skill -> SkillMatchCandidate in
-                let skillTokens = Self.matchTokens(in: [skill.name, skill.strategy, skill.toolSequence.joined(separator: " ")].joined(separator: " "))
+                let skillTokens = Self.matchTokens(
+                    in: [skill.name, skill.strategy, skill.toolSequence.joined(separator: " ")].joined(separator: " "))
                 let overlapCount = messageTokens.intersection(skillTokens).count
                 let denominator = Double(max(1, min(messageTokens.count, 8)))
                 let semanticScore = Double(overlapCount) / denominator
@@ -419,7 +418,9 @@ public final class SkillEvolutionEngine {
         if (lower.contains("搜索") || lower.contains("查找") || lower.contains("search")) && tools.contains("code.search") {
             bonus += 0.20
         }
-        if (lower.contains("修改") || lower.contains("修复") || lower.contains("改")) && (tools.contains("file.edit") || tools.contains("file.write")) {
+        if (lower.contains("修改") || lower.contains("修复") || lower.contains("改"))
+            && (tools.contains("file.edit") || tools.contains("file.write"))
+        {
             bonus += 0.25
         }
         return bonus

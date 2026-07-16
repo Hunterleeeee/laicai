@@ -16,10 +16,8 @@ public final class FailurePatternDB {
     private let path: String
 
     public init(path: String? = nil) {
-        let base = path ?? (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory())
-        let dir = (base as NSString).appendingPathComponent("Laicai")
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        self.path = (dir as NSString).appendingPathComponent("patterns.sqlite3")
+        let directory = LaicaiStoragePaths.appDirectory(basePath: path)
+        self.path = directory.appendingPathComponent("patterns.sqlite3").path
         queue.setSpecific(key: Self.queueKey, value: ())
         open()
         migrate()
@@ -109,7 +107,7 @@ public final class FailurePatternDB {
             if sqlite3_prepare_v2(database, updateSQL, -1, &updateStmt, nil) == SQLITE_OK {
                 defer { sqlite3_finalize(updateStmt) }
                 sqlite3_bind_double(updateStmt, 1, now)
-                sqlite3_bind_text_safe(updateStmt, 2, hash)
+                sqlite3BindTextSafe(updateStmt, 2, hash)
                 sqlite3_step(updateStmt)
                 let rowsChanged = sqlite3_changes(database)
                 if rowsChanged > 0 { return }
@@ -125,15 +123,15 @@ public final class FailurePatternDB {
             var insertStmt: OpaquePointer?
             guard sqlite3_prepare_v2(database, insertSQL, -1, &insertStmt, nil) == SQLITE_OK else { return }
             defer { sqlite3_finalize(insertStmt) }
-            sqlite3_bind_text_safe(insertStmt, 1, hash)
-            sqlite3_bind_text_safe(insertStmt, 2, intent)
-            sqlite3_bind_text_safe(insertStmt, 3, tools)
-            sqlite3_bind_text_safe(insertStmt, 4, keywords)
-            sqlite3_bind_text_safe(insertStmt, 5, rootCause)
-            sqlite3_bind_text_safe(insertStmt, 6, preemptiveInstruction)
+            sqlite3BindTextSafe(insertStmt, 1, hash)
+            sqlite3BindTextSafe(insertStmt, 2, intent)
+            sqlite3BindTextSafe(insertStmt, 3, tools)
+            sqlite3BindTextSafe(insertStmt, 4, keywords)
+            sqlite3BindTextSafe(insertStmt, 5, rootCause)
+            sqlite3BindTextSafe(insertStmt, 6, preemptiveInstruction)
             sqlite3_bind_double(insertStmt, 7, now)
             sqlite3_bind_double(insertStmt, 8, now)
-            sqlite3_bind_text_safe(insertStmt, 9, modelName)
+            sqlite3BindTextSafe(insertStmt, 9, modelName)
             sqlite3_step(insertStmt)
         }
     }
@@ -159,10 +157,10 @@ public final class FailurePatternDB {
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
             defer { sqlite3_finalize(stmt) }
-            sqlite3_bind_text_safe(stmt, 1, intent)
+            sqlite3BindTextSafe(stmt, 1, intent)
             sqlite3_bind_double(stmt, 2, cutoff)
-            sqlite3_bind_text_safe(stmt, 3, modelName)
-            sqlite3_bind_text_safe(stmt, 4, modelName)
+            sqlite3BindTextSafe(stmt, 3, modelName)
+            sqlite3BindTextSafe(stmt, 4, modelName)
             let now = Date()
             let decayThreshold: TimeInterval = 14 * 86400
             var results: [FailurePattern] = []
@@ -182,7 +180,8 @@ public final class FailurePatternDB {
                 // Use token similarity for keyword matching (P2: better than pure substring)
                 let keywordTokens = keywords.reduce(into: Set<String>()) { $0.formUnion(Self.tokenize($1)) }
                 let sim = Self.similarity(messageTokens, keywordTokens)
-                let keywordMatch = sim > 0.15 || (!keywords.isEmpty && keywords.contains(where: { message.localizedCaseInsensitiveContains($0) }))
+                let keywordMatch =
+                    sim > 0.15 || (!keywords.isEmpty && keywords.contains(where: { message.localizedCaseInsensitiveContains($0) }))
                 if toolOverlap || keywordMatch {
                     let lastSeen = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 9))
                     let age = now.timeIntervalSince(lastSeen)
@@ -215,7 +214,7 @@ public final class FailurePatternDB {
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return }
             defer { sqlite3_finalize(stmt) }
-            sqlite3_bind_text_safe(stmt, 1, patternHash)
+            sqlite3BindTextSafe(stmt, 1, patternHash)
             sqlite3_step(stmt)
         }
     }

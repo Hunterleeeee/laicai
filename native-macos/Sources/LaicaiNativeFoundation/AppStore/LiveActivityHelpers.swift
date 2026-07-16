@@ -9,7 +9,7 @@ extension AppStore {
         "wiki.build": "构建知识页…",
         "image.generate": "生成图片…",
         "verify.build": "验证构建…",
-        "llm": "LLM 分析…"
+        "llm": "LLM 分析…",
     ]
 
     func updateLiveActivity(from step: TaskStep, for threadID: UUID) {

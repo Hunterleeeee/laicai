@@ -9,7 +9,8 @@ extension AppStore {
         let step = state.threads[threadIndex].steps[stepIndex]
         guard step.approved == nil else { return }
         guard let filePath = step.diffFilePath,
-              let newContent = step.diffNewContent else {
+            let newContent = step.diffNewContent
+        else {
             state.threads[threadIndex].steps[stepIndex].approved = false
             appendReviewResult(to: threadIndex, approved: false, text: "缺少文件变更内容，无法写入。")
             syncAgentSnapshot(at: threadIndex)
@@ -18,7 +19,8 @@ extension AppStore {
             return
         }
 
-        let fullPath = step.toolParams?["fullPath"]
+        let fullPath =
+            step.toolParams?["fullPath"]
             ?? absolutePath(for: filePath, workspaceRoot: state.threads[threadIndex].context.workspaceRoot)
         let createDirectories = step.toolParams?["createDirectories"] != "false"
 
@@ -35,9 +37,11 @@ extension AppStore {
 
         // Verify file hasn't been modified externally since review was created.
         if let oldContent = step.diffOldContent,
-           FileManager.default.fileExists(atPath: fullPath) {
+            FileManager.default.fileExists(atPath: fullPath)
+        {
             if let currentContent = try? String(contentsOfFile: fullPath, encoding: .utf8),
-               currentContent != oldContent {
+                currentContent != oldContent
+            {
                 state.threads[threadIndex].steps[stepIndex].approved = false
                 appendReviewResult(to: threadIndex, approved: false, text: "文件在审查期间被外部修改，写入已取消。请重新读取文件并提交新变更。")
                 syncAgentSnapshot(at: threadIndex)
@@ -73,9 +77,10 @@ extension AppStore {
 
     public func approveHunk(taskID: UUID, stepID: UUID, hunkID: UUID) {
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }),
-              let stepIndex = state.threads[threadIndex].steps.firstIndex(where: { $0.id == stepID }),
-              var hunks = state.threads[threadIndex].steps[stepIndex].diffHunks,
-              let hunkIndex = hunks.firstIndex(where: { $0.id == hunkID }) else { return }
+            let stepIndex = state.threads[threadIndex].steps.firstIndex(where: { $0.id == stepID }),
+            var hunks = state.threads[threadIndex].steps[stepIndex].diffHunks,
+            let hunkIndex = hunks.firstIndex(where: { $0.id == hunkID })
+        else { return }
         hunks[hunkIndex].approved = true
         state.threads[threadIndex].steps[stepIndex].diffHunks = hunks
         checkAllHunksDecided(threadIndex: threadIndex, stepIndex: stepIndex)
@@ -86,9 +91,10 @@ extension AppStore {
 
     public func rejectHunk(taskID: UUID, stepID: UUID, hunkID: UUID) {
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }),
-              let stepIndex = state.threads[threadIndex].steps.firstIndex(where: { $0.id == stepID }),
-              var hunks = state.threads[threadIndex].steps[stepIndex].diffHunks,
-              let hunkIndex = hunks.firstIndex(where: { $0.id == hunkID }) else { return }
+            let stepIndex = state.threads[threadIndex].steps.firstIndex(where: { $0.id == stepID }),
+            var hunks = state.threads[threadIndex].steps[stepIndex].diffHunks,
+            let hunkIndex = hunks.firstIndex(where: { $0.id == hunkID })
+        else { return }
         hunks[hunkIndex].approved = false
         state.threads[threadIndex].steps[stepIndex].diffHunks = hunks
         checkAllHunksDecided(threadIndex: threadIndex, stepIndex: stepIndex)
@@ -99,7 +105,8 @@ extension AppStore {
 
     private func checkAllHunksDecided(threadIndex: Int, stepIndex: Int) {
         guard let hunks = state.threads[threadIndex].steps[stepIndex].diffHunks,
-              hunks.allSatisfy({ $0.approved != nil }) else { return }
+            hunks.allSatisfy({ $0.approved != nil })
+        else { return }
         let approvedHunks = hunks.filter { $0.approved == true }
         if approvedHunks.isEmpty {
             state.threads[threadIndex].steps[stepIndex].approved = false
@@ -108,7 +115,8 @@ extension AppStore {
             return
         }
         guard let filePath = state.threads[threadIndex].steps[stepIndex].diffFilePath,
-              let oldContent = state.threads[threadIndex].steps[stepIndex].diffOldContent else {
+            let oldContent = state.threads[threadIndex].steps[stepIndex].diffOldContent
+        else {
             state.threads[threadIndex].steps[stepIndex].approved = false
             appendReviewResult(to: threadIndex, approved: false, text: "缺少文件信息")
             syncAgentSnapshot(at: threadIndex)
@@ -118,7 +126,8 @@ extension AppStore {
         for hunk in approvedHunks.sorted(by: { $0.index < $1.index }) {
             result = result.replacingOccurrences(of: hunk.oldText, with: hunk.newText)
         }
-        let fullPath = state.threads[threadIndex].steps[stepIndex].toolParams?["fullPath"]
+        let fullPath =
+            state.threads[threadIndex].steps[stepIndex].toolParams?["fullPath"]
             ?? absolutePath(for: filePath, workspaceRoot: state.threads[threadIndex].context.workspaceRoot)
         let createDirectories = state.threads[threadIndex].steps[stepIndex].toolParams?["createDirectories"] != "false"
         if let securityError = SecurityManager.shared.checkWrite(path: fullPath) {

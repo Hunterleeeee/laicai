@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Diagnostics Panel
 
@@ -126,11 +126,13 @@ struct DiagnosticsPanel: View {
             tint: store.hasRunningGenerationTasks ? Brand.teal : Semantic.success
         ) {
             VStack(spacing: AppSpace.small) {
-                diagRow("状态", store.hasRunningGenerationTasks ? "生成中" : "空闲",
-                        color: store.hasRunningGenerationTasks ? Semantic.toolRunning : Semantic.success)
+                diagRow(
+                    "状态", store.hasRunningGenerationTasks ? "生成中" : "空闲",
+                    color: store.hasRunningGenerationTasks ? Semantic.toolRunning : Semantic.success)
                 Divider().opacity(0.3)
-                diagRow("模型", store.state.activeConnector?.modelName ?? "未配置",
-                        color: store.state.activeConnector != nil ? TextGrade.primary : Semantic.warning)
+                diagRow(
+                    "模型", store.state.activeConnector?.modelName ?? "未配置",
+                    color: store.state.activeConnector != nil ? TextGrade.primary : Semantic.warning)
                 Divider().opacity(0.3)
                 diagRow("端点", store.state.activeConnector?.endpoint ?? "—", color: TextGrade.secondary)
 
@@ -216,7 +218,7 @@ struct DiagnosticsPanel: View {
             "工具活动: \(store.state.toolActivities.count)",
             "审计: \(auditLog.recentEntries.count)",
             "内存: \(formatMemory())",
-            "系统: \(ProcessInfo.processInfo.operatingSystemVersionString)"
+            "系统: \(ProcessInfo.processInfo.operatingSystemVersionString)",
         ]
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
@@ -282,31 +284,31 @@ private struct AuditEntryRow: View {
                     HStack(alignment: .center, spacing: AppSpace.small) {
                         // Status + tool icon
                         ZStack {
-                        Circle()
-                            .fill(entry.success ? Semantic.success.opacity(0.12) : Semantic.error.opacity(0.12))
-                            .frame(width: 22, height: 22)
-                        Image(systemName: toolIcon)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(entry.success ? Semantic.success : Semantic.error)
-                    }
+                            Circle()
+                                .fill(entry.success ? Semantic.success.opacity(0.12) : Semantic.error.opacity(0.12))
+                                .frame(width: 22, height: 22)
+                            Image(systemName: toolIcon)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(entry.success ? Semantic.success : Semantic.error)
+                        }
 
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(summaryText)
-                            .font(AppFont.captionMedium)
-                            .foregroundStyle(TextGrade.primary)
-                            .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(summaryText)
+                                .font(AppFont.captionMedium)
+                                .foregroundStyle(TextGrade.primary)
+                                .lineLimit(1)
 
-                        Text(RelativeTimeFormatter.string(for: entry.timestamp))
-                            .font(AppFont.tiny)
-                            .foregroundStyle(TextGrade.ghost)
-                    }
+                            Text(RelativeTimeFormatter.string(for: entry.timestamp))
+                                .font(AppFont.tiny)
+                                .foregroundStyle(TextGrade.ghost)
+                        }
 
-                    Spacer(minLength: 0)
+                        Spacer(minLength: 0)
 
-                    if hasDetails {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(TextGrade.ghost)
+                        if hasDetails {
+                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(TextGrade.ghost)
                         }
                     }
                 }
@@ -373,7 +375,7 @@ private struct AuditEntryRow: View {
         "wiki.build": "知识页生成",
         "image.generate": "图片生成",
         "batch.apply": "批量写入",
-        "batch.rollback": "批量回滚"
+        "batch.rollback": "批量回滚",
     ]
 
     private func displayToolName(_ name: String) -> String {
@@ -412,7 +414,7 @@ struct SessionCostCard: View {
     var body: some View {
         let stats = aggregateMetrics()
         if stats.totalInput > 0 || stats.totalOutput > 0 {
-                contextSectionCard(title: "会话消耗") {
+            contextSectionCard(title: "会话消耗") {
                 VStack(alignment: .leading, spacing: AppSpace.small) {
                     HStack(spacing: AppSpace.large) {
                         costMetric(icon: "arrow.down.left", label: "输入", value: formatTokens(stats.totalInput), color: Brand.primary)
@@ -422,15 +424,20 @@ struct SessionCostCard: View {
                     Divider().opacity(0.3)
 
                     HStack(spacing: AppSpace.large) {
-                        costMetric(icon: "sum", label: "总计", value: formatTokens(stats.totalInput + stats.totalOutput), color: TextGrade.primary)
+                        costMetric(
+                            icon: "sum", label: "总计", value: formatTokens(stats.totalInput + stats.totalOutput), color: TextGrade.primary)
                         costMetric(icon: "dollarsign.circle", label: "预估", value: formatCost(stats.estimatedCost), color: Semantic.warning)
                     }
 
                     if stats.requestCount > 1 {
                         HStack(spacing: AppSpace.large) {
-                            costMetric(icon: "arrow.triangle.2.circlepath", label: "请求", value: "\(stats.requestCount) 次", color: TextGrade.secondary)
+                            costMetric(
+                                icon: "arrow.triangle.2.circlepath", label: "请求", value: "\(stats.requestCount) 次",
+                                color: TextGrade.secondary)
                             if stats.avgSpeed > 0 {
-                                costMetric(icon: "speedometer", label: "均速", value: "\(String(format: "%.0f", stats.avgSpeed)) t/s", color: TextGrade.secondary)
+                                costMetric(
+                                    icon: "speedometer", label: "均速", value: "\(String(format: "%.0f", stats.avgSpeed)) t/s",
+                                    color: TextGrade.secondary)
                             }
                         }
                     }
@@ -522,7 +529,9 @@ struct OutcomeStatsPanel: View {
                     .font(AppFont.bodyMedium)
                     .foregroundStyle(TextGrade.primary)
                 Spacer()
-                Button { refresh() } label: {
+                Button {
+                    refresh()
+                } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11))
                         .foregroundStyle(TextGrade.muted)
@@ -602,7 +611,9 @@ struct OutcomeStatsPanel: View {
             }
             .padding(AppSpace.medium)
             .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(Semantic.success.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(Semantic.success.opacity(0.2), lineWidth: 0.5))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(
+                    Semantic.success.opacity(0.2), lineWidth: 0.5))
         }
     }
 
@@ -649,11 +660,17 @@ struct OutcomeStatsPanel: View {
             }
             .frame(height: 6)
             HStack(spacing: AppSpace.medium) {
-                statPill("完成", value: "\(Int(row.completionRate * 100))%", color: row.completionRate > 0.7 ? Semantic.success : Semantic.warning)
-                statPill("取消", value: "\(Int(row.cancellationRate * 100))%", color: row.cancellationRate < 0.2 ? Semantic.success : Semantic.error)
-                statPill("迭代", value: String(format: "%.1f", row.avgIterations), color: row.avgIterations < 8 ? Brand.primary : Semantic.warning)
+                statPill(
+                    "完成", value: "\(Int(row.completionRate * 100))%", color: row.completionRate > 0.7 ? Semantic.success : Semantic.warning)
+                statPill(
+                    "取消", value: "\(Int(row.cancellationRate * 100))%",
+                    color: row.cancellationRate < 0.2 ? Semantic.success : Semantic.error)
+                statPill(
+                    "迭代", value: String(format: "%.1f", row.avgIterations), color: row.avgIterations < 8 ? Brand.primary : Semantic.warning)
                 if row.avgUserRating > 0 {
-                    statPill("评分", value: String(format: "%.1f", row.avgUserRating), color: row.avgUserRating >= 4 ? Semantic.success : Semantic.warning)
+                    statPill(
+                        "评分", value: String(format: "%.1f", row.avgUserRating),
+                        color: row.avgUserRating >= 4 ? Semantic.success : Semantic.warning)
                 }
             }
         }

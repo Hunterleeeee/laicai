@@ -57,17 +57,20 @@ public struct DocumentTransformTool: LaicaiTool {
                     "sourcePath": FunctionProperty(type: "string", description: "源文档路径，支持绝对路径或相对工作区路径。"),
                     "path": FunctionProperty(type: "string", description: "sourcePath 的兼容别名。"),
                     "outputPath": FunctionProperty(type: "string", description: "输出文档路径。apply/copy 时可选；不提供则在源文件旁生成 _Laicai 副本。"),
-                    "workflowPath": FunctionProperty(type: "string", description: "workspace/render 使用的交付工作区路径；不提供则在当前工作区 .laicai/document-workflows 下创建。"),
+                    "workflowPath": FunctionProperty(
+                        type: "string", description: "workspace/render 使用的交付工作区路径；不提供则在当前工作区 .laicai/document-workflows 下创建。"),
                     "renderDir": FunctionProperty(type: "string", description: "render 输出目录；不提供则使用 workflowPath/rendered。"),
                     "translationsJSON": FunctionProperty(
                         type: "string",
-                        description: "apply 时使用的 JSON。支持对象 {\"part::index\":\"新文本\"} 或数组 [{\"id\":\"part::index\",\"text\":\"新文本\"}]；也支持用原文作为 key。"),
+                        description:
+                            "apply 时使用的 JSON。支持对象 {\"part::index\":\"新文本\"} 或数组 [{\"id\":\"part::index\",\"text\":\"新文本\"}]；也支持用原文作为 key。"),
                     "replacementsJSON": FunctionProperty(type: "string", description: "translationsJSON 的兼容别名。"),
                     "chunkIndex": FunctionProperty(type: "integer", description: "prepare 时返回第几个分块，从 0 开始。"),
                     "chunkSize": FunctionProperty(type: "integer", description: "prepare 每块最多文本条数，默认 80，最大 300。"),
                     "onlyChinese": FunctionProperty(type: "boolean", description: "prepare 是否只返回含中文/CJK 的文本，默认 true。"),
                     "granularity": FunctionProperty(
-                        type: "string", description: "文本粒度：paragraph/text。pptx/docx 默认 paragraph，xlsx/xlsm 默认 text。", enumValues: ["paragraph", "text"])
+                        type: "string", description: "文本粒度：paragraph/text。pptx/docx 默认 paragraph，xlsx/xlsm 默认 text。",
+                        enumValues: ["paragraph", "text"]),
                 ],
                 required: ["action"]
             )
@@ -84,7 +87,8 @@ public struct DocumentTransformTool: LaicaiTool {
 
         let action = (params.action ?? "prepare").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard Self.allowedActions.contains(action) else {
-            return ToolResult(output: "参数错误：action 必须是 workspace/inspect/prepare/apply/copy/verify/render。", success: false, error: "invalid_action")
+            return ToolResult(
+                output: "参数错误：action 必须是 workspace/inspect/prepare/apply/copy/verify/render。", success: false, error: "invalid_action")
         }
 
         guard let rawSource = Self.rawSource(from: params) else {
@@ -180,7 +184,8 @@ public struct DocumentTransformTool: LaicaiTool {
         let outputPath = outputPath(from: params, sourcePath: sourcePath, context: context)
         let sourceForRead = sourceForRead(action: action, sourcePath: sourcePath, outputPath: outputPath)
         if sourceForRead != sourcePath,
-            let securityError = await SecurityManager.shared.checkRead(path: sourceForRead) {
+            let securityError = await SecurityManager.shared.checkRead(path: sourceForRead)
+        {
             return (nil, ToolResult(output: securityError, success: false, error: "security_denied"))
         }
         let ext = (sourceForRead as NSString).pathExtension.lowercased()
@@ -261,7 +266,10 @@ public struct DocumentTransformTool: LaicaiTool {
     }
 
     private static func writeAccessFailure(path: String, context: TaskContext) async -> ToolResult? {
-        if let securityError = await SecurityManager.shared.checkWrite(path: path) {
+        if let securityError = await SecurityManager.shared.checkWrite(
+            path: path,
+            workspaceRoot: context.workspaceRoot
+        ) {
             return ToolResult(output: securityError, success: false, error: "security_denied")
         }
         if let dangerousError = DangerousOperationGuard.documentWriteViolation(path: path, context: context) {
@@ -282,7 +290,7 @@ public struct DocumentTransformTool: LaicaiTool {
             "chunkIndex": request.chunkIndex,
             "chunkSize": request.chunkSize,
             "onlyChinese": request.onlyChinese,
-            "granularity": request.granularity
+            "granularity": request.granularity,
         ]
     }
 
@@ -295,7 +303,8 @@ public struct DocumentTransformTool: LaicaiTool {
         for key in ["translationsJSON", "replacementsJSON"] {
             if let value = dict[key], !(value is String),
                 let encoded = try? JSONSerialization.data(withJSONObject: value),
-                let string = String(data: encoded, encoding: .utf8) {
+                let string = String(data: encoded, encoding: .utf8)
+            {
                 dict[key] = string
             }
         }
@@ -332,48 +341,25 @@ public struct DocumentTransformTool: LaicaiTool {
 
     private static func runPython(script: String, input: [String: Any]) throws -> String {
         let inputData = try JSONSerialization.data(withJSONObject: input)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        process.arguments = ["-c", script]
-
-        let stdin = Pipe()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        try process.run()
-        stdin.fileHandleForWriting.write(inputData)
-        try? stdin.fileHandleForWriting.close()
-        guard waitForExit(process, timeoutSeconds: 240) else {
-            process.terminate()
-            if !waitForExit(process, timeoutSeconds: 2) {
-                Darwin.kill(process.processIdentifier, SIGKILL)
-                _ = waitForExit(process, timeoutSeconds: 1)
-            }
+        let result = try ProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/python3"),
+            arguments: ["-c", script],
+            standardInput: inputData,
+            timeout: 240
+        )
+        guard !result.timedOut else {
             throw NSError(domain: "DocumentTransformTool", code: -1, userInfo: [NSLocalizedDescriptionKey: "python3 转换超时"])
         }
 
-        let out = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        guard process.terminationStatus == 0 else {
+        let err = result.stderrString
+        guard result.exitCode == 0 else {
             throw NSError(
                 domain: "DocumentTransformTool",
-                code: Int(process.terminationStatus),
+                code: Int(result.exitCode),
                 userInfo: [NSLocalizedDescriptionKey: err.isEmpty ? "python3 文档转换失败" : err]
             )
         }
-        return out
-    }
-
-    private static func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) -> Bool {
-        let semaphore = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in semaphore.signal() }
-        if !process.isRunning { return true }
-        let result = semaphore.wait(timeout: .now() + timeoutSeconds)
-        process.terminationHandler = nil
-        return result == .success || !process.isRunning
+        return result.stdoutString
     }
 
     private static func summary(from json: String, fallbackAction: String, outputPath: String) -> String {
@@ -408,7 +394,7 @@ public struct DocumentTransformTool: LaicaiTool {
             "action": action,
             "sourcePath": sourcePath,
             "outputPath": outputPath,
-            "path": outputPath
+            "path": outputPath,
         ]
         guard let data = json.data(using: .utf8),
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -419,7 +405,7 @@ public struct DocumentTransformTool: LaicaiTool {
             "format", "granularity", "workflowPath", "workingCopyPath", "manifestPath",
             "scriptsPath", "verifyScriptPath", "renderDir", "pdfPath", "renderedPages",
             "totalTextRuns", "cjkTextRuns", "chunkIndex", "chunkSize", "totalChunks",
-            "returnedEntries", "appliedReplacements", "remainingCJK", "mediaCount"
+            "returnedEntries", "appliedReplacements", "remainingCJK", "mediaCount",
         ] {
             if let value = obj[key] {
                 result[key] = "\(value)"

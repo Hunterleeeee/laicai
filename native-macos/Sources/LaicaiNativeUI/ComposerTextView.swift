@@ -59,7 +59,8 @@ struct ComposerTextView: NSViewRepresentable {
         let previousPlaceholder = context.coordinator.placeholderString
         if textView.string != text {
             let recentUserEdit = Date().timeIntervalSince(context.coordinator.lastUserEditAt) < 0.25
-            let looksLikeStaleEcho = recentUserEdit
+            let looksLikeStaleEcho =
+                recentUserEdit
                 && !text.isEmpty
                 && text.count < textView.string.count
                 && textView.window?.firstResponder === textView
@@ -136,8 +137,9 @@ struct ComposerTextView: NSViewRepresentable {
             guard let textView = textView else { return }
             let width = max(1, wrapper?.bounds.width ?? textView.bounds.width)
             if !force,
-               lastMeasuredText == textView.string,
-               abs(lastMeasuredWidth - width) < 0.5 {
+                lastMeasuredText == textView.string,
+                abs(lastMeasuredWidth - width) < 0.5
+            {
                 return
             }
             lastMeasuredText = textView.string
@@ -158,8 +160,10 @@ struct ComposerTextView: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            guard commandSelector == #selector(NSResponder.insertNewline(_:))
-                    || commandSelector == #selector(NSResponder.insertLineBreak(_:)) else {
+            guard
+                commandSelector == #selector(NSResponder.insertNewline(_:))
+                    || commandSelector == #selector(NSResponder.insertLineBreak(_:))
+            else {
                 return false
             }
             if textView.hasMarkedText() { return false }
@@ -227,8 +231,9 @@ final class ComposerNSTextView: NSTextView {
     // paste from other text fields (e.g. skill search box)
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if window?.firstResponder === self,
-           event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-           event.charactersIgnoringModifiers == "v" {
+            event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+            event.charactersIgnoringModifiers == "v"
+        {
             pasteAsImage(sender: nil)
             return true
         }
@@ -262,11 +267,12 @@ final class ComposerNSTextView: NSTextView {
 
         // Image file URL
         if hasFileURL,
-           let urlData = pasteboard.data(forType: .fileURL),
-           let url = URL(dataRepresentation: urlData, relativeTo: nil),
-           let uti = try? url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier,
-           uti.hasPrefix("public.image"),
-           let data = try? Data(contentsOf: url) {
+            let urlData = pasteboard.data(forType: .fileURL),
+            let url = URL(dataRepresentation: urlData, relativeTo: nil),
+            let uti = try? url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier,
+            uti.hasPrefix("public.image"),
+            let data = try? Data(contentsOf: url)
+        {
             let ext = url.pathExtension.lowercased()
             let mediaType = ext == "jpg" || ext == "jpeg" ? "image/jpeg" : "image/png"
             onImagePaste?(data, mediaType)
@@ -283,13 +289,19 @@ final class ComposerNSTextView: NSTextView {
         if let data = pasteboard.data(forType: .png), !data.isEmpty { return data }
         // 2) TIFF → PNG
         if let tiffData = pasteboard.data(forType: .tiff), !tiffData.isEmpty,
-           let rep = NSBitmapImageRep(data: tiffData),
-           let png = rep.representation(using: .png, properties: [:]) { return png }
+            let rep = NSBitmapImageRep(data: tiffData),
+            let png = rep.representation(using: .png, properties: [:])
+        {
+            return png
+        }
         // 3) NSImage(pasteboard:) — catches ALL image formats (JPEG, HEIC, WebP, etc.)
         if let image = NSImage(pasteboard: pasteboard),
-           let tiffData = image.tiffRepresentation,
-           let rep = NSBitmapImageRep(data: tiffData),
-           let png = rep.representation(using: .png, properties: [:]) { return png }
+            let tiffData = image.tiffRepresentation,
+            let rep = NSBitmapImageRep(data: tiffData),
+            let png = rep.representation(using: .png, properties: [:])
+        {
+            return png
+        }
         return nil
     }
 
@@ -301,7 +313,7 @@ final class ComposerNSTextView: NSTextView {
             "public.jpg",
             "public.heic",
             "public.heif",
-            "org.webmproject.webp"
+            "org.webmproject.webp",
         ]
         return types.contains { imageTypes.contains($0.rawValue) || $0.rawValue == "public.image" }
     }
@@ -315,11 +327,12 @@ final class ComposerNSTextView: NSTextView {
         }
         // Image file URL
         if let types = pasteboard.types, types.contains(.fileURL),
-           let urlData = pasteboard.data(forType: .fileURL),
-           let url = URL(dataRepresentation: urlData, relativeTo: nil),
-           let uti = try? url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier,
-           uti.hasPrefix("public.image"),
-           let data = try? Data(contentsOf: url) {
+            let urlData = pasteboard.data(forType: .fileURL),
+            let url = URL(dataRepresentation: urlData, relativeTo: nil),
+            let uti = try? url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier,
+            uti.hasPrefix("public.image"),
+            let data = try? Data(contentsOf: url)
+        {
             let ext = url.pathExtension.lowercased()
             let mediaType = ext == "jpg" || ext == "jpeg" ? "image/jpeg" : "image/png"
             onImagePaste?(data, mediaType)
@@ -350,7 +363,7 @@ final class ComposerNSTextView: NSTextView {
         let origin = textContainerOrigin
         let attrs: [NSAttributedString.Key: Any] = [
             .foregroundColor: NSColor(red: 0.51, green: 0.48, blue: 0.46, alpha: 1),
-            .font: font ?? NSFont.systemFont(ofSize: 14)
+            .font: font ?? NSFont.systemFont(ofSize: 14),
         ]
         let drawRect = NSRect(
             x: origin.x,

@@ -102,7 +102,8 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
     public static func infer(for connector: ConnectorProfile?, mode: ContextMode) -> ConnectorCapabilityProfile {
         let local = connector.map { Self.isLocalConnector($0) } ?? false
         let iterationCap = local ? localIterationCap(for: mode) : mode.maxIterations
-        let toolCallingResolution = connector.map { Self.resolveToolCalling(for: $0) }
+        let toolCallingResolution =
+            connector.map { Self.resolveToolCalling(for: $0) }
             ?? (supports: true, source: .automaticHeuristic)
         let learnedCapability = connector?.toolCallingCapability
         let model = connector?.modelName.lowercased() ?? ""
@@ -139,7 +140,8 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
     }
 
     public static func isImageOnlyModel(_ modelName: String) -> Bool {
-        let model = modelName
+        let model =
+            modelName
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .replacingOccurrences(of: "_", with: "-")
@@ -166,7 +168,8 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
         return "当前选择的是图片生成模型 \(modelLabel)，不能作为通用会话模型使用。生成图片请直接发送“生成图片”，或切换到支持文字和工具的模型（如 gpt-5.5、gpt-4o、Claude）处理文字目标。"
     }
 
-    public static func resolveToolCalling(for connector: ConnectorProfile) -> (supports: Bool, source: ConnectorToolCallingResolutionSource) {
+    public static func resolveToolCalling(for connector: ConnectorProfile) -> (supports: Bool, source: ConnectorToolCallingResolutionSource)
+    {
         switch connector.toolCallingPolicy ?? .automatic {
         case .enabled:
             return (true, .manualEnabled)
@@ -201,7 +204,8 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
         }
         if connector.name.localizedCaseInsensitiveContains("本地")
             || connector.name.localizedCaseInsensitiveContains("local")
-            || connector.name.localizedCaseInsensitiveContains("ollama") {
+            || connector.name.localizedCaseInsensitiveContains("ollama")
+        {
             return true
         }
         guard let host = URL(string: connector.endpoint)?.host?.lowercased() else {
@@ -252,7 +256,7 @@ public struct ConnectorCapabilityProfile: Equatable, Sendable {
             (["claude-3-5", "claude-3.5", "claude-3"], 200_000),
             (["claude-2"], 100_000),
             (["llama-4", "llama4", "gemini"], 1_000_000),
-            (["llama-3", "llama3"], 128_000)
+            (["llama-3", "llama3"], 128_000),
         ]
         return rules.first { tokens, _ in
             tokens.contains { model.contains($0) }

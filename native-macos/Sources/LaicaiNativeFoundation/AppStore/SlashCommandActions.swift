@@ -12,7 +12,7 @@ extension AppStore {
             handleGatewaySlash,
             handlePipelineSlash,
             handleExportSlash,
-            handleRegressionSlash
+            handleRegressionSlash,
         ]
         for handler in handlers where handler(trimmed) {
             return true

@@ -31,7 +31,8 @@ struct SchedulesPanel: View {
         ) {
             HStack(spacing: AppSpace.extraSmall) {
                 scheduleMetric(
-                    icon: "power", value: scheduler.isRunning ? "运行中" : "未启动", label: "调度器", tint: scheduler.isRunning ? Semantic.success : TextGrade.ghost)
+                    icon: "power", value: scheduler.isRunning ? "运行中" : "未启动", label: "调度器",
+                    tint: scheduler.isRunning ? Semantic.success : TextGrade.ghost)
                 scheduleMetric(icon: "alarm", value: "\(scheduler.tasks.count)", label: "任务", tint: Brand.primary)
                 scheduleMetric(icon: "clock.arrow.circlepath", value: nextRunSummary, label: "下次", tint: Semantic.warning)
             }
@@ -47,7 +48,8 @@ struct SchedulesPanel: View {
                     .padding(.horizontal, AppSpace.medium)
                     .frame(height: 32)
                     .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.76)))
-                    .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.7))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.7))
 
                 TextEditor(text: $message)
                     .font(AppFont.caption)
@@ -56,7 +58,9 @@ struct SchedulesPanel: View {
                     .scrollContentBackground(.hidden)
                     .padding(AppSpace.small)
                     .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.76)))
-                    .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.7))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.7)
+                    )
                     .overlay(alignment: .topLeading) {
                         if message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text("要定时执行的会话指令…")
@@ -87,7 +91,9 @@ struct SchedulesPanel: View {
                         .padding(.horizontal, AppSpace.small)
                         .frame(height: 28)
                         .background(RoundedRectangle(cornerRadius: AppRadius.small).fill(SurfaceGrade.card.opacity(0.72)))
-                        .overlay(RoundedRectangle(cornerRadius: AppRadius.small).strokeBorder(SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AppRadius.small).strokeBorder(
+                                SurfaceGrade.hairline.opacity(0.85), lineWidth: 0.6))
                 }
 
                 if !workflowOptions.isEmpty {
@@ -109,7 +115,8 @@ struct SchedulesPanel: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, AppSpace.small)
                         .background(
-                            RoundedRectangle(cornerRadius: AppRadius.medium).fill(canCreate ? Brand.teal.opacity(0.14) : SurfaceGrade.elevated.opacity(0.62))
+                            RoundedRectangle(cornerRadius: AppRadius.medium).fill(
+                                canCreate ? Brand.teal.opacity(0.14) : SurfaceGrade.elevated.opacity(0.62))
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(
@@ -168,7 +175,9 @@ struct SchedulesPanel: View {
                         }
                         .padding(AppSpace.small)
                         .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.66)))
-                        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(
+                                SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
                     }
                 }
             }

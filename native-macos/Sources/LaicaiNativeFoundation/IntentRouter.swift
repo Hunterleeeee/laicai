@@ -93,33 +93,36 @@ public struct IntentRouter {
         includeRoutingDrift: Bool
     ) -> PlannerDecision? {
         if let workflow = signals.workflow {
-            return routed(PlannerDecision(
-                intent: .workflow(workflow),
-                confidence: 0.86,
-                reason: signals.workflowReason(for: workflow),
-                routeLabel: "会话 工作流",
-                expectedCapabilities: signals.workflowCapabilities(for: workflow)
-            ), includeRoutingDrift: includeRoutingDrift)
+            return routed(
+                PlannerDecision(
+                    intent: .workflow(workflow),
+                    confidence: 0.86,
+                    reason: signals.workflowReason(for: workflow),
+                    routeLabel: "会话 工作流",
+                    expectedCapabilities: signals.workflowCapabilities(for: workflow)
+                ), includeRoutingDrift: includeRoutingDrift)
         }
 
         if signals.isResearch {
-            return routed(PlannerDecision(
-                intent: .task,
-                confidence: 0.85,
-                reason: signals.researchReason,
-                routeLabel: "会话 研究",
-                expectedCapabilities: ["联网检索", "整理交付"]
-            ), includeRoutingDrift: includeRoutingDrift)
+            return routed(
+                PlannerDecision(
+                    intent: .task,
+                    confidence: 0.85,
+                    reason: signals.researchReason,
+                    routeLabel: "会话 研究",
+                    expectedCapabilities: ["联网检索", "整理交付"]
+                ), includeRoutingDrift: includeRoutingDrift)
         }
 
         if signals.requestsImageGeneration {
-            return routed(PlannerDecision(
-                intent: .task,
-                confidence: 0.84,
-                reason: "用户在要求生成视觉素材，应调用图片生成能力。",
-                routeLabel: "会话 图片",
-                expectedCapabilities: ["生成图片", "整理交付"]
-            ), includeRoutingDrift: includeRoutingDrift)
+            return routed(
+                PlannerDecision(
+                    intent: .task,
+                    confidence: 0.84,
+                    reason: "用户在要求生成视觉素材，应调用图片生成能力。",
+                    routeLabel: "会话 图片",
+                    expectedCapabilities: ["生成图片", "整理交付"]
+                ), includeRoutingDrift: includeRoutingDrift)
         }
 
         return nil
@@ -131,33 +134,36 @@ public struct IntentRouter {
     ) -> PlannerDecision? {
         let shouldAnalyzeOnly = signals.shouldInspectBeforeActing && signals.prefersAnalysisOnly
         if shouldAnalyzeOnly {
-            return routed(PlannerDecision(
-                intent: .task,
-                confidence: 0.80,
-                reason: "用户要求理解/诊断/评估实际对象，但表达为建议、方案或只读分析。先读证据，再给结论；不默认修改文件。",
-                routeLabel: "会话 分析",
-                expectedCapabilities: signals.expectedCapabilities
-            ), includeRoutingDrift: includeRoutingDrift)
+            return routed(
+                PlannerDecision(
+                    intent: .task,
+                    confidence: 0.80,
+                    reason: "用户要求理解/诊断/评估实际对象，但表达为建议、方案或只读分析。先读证据，再给结论；不默认修改文件。",
+                    routeLabel: "会话 分析",
+                    expectedCapabilities: signals.expectedCapabilities
+                ), includeRoutingDrift: includeRoutingDrift)
         }
 
         if signals.requiresExecution {
-            return routed(PlannerDecision(
-                intent: .task,
-                confidence: signals.executionConfidence,
-                reason: signals.executionReason,
-                routeLabel: "会话 执行",
-                expectedCapabilities: signals.expectedCapabilities
-            ), includeRoutingDrift: includeRoutingDrift)
+            return routed(
+                PlannerDecision(
+                    intent: .task,
+                    confidence: signals.executionConfidence,
+                    reason: signals.executionReason,
+                    routeLabel: "会话 执行",
+                    expectedCapabilities: signals.expectedCapabilities
+                ), includeRoutingDrift: includeRoutingDrift)
         }
 
         if signals.shouldInspectBeforeActing {
-            return routed(PlannerDecision(
-                intent: .task,
-                confidence: 0.80,
-                reason: "用户要求理解/诊断/评估实际对象。先读证据，再继续形成可执行结论或落地修改；只有用户明确说只分析/先别改时才停止在建议层。",
-                routeLabel: signals.prefersAnalysisOnly ? "会话 分析" : "会话 执行",
-                expectedCapabilities: signals.expectedCapabilities
-            ), includeRoutingDrift: includeRoutingDrift)
+            return routed(
+                PlannerDecision(
+                    intent: .task,
+                    confidence: 0.80,
+                    reason: "用户要求理解/诊断/评估实际对象。先读证据，再继续形成可执行结论或落地修改；只有用户明确说只分析/先别改时才停止在建议层。",
+                    routeLabel: signals.prefersAnalysisOnly ? "会话 分析" : "会话 执行",
+                    expectedCapabilities: signals.expectedCapabilities
+                ), includeRoutingDrift: includeRoutingDrift)
         }
 
         return nil
@@ -169,23 +175,25 @@ public struct IntentRouter {
     ) -> PlannerDecision? {
         let isPureQuestion = signals.isQuestion && !signals.requestsAction
         if isPureQuestion {
-            return routed(PlannerDecision(
-                intent: .chat,
-                confidence: 0.82,
-                reason: "这是能力、概念或判断类问题，不需要立即调用工具。",
-                routeLabel: "会话 问答",
-                expectedCapabilities: ["解释", "分析", "规划"]
-            ), includeRoutingDrift: includeRoutingDrift)
+            return routed(
+                PlannerDecision(
+                    intent: .chat,
+                    confidence: 0.82,
+                    reason: "这是能力、概念或判断类问题，不需要立即调用工具。",
+                    routeLabel: "会话 问答",
+                    expectedCapabilities: ["解释", "分析", "规划"]
+                ), includeRoutingDrift: includeRoutingDrift)
         }
 
         if signals.requestsAction {
-            return routed(PlannerDecision(
-                intent: .task,
-                confidence: 0.68,
-                reason: "用户希望产出具体结果，但没有匹配到专门工作流。",
-                routeLabel: "会话 执行",
-                expectedCapabilities: signals.expectedCapabilities
-            ), includeRoutingDrift: includeRoutingDrift)
+            return routed(
+                PlannerDecision(
+                    intent: .task,
+                    confidence: 0.68,
+                    reason: "用户希望产出具体结果，但没有匹配到专门工作流。",
+                    routeLabel: "会话 执行",
+                    expectedCapabilities: signals.expectedCapabilities
+                ), includeRoutingDrift: includeRoutingDrift)
         }
 
         return nil
@@ -215,11 +223,13 @@ public struct IntentRouter {
     /// if it performs well, slightly boost confidence.
     private static func applyRoutingDrift(_ decision: PlannerDecision) -> PlannerDecision {
         let outcomes = TaskOutcomeRecorder.shared.stats(days: 7)
-        guard let suggestion = ResultEvaluator.suggestRoutingAdjustment(
-            outcomes: outcomes,
-            intent: decision.intent,
-            currentRouteLabel: decision.routeLabel
-        ) else { return decision }
+        guard
+            let suggestion = ResultEvaluator.suggestRoutingAdjustment(
+                outcomes: outcomes,
+                intent: decision.intent,
+                currentRouteLabel: decision.routeLabel
+            )
+        else { return decision }
 
         var adjusted = decision
         switch suggestion.direction {

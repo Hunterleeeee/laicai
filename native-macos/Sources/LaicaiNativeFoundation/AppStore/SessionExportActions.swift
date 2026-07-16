@@ -89,18 +89,22 @@ extension AppStore {
         guard let thread = state.selectedThread, thread.canContinue else { return nil }
         let steps = thread.steps
         let toolCalls = steps.filter { $0.kind == .toolCall }
-        let readFiles = Self.uniqueMemoryValues(steps
-            .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] })
-        let searchQueries = Self.uniqueMemoryValues(toolCalls
-            .filter { $0.toolName == "code.search" || $0.toolName == "web.search" }
-            .compactMap { $0.toolParams?["query"] })
-        let commands = Self.uniqueMemoryValues(toolCalls
-            .filter { $0.toolName == "shell.exec" }
-            .compactMap { $0.toolParams?["command"] })
-        let writeReviews = Self.uniqueMemoryValues(steps
-            .filter { $0.kind == .reviewRequest }
-            .compactMap(\.diffFilePath))
+        let readFiles = Self.uniqueMemoryValues(
+            steps
+                .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
+                .compactMap { $0.toolParams?["path"] })
+        let searchQueries = Self.uniqueMemoryValues(
+            toolCalls
+                .filter { $0.toolName == "code.search" || $0.toolName == "web.search" }
+                .compactMap { $0.toolParams?["query"] })
+        let commands = Self.uniqueMemoryValues(
+            toolCalls
+                .filter { $0.toolName == "shell.exec" }
+                .compactMap { $0.toolParams?["command"] })
+        let writeReviews = Self.uniqueMemoryValues(
+            steps
+                .filter { $0.kind == .reviewRequest }
+                .compactMap(\.diffFilePath))
         let failedTools = Dictionary(grouping: steps.filter { $0.kind == .toolResult && $0.isFailure }, by: { $0.toolName ?? "tool" })
             .map { "\($0.key) ×\($0.value.count)" }
             .sorted()
@@ -152,7 +156,7 @@ extension AppStore {
             "name: \(thread.title)",
             "description: 从会话自动导出",
             "category: custom",
-            "steps:"
+            "steps:",
         ]
         for (index, step) in toolSteps.enumerated() {
             let toolName = step.toolName ?? "unknown"

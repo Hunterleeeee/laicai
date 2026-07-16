@@ -34,12 +34,13 @@ final class AgentLoopWikiSkillTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .userInput, text: "整理到 wiki\n请读取这个附件：/tmp/a.xlsx"),
                 TaskStep(kind: .toolCall, text: "读取", toolName: "file.extract", toolParams: ["path": "/tmp/a.xlsx"]),
                 TaskStep(kind: .toolResult, text: "已提取 /tmp/a.xlsx", toolName: "file.extract", toolParams: ["path": "/tmp/a.xlsx"]),
-                TaskStep(kind: .textOutput, text: "我会整理成 Wiki。")
+                TaskStep(kind: .textOutput, text: "我会整理成 Wiki。"),
             ]
         )
 
         XCTAssertFalse(
-            AgentLoop.meetsCompletionCriteria(task: task, intent: .task, didComplete: true, hadFailure: false, wasTruncated: false, isReadOnlyRun: true))
+            AgentLoop.meetsCompletionCriteria(
+                task: task, intent: .task, didComplete: true, hadFailure: false, wasTruncated: false, isReadOnlyRun: true))
     }
     func testLearnedSkillDoesNotReturnUnrelatedHighQSkill() async throws {
         let workspace = try makeTemporaryWorkspace()

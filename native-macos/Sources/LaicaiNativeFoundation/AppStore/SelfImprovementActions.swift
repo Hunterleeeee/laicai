@@ -4,7 +4,8 @@ import LaicaiNativeDomain
 extension AppStore {
     func handlePostRunSelfImprovement(completedTask: AgentTask, targetTaskID: UUID) {
         if completedTask.context.metadata["selfImproveTask"] == nil,
-           let threadIndex = state.threads.firstIndex(where: { $0.id == targetTaskID }) {
+            let threadIndex = state.threads.firstIndex(where: { $0.id == targetTaskID })
+        {
             let thread = state.threads[threadIndex]
             let report = SessionPostMortem.shared.analyze(thread: thread)
             if report.hasCritical {

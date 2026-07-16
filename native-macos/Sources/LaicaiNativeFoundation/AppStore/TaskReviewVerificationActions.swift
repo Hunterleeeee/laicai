@@ -7,7 +7,8 @@ extension AppStore {
             let skipExtensions = [".json", ".md", ".txt", ".yaml", ".yml", ".toml", ".lock", ".png", ".jpg", ".svg", ".ico"]
             let skipDirectories = ["skills/", "docs/", "assets/", ".github/", ".vscode/"]
             if skipExtensions.contains(where: { lowercasedFilePath.hasSuffix($0) })
-                || skipDirectories.contains(where: { lowercasedFilePath.contains($0) }) {
+                || skipDirectories.contains(where: { lowercasedFilePath.contains($0) })
+            {
                 return
             }
         }
@@ -60,7 +61,8 @@ extension AppStore {
         let lowercasedFilePath = filePath.lowercased()
         if lowercasedFilePath.contains("/skills/")
             || lowercasedFilePath.hasPrefix("skills/")
-            || lowercasedFilePath.contains(".laicai/skills") {
+            || lowercasedFilePath.contains(".laicai/skills")
+        {
             SkillRegistry.shared.refresh(workspaceRoot: state.settings.workspacePath)
         }
     }
@@ -126,17 +128,17 @@ extension AppStore {
         Task { [weak self] in
             guard let self else { return }
             let repairPrompt = """
-            构建/测试验证失败（第 \(attempt) 次尝试），请分析以下错误并用 file.edit 工具修复：
+                构建/测试验证失败（第 \(attempt) 次尝试），请分析以下错误并用 file.edit 工具修复：
 
-            ```
-            \(truncatedError)
-            ```
+                ```
+                \(truncatedError)
+                ```
 
-            请：
-            1. 分析错误原因
-            2. 用 file.edit 提交精准修复
-            3. 修复后自动触发 verify.build 重新验证
-            """
+                请：
+                1. 分析错误原因
+                2. 用 file.edit 提交精准修复
+                3. 修复后自动触发 verify.build 重新验证
+                """
 
             let connector = await MainActor.run { self.state.activeConnector }
             guard let connector else { return }
@@ -180,11 +182,12 @@ extension AppStore {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     guard let threadIndex = self.state.threads.firstIndex(where: { $0.id == taskID }) else { return }
-                    self.state.threads[threadIndex].steps.append(TaskStep(
-                        kind: .error,
-                        text: "自动修复失败：\(error.localizedDescription)",
-                        isFailure: true
-                    ))
+                    self.state.threads[threadIndex].steps.append(
+                        TaskStep(
+                            kind: .error,
+                            text: "自动修复失败：\(error.localizedDescription)",
+                            isFailure: true
+                        ))
                     self.state.threads[threadIndex].updatedAt = .now
                     self.persistThreadsNow()
                 }

@@ -13,7 +13,7 @@ public struct UserFrustrationDetector {
             "自动创建新", "说一半", "被截断", "没发完", "别重复", "不要重复",
             "费token", "费 token", "省点token", "省点 token", "认真", "一次性",
             "卡的", "难受", "差距", "你看了吗", "你看看",
-            "干活干不明白", "干不明白", "没干活", "只回答", "不干活"
+            "干活干不明白", "干不明白", "没干活", "只回答", "不干活",
         ]
         return markers.contains { text.localizedCaseInsensitiveContains($0) }
     }
@@ -24,7 +24,7 @@ public struct UserFrustrationDetector {
         let taskMarkers = [
             "刚才", "最近", "上个", "上一轮", "这个会话", "那个会话", "这个任务", "那个任务",
             "上下文", "新会话", "本地项目", "读取项目", "输出", "截断", "没发完", "没说完",
-            "干活", "只回答"
+            "干活", "只回答",
         ]
         return taskMarkers.contains { text.localizedCaseInsensitiveContains($0) }
     }
@@ -38,7 +38,7 @@ public struct UserFrustrationDetector {
             "很好", "不错", "正确", "完美", "太好了", "厉害", "漂亮", "好的",
             "对了", "就这样", "可以", "没问题", "牛", "强", "感谢", "谢谢",
             "good", "great", "perfect", "nice", "awesome", "thanks", "correct",
-            "exactly", "well done"
+            "exactly", "well done",
         ]
         return markers.contains { text.localizedCaseInsensitiveContains($0) }
     }
@@ -180,10 +180,10 @@ public struct ResultEvaluator {
 
 public struct RoutingSuggestion: Sendable {
     public enum Direction: Sendable {
-        case relax      // Reduce automatic tool use
-        case tighten    // Increase tool use
-        case reclassify // Consider different intent classification
-        case keep       // Current strategy is working
+        case relax  // Reduce automatic tool use
+        case tighten  // Increase tool use
+        case reclassify  // Consider different intent classification
+        case keep  // Current strategy is working
     }
 
     public let direction: Direction

@@ -123,3 +123,28 @@ public struct AppState: Equatable {
     }
 
 }
+
+extension AppState {
+    /// Production startup state. Preview/demo content lives exclusively in SampleData.
+    public static var empty: AppState {
+        AppState(
+            workspaceName: "来财",
+            modeLabel: "会话 问答",
+            threads: [],
+            selectedThreadID: nil,
+            workbenchTab: .tools,
+            connectors: [],
+            activeConnectorID: nil,
+            toolActivities: [],
+            workflowRuns: [],
+            draftMessage: "",
+            isGenerating: false,
+            settings: AppSettings(
+                workspacePath: "",
+                defaultConnectorName: "无模型",
+                compactComposer: false,
+                showDebugPanels: false
+            )
+        )
+    }
+}

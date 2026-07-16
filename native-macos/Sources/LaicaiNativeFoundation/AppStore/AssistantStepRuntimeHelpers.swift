@@ -7,7 +7,8 @@ extension AppStore {
     func appendAssistantStep(_ text: String, to sessionID: UUID, connectorName: String, metrics: ResponseMetrics? = nil) {
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == sessionID }) else { return }
         let assistantText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        state.threads[threadIndex].steps.append(TaskStep(kind: .textOutput, text: assistantText, isCollapsible: false, isCollapsed: false, metrics: metrics))
+        state.threads[threadIndex].steps.append(
+            TaskStep(kind: .textOutput, text: assistantText, isCollapsible: false, isCollapsed: false, metrics: metrics))
         state.threads[threadIndex].preview = normalizedSessionPreview(assistantText)
         state.threads[threadIndex].modelName = connectorName
         state.threads[threadIndex].updatedAt = .now

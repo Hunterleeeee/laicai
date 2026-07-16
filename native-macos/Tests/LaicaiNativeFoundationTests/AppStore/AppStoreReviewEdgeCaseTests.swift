@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AppStoreReviewEdgeCaseTests: LaicaiNativeFoundationTestCase {
@@ -23,9 +24,10 @@ final class AppStoreReviewEdgeCaseTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
         XCTAssertEqual(store.state.selectedThread?.steps.first?.approved, false)
-        XCTAssertTrue(store.state.selectedThread?.steps.contains {
-            $0.kind == .reviewResult && $0.text.contains("缺少文件变更内容")
-        } == true)
+        XCTAssertTrue(
+            store.state.selectedThread?.steps.contains {
+                $0.kind == .reviewResult && $0.text.contains("缺少文件变更内容")
+            } == true)
     }
 
     func testRejectingAllHunksDoesNotWriteFile() throws {
@@ -54,9 +56,10 @@ final class AppStoreReviewEdgeCaseTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), oldContent)
         XCTAssertEqual(store.state.selectedThread?.steps.first?.approved, false)
-        XCTAssertTrue(store.state.selectedThread?.steps.contains {
-            $0.kind == .reviewResult && $0.text.contains("所有 hunk 均已拒绝")
-        } == true)
+        XCTAssertTrue(
+            store.state.selectedThread?.steps.contains {
+                $0.kind == .reviewResult && $0.text.contains("所有 hunk 均已拒绝")
+            } == true)
     }
 
     func testApproveAllPendingReviewsCancelsWhenAnyFileChangedExternally() throws {
@@ -99,9 +102,10 @@ final class AppStoreReviewEdgeCaseTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "external second")
         let reviewSteps = store.state.selectedThread?.steps.filter { $0.kind == .reviewRequest } ?? []
         XCTAssertEqual(reviewSteps.map(\.approved), [nil, false])
-        XCTAssertTrue(store.state.selectedThread?.steps.contains {
-            $0.kind == .reviewResult && $0.text.contains("批量写入取消")
-        } == true)
+        XCTAssertTrue(
+            store.state.selectedThread?.steps.contains {
+                $0.kind == .reviewResult && $0.text.contains("批量写入取消")
+            } == true)
         XCTAssertFalse(AuditLog.shared.recentEntries.contains { $0.tool == "batch.apply" && $0.success })
     }
 }

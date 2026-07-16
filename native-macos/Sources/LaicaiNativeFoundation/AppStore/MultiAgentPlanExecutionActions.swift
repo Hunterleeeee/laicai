@@ -4,7 +4,8 @@ import LaicaiNativeDomain
 extension AppStore {
     private func connectorForPlanExecution(thread: Thread) -> ConnectorProfile? {
         if let connectorID = thread.connectorID,
-           let connector = state.connectors.first(where: { $0.id == connectorID }) {
+            let connector = state.connectors.first(where: { $0.id == connectorID })
+        {
             return connector
         }
         return state.activeConnector
@@ -13,8 +14,9 @@ extension AppStore {
     /// Execute a user-edited multi-agent plan (triggered from the plan editor UI).
     public func executeEditedPlan(threadID: UUID) {
         guard let idx = state.threads.firstIndex(where: { $0.id == threadID }),
-              var plan = state.threads[idx].multiAgentPlan,
-              plan.isEditable || plan.status == .queued else { return }
+            var plan = state.threads[idx].multiAgentPlan,
+            plan.isEditable || plan.status == .queued
+        else { return }
 
         let threadBeforeStart = state.threads[idx]
         guard let connector = connectorForPlanExecution(thread: threadBeforeStart) else {
@@ -32,22 +34,24 @@ extension AppStore {
         let generationRunID = markGenerationStarted(for: epThreadID, activity: "正在执行编排计划…")
         generationTasks[epThreadID] = Task { [weak self] in
             guard let self else { return }
-            await self.runMultiAgentPlanExecution(MultiAgentPlanRun(
-                thread: thread,
-                plan: plan,
-                connector: connector,
-                threadID: epThreadID,
-                generationRunID: generationRunID,
-                failurePrefix: "多会话执行失败"
-            ))
+            await self.runMultiAgentPlanExecution(
+                MultiAgentPlanRun(
+                    thread: thread,
+                    plan: plan,
+                    connector: connector,
+                    threadID: epThreadID,
+                    generationRunID: generationRunID,
+                    failurePrefix: "多会话执行失败"
+                ))
         }
     }
 
     /// Resume a failed multi-agent plan from where it left off.
     public func resumeFailedPlan(threadID: UUID) {
         guard let idx = state.threads.firstIndex(where: { $0.id == threadID }),
-              var plan = state.threads[idx].multiAgentPlan,
-              plan.status == .failed else { return }
+            var plan = state.threads[idx].multiAgentPlan,
+            plan.status == .failed
+        else { return }
 
         let threadBeforeStart = state.threads[idx]
         guard let connector = connectorForPlanExecution(thread: threadBeforeStart) else {
@@ -66,14 +70,15 @@ extension AppStore {
         let generationRunID = markGenerationStarted(for: rpThreadID, activity: "正在恢复编排计划…")
         generationTasks[rpThreadID] = Task { [weak self] in
             guard let self else { return }
-            await self.runMultiAgentPlanExecution(MultiAgentPlanRun(
-                thread: thread,
-                plan: plan,
-                connector: connector,
-                threadID: rpThreadID,
-                generationRunID: generationRunID,
-                failurePrefix: "多会话恢复执行失败"
-            ))
+            await self.runMultiAgentPlanExecution(
+                MultiAgentPlanRun(
+                    thread: thread,
+                    plan: plan,
+                    connector: connector,
+                    threadID: rpThreadID,
+                    generationRunID: generationRunID,
+                    failurePrefix: "多会话恢复执行失败"
+                ))
         }
     }
 

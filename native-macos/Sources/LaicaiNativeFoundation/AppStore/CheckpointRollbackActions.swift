@@ -15,36 +15,38 @@ extension AppStore {
             return
         }
 
-        let logProcess = Process()
-        logProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        logProcess.currentDirectoryURL = URL(fileURLWithPath: root)
-        logProcess.arguments = ["git", "log", "-1", "--format=%s"]
-        let logPipe = Pipe()
-        logProcess.standardOutput = logPipe
-        logProcess.standardError = Pipe()
-        try? logProcess.run()
-        logProcess.waitUntilExit()
-        let logData = logPipe.fileHandleForReading.readDataToEndOfFile()
-        let lastMessage = String(data: logData, encoding: .utf8) ?? ""
+        guard
+            let logResult = try? ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git", "log", "-1", "--format=%s"],
+                currentDirectoryURL: URL(fileURLWithPath: root),
+                timeout: 10
+            ), logResult.exitCode == 0, !logResult.timedOut
+        else {
+            notify("无法读取最近一次 Git 提交")
+            return
+        }
+        let lastMessage = logResult.stdoutString
 
         guard lastMessage.contains("来财自动检查点") else {
             notify("最近一次提交不是来财检查点")
             return
         }
 
-        let resetProcess = Process()
-        resetProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        resetProcess.currentDirectoryURL = URL(fileURLWithPath: root)
-        resetProcess.arguments = ["git", "reset", "HEAD~1"]
-        let resetPipe = Pipe()
-        resetProcess.standardOutput = resetPipe
-        resetProcess.standardError = resetPipe
-        try? resetProcess.run()
-        resetProcess.waitUntilExit()
-        let resetData = resetPipe.fileHandleForReading.readDataToEndOfFile()
-        let resetOutput = String(data: resetData, encoding: .utf8) ?? ""
+        guard
+            let resetResult = try? ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git", "reset", "HEAD~1"],
+                currentDirectoryURL: URL(fileURLWithPath: root),
+                timeout: 30
+            )
+        else {
+            notify("回滚命令无法启动")
+            return
+        }
+        let resetOutput = resetResult.stdoutString + resetResult.stderrString
 
-        if resetProcess.terminationStatus == 0 {
+        if resetResult.exitCode == 0, !resetResult.timedOut {
             notify("已回滚到最近检查点（变更保留在工作区）", style: .success)
             AuditLog.shared.record(tool: "git.reset", input: "undo checkpoint", output: resetOutput.prefix(200).description, success: true)
         } else {

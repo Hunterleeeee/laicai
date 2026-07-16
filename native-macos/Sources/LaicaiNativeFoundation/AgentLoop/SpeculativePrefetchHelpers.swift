@@ -6,8 +6,8 @@ extension AgentLoop {
     // MARK: - G2: Speculative Pre-Fetch
 
     struct SpeculativeResult {
-        var cachedFiles: [String: String] = [:]   // path → content
-        var summaries: [String: String] = [:]      // path → summary
+        var cachedFiles: [String: String] = [:]  // path → content
+        var summaries: [String: String] = [:]  // path → summary
     }
 
     /// While LLM is thinking, predict what it'll need next and pre-read files.
@@ -37,7 +37,8 @@ extension AgentLoop {
         result: inout SpeculativeResult
     ) {
         guard let lastSearch = recentSteps.last(where: { $0.toolName == "code.search" && $0.kind == .toolResult }),
-              !lastSearch.text.hasPrefix("未找到") else { return }
+            !lastSearch.text.hasPrefix("未找到")
+        else { return }
         let paths = extractReadablePaths(fromSearchOutput: lastSearch.text, workspaceRoot: taskContext.workspaceRoot, limit: 2)
         for path in paths where !taskContext.memory.readFiles.contains(path) {
             guard !Task.isCancelled else { return }
@@ -63,7 +64,8 @@ extension AgentLoop {
         result: inout SpeculativeResult
     ) {
         guard let lastRead = recentSteps.last(where: { $0.toolName == "file.read" && $0.kind == .toolCall }),
-              let path = lastRead.toolParams?["path"] else { return }
+            let path = lastRead.toolParams?["path"]
+        else { return }
         let dir = (path as NSString).deletingLastPathComponent
         guard !dir.isEmpty, !Task.isCancelled else { return }
         let ext = (path as NSString).pathExtension.lowercased()
@@ -93,9 +95,11 @@ extension AgentLoop {
         taskContext: TaskContext,
         result: inout SpeculativeResult
     ) {
-        guard let lastVerify = recentSteps.last(where: {
-            $0.toolName == "verify.build" && $0.isFailure == true && $0.kind == .toolResult
-        }) else { return }
+        guard
+            let lastVerify = recentSteps.last(where: {
+                $0.toolName == "verify.build" && $0.isFailure == true && $0.kind == .toolResult
+            })
+        else { return }
         let errorPaths = lastVerify.text.components(separatedBy: .newlines)
             .compactMap { pathFromErrorLine($0, workspaceRoot: taskContext.workspaceRoot) }
         for path in Set(errorPaths).prefix(3) {
@@ -119,7 +123,8 @@ extension AgentLoop {
         result: inout SpeculativeResult
     ) {
         guard recentSteps.contains(where: { $0.toolName == "file.edit" && $0.kind == .toolResult && !$0.isFailure }),
-              let path = recentSteps.last(where: { $0.toolName == "file.edit" && $0.kind == .toolCall })?.toolParams?["path"] else {
+            let path = recentSteps.last(where: { $0.toolName == "file.edit" && $0.kind == .toolCall })?.toolParams?["path"]
+        else {
             return
         }
         let ext = (path as NSString).pathExtension.lowercased()
@@ -141,10 +146,11 @@ extension AgentLoop {
         result: inout SpeculativeResult
     ) {
         guard !path.isEmpty,
-              !taskContext.memory.readFiles.contains(path),
-              result.cachedFiles[path] == nil,
-              let content = try? String(contentsOfFile: path, encoding: .utf8),
-              content.count < limit else { return }
+            !taskContext.memory.readFiles.contains(path),
+            result.cachedFiles[path] == nil,
+            let content = try? String(contentsOfFile: path, encoding: .utf8),
+            content.count < limit
+        else { return }
         result.cachedFiles[path] = content
     }
 
@@ -165,8 +171,9 @@ extension AgentLoop {
                 }
             }
             if let candidatePath = candidate,
-               FileManager.default.fileExists(atPath: candidatePath),
-               !paths.contains(candidatePath) {
+                FileManager.default.fileExists(atPath: candidatePath),
+                !paths.contains(candidatePath)
+            {
                 paths.append(candidatePath)
             }
         }

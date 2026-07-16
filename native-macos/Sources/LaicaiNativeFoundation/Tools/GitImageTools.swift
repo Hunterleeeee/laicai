@@ -63,7 +63,7 @@ public struct GitTool: LaicaiTool {
                     "args": FunctionProperty(
                         type: "string",
                         description: "子命令参数。commit 时传 -m \"message\"；commit-auto 留空自动生成信息；branch-create 传分支名；pr-desc 自动生成 PR 描述"
-                    )
+                    ),
                 ],
                 required: ["subcommand"]
             )
@@ -110,7 +110,8 @@ public struct GitTool: LaicaiTool {
         // Dangerous command guard
         let fullCmd = "git \(subcommand) \(args)"
         if Self.dangerousPatterns.contains(where: { fullCmd.contains($0) })
-            || DangerousOperationGuard.shellViolation(command: fullCmd) != nil {
+            || DangerousOperationGuard.shellViolation(command: fullCmd) != nil
+        {
             return ToolResult(
                 output: "安全拦截：\(fullCmd) 是破坏性操作，不允许自动执行。请手动确认后再处理。",
                 data: ["command": fullCmd, "blocked": "true"],
@@ -167,7 +168,9 @@ public struct GitTool: LaicaiTool {
     private static func commitAuto(messageHint: String, context: TaskContext) async throws -> ToolResult {
         let statusResult = try await ShellTool().execute(params: ["command": "git status --short", "timeout": "15"], context: context)
         guard statusResult.success else { return statusResult }
-        let statusLines = statusResult.output.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let statusLines = statusResult.output.components(separatedBy: .newlines).filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
         guard !statusLines.isEmpty else {
             return ToolResult(output: "没有可提交的变更。", data: ["exitCode": "0"], success: true)
         }
@@ -236,31 +239,37 @@ public struct GitTool: LaicaiTool {
 
     private static func generatePRDescription(context: TaskContext) async throws -> ToolResult {
         // Get diff against main/master
-        let branchResult = try await ShellTool().execute(params: ["command": "git rev-parse --abbrev-ref HEAD", "timeout": "10"], context: context)
+        let branchResult = try await ShellTool().execute(
+            params: ["command": "git rev-parse --abbrev-ref HEAD", "timeout": "10"], context: context)
         let currentBranch = branchResult.output.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Try main, then master as base
         var base = "main"
-        let checkMain = try await ShellTool().execute(params: ["command": "git rev-parse --verify main 2>/dev/null", "timeout": "10"], context: context)
+        let checkMain = try await ShellTool().execute(
+            params: ["command": "git rev-parse --verify main 2>/dev/null", "timeout": "10"], context: context)
         if !checkMain.success {
             base = "master"
         }
 
-        let diffResult = try await ShellTool().execute(params: ["command": "git log \(base)..HEAD --oneline", "timeout": "15"], context: context)
+        let diffResult = try await ShellTool().execute(
+            params: ["command": "git log \(base)..HEAD --oneline", "timeout": "15"], context: context)
         let commits = diffResult.output.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let statResult = try await ShellTool().execute(params: ["command": "git diff \(base)..HEAD --stat", "timeout": "15"], context: context)
+        let statResult = try await ShellTool().execute(
+            params: ["command": "git diff \(base)..HEAD --stat", "timeout": "15"], context: context)
         let stat = statResult.output.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Get changed file list for categorization
-        let filesResult = try await ShellTool().execute(params: ["command": "git diff \(base)..HEAD --name-only", "timeout": "15"], context: context)
+        let filesResult = try await ShellTool().execute(
+            params: ["command": "git diff \(base)..HEAD --name-only", "timeout": "15"], context: context)
         let changedFiles = filesResult.output.trimmingCharacters(in: .whitespacesAndNewlines)
             .components(separatedBy: "\n").filter { !$0.isEmpty }
         let fileGroups = Self.categorizePRFiles(changedFiles)
 
         // Detect potential breaking changes
         let diffContentResult = try await ShellTool().execute(
-            params: ["command": "git diff \(base)..HEAD -- '*.swift' '*.py' '*.ts' '*.js' '*.go' | head -200", "timeout": "15"], context: context)
+            params: ["command": "git diff \(base)..HEAD -- '*.swift' '*.py' '*.ts' '*.js' '*.go' | head -200", "timeout": "15"],
+            context: context)
         let breakingChangeHints = Self.breakingChangeHints(from: diffContentResult.output)
 
         let title = currentBranch.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
@@ -283,7 +292,7 @@ public struct GitTool: LaicaiTool {
                 "sourceFileCount": "\(fileGroups.sourceFiles.count)",
                 "testFileCount": "\(fileGroups.testFiles.count)",
                 "configFileCount": "\(fileGroups.configFiles.count)",
-                "hasBreakingChanges": "\(breakingChangeHints.isEmpty ? "false" : "true")"
+                "hasBreakingChanges": "\(breakingChangeHints.isEmpty ? "false" : "true")",
             ],
             success: true
         )
@@ -363,16 +372,14 @@ public struct GitTool: LaicaiTool {
         let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !root.isEmpty, FileManager.default.fileExists(atPath: root) else { return false }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "rev-parse", "--is-inside-work-tree"]
-        process.currentDirectoryURL = URL(fileURLWithPath: root)
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
         do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git", "rev-parse", "--is-inside-work-tree"],
+                currentDirectoryURL: URL(fileURLWithPath: root),
+                timeout: 10
+            )
+            return result.exitCode == 0 && !result.timedOut
         } catch {
             return false
         }
@@ -404,7 +411,7 @@ public struct ComfyUITool: LaicaiTool {
                     "width": FunctionProperty(type: "integer", description: "图片宽度（可选，默认 1024）"),
                     "height": FunctionProperty(type: "integer", description: "图片高度（可选，默认 1024）"),
                     "steps": FunctionProperty(type: "integer", description: "采样步数（可选，默认 20）"),
-                    "seed": FunctionProperty(type: "integer", description: "随机种子（可选，默认 -1 随机）")
+                    "seed": FunctionProperty(type: "integer", description: "随机种子（可选，默认 -1 随机）"),
                 ],
                 required: ["prompt"]
             )
@@ -637,7 +644,8 @@ public struct ComfyUITool: LaicaiTool {
         } else if let urlString = first.url, let url = URL(string: urlString) {
             let (downloaded, downloadResponse) = try await session.data(from: url)
             if let status = (downloadResponse as? HTTPURLResponse)?.statusCode,
-                !(200...299).contains(status) {
+                !(200...299).contains(status)
+            {
                 throw NSError(domain: "ImagesAPI", code: 2, userInfo: [NSLocalizedDescriptionKey: "图片下载失败"])
             }
             imageData = downloaded
@@ -753,39 +761,23 @@ public struct ComfyUITool: LaicaiTool {
         try config.write(to: configURL, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-        process.arguments = ["--config", configURL.path]
-
-        let output = Pipe()
-        let error = Pipe()
-        process.standardOutput = output
-        process.standardError = error
-
-        try process.run()
-        let timedOut = await waitForCurlExit(process, timeoutSeconds: Int(NetworkDefaults.imageRequest) + 10)
-        if timedOut {
-            process.terminate()
-            process.waitUntilExit()
-        }
-
-        let outputData = output.fileHandleForReading.readDataToEndOfFile()
-        let stderr =
-            String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if timedOut {
+        let result = try await ProcessRunner.runAsync(
+            executableURL: URL(fileURLWithPath: "/usr/bin/curl"),
+            arguments: ["--config", configURL.path],
+            timeout: NetworkDefaults.imageRequest + 10
+        )
+        let stderr = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if result.timedOut {
             throw NSError(domain: "ImagesAPICurl", code: Int(NSURLErrorTimedOut), userInfo: [NSLocalizedDescriptionKey: "curl 图片请求超时"])
         }
 
-        let codeText =
-            String(data: outputData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let codeText = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
         let responseData = (try? Data(contentsOf: responseURL)) ?? Data()
         return CurlImagesResponse(
             data: responseData,
             statusCode: Int(codeText) ?? 0,
             stderr: stderr,
-            exitCode: process.terminationStatus
+            exitCode: result.exitCode
         )
     }
 
@@ -797,7 +789,7 @@ public struct ComfyUITool: LaicaiTool {
             "connect-timeout = \"15\"",
             "max-time = \"\(Int(NetworkDefaults.imageRequest))\"",
             "request = \"POST\"",
-            "header = \"Content-Type: application/json\""
+            "header = \"Content-Type: application/json\"",
         ]
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedKey.isEmpty {
@@ -807,7 +799,7 @@ public struct ComfyUITool: LaicaiTool {
             "data-binary = \"@\(curlConfigEscape(bodyPath))\"",
             "output = \"\(curlConfigEscape(responsePath))\"",
             "write-out = \"%{http_code}\"",
-            "url = \"\(curlConfigEscape(url.absoluteString))\""
+            "url = \"\(curlConfigEscape(url.absoluteString))\"",
         ]
         return lines.joined(separator: "\n")
     }
@@ -818,33 +810,6 @@ public struct ComfyUITool: LaicaiTool {
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "")
             .replacingOccurrences(of: "\r", with: "")
-    }
-
-    private static func waitForCurlExit(_ process: Process, timeoutSeconds: Int) async -> Bool {
-        await withCheckedContinuation { continuation in
-            let finished = Locked(false)
-            process.terminationHandler = { _ in
-                let shouldResume = finished.withValue { value in
-                    guard !value else { return false }
-                    value = true
-                    return true
-                }
-                if shouldResume {
-                    continuation.resume(returning: false)
-                }
-            }
-            Task {
-                try? await Task.sleep(for: .seconds(timeoutSeconds))
-                let shouldResume = finished.withValue { value in
-                    guard !value else { return false }
-                    value = true
-                    return true
-                }
-                if shouldResume {
-                    continuation.resume(returning: true)
-                }
-            }
-        }
     }
 
     private static func saveImageData(_ data: Data, outputDir: String, prefix: String) throws -> String {
@@ -903,7 +868,7 @@ public struct ComfyUITool: LaicaiTool {
             NSURLErrorTimedOut,
             NSURLErrorCannotConnectToHost,
             NSURLErrorCannotFindHost,
-            NSURLErrorDNSLookupFailed
+            NSURLErrorDNSLookupFailed,
         ].contains(nsError.code)
     }
 
@@ -945,45 +910,45 @@ public struct ComfyUITool: LaicaiTool {
                     "sampler_name": "euler",
                     "scheduler": "normal",
                     "seed": request.seed == -1 ? Int.random(in: 0...Int.max) : request.seed,
-                    "steps": request.steps
-                ] as [String: Any]
+                    "steps": request.steps,
+                ] as [String: Any],
             ],
             "4": [
                 "class_type": "CheckpointLoaderSimple",
-                "inputs": ["ckpt_name": request.modelName] as [String: Any]
+                "inputs": ["ckpt_name": request.modelName] as [String: Any],
             ],
             "5": [
                 "class_type": "EmptyLatentImage",
-                "inputs": ["batch_size": 1, "height": request.height, "width": request.width] as [String: Any]
+                "inputs": ["batch_size": 1, "height": request.height, "width": request.width] as [String: Any],
             ],
             "6": [
                 "class_type": "CLIPTextEncode",
                 "inputs": [
                     "clip": ["4", 1] as [Any],
-                    "text": request.prompt
-                ] as [String: Any]
+                    "text": request.prompt,
+                ] as [String: Any],
             ],
             "7": [
                 "class_type": "CLIPTextEncode",
                 "inputs": [
                     "clip": ["4", 1] as [Any],
-                    "text": request.negativePrompt
-                ] as [String: Any]
+                    "text": request.negativePrompt,
+                ] as [String: Any],
             ],
             "8": [
                 "class_type": "VAEDecode",
                 "inputs": [
                     "samples": ["3", 0] as [Any],
-                    "vae": ["4", 2] as [Any]
-                ] as [String: Any]
+                    "vae": ["4", 2] as [Any],
+                ] as [String: Any],
             ],
             "9": [
                 "class_type": "SaveImage",
                 "inputs": [
                     "filename_prefix": "Laicai",
-                    "images": ["8", 0] as [Any]
-                ] as [String: Any]
-            ]
+                    "images": ["8", 0] as [Any],
+                ] as [String: Any],
+            ],
         ]
     }
 
@@ -995,7 +960,7 @@ public struct ComfyUITool: LaicaiTool {
         let promptData = try JSONSerialization.data(
             withJSONObject: [
                 "prompt": workflow,
-                "client_id": clientId
+                "client_id": clientId,
             ] as [String: Any])
         guard let promptURL = URL(string: "\(serverURL)/prompt") else {
             throw URLError(.badURL)

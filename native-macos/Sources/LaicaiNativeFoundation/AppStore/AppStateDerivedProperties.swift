@@ -18,7 +18,7 @@ extension AppState {
             thread.modelName,
             thread.status.title,
             thread.executionState.title,
-            thread.context.workspaceRoot
+            thread.context.workspaceRoot,
         ]
         let recentStepParts = thread.steps.suffix(summarySearchRecentStepLimit).flatMap { step in
             [step.text, step.toolName ?? ""]
@@ -49,7 +49,8 @@ extension AppState {
 
     public var selectedAgent: AgentRecord? {
         guard let id = selectedThreadID,
-              let thread = threads.first(where: { $0.id == id }) else { return nil }
+            let thread = threads.first(where: { $0.id == id })
+        else { return nil }
         return AgentRecord(thread: thread, includeEvents: true)
     }
 
@@ -84,7 +85,8 @@ extension AppState {
     /// Estimated progress (0.0-1.0) for the currently running task based on tool call iterations.
     public var estimatedProgress: Double? {
         guard isGenerating, let id = selectedThreadID,
-              let thread = threads.first(where: { $0.id == id }) else { return nil }
+            let thread = threads.first(where: { $0.id == id })
+        else { return nil }
         let toolCalls = thread.steps.filter { $0.kind == .toolCall }.count
         guard toolCalls > 0 else { return nil }
         let expectedIterations = max(3.0, Double(thread.context.metadata["expectedIterations"] ?? "8") ?? 8.0)
@@ -121,14 +123,17 @@ extension AppState {
                 thread.goal ?? "",
                 thread.steps.last?.text ?? "",
                 thread.modelName,
-                    thread.status.title,
+                thread.status.title,
                 thread.executionState.title,
-                thread.context.workspaceRoot
+                thread.context.workspaceRoot,
             ].joined(separator: " ").lowercased()
-            guard metadata.contains(lower) || thread.steps.suffix(12).contains(where: { step in
-                step.text.lowercased().contains(lower)
-                    || step.toolName?.lowercased().contains(lower) == true
-            }) else {
+            guard
+                metadata.contains(lower)
+                    || thread.steps.suffix(12).contains(where: { step in
+                        step.text.lowercased().contains(lower)
+                            || step.toolName?.lowercased().contains(lower) == true
+                    })
+            else {
                 return nil
             }
             return ThreadRecord(thread: thread, includeEvents: true)

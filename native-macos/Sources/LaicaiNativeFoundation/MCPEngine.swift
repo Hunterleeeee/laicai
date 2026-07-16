@@ -81,9 +81,9 @@ public struct MCPResourceInfo: Codable, Sendable, Identifiable {
 public struct MCPServerConfig: Codable, Sendable, Identifiable, Equatable {
     public let id: UUID
     public var name: String
-    public var command: String          // e.g. "npx", "python3", "/usr/local/bin/mcp-server"
-    public var args: [String]           // e.g. ["-y", "@modelcontextprotocol/server-github"]
-    public var env: [String: String]    // Extra environment variables (API keys etc.)
+    public var command: String  // e.g. "npx", "python3", "/usr/local/bin/mcp-server"
+    public var args: [String]  // e.g. ["-y", "@modelcontextprotocol/server-github"]
+    public var env: [String: String]  // Extra environment variables (API keys etc.)
     public var enabled: Bool
     public var transport: Transport
 
@@ -183,11 +183,13 @@ public final class MCPServer: Sendable {
         }
 
         // Initialize MCP handshake
-        let initResult = try await sendRequest(method: "initialize", params: [
-            "protocolVersion": AnyCodable("2024-11-05"),
-            "capabilities": AnyCodable(["tools": [:] as [String: String], "resources": [:] as [String: String]]),
-            "clientInfo": AnyCodable(["name": "laicai", "version": "1.0.0"])
-        ])
+        let initResult = try await sendRequest(
+            method: "initialize",
+            params: [
+                "protocolVersion": AnyCodable("2024-11-05"),
+                "capabilities": AnyCodable(["tools": [:] as [String: String], "resources": [:] as [String: String]]),
+                "clientInfo": AnyCodable(["name": "laicai", "version": "1.0.0"]),
+            ])
 
         // Send initialized notification
         sendNotification(method: "notifications/initialized")
@@ -222,7 +224,8 @@ public final class MCPServer: Sendable {
         do {
             let response = try await sendRequest(method: "tools/list")
             if let result = response.result?.objectValue,
-               let toolsArray = result["tools"] as? [[String: Any]] {
+                let toolsArray = result["tools"] as? [[String: Any]]
+            {
                 let data = try JSONSerialization.data(withJSONObject: toolsArray)
                 let decoded = (try? JSONDecoder().decode([MCPToolInfo].self, from: data)) ?? []
                 state.withValue { $0.tools = decoded }
@@ -235,10 +238,12 @@ public final class MCPServer: Sendable {
 
     public func callTool(name: String, arguments: [String: Any]) async throws -> ToolResult {
         let argsEncodable = arguments.mapValues { AnyCodable($0) }
-        let response = try await sendRequest(method: "tools/call", params: [
-            "name": AnyCodable(name),
-            "arguments": AnyCodable(argsEncodable)
-        ])
+        let response = try await sendRequest(
+            method: "tools/call",
+            params: [
+                "name": AnyCodable(name),
+                "arguments": AnyCodable(argsEncodable),
+            ])
 
         if let error = response.error {
             return ToolResult(output: "MCP Error: \(error.message)", success: false)
@@ -267,7 +272,8 @@ public final class MCPServer: Sendable {
     public func listResources() async throws -> [MCPResourceInfo] {
         let response = try await sendRequest(method: "resources/list")
         if let result = response.result?.objectValue,
-           let array = result["resources"] as? [[String: Any]] {
+            let array = result["resources"] as? [[String: Any]]
+        {
             let data = try JSONSerialization.data(withJSONObject: array)
             let decoded = (try? JSONDecoder().decode([MCPResourceInfo].self, from: data)) ?? []
             state.withValue { $0.resources = decoded }
@@ -276,12 +282,15 @@ public final class MCPServer: Sendable {
     }
 
     public func readResource(uri: String) async throws -> String {
-        let response = try await sendRequest(method: "resources/read", params: [
-            "uri": AnyCodable(uri)
-        ])
+        let response = try await sendRequest(
+            method: "resources/read",
+            params: [
+                "uri": AnyCodable(uri)
+            ])
         if let result = response.result?.objectValue,
-           let contents = result["contents"] as? [[String: Any]],
-           let first = contents.first {
+            let contents = result["contents"] as? [[String: Any]],
+            let first = contents.first
+        {
             return first["text"] as? String ?? ""
         }
         return ""
@@ -346,7 +355,8 @@ public final class MCPServer: Sendable {
 
             for lineData in lines {
                 guard let response = try? JSONDecoder().decode(MCPResponse.self, from: lineData),
-                      let id = response.id else { continue }
+                    let id = response.id
+                else { continue }
                 let continuation = state.withValue { $0.pendingRequests.removeValue(forKey: id) }
                 if let error = response.error {
                     continuation?.resume(throwing: error)
@@ -410,7 +420,8 @@ public struct MCPToolAdapter: LaicaiTool {
 
         let arguments: [String: Any]
         if let data = argumentsJSON.data(using: .utf8),
-           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
             arguments = dict
         } else {
             arguments = [:]
@@ -432,11 +443,7 @@ public final class MCPManager: ObservableObject {
     private let configFile: URL
 
     private init() {
-        let support =
-            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        let laicaiDir = support.appendingPathComponent("Laicai", isDirectory: true)
-        try? FileManager.default.createDirectory(at: laicaiDir, withIntermediateDirectories: true)
+        let laicaiDir = LaicaiStoragePaths.ensureDirectory(LaicaiStoragePaths.appDirectory)
         self.configFile = laicaiDir.appendingPathComponent("mcp-servers.json")
         loadConfigs()
     }
@@ -445,7 +452,8 @@ public final class MCPManager: ObservableObject {
 
     public func loadConfigs() {
         guard let data = try? Data(contentsOf: configFile),
-              let decoded = try? JSONDecoder().decode([MCPServerConfig].self, from: data) else {
+            let decoded = try? JSONDecoder().decode([MCPServerConfig].self, from: data)
+        else {
             return
         }
         configs = decoded

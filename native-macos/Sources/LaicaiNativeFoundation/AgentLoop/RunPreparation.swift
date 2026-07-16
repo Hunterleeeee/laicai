@@ -30,20 +30,22 @@ extension AgentLoop {
         taskContext.imageGenerationModelName = taskContext.imageGenerationModelName ?? config.modelName
         taskContext.imageGenerationAPIKey = taskContext.imageGenerationAPIKey ?? config.apiKey
         if let protocolJSON = taskContext.metadata["taskProtocolJSON"],
-           let data = protocolJSON.data(using: .utf8),
-           let taskProtocol = try? JSONDecoder().decode(AgentTaskProtocol.self, from: data) {
+            let data = protocolJSON.data(using: .utf8),
+            let taskProtocol = try? JSONDecoder().decode(AgentTaskProtocol.self, from: data)
+        {
             taskContext.metadata["taskProtocolGoal"] = taskProtocol.taskGoal
             taskContext.metadata["taskProtocolRisk"] = taskProtocol.riskPolicy.rawValue
         }
         if let ledgerJSON = taskContext.metadata["executionLedgerJSON"],
-           let data = ledgerJSON.data(using: .utf8),
-           let ledger = try? JSONDecoder().decode(AgentExecutionLedger.self, from: data) {
+            let data = ledgerJSON.data(using: .utf8),
+            let ledger = try? JSONDecoder().decode(AgentExecutionLedger.self, from: data)
+        {
             let ledgerSummary = [
                 "state=\(ledger.state.rawValue)",
                 "next=\(ledger.nextAction ?? "无")",
                 "read=\(ledger.readFiles.prefix(8).joined(separator: "、"))",
                 "modified=\(ledger.modifiedFiles.prefix(8).joined(separator: "、"))",
-                "failed=\(ledger.failedTools.prefix(5).joined(separator: "、"))"
+                "failed=\(ledger.failedTools.prefix(5).joined(separator: "、"))",
             ].joined(separator: "; ")
             taskContext.memory.appendDecision("[execution-ledger] \(ledgerSummary)")
         }
@@ -68,25 +70,29 @@ extension AgentLoop {
         for step in priorSteps {
             guard step.kind == .toolResult, !step.isFailure else { continue }
             if ["file.read", "file.extract"].contains(step.toolName ?? ""),
-               let path = step.toolParams?["path"],
-               !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let path = step.toolParams?["path"],
+                !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
                 if !taskContext.memory.readFiles.contains(path) {
                     taskContext.memory.readFiles.append(path)
                 }
                 continue
             }
             if step.toolName == "web.fetch",
-               let url = step.toolParams?["url"],
-               !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let url = step.toolParams?["url"],
+                !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
                 let cacheKey = "web:\(url)"
                 if taskContext.memory.fileContentCache[cacheKey] == nil,
-                   !step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    !step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                {
                     taskContext.memory.fileContentCache[cacheKey] = step.text
                 }
             }
         }
 
-        let recentOutputs = priorSteps
+        let recentOutputs =
+            priorSteps
             .filter { $0.kind == .textOutput }
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -119,7 +125,8 @@ extension AgentLoop {
 
             if !narrowedWorkspace {
                 let currentRoot = taskContext.workspaceRoot
-                let isBroad = currentRoot.isEmpty
+                let isBroad =
+                    currentRoot.isEmpty
                     || currentRoot == FileManager.default.homeDirectoryForCurrentUser.path
                     || (currentRoot.components(separatedBy: "/").count <= 4 && !dir.hasPrefix(currentRoot + "/"))
                 if isBroad && FileManager.default.fileExists(atPath: dir) {
@@ -150,7 +157,8 @@ extension AgentLoop {
             return
         }
         guard !Self.shouldBootstrapWorkspaceIndex(for: request.message, intent: request.intent),
-              !Self.shouldBootstrapWorkspaceSearch(for: request.message, intent: request.intent, context: taskContext) else {
+            !Self.shouldBootstrapWorkspaceSearch(for: request.message, intent: request.intent, context: taskContext)
+        else {
             return
         }
         guard let indexTool = toolRegistry.tool(named: "workspace_index") ?? toolRegistry.tool(named: "workspace.index") else {

@@ -81,7 +81,8 @@ public struct ValidationEngine {
     private static let deterministicErrors: Set<String> = [
         "invalid_params", "invalid_edits", "invalid_batch_edits", "empty_edits", "empty_batch_edits",
         "patch_not_found", "patch_ambiguous", "all_edits_failed",
-        "file_not_found", "unsupported_binary_file", "unsupported_file_type", "security_denied", "unknown_tool"
+        "file_not_found", "unsupported_binary_file", "unsupported_file_type", "security_denied", "unknown_tool",
+        "rg_missing", "invalid_query", "workspace_missing", "workspace_not_found",
     ]
 
     /// Execute tool with JSON arguments (function calling style)
@@ -220,7 +221,7 @@ extension ValidationEngine {
             ("pom.xml", "mvn test"),
             ("build.gradle", "gradle test"),
             ("Gemfile", "bundle exec rspec"),
-            ("Makefile", "make test")
+            ("Makefile", "make test"),
         ]
         for indicator in projectIndicators {
             let fullPath = (workspaceRoot as NSString).appendingPathComponent(indicator.file)
@@ -250,7 +251,7 @@ public struct ErrorRecoveryEngine {
             { codeSearchRecovery(toolName: toolName) },
             { binaryFileReadRecovery(error: error, toolName: toolName, params: params) },
             { fileExtractUnsupportedRecovery(error: error, toolName: toolName, params: params) },
-            { fileReadRecovery(toolName: toolName, params: params, attemptCount: attemptCount) }
+            { fileReadRecovery(toolName: toolName, params: params, attemptCount: attemptCount) },
         ]
         for builder in recoveryBuilders {
             if let plan = builder() { return plan }
@@ -280,7 +281,7 @@ public struct ErrorRecoveryEngine {
             description: "文件未找到，尝试相似路径：\(altPath)",
             fallbackChain: [
                 .fallbackTool("code.search", "{\"query\":\"\((path as NSString).lastPathComponent)\"}"),
-                .askUser("文件不存在：\(path)，请确认路径")
+                .askUser("文件不存在：\(path)，请确认路径"),
             ],
             suppressOriginalFailure: true
         )
@@ -363,7 +364,8 @@ public struct ErrorRecoveryEngine {
         params: [String: String]
     ) -> RecoveryPlan? {
         guard toolName == "file.read",
-              error.contains("unsupported_binary_file") || error.contains("file_extract") else {
+            error.contains("unsupported_binary_file") || error.contains("file_extract")
+        else {
             return nil
         }
         let path = params["path"] ?? ""
@@ -382,7 +384,8 @@ public struct ErrorRecoveryEngine {
         params: [String: String]
     ) -> RecoveryPlan? {
         guard toolName == "file.extract",
-              error.contains("unsupported_file_type") || error.contains("暂不支持提取") else {
+            error.contains("unsupported_file_type") || error.contains("暂不支持提取")
+        else {
             return nil
         }
         let path = params["path"] ?? ""
@@ -400,7 +403,7 @@ public struct ErrorRecoveryEngine {
             "action": "prepare",
             "sourcePath": path,
             "chunkSize": 80,
-            "onlyChinese": true
+            "onlyChinese": true,
         ]
         let json = jsonString(payload, fallback: "{\"sourcePath\":\"\(path)\"}")
         return RecoveryPlan(
@@ -421,7 +424,7 @@ public struct ErrorRecoveryEngine {
             description: "文件读取失败，重试（第 \(attemptCount + 1) 次）",
             fallbackChain: [
                 .fallbackTool("code.search", "{\"query\":\"\(params["path"] ?? "")\"}"),
-                .fallbackTool("workspace.index", "{\"maxFiles\":200,\"maxDepth\":4}")
+                .fallbackTool("workspace.index", "{\"maxFiles\":200,\"maxDepth\":4}"),
             ],
             suppressOriginalFailure: attemptCount >= 1
         )
@@ -456,7 +459,8 @@ public struct ErrorRecoveryEngine {
         // Parse params from JSON for error analysis
         var params: [String: String] = [:]
         if let data = argumentsJSON.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
             params = json.mapValues { "\($0)" }
         }
 
@@ -467,7 +471,8 @@ public struct ErrorRecoveryEngine {
         switch plan.action {
         case .retryWithModifiedParams(let newParams):
             if let jsonData = try? JSONSerialization.data(withJSONObject: newParams),
-               let jsonStr = String(data: jsonData, encoding: .utf8) {
+                let jsonStr = String(data: jsonData, encoding: .utf8)
+            {
                 return RecoveryPlan(action: .retryWithModifiedJSON(jsonStr), description: plan.description)
             }
         case .fallbackTool:
@@ -481,17 +486,13 @@ public struct ErrorRecoveryEngine {
 
     private static func findSimilarFile(hint: String) -> String {
         let filename = (hint as NSString).lastPathComponent
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["find", ".", "-name", filename, "-maxdepth", "4"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
         do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["find", ".", "-name", filename, "-maxdepth", "4"],
+                timeout: 10
+            )
+            let output = result.stdoutString
             let first = output.components(separatedBy: "\n").first { !$0.isEmpty } ?? ""
             return first.hasPrefix("./") ? String(first.dropFirst(2)) : first
         } catch {

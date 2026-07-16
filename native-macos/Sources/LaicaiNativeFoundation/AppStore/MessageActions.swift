@@ -34,7 +34,8 @@ extension AppStore {
 
     private static func standaloneChatDecisionIfNeeded(_ decision: PlannerDecision, message: String) -> PlannerDecision {
         guard decision.intent != .chat,
-              isStandaloneCapabilityOrConceptQuestion(message) || isStandaloneGeneralQuestion(message) else { return decision }
+            isStandaloneCapabilityOrConceptQuestion(message) || isStandaloneGeneralQuestion(message)
+        else { return decision }
         return PlannerDecision(
             intent: .chat,
             confidence: max(decision.confidence, 0.82),
@@ -46,28 +47,33 @@ extension AppStore {
 
     private func selectedTaskFollowUpDecision(_ decision: PlannerDecision, message: String) -> PlannerDecision {
         guard decision.intent == .chat,
-              let thread = selectedTaskFollowUpThread(message: message) else { return decision }
+            let thread = selectedTaskFollowUpThread(message: message)
+        else { return decision }
         let readOnlyFollowUp = Self.isReadOnlyInvestigationFollowUp(message)
-        let shouldExecuteFollowUp = Self.isExplicitExecutionFollowUp(message)
+        let shouldExecuteFollowUp =
+            Self.isExplicitExecutionFollowUp(message)
             || (!readOnlyFollowUp && Self.isContinuationCommand(message) && thread.status != .completed)
         return PlannerDecision(
             intent: .task,
             confidence: max(decision.confidence, 0.75),
             reason: followUpReason(base: decision.reason, shouldExecute: shouldExecuteFollowUp),
             routeLabel: shouldExecuteFollowUp ? "会话 执行" : "会话 分析",
-            expectedCapabilities: Array(Set(followUpExpectedCapabilities(
-                thread: thread,
-                message: message,
-                shouldExecute: shouldExecuteFollowUp
-            )))
+            expectedCapabilities: Array(
+                Set(
+                    followUpExpectedCapabilities(
+                        thread: thread,
+                        message: message,
+                        shouldExecute: shouldExecuteFollowUp
+                    )))
         )
     }
 
     private func selectedTaskFollowUpThread(message: String) -> Thread? {
         guard let tid = state.selectedThreadID,
-              let thread = state.threads.first(where: { $0.id == tid }),
-              thread.isExecution || thread.steps.contains(where: { $0.kind == .toolCall }),
-              Self.shouldRouteChatFollowUpIntoSelectedTask(message: message, task: AgentTask(thread: thread)) else { return nil }
+            let thread = state.threads.first(where: { $0.id == tid }),
+            thread.isExecution || thread.steps.contains(where: { $0.kind == .toolCall }),
+            Self.shouldRouteChatFollowUpIntoSelectedTask(message: message, task: AgentTask(thread: thread))
+        else { return nil }
         return thread
     }
 
@@ -76,7 +82,8 @@ extension AppStore {
         message: String,
         shouldExecute: Bool
     ) -> [String] {
-        let originalMessage = thread.goal
+        let originalMessage =
+            thread.goal
             ?? thread.steps.first(where: { $0.kind == .userInput })?.text
             ?? thread.title
         let originalDecision = IntentRouter.plan(originalMessage)
@@ -85,8 +92,9 @@ extension AppStore {
             capabilities = ["读取工作区", "形成可验证结果"]
         }
         if shouldExecute,
-           !thread.context.workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           !capabilities.contains("读取工作区") {
+            !thread.context.workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            !capabilities.contains("读取工作区")
+        {
             capabilities.append("读取工作区")
         }
         if Self.isWikiPersistenceFollowUp(message) {
@@ -96,17 +104,19 @@ extension AppStore {
     }
 
     private func followUpReason(base: String, shouldExecute: Bool) -> String {
-        base + (shouldExecute
-            ? " [当前会话已有工具调用历史，按明确续跑/执行意图恢复执行姿态]"
-            : " [当前会话已有工具调用历史，本轮按只读追问续接，不默认修改或运行命令]")
+        base
+            + (shouldExecute
+                ? " [当前会话已有工具调用历史，按明确续跑/执行意图恢复执行姿态]"
+                : " [当前会话已有工具调用历史，本轮按只读追问续接，不默认修改或运行命令]")
     }
 
     private func executeQueuedMultiAgentPlanIfRequested(_ message: String) -> Bool {
         guard let thread = state.selectedThread,
-              let plan = thread.multiAgentPlan,
-              plan.isEditable,
-              plan.status == .queued,
-              Self.isQueuedPlanExecutionCommand(message) else {
+            let plan = thread.multiAgentPlan,
+            plan.isEditable,
+            plan.status == .queued,
+            Self.isQueuedPlanExecutionCommand(message)
+        else {
             return false
         }
         executeEditedPlan(threadID: thread.id)

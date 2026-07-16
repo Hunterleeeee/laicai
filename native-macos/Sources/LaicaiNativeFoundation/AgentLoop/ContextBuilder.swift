@@ -52,7 +52,11 @@ struct ContextBuilder {
 
         // Priority 2 (useful): memory engine, failure patterns
         if usedTokens < maxPromptTokens {
-            usedTokens += enrichWithMemoryEngine(prompt: &prompt, message: state.message)
+            usedTokens += enrichWithMemoryEngine(
+                prompt: &prompt,
+                message: state.message,
+                memoryEngine: state.config.dependencies.memoryEngine
+            )
         }
         if usedTokens < maxPromptTokens {
             usedTokens += enrichWithFailurePatterns(prompt: &prompt, state: &state, config: config, injectedHashes: &injectedPatternHashes)
@@ -85,7 +89,11 @@ struct ContextBuilder {
             phase: initialPhase,
             toolRegistry: toolRegistry
         )
-        reorderToolsByEffectiveness(toolDefs: &toolDefs, prompt: &prompt)
+        reorderToolsByEffectiveness(
+            toolDefs: &toolDefs,
+            prompt: &prompt,
+            recorder: state.config.dependencies.taskOutcomeRecorder
+        )
         injectToolAvailabilityGuardrail(prompt: &prompt, config: config, toolDefs: toolDefs)
 
         return Result(
@@ -116,8 +124,12 @@ struct ContextBuilder {
     }
 
     @discardableResult
-    private static func enrichWithMemoryEngine(prompt: inout String, message: String) -> Int {
-        if let memoryContext = MemoryEngine.shared.buildMemoryContext(for: message, maxTokens: 1500) {
+    private static func enrichWithMemoryEngine(
+        prompt: inout String,
+        message: String,
+        memoryEngine: MemoryEngine
+    ) -> Int {
+        if let memoryContext = memoryEngine.buildMemoryContext(for: message, maxTokens: 1500) {
             let injection = "\n\n\(memoryContext)"
             prompt += injection
             return estimateTokens(injection)
@@ -129,7 +141,7 @@ struct ContextBuilder {
     private static func enrichWithSkillGuidance(prompt: inout String, state: inout PipelineState, config: AgentLoop.Config) -> Int {
         guard state.intent != .chat else { return 0 }
         guard
-            let learnedSkill = SkillEvolutionEngine.shared.bestSkill(
+            let learnedSkill = state.config.dependencies.skillEvolutionEngine.bestSkill(
                 intent: state.intentString,
                 modelName: config.modelName,
                 message: state.message
@@ -178,7 +190,7 @@ struct ContextBuilder {
         injectedHashes: inout [String]
     ) -> Int {
         guard state.intent != .chat else { return 0 }
-        let matchedPatterns = FailurePatternDB.shared.matches(
+        let matchedPatterns = state.config.dependencies.failurePatternDB.matches(
             intent: state.intentString,
             recentTools: [],
             message: state.message,
@@ -208,7 +220,8 @@ struct ContextBuilder {
     @discardableResult
     private static func enrichWithCustomPrompt(prompt: inout String, config: AgentLoop.Config) -> Int {
         if let customSystemPrompt = config.customSystemPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !customSystemPrompt.isEmpty {
+            !customSystemPrompt.isEmpty
+        {
             let injection = "\n\n## 用户自定义指令\n\(customSystemPrompt)"
             prompt += injection
             return estimateTokens(injection)
@@ -234,7 +247,8 @@ struct ContextBuilder {
         var toolHints: [String] = []
         let lowerMsg = state.message.lowercased()
         let isFileCreation =
-            lowerMsg.contains("创建") || lowerMsg.contains("写入") || lowerMsg.contains("新建") || lowerMsg.contains("create") || lowerMsg.contains("write")
+            lowerMsg.contains("创建") || lowerMsg.contains("写入") || lowerMsg.contains("新建") || lowerMsg.contains("create")
+            || lowerMsg.contains("write")
         if isFileCreation {
             toolHints.append("创建文件：用 file_write，不要用 wiki_build（wiki_build 只用于 Obsidian 知识库整理）")
         }
@@ -272,8 +286,12 @@ struct ContextBuilder {
         }
     }
 
-    static func reorderToolsByEffectiveness(toolDefs: inout [ToolDefinition], prompt: inout String) {
-        let tStats = toolDefs.isEmpty ? [] : TaskOutcomeRecorder.shared.toolStats(days: 14)
+    static func reorderToolsByEffectiveness(
+        toolDefs: inout [ToolDefinition],
+        prompt: inout String,
+        recorder: TaskOutcomeRecorder
+    ) {
+        let tStats = toolDefs.isEmpty ? [] : recorder.toolStats(days: 14)
         guard !tStats.isEmpty else { return }
 
         let successMap = Dictionary(grouping: tStats, by: \.toolName)

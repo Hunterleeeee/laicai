@@ -40,7 +40,9 @@ public struct ImageAttachment: Identifiable, Equatable, Sendable {
     public let width: Int
     public let height: Int
 
-    public init(id: UUID = UUID(), data: Data, mediaType: String = "image/png", thumbnailName: String = "图片", width: Int = 0, height: Int = 0) {
+    public init(
+        id: UUID = UUID(), data: Data, mediaType: String = "image/png", thumbnailName: String = "图片", width: Int = 0, height: Int = 0
+    ) {
         self.id = id
         self.data = data
         self.mediaType = mediaType

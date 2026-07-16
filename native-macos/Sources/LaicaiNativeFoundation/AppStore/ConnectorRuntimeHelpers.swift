@@ -12,7 +12,8 @@ extension AppStore {
         normalized.note = connector.note.trimmingCharacters(in: .whitespacesAndNewlines)
         normalized.kind = LiveChatRuntime.normalizedConnectorKind(normalized.kind, endpoint: normalized.endpoint)
         if let previous,
-           Self.toolCallingIdentityChanged(from: previous, to: normalized) {
+            Self.toolCallingIdentityChanged(from: previous, to: normalized)
+        {
             normalized.toolCallingCapability = nil
             normalized.toolCallingCapabilitySource = nil
             normalized.toolCallingCapabilityLearnedAt = nil
@@ -68,15 +69,19 @@ extension AppStore {
 
     static func connectorConfigurationChanged(from previous: ConnectorProfile, to next: ConnectorProfile) -> Bool {
         previous.kind.trimmingCharacters(in: .whitespacesAndNewlines) != next.kind.trimmingCharacters(in: .whitespacesAndNewlines)
-            || previous.endpoint.trimmingCharacters(in: .whitespacesAndNewlines) != next.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-            || previous.modelName.trimmingCharacters(in: .whitespacesAndNewlines) != next.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+            || previous.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+                != next.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+            || previous.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+                != next.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
             || previous.note.trimmingCharacters(in: .whitespacesAndNewlines) != next.note.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func toolCallingIdentityChanged(from previous: ConnectorProfile, to next: ConnectorProfile) -> Bool {
         previous.kind.trimmingCharacters(in: .whitespacesAndNewlines) != next.kind.trimmingCharacters(in: .whitespacesAndNewlines)
-            || previous.endpoint.trimmingCharacters(in: .whitespacesAndNewlines) != next.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-            || previous.modelName.trimmingCharacters(in: .whitespacesAndNewlines) != next.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+            || previous.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+                != next.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+            || previous.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+                != next.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func rememberToolCallingCapabilityIfNeeded(from task: AgentTask, connectorID: UUID, attemptedToolCalling: Bool) {
@@ -105,7 +110,8 @@ extension AppStore {
         activitySource: ConnectorToolCallObservationSource?
     ) -> Bool {
         guard let capability,
-              let index = state.connectors.firstIndex(where: { $0.id == connectorID }) else { return false }
+            let index = state.connectors.firstIndex(where: { $0.id == connectorID })
+        else { return false }
         let previousCapability = state.connectors[index].toolCallingCapability
         let previousSource = state.connectors[index].toolCallingCapabilitySource
         let capabilityChanged = previousCapability != capability
@@ -124,7 +130,8 @@ extension AppStore {
             state.connectors[index].toolCallingCapabilityLearnedAt = nil
         }
         guard let activitySource,
-              capabilityChanged || sourceChanged else { return true }
+            capabilityChanged || sourceChanged
+        else { return true }
         let statusLine: String
         switch (activitySource, capability) {
         case (.connectorProbe, .supported):

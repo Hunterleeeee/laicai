@@ -334,7 +334,8 @@ struct ToolExecutionEngine {
             let readPath = callStep.toolParams?["path"],
             callStep.toolParams?["offset"] == nil,
             let cached = taskContext.memory.fileContentCache[readPath]
-                ?? taskContext.memory.fileContentCache[(taskContext.workspaceRoot as NSString).appendingPathComponent(readPath)] {
+                ?? taskContext.memory.fileContentCache[(taskContext.workspaceRoot as NSString).appendingPathComponent(readPath)]
+        {
             let limit = min(cached.count, 20000)
             let content = cached.count <= limit ? cached : String(cached.prefix(limit)) + "\n…（共\(cached.count)字符，已截取前\(limit)字符）"
             let dir = (readPath as NSString).deletingLastPathComponent
@@ -348,7 +349,8 @@ struct ToolExecutionEngine {
 
         // workspace.index cache
         if toolName == "workspace.index",
-            taskContext.memory.userDecisions.contains(where: { $0.hasPrefix("工作区索引：") }) {
+            taskContext.memory.userDecisions.contains(where: { $0.hasPrefix("工作区索引：") })
+        {
             let cached = taskContext.memory.userDecisions.first(where: { $0.hasPrefix("工作区索引：") }) ?? "已索引"
             return ToolResult(
                 output: "✅ 工作区已索引（缓存）。\(String(cached.prefix(500)))",
@@ -358,7 +360,8 @@ struct ToolExecutionEngine {
 
         // code.search dedup
         if toolName == "code.search",
-            let query = callStep.toolParams?["query"] {
+            let query = callStep.toolParams?["query"]
+        {
             let isDuplicate = taskContext.memory.searchedQueries.contains(query)
             let isSimilar =
                 !isDuplicate
@@ -451,7 +454,8 @@ struct ToolExecutionEngine {
     ) {
         if processed.toolResult.success,
             AgentLoop.isFileChangeTool(processed.toolName),
-            let data = processed.toolResult.data {
+            let data = processed.toolResult.data
+        {
             emitReviewSteps(
                 request: ReviewStepEmissionRequest(
                     data: data,
@@ -537,7 +541,7 @@ struct ToolExecutionEngine {
         config: AgentLoop.Config,
         state: PipelineState
     ) {
-        TaskOutcomeRecorder.shared.recordToolOutcome(
+        state.config.dependencies.taskOutcomeRecorder.recordToolOutcome(
             taskID: state.task.id.uuidString,
             toolName: processed.toolName,
             modelName: config.modelName,
@@ -599,7 +603,8 @@ struct ToolExecutionEngine {
         if processed.toolName == "file.edit" && failCount == 1 {
             appendFileEditFailureGuidance(target: target, errorDetail: errorDetail, state: &state)
         } else if isDeterministicUnsupportedFileFailure(toolName: processed.toolName, result: processed.toolResult) {
-            appendCircuitBreakerGuidance(processed.toolName, target: target, errorDetail: errorDetail, diagnosticHint: diagnosticHint, state: &state)
+            appendCircuitBreakerGuidance(
+                processed.toolName, target: target, errorDetail: errorDetail, diagnosticHint: diagnosticHint, state: &state)
         } else if failCount >= state.maxRepeatedFailures {
             appendRepeatedFailureGuidance(
                 FailureGuidanceContext(
@@ -657,14 +662,13 @@ struct ToolExecutionEngine {
         state.messages.append(
             ChatMessage(
                 role: "system",
-                content:
-                    [
-                        "⚠️ \(context.toolName) 对 \(context.target) 已失败 \(context.failCount) 次。",
-                        "最近失败原因：\(context.errorDetail)",
-                        context.diagnosticHint,
-                        "替代方案：\(alternatives)",
-                        "禁止再用相同参数重试。"
-                    ].joined(separator: "\n")
+                content: [
+                    "⚠️ \(context.toolName) 对 \(context.target) 已失败 \(context.failCount) 次。",
+                    "最近失败原因：\(context.errorDetail)",
+                    context.diagnosticHint,
+                    "替代方案：\(alternatives)",
+                    "禁止再用相同参数重试。",
+                ].joined(separator: "\n")
             ))
     }
 
@@ -1041,7 +1045,7 @@ struct ToolExecutionEngine {
         let ext = (path as NSString).pathExtension.lowercased()
         let knownExts = [
             "swift", "py", "js", "ts", "tsx", "jsx", "rs", "go", "java",
-            "c", "cpp", "h", "m", "mm", "md", "json", "yaml", "yml", "toml"
+            "c", "cpp", "h", "m", "mm", "md", "json", "yaml", "yml", "toml",
         ]
         return Array(
             siblings.filter { file in
@@ -1179,52 +1183,9 @@ struct ToolExecutionEngine {
             state.task.steps.append(chainStep)
             onStep(chainStep)
         }
-        let readContent = ToolResultFormatter.modelContent(toolName: "file.read", result: readResultValue, limit: max(2000, config.maxTokensPerTurn / 2))
+        let readContent = ToolResultFormatter.modelContent(
+            toolName: "file.read", result: readResultValue, limit: max(2000, config.maxTokensPerTurn / 2))
         return "\n\n已读取最相关文件 \(bestPath)：\n\(readContent)"
     }
 
-    // MARK: - Dynamic Token Limit
-
-    private static func dynamicTokenLimit(toolName: String, success: Bool, config: AgentLoop.Config) -> Int {
-        if !success { return config.maxTokensPerTurn }
-        if toolName == "file.read" { return config.maxTokensPerTurn }
-        if toolName == "document.transform" { return min(max(config.maxTokensPerTurn, 8000), 40_000) }
-        if toolName == "verify.build" { return 200 }
-        if toolName == "workspace.index" || toolName == "code.search" { return min(3000, config.maxTokensPerTurn) }
-        if toolName == "shell.exec" { return config.maxTokensPerTurn / 2 }
-        return config.maxTokensPerTurn
-    }
-
-    // MARK: - Utility
-
-    private static func isToolAllowed(_ name: String, config: AgentLoop.Config) -> Bool {
-        AgentLoop.allowsTool(name, allowedTools: config.allowedTools)
-    }
-
-    private static func isDeterministicUnsupportedFileFailure(toolName: String, result: ToolResult) -> Bool {
-        guard ["file.read", "file.extract", "document.transform"].contains(toolName) else { return false }
-        let code = result.error ?? ""
-        return code == "unsupported_binary_file" || code == "unsupported_file_type"
-    }
-
-    /// Generate actionable diagnostic hint based on error type.
-    private static func diagnosticHintForFailure(toolName: String, error: String) -> String {
-        let lower = error.lowercased()
-        let hintRules: [(keywords: [String], hint: String)] = [
-            (["timeout", "超时"], "诊断：请求超时。可能是网络不稳定或服务端响应慢。"),
-            (["connection", "连接", "cannot find host"], "诊断：连接失败。请检查网络连接和服务端地址是否正确。"),
-            (["429", "rate limit", "限流"], "诊断：触发限流。请稍后重试或降低请求频率。"),
-            (["401", "403", "unauthorized", "forbidden"], "诊断：认证失败。请检查 API Key 是否正确且未过期。"),
-            (["404", "not found"], "诊断：资源不存在。请检查路径或端点是否正确。"),
-            (["500", "502", "503", "server error"], "诊断：服务端错误。可能是服务暂时不可用，请稍后重试。"),
-            (["no such file", "文件不存在", "not found"], "诊断：文件不存在。请先用 file_read 确认路径，或用 file_write 创建新文件。"),
-            (["permission", "权限"], "诊断：权限不足。请检查文件权限或工作区访问权限。"),
-            (["encoding", "编码", "utf"], "诊断：编码问题。文件可能包含非文本内容。"),
-            (["match", "匹配"], "诊断：内容匹配失败。请先 file_read 获取最新内容，再用新内容重试。"),
-            (["not allowed", "blocked", "禁止"], "诊断：工具被阻止。请检查执行级别设置。")
-        ]
-        return hintRules.first { rule in
-            rule.keywords.contains { lower.contains($0) }
-        }?.hint ?? ""
-    }
 }

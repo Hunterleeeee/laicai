@@ -80,7 +80,8 @@ final class FastMarkdownTextView: NSView {
     }
 
     private func measure(width: CGFloat) {
-        let measureKey = "\(lastMarkdown.count)-\(Int(width.rounded()))-\(Int(lastFontSize * 10))-\(lastMarkdown.prefix(48))-\(lastMarkdown.suffix(48))"
+        let measureKey =
+            "\(lastMarkdown.count)-\(Int(width.rounded()))-\(Int(lastFontSize * 10))-\(lastMarkdown.prefix(48))-\(lastMarkdown.suffix(48))"
         if measureKey == lastMeasureKey { return }
         lastMeasureKey = measureKey
         textContainer.containerSize = NSSize(width: max(1, width), height: .greatestFiniteMagnitude)
@@ -103,7 +104,7 @@ final class FastMarkdownTextView: NSView {
             attributes: [
                 .font: NSFont.systemFont(ofSize: fontSize),
                 .foregroundColor: NSColor.labelColor,
-                .paragraphStyle: paragraph
+                .paragraphStyle: paragraph,
             ]
         )
         applyLineStyles(output, fontSize: fontSize)
@@ -116,19 +117,22 @@ final class FastMarkdownTextView: NSView {
         string.enumerateSubstrings(in: full, options: [.byLines, .substringNotRequired]) { _, range, _, _ in
             let line = string.substring(with: range)
             if line.hasPrefix("# ") || line.hasPrefix("## ") {
-                output.addAttributes([
-                    .font: NSFont.boldSystemFont(ofSize: fontSize + (line.hasPrefix("# ") ? 4 : 2)),
-                    .foregroundColor: NSColor.labelColor
-                ], range: range)
+                output.addAttributes(
+                    [
+                        .font: NSFont.boldSystemFont(ofSize: fontSize + (line.hasPrefix("# ") ? 4 : 2)),
+                        .foregroundColor: NSColor.labelColor,
+                    ], range: range)
             } else if line.hasPrefix("```") {
-                output.addAttributes([
-                    .font: NSFont.monospacedSystemFont(ofSize: fontSize - 1, weight: .regular),
-                    .foregroundColor: NSColor.secondaryLabelColor
-                ], range: range)
+                output.addAttributes(
+                    [
+                        .font: NSFont.monospacedSystemFont(ofSize: fontSize - 1, weight: .regular),
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                    ], range: range)
             } else if line.hasPrefix("    ") || line.hasPrefix("\t") {
-                output.addAttributes([
-                    .font: NSFont.monospacedSystemFont(ofSize: fontSize - 1, weight: .regular)
-                ], range: range)
+                output.addAttributes(
+                    [
+                        .font: NSFont.monospacedSystemFont(ofSize: fontSize - 1, weight: .regular)
+                    ], range: range)
             }
         }
     }

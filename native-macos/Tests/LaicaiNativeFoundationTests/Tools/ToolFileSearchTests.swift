@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class ToolFileSearchTests: LaicaiNativeFoundationTestCase {
@@ -30,6 +31,26 @@ final class ToolFileSearchTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertTrue(result.success)
         XCTAssertTrue(result.output.contains("未找到匹配文件"))
+    }
+
+    func testContentSearchValidationReturnsWithoutRetryDelayWhenNoMatch() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        try "hello".write(to: workspace.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        let startedAt = Date()
+
+        let validated = await ValidationEngine.executeWithValidationJSON(
+            tool: SearchTool(),
+            argumentsJSON: #"{"query":"definitely-missing","scope":"content","maxResults":10}"#,
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+
+        XCTAssertTrue(
+            validated.result.success || validated.result.error == "rg_missing",
+            "\(validated.result.error ?? "nil"): \(validated.result.output)"
+        )
+        XCTAssertEqual(validated.validation.retryCount, 0)
+        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 1)
     }
     func testReadFileToolReadsSmallFileWithinWorkspace() async throws {
         let workspace = try makeTemporaryWorkspace()
@@ -159,9 +180,9 @@ final class ToolFileSearchTests: LaicaiNativeFoundationTestCase {
     }
     func testWebFetchExtractsReadableTextFromHTML() {
         let html = """
-        <html><head><title>Example &amp; Test</title><style>.x{}</style></head>
-        <body><nav>menu</nav><h1>Hello</h1><p>Readable content &quot;here&quot;.</p><script>alert(1)</script></body></html>
-        """
+            <html><head><title>Example &amp; Test</title><style>.x{}</style></head>
+            <body><nav>menu</nav><h1>Hello</h1><p>Readable content &quot;here&quot;.</p><script>alert(1)</script></body></html>
+            """
 
         let result = WebFetchTool.extractReadableText(fromHTML: html, url: "https://example.com/page", maxCharacters: 500)
 

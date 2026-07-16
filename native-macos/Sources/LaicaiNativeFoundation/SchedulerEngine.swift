@@ -101,8 +101,7 @@ public final class SchedulerEngine: ObservableObject {
         let useWorkspaceSchedule = !root.isEmpty && WorkspaceTrust.isTrusted(root)
         let dir =
             !useWorkspaceSchedule
-            ? ((FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory()) as NSString)
-                .appendingPathComponent("Laicai")
+            ? LaicaiStoragePaths.appDirectory.path
             : (root as NSString).appendingPathComponent(".laicai")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         persistPath = (dir as NSString).appendingPathComponent("scheduled_tasks.json")
@@ -267,7 +266,8 @@ public final class SchedulerEngine: ObservableObject {
 
                 if matches(field: fields[0], value: minute, range: 0...59) && matches(field: fields[1], value: hour, range: 0...23)
                     && matches(field: fields[2], value: day, range: 1...31) && matches(field: fields[3], value: month, range: 1...12)
-                    && matches(field: fields[4], value: weekday == 1 ? 0 : weekday - 1, range: 0...6) {
+                    && matches(field: fields[4], value: weekday == 1 ? 0 : weekday - 1, range: 0...6)
+                {
                     return candidate
                 }
                 candidate = cal.date(byAdding: .minute, value: 1, to: candidate)!

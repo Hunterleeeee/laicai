@@ -14,6 +14,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Check build script syntax
         run: |
           bash -n native-macos/build.sh
@@ -24,8 +26,9 @@ jobs:
         run: bash scripts/check-swift-file-sizes.sh
       - name: Check project hygiene
         run: bash scripts/check-project-hygiene.sh
-      - name: Swift lint debt report
-        continue-on-error: true
+      - name: Lint changed Swift files
+        env:
+          SWIFT_LINT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bash scripts/lint-swift.sh
       - name: Check formatting whitespace
         run: git diff --check
@@ -45,3 +48,12 @@ jobs:
       - name: Run tests
         working-directory: native-macos
         run: swift test
+      - name: Build signed app and CLI bundle (arm64)
+        env:
+          LAICAI_ARCHS: arm64
+        run: bash native-macos/build.sh
+      - name: Verify app signature and artifacts
+        run: |
+          codesign --verify --deep --strict --verbose=2 native-macos/dist/Laicai.app
+          test -x native-macos/dist/laicai
+          native-macos/dist/laicai --version

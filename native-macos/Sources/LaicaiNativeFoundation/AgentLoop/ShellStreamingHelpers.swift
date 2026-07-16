@@ -28,7 +28,8 @@ extension AgentLoop {
         let cmd = params.command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cmd.isEmpty else {
             return ToolResult(
-                output: "shell.exec 缺少 command 参数。不要重试空命令；请根据原始用户目标、已读文件和最近失败，构造一个具体命令，或改用更合适的工具（workspace.index/code.search/file.read/document.transform）。",
+                output:
+                    "shell.exec 缺少 command 参数。不要重试空命令；请根据原始用户目标、已读文件和最近失败，构造一个具体命令，或改用更合适的工具（workspace.index/code.search/file.read/document.transform）。",
                 success: false,
                 error: "missing_command"
             )
@@ -63,7 +64,7 @@ extension AgentLoop {
                         "command": cmd,
                         "text": text.isEmpty ? "命令运行中…" : text,
                         "isFinal": isFinal,
-                        "isFailure": isFailure
+                        "isFailure": isFailure,
                     ]
                 )
             }
@@ -85,7 +86,8 @@ extension AgentLoop {
                 try process.run()
                 postUpdate("$ \(cmd)\n")
             } catch {
-                continuation.resume(returning: ToolResult(output: "无法启动命令：\(error.localizedDescription)", success: false, error: "launch_failed"))
+                continuation.resume(
+                    returning: ToolResult(output: "无法启动命令：\(error.localizedDescription)", success: false, error: "launch_failed"))
                 return
             }
 
@@ -108,12 +110,13 @@ extension AgentLoop {
                 let body = captured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "命令无输出" : captured
                 let finalText = exitCode == 0 ? body : "命令失败（退出码 \(exitCode)）：\n\(body)"
                 postUpdate(finalText, isFinal: true, isFailure: exitCode != 0)
-                continuation.resume(returning: ToolResult(
-                    output: finalText,
-                    data: ["exitCode": "\(exitCode)", "streamed": "true"],
-                    success: exitCode == 0,
-                    error: exitCode == 0 ? nil : "exit_\(exitCode)"
-                ))
+                continuation.resume(
+                    returning: ToolResult(
+                        output: finalText,
+                        data: ["exitCode": "\(exitCode)", "streamed": "true"],
+                        success: exitCode == 0,
+                        error: exitCode == 0 ? nil : "exit_\(exitCode)"
+                    ))
             }
         }
     }

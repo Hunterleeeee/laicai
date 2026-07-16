@@ -15,7 +15,9 @@ extension AgentLoop {
         if !writes.isEmpty { lines.append("- 已修改 \(writes.count) 个文件") }
         let shells = task.steps.filter { $0.kind == .toolResult && $0.toolName == "shell.exec" && !$0.isFailure }
         if !shells.isEmpty { lines.append("- 已执行 \(shells.count) 个命令") }
-        let searches = task.steps.filter { $0.kind == .toolResult && ["code.search", "web.search"].contains($0.toolName ?? "") && !$0.isFailure }
+        let searches = task.steps.filter {
+            $0.kind == .toolResult && ["code.search", "web.search"].contains($0.toolName ?? "") && !$0.isFailure
+        }
         if !searches.isEmpty { lines.append("- 已搜索 \(searches.count) 次") }
         let failures = task.steps.filter { ($0.kind == .toolResult || $0.kind == .error || $0.kind == .aiThinking) && $0.isFailure }
         if !failures.isEmpty { lines.append("- \(failures.count) 次工具调用失败") }
@@ -54,8 +56,11 @@ extension AgentLoop {
         }
         if !failures.isEmpty, let lastFail = failures.last {
             if lastFail.toolName == "file.read",
-                lastFail.text.contains("unsupported_binary_file") || lastFail.text.contains("文档/表格") || lastFail.text.contains("file_extract") {
-                return "上一步用 file_read 读取表格/文档失败。若只是阅读请改用 file_extract；若用户要生成、翻译、改写或保存 Office 文档，请改用 document_transform(action=prepare/apply)。不要把失败当作最终答案。"
+                lastFail.text.contains("unsupported_binary_file") || lastFail.text.contains("文档/表格")
+                    || lastFail.text.contains("file_extract")
+            {
+                return
+                    "上一步用 file_read 读取表格/文档失败。若只是阅读请改用 file_extract；若用户要生成、翻译、改写或保存 Office 文档，请改用 document_transform(action=prepare/apply)。不要把失败当作最终答案。"
             }
             return "上一步失败了：\(String(lastFail.text.prefix(100)))。请换一种方法继续。不要用相同参数重试。"
         }
@@ -100,7 +105,7 @@ extension AgentLoop {
             "我将", "我会", "我来", "首先", "第一步", "步骤", "计划如下", "方案如下",
             "接下来", "让我", "需要先", "我打算", "执行计划", "分析如下",
             "先补齐", "先拆分", "先读取", "先整理", "继续整理", "继续处理", "继续执行",
-            "i will", "i'll", "let me", "first,", "step 1", "here's my plan"
+            "i will", "i'll", "let me", "first,", "step 1", "here's my plan",
         ]
         let matchCount = planIndicators.filter { lower.contains($0) }.count
         // Short texts need only 1 indicator; longer texts need 2
@@ -164,8 +169,10 @@ extension AgentLoop {
     }
 
     private static func appendLastOutput(to messages: inout [ChatMessage], priorSteps: [TaskStep]) {
-        if let lastOutput = priorSteps.reversed().first(where: { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
-            .text {
+        if let lastOutput = priorSteps.reversed().first(where: {
+            $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        })?
+        .text {
             messages.append(ChatMessage(role: "assistant", content: compactHistoryText(lastOutput, limit: 2_000)))
         }
     }
@@ -182,7 +189,8 @@ extension AgentLoop {
 
     private static func reinforcePositiveFeedback(message: String, context: TaskContext) {
         if UserFrustrationDetector.isPositive(message),
-            let skillID = context.metadata["learnedSkillID"].flatMap(Int.init) {
+            let skillID = context.metadata["learnedSkillID"].flatMap(Int.init)
+        {
             SkillEvolutionEngine.shared.updateQ(skillID: skillID, outcomeScore: 90, succeeded: true)
         }
     }
@@ -246,7 +254,8 @@ extension AgentLoop {
                 let path = nsString.substring(with: match.range(at: 1))
                 if FileManager.default.fileExists(atPath: path),
                     let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-                    data.count < 20_000_000 {  // Skip files > 20MB
+                    data.count < 20_000_000
+                {  // Skip files > 20MB
                     imageParts.append(.imageBase64(data: data, mediaType: imageMediaType(path)))
                 }
             }
@@ -279,7 +288,7 @@ extension AgentLoop {
         let lines: [String] =
             [
                 "## 续跑恢复现场",
-                "本轮用户是在续接当前会话，不是提出一个只包含「\(trimmed)」的新目标。请以原始目标和已有证据为准，继续推进到可验证交付。"
+                "本轮用户是在续接当前会话，不是提出一个只包含「\(trimmed)」的新目标。请以原始目标和已有证据为准，继续推进到可验证交付。",
             ] + continuationEvidenceLines(evidence)
             + ["- 规则：不要把「继续」当作搜索词或命令；不要把「继续」「？」当作搜索词或命令；不要重复已经失败的空工具调用；如果需要工具，必须给出完整参数。"]
         return lines.joined(separator: "\n")
@@ -299,7 +308,7 @@ extension AgentLoop {
             "继续处理当前" + "任务",
             "继续处理当前会话",
             "继续这个会话",
-            "从未完成处继续"
+            "从未完成处继续",
         ]
         return isPureContinuationCommand(trimmed)
             || phrases.contains { trimmed.localizedCaseInsensitiveContains($0) }
@@ -364,7 +373,7 @@ extension AgentLoop {
             evidence.successfulReads.isEmpty ? nil : "- 已读文件：\(evidence.successfulReads.prefix(10).joined(separator: "、"))",
             evidence.successfulWrites.isEmpty ? nil : "- 已写/交付文件：\(evidence.successfulWrites.prefix(10).joined(separator: "、"))",
             evidence.recentFailures.isEmpty ? nil : "- 最近失败，下一步需恢复或换路：\n\(evidence.recentFailures.joined(separator: "\n"))",
-            evidence.userDecisions.isEmpty ? nil : "- 编排恢复摘要：\(evidence.userDecisions.joined(separator: " / "))"
+            evidence.userDecisions.isEmpty ? nil : "- 编排恢复摘要：\(evidence.userDecisions.joined(separator: " / "))",
         ].compactMap { $0 }
     }
 
@@ -453,7 +462,7 @@ extension AgentLoop {
             snapshot.checkpoints.isEmpty ? nil : "- 最近检查点：\(uniqueValues(snapshot.checkpoints).joined(separator: " / "))",
             verificationLine(snapshot.verificationStatus),
             snapshot.pendingFiles.isEmpty ? nil : "- 未读候选：\(uniqueValues(snapshot.pendingFiles).prefix(12).joined(separator: "、"))",
-            snapshot.userDecisions.isEmpty ? nil : "- 用户决策：\(uniqueValues(snapshot.userDecisions).prefix(8).joined(separator: " / "))"
+            snapshot.userDecisions.isEmpty ? nil : "- 用户决策：\(uniqueValues(snapshot.userDecisions).prefix(8).joined(separator: " / "))",
         ].compactMap { $0 }
     }
 
@@ -605,7 +614,8 @@ extension AgentLoop {
             }
             recordFilePath(from: content)
             if content.contains("搜索") || content.contains("code.search"),
-                let query = AgentLoop.extractSearchQuery(from: content) {
+                let query = AgentLoop.extractSearchQuery(from: content)
+            {
                 searchQueries.append(query)
             }
         }
@@ -676,7 +686,7 @@ extension AgentLoop {
             #"已读取\s+(\S+)"#,
             #"已写入\s+(\S+)"#,
             #"\"path\"\s*:\s*\"([^\"]+)\""#,
-            #"·\s+(/\S+)"#
+            #"·\s+(/\S+)"#,
         ]
         for pattern in patterns {
             if let match = content.range(of: pattern, options: .regularExpression) {
@@ -754,7 +764,7 @@ extension AgentLoop {
             "<invoke name=",
             "<tool_call>", "</tool_call>",
             "<|tool_call|>", "<|/tool_call|>", "</|tool_call|>",
-            "<|assistant_tool_call|>"
+            "<|assistant_tool_call|>",
         ]
         if strongPatterns.contains(where: { text.contains($0) }) { return true }
         // Pattern 1: explicit tool call syntax in text
@@ -763,7 +773,7 @@ extension AgentLoop {
             "tool:workspace_index", "tool:shell_exec", "tool:diff_apply",
             "<file_read", "<code_search", "<web_search", "<shell_exec",
             "web_search(query=", "file_read(path=", "code_search(query=",
-            "workspace_index(path=", "shell_exec(command=", "diff_apply(path="
+            "workspace_index(path=", "shell_exec(command=", "diff_apply(path=",
         ]
         let syntaxMatches = syntaxPatterns.filter { text.contains($0) }.count
         if syntaxMatches >= 2 { return true }
@@ -773,7 +783,7 @@ extension AgentLoop {
             "shell.exec", "file.read", "file.write", "file.edit", "diff.apply",
             "web.search", "web.fetch", "code.search", "workspace.index",
             "shell_exec", "file_read", "file_write", "file_edit", "diff_apply",
-            "web_search", "web_fetch", "code_search", "workspace_index"
+            "web_search", "web_fetch", "code_search", "workspace_index",
         ]
         let totalMentions = toolNames.reduce(0) { count, name in
             count + text.components(separatedBy: name).count - 1
@@ -811,7 +821,7 @@ extension AgentLoop {
             #"<invoke[\s\S]*?(?=\n\n|$)"#,
             #"<tool_call>[\s\S]*?</tool_call>"#,
             #"<\|tool_call\|>[\s\S]*?(<\|/tool_call\|>|</\|tool_call\|>|$)"#,
-            #"<\|assistant_tool_call\|>[\s\S]*?(?=\n\n|$)"#
+            #"<\|assistant_tool_call\|>[\s\S]*?(?=\n\n|$)"#,
         ]
         for pattern in blockPatterns {
             if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
@@ -872,7 +882,7 @@ extension AgentLoop {
             let normalizedTool = tool.lowercased()
             let knownToolPrefixes = [
                 "shell", "file", "code", "workspace", "web", "diff", "browser",
-                "wiki", "document", "skill", "image", "git"
+                "wiki", "document", "skill", "image", "git",
             ]
             if knownToolPrefixes.contains(where: { normalizedTool.contains($0) }) {
                 return true
@@ -884,12 +894,12 @@ extension AgentLoop {
         let commandKeys = ["cmd", "command"]
         let toolArgumentKeys = [
             "cwd", "path", "timeout", "timeout_ms", "max_output_tokens", "sandbox_permissions",
-            "justification", "workdir", "yield_time_ms"
+            "justification", "workdir", "yield_time_ms",
         ]
         let shellPrefixes = [
             "ls", "cat", "sed", "rg", "grep", "find", "pwd", "python", "python3",
             "node", "npm", "pnpm", "yarn", "swift", "xcodebuild", "git", "bash",
-            "sh", "zip", "unzip", "mkdir", "cp", "mv", "open", "defaults"
+            "sh", "zip", "unzip", "mkdir", "cp", "mv", "open", "defaults",
         ]
         let firstToken = trimmedCommand.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }).first.map(String.init) ?? ""
         let looksLikeShell = shellPrefixes.contains(firstToken) || trimmedCommand.contains(" && ") || trimmedCommand.contains("; ")
@@ -920,7 +930,7 @@ extension AgentLoop {
             "timeout", "超时", "connection", "连接", "network", "网络",
             "reset", "broken pipe", "429", "rate limit", "限流", "too many requests",
             "500", "502", "503", "504", "server error", "服务不可用",
-            "cannot parse", "parse response", "urlerror", "not connected", "cannot find host"
+            "cannot parse", "parse response", "urlerror", "not connected", "cannot find host",
         ]
         return transientKeywords.contains { desc.contains($0) }
             || (desc.contains("decode") && desc.contains("response"))
@@ -948,7 +958,8 @@ extension AgentLoop {
     static func connectorFailoverMessage(from failed: ConnectorProfile, to fallback: ConnectorProfile, reason: String) -> ChatMessage {
         ChatMessage(
             role: "system",
-            content: "连接器 \(displayConnectorName(failed)) 请求失败（\(reason)）。系统已自动切换到 \(displayConnectorName(fallback))，请基于同一用户目标继续，不要要求用户手动重试。"
+            content:
+                "连接器 \(displayConnectorName(failed)) 请求失败（\(reason)）。系统已自动切换到 \(displayConnectorName(fallback))，请基于同一用户目标继续，不要要求用户手动重试。"
         )
     }
 
@@ -984,21 +995,24 @@ extension AgentLoop {
 
         // 1. Transient + haven't failovered yet → try another connector
         if isTransient, !context.didConnectorFailover,
-            let fallback = fallbackConnector(after: context.currentConnector, allConnectors: context.allConnectors) {
+            let fallback = fallbackConnector(after: context.currentConnector, allConnectors: context.allConnectors)
+        {
             return .connectorFailover(connector: fallback)
         }
 
         // 2. Transient + still have retries left → retry with backoff
         if isTransient,
             context.transientRetryCount < context.maxTransientRetries,
-            context.iteration < context.effectiveMaxIterations {
+            context.iteration < context.effectiveMaxIterations
+        {
             let delaySec = min(Int(pow(2.0, Double(context.transientRetryCount + 1))), 8)
             return .transientRetry(delaySeconds: delaySec)
         }
 
         // 3. Non-transient or retries exhausted + haven't failovered → try another connector
         if !context.didConnectorFailover,
-            let fallback = fallbackConnector(after: context.currentConnector, allConnectors: context.allConnectors) {
+            let fallback = fallbackConnector(after: context.currentConnector, allConnectors: context.allConnectors)
+        {
             return .connectorFailover(connector: fallback)
         }
 
@@ -1020,37 +1034,33 @@ extension AgentLoop {
         guard !stagePaths.isEmpty else { return }
 
         // Stage only the files touched by the current tool call.
-        let addProcess = Process()
-        addProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        addProcess.currentDirectoryURL = URL(fileURLWithPath: root)
-        addProcess.arguments = ["git", "add", "--"] + stagePaths
-        let pipe = Pipe()
-        addProcess.standardOutput = pipe
-        addProcess.standardError = pipe
-        try? addProcess.run()
-        addProcess.waitUntilExit()
+        guard
+            let addResult = try? ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git", "add", "--"] + stagePaths,
+                currentDirectoryURL: URL(fileURLWithPath: root),
+                timeout: 30
+            ), addResult.exitCode == 0, !addResult.timedOut
+        else { return }
 
         // Check if there are staged changes to commit
-        let statusProcess = Process()
-        statusProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        statusProcess.currentDirectoryURL = URL(fileURLWithPath: root)
-        statusProcess.arguments = ["git", "diff", "--cached", "--quiet"]
-        let statusPipe = Pipe()
-        statusProcess.standardOutput = statusPipe
-        statusProcess.standardError = statusPipe
-        try? statusProcess.run()
-        statusProcess.waitUntilExit()
+        guard
+            let statusResult = try? ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git", "diff", "--cached", "--quiet"],
+                currentDirectoryURL: URL(fileURLWithPath: root),
+                timeout: 15
+            ), !statusResult.timedOut
+        else { return }
 
         // If there are staged changes (exit code 1 = differences exist), commit them
-        if statusProcess.terminationStatus != 0 {
-            let commitProcess = Process()
-            commitProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            commitProcess.currentDirectoryURL = URL(fileURLWithPath: root)
-            commitProcess.arguments = ["git", "commit", "-m", "来财自动检查点", "--allow-empty-message"]
-            commitProcess.standardOutput = pipe
-            commitProcess.standardError = pipe
-            try? commitProcess.run()
-            commitProcess.waitUntilExit()
+        if statusResult.exitCode == 1 {
+            _ = try? ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git", "commit", "-m", "来财自动检查点", "--allow-empty-message"],
+                currentDirectoryURL: URL(fileURLWithPath: root),
+                timeout: 60
+            )
         }
     }
 
@@ -1118,7 +1128,8 @@ extension AgentLoop {
                 // Extract first meaningful line as summary
                 let lines = content.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
                 let summary = lines.prefix(3).joined(separator: "\n")
-                compressed.append(ChatMessage(role: msg.role, content: String(summary.prefix(400)) + "\n[…已压缩]", toolCallId: msg.toolCallId))
+                compressed.append(
+                    ChatMessage(role: msg.role, content: String(summary.prefix(400)) + "\n[…已压缩]", toolCallId: msg.toolCallId))
                 index += 1
                 continue
             }
@@ -1140,7 +1151,8 @@ extension AgentLoop {
 
             // Keep other messages but truncate if very long
             if content.count > 2000 {
-                compressed.append(ChatMessage(role: msg.role, content: String(content.prefix(1500)) + "\n[…已压缩]", toolCallId: msg.toolCallId))
+                compressed.append(
+                    ChatMessage(role: msg.role, content: String(content.prefix(1500)) + "\n[…已压缩]", toolCallId: msg.toolCallId))
             } else {
                 compressed.append(msg)
             }
@@ -1150,67 +1162,6 @@ extension AgentLoop {
         // Append tail
         compressed.append(contentsOf: messages[(messages.count - keepTail)...])
         messages = compressed
-    }
-
-    /// Rough token estimate accounting for script density:
-    /// - CJK (incl. extension blocks A/B/C/D/E/F, kana, hangul): ~1 token per char
-    /// - ASCII / Latin: ~0.25 tokens per char (~4 chars/token)
-    /// - Other (emoji, math, etc.): ~0.5 tokens per char
-    static func roughTokenCount(_ text: String) -> Int {
-        var cjk = 0
-        var ascii = 0
-        var other = 0
-        for scalar in text.unicodeScalars {
-            let scalarValue = scalar.value
-            // ASCII printable + whitespace
-            if scalarValue < 0x80 {
-                ascii += 1
-            }
-            // CJK Unified Ideographs + Extensions A-F + Compatibility, Kana, Hangul, fullwidth
-            else if (0x3000...0x303F).contains(scalarValue)  // CJK punctuation
-                || (0x3040...0x309F).contains(scalarValue)  // Hiragana
-                || (0x30A0...0x30FF).contains(scalarValue)  // Katakana
-                || (0x3400...0x4DBF).contains(scalarValue)  // CJK Ext A
-                || (0x4E00...0x9FFF).contains(scalarValue)  // CJK Unified
-                || (0xAC00...0xD7AF).contains(scalarValue)  // Hangul syllables
-                || (0xF900...0xFAFF).contains(scalarValue)  // CJK Compatibility
-                || (0xFF00...0xFFEF).contains(scalarValue)  // Halfwidth/Fullwidth
-                || (0x20000...0x2A6DF).contains(scalarValue)  // CJK Ext B
-                || (0x2A700...0x2B73F).contains(scalarValue)  // CJK Ext C
-                || (0x2B740...0x2B81F).contains(scalarValue)  // CJK Ext D
-                || (0x2B820...0x2CEAF).contains(scalarValue)  // CJK Ext E
-                || (0x2CEB0...0x2EBEF).contains(scalarValue)  // CJK Ext F
-                || (0x30000...0x3134F).contains(scalarValue) {  // CJK Ext G
-                cjk += 1
-            } else {
-                other += 1
-            }
-        }
-        // Tokens ~= cjk*1.0 + ascii*0.25 + other*0.5
-        let estimate = cjk + (ascii / 4) + (other / 2)
-        return max(1, estimate)
-    }
-
-    /// Deduplicate tool call cache entries that are semantically equivalent.
-    /// Returns true if the new query is a semantic duplicate of a cached one.
-    static func isSemanticDuplicate(newQuery: String, cachedQueries: [String], toolName: String) -> Bool {
-        guard toolName == "code.search" || toolName == "web.search" else { return false }
-        let newNorm = newQuery.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        for cached in cachedQueries {
-            let cachedNorm = cached.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-            // Exact match
-            if newNorm == cachedNorm { return true }
-            // Containment match
-            if newNorm.contains(cachedNorm) || cachedNorm.contains(newNorm) { return true }
-            // Word overlap: if >80% words overlap, it's a duplicate
-            let newWords = Set(newNorm.components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 1 })
-            let cachedWords = Set(cachedNorm.components(separatedBy: .whitespacesAndNewlines).filter { $0.count > 1 })
-            guard !newWords.isEmpty && !cachedWords.isEmpty else { continue }
-            let overlap = newWords.intersection(cachedWords).count
-            let maxSize = max(newWords.count, cachedWords.count)
-            if Double(overlap) / Double(maxSize) > 0.8 { return true }
-        }
-        return false
     }
 
 }

@@ -65,7 +65,7 @@ public struct TokenBudget: Sendable, Equatable {
             ("任务记忆", Self.format(memoryTokens)),
             ("工具结果", Self.format(toolTokens)),
             ("附件线索", Self.format(attachmentTokens)),
-            ("系统预留", Self.format(systemReserveTokens))
+            ("系统预留", Self.format(systemReserveTokens)),
         ].filter { $0.value != "0" }
         if !trimDetails.isEmpty {
             rows.append(("裁剪明细", trimDetails.joined(separator: "；")))
@@ -92,11 +92,13 @@ public struct TokenBudget: Sendable, Equatable {
             projectTokens += estimate(text: file.summary)
         }
 
-        let memoryTokens = estimate(text: context.memory.stageConclusions.joined(separator: "\n"))
+        let memoryTokens =
+            estimate(text: context.memory.stageConclusions.joined(separator: "\n"))
             + estimate(text: context.memory.checkpoints.joined(separator: "\n"))
             + estimate(text: context.memory.userDecisions.joined(separator: "\n"))
             + estimate(text: context.memory.verificationStatus ?? "")
-        let toolTokens = estimate(text: context.memory.readFiles.joined(separator: "\n"))
+        let toolTokens =
+            estimate(text: context.memory.readFiles.joined(separator: "\n"))
             + estimate(text: context.memory.searchedQueries.joined(separator: "\n"))
             + estimate(text: context.memory.failedTools.joined(separator: "\n"))
         let attachmentTokens = estimate(text: context.memory.pendingFiles.joined(separator: "\n"))

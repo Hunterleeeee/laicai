@@ -90,15 +90,13 @@ public struct SandboxExecutor: Sendable {
 
     /// Check if Docker is available on the system
     public static func isDockerAvailable() -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["docker", "info"]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
         do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["docker", "info"],
+                timeout: 5
+            )
+            return result.exitCode == 0 && !result.timedOut
         } catch {
             return false
         }
@@ -107,59 +105,15 @@ public struct SandboxExecutor: Sendable {
     // MARK: - Native (no sandbox)
 
     private static func executeNative(command: String, workspaceRoot: String, timeout: Int) async throws -> SandboxCommandResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", command]
-        if !workspaceRoot.isEmpty {
-            process.currentDirectoryURL = URL(fileURLWithPath: workspaceRoot)
-        }
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        try process.run()
-
-        let didTimeout = await waitForExit(process, timeoutSeconds: timeout)
-        if didTimeout {
-            process.terminate()
-            process.waitUntilExit()
-        }
-
-        let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: outData, encoding: .utf8) ?? ""
-        let errOutput = String(data: errData, encoding: .utf8) ?? ""
-
-        return SandboxCommandResult(output: output, error: errOutput, exitCode: process.terminationStatus)
-    }
-
-    private static func waitForExit(_ process: Process, timeoutSeconds: Int) async -> Bool {
-        await withCheckedContinuation { continuation in
-            let finished = Locked(false)
-            process.terminationHandler = { _ in
-                let shouldResume = finished.withValue { value in
-                    guard !value else { return false }
-                    value = true
-                    return true
-                }
-                if shouldResume {
-                    continuation.resume(returning: false)
-                }
-            }
-            Task {
-                try? await Task.sleep(for: .seconds(timeoutSeconds))
-                let shouldResume = finished.withValue { value in
-                    guard !value else { return false }
-                    value = true
-                    return true
-                }
-                if shouldResume {
-                    continuation.resume(returning: true)
-                }
-            }
-        }
+        let result = try await ProcessRunner.runAsync(
+            executableURL: URL(fileURLWithPath: "/bin/zsh"),
+            arguments: ["-lc", command],
+            currentDirectoryURL: workspaceRoot.isEmpty ? nil : URL(fileURLWithPath: workspaceRoot),
+            timeout: TimeInterval(timeout)
+        )
+        let timeoutMessage = result.timedOut ? "命令执行超时（\(timeout)秒）" : ""
+        let error = [result.stderrString, timeoutMessage].filter { !$0.isEmpty }.joined(separator: "\n")
+        return SandboxCommandResult(output: result.stdoutString, error: error, exitCode: result.exitCode)
     }
 
     // MARK: - macOS sandbox-exec
@@ -175,21 +129,21 @@ public struct SandboxExecutor: Sendable {
 
         // Build sandbox profile
         var profile = """
-        (version 1)
-        (deny default)
-        (allow process-exec)
-        (allow process-fork)
-        (allow file-read* (subpath "/usr"))
-        (allow file-read* (subpath "/bin"))
-        (allow file-read* (subpath "/sbin"))
-        (allow file-read* (subpath "/opt/homebrew"))
-        (allow file-read* (subpath "/dev"))
-        (allow file-write* (subpath "/dev/null"))
-        (allow file-read* (subpath "\(runtimeRoot)"))
-        (allow file-write* (subpath "\(runtimeRoot)"))
-        (allow sysctl-read)
-        (allow mach-lookup)
-        """
+            (version 1)
+            (deny default)
+            (allow process-exec)
+            (allow process-fork)
+            (allow file-read* (subpath "/usr"))
+            (allow file-read* (subpath "/bin"))
+            (allow file-read* (subpath "/sbin"))
+            (allow file-read* (subpath "/opt/homebrew"))
+            (allow file-read* (subpath "/dev"))
+            (allow file-write* (subpath "/dev/null"))
+            (allow file-read* (subpath "\(runtimeRoot)"))
+            (allow file-write* (subpath "\(runtimeRoot)"))
+            (allow sysctl-read)
+            (allow mach-lookup)
+            """
 
         if !workspaceRoot.isEmpty {
             profile += "\n(allow file-read* (subpath \"\(workspaceRoot)\"))"

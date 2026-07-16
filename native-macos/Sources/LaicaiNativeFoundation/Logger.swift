@@ -55,11 +55,9 @@ public final class AgentLogger: Sendable {
     private let encoder: JSONEncoder
 
     private init() {
-        let appSupport =
-            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        logsDirectory = appSupport.appendingPathComponent("Laicai/AgentLogs", isDirectory: true)
-        try? FileManager.default.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+        logsDirectory = LaicaiStoragePaths.ensureDirectory(
+            LaicaiStoragePaths.appDirectory.appendingPathComponent("AgentLogs", isDirectory: true)
+        )
 
         encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -74,7 +72,8 @@ public final class AgentLogger: Sendable {
         let fileURL = logsDirectory.appendingPathComponent("\(dateString).jsonl")
 
         guard let data = try? encoder.encode(log),
-              let line = String(data: data, encoding: .utf8) else { return }
+            let line = String(data: data, encoding: .utf8)
+        else { return }
 
         let entry = line + "\n"
 
@@ -131,19 +130,15 @@ public enum NetworkDefaults {
     public static let localChat: TimeInterval = 45
     public static let remoteChat: TimeInterval = 120
 
-    public static var ephemeralSession: URLSession {
-        URLSession(configuration: .ephemeral)
-    }
+    public static let ephemeralSession = URLSession(configuration: .ephemeral)
 
-    public static var imageSession: URLSession {
+    public static let imageSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = imageRequest
         configuration.timeoutIntervalForResource = imageRequest + 30
         configuration.waitsForConnectivity = true
         return URLSession(configuration: configuration)
-    }
+    }()
 
-    public static var webSocketSession: URLSession {
-        URLSession(configuration: .default)
-    }
+    public static let webSocketSession = URLSession(configuration: .default)
 }

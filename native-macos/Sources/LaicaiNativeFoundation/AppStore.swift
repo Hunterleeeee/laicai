@@ -28,8 +28,9 @@ public final class AppStore: ObservableObject {
     public var cachedThreadRecordSummaries: [ThreadRecord] {
         let signature = threadSummarySignature()
         if let cached = _cachedThreadSummaries,
-           _cachedSummaryGen == state.threadSummaryGeneration,
-           _cachedSummarySignature == signature {
+            _cachedSummaryGen == state.threadSummaryGeneration,
+            _cachedSummarySignature == signature
+        {
             return cached
         }
         let result = state.threadRecordSummaries
@@ -72,9 +73,10 @@ public final class AppStore: ObservableObject {
         Self.markStaleRunningTasks(in: &initialState)
         var startupConnectorSwitchMessage: String?
         if let activeID = initialState.activeConnectorID,
-           let active = initialState.connectors.first(where: { $0.id == activeID }),
-           active.health == .offline,
-           let fallback = AgentLoop.fallbackConnector(after: active, allConnectors: initialState.connectors) {
+            let active = initialState.connectors.first(where: { $0.id == activeID }),
+            active.health == .offline,
+            let fallback = AgentLoop.fallbackConnector(after: active, allConnectors: initialState.connectors)
+        {
             initialState.activeConnectorID = fallback.id
             initialState.settings.defaultConnectorName = fallback.name
             startupConnectorSwitchMessage = "当前模型离线，已自动切换到 \(AgentLoop.displayConnectorName(fallback))。"

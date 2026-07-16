@@ -21,5 +21,6 @@ let package = Package(
         .executableTarget(name: "LaicaiNativeApp", dependencies: ["LaicaiNativeUI", "LaicaiNativeFoundation"]),
         .executableTarget(name: "LaicaiNativeCLI", dependencies: ["LaicaiNativeFoundation", "LaicaiNativeDomain"]),
         .testTarget(name: "LaicaiNativeFoundationTests", dependencies: ["LaicaiNativeFoundation", "LaicaiNativeDomain"]),
+        .testTarget(name: "LaicaiNativeCLITests", dependencies: ["LaicaiNativeCLI", "LaicaiNativeFoundation", "LaicaiNativeDomain"]),
     ]
 )

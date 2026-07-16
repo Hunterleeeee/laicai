@@ -5,9 +5,10 @@ extension AppStore {
     @discardableResult
     func switchFromUnhealthyActiveConnectorIfNeeded() -> ConnectorProfile? {
         guard let activeID = state.activeConnectorID,
-              let active = state.connectors.first(where: { $0.id == activeID }),
-              active.health != .ready,
-              let fallback = AgentLoop.fallbackConnector(after: active, allConnectors: state.connectors) else {
+            let active = state.connectors.first(where: { $0.id == activeID }),
+            active.health != .ready,
+            let fallback = AgentLoop.fallbackConnector(after: active, allConnectors: state.connectors)
+        else {
             return state.activeConnector
         }
         state.activeConnectorID = fallback.id

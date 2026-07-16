@@ -512,7 +512,8 @@ extension AgentLoop {
 
             // Auto-continuation with context compression
             if !state.didComplete && !state.hadFailure && !state.wasTruncated && !Task.isCancelled && state.autoRound < state.maxAutoRounds
-                && state.intent != .chat {
+                && state.intent != .chat
+            {
                 state.autoRound += 1
                 state.iteration = 0
 
@@ -521,16 +522,19 @@ extension AgentLoop {
                 let systemMsgs = state.messages.filter { $0.role == "system" }
                 let recentMsgs = state.messages.suffix(6)
                 state.messages = Array(systemMsgs.prefix(2)) + Array(recentMsgs)
-                state.messages.append(ChatMessage(role: "system", content: "自动继续中（已压缩上下文）。\n当前进展：\n\(progressSummary)\n请继续完成剩余工作，不要重复已成功的操作。"))
+                state.messages.append(
+                    ChatMessage(role: "system", content: "自动继续中（已压缩上下文）。\n当前进展：\n\(progressSummary)\n请继续完成剩余工作，不要重复已成功的操作。"))
 
                 state.consecutiveEmptyResponses = 0
                 state.transientRetryCount = 0
                 state.didInjectWorkingSet = false
-                let roundStep = TaskStep(kind: .aiThinking, text: "自动继续处理中（第 \(state.autoRound) 轮）…", isCollapsible: true, isCollapsed: false)
+                let roundStep = TaskStep(
+                    kind: .aiThinking, text: "自动继续处理中（第 \(state.autoRound) 轮）…", isCollapsible: true, isCollapsed: false)
                 state.task.steps.append(roundStep)
                 onStep(roundStep)
             }
-        } while !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound > 0 && state.autoRound <= state.maxAutoRounds
+        } while !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound > 0
+            && state.autoRound <= state.maxAutoRounds
             && state.intent != .chat
 
         // Fallback wiki build (uses instance method). Run this even when the

@@ -236,7 +236,8 @@ public final class PromptTemplateStore: @unchecked Sendable {
         register(
             PromptTemplate(
                 id: "nudge.plan_only_with_reads",
-                content: "你已经读取了资料但停了下来。不要只说计划，立即继续执行下一步：整理到 Wiki 就调用 wiki_build(save=true)，表格/文档先用 file_extract，其他交付用 file_write / shell_exec。",
+                content:
+                    "你已经读取了资料但停了下来。不要只说计划，立即继续执行下一步：整理到 Wiki 就调用 wiki_build(save=true)，表格/文档先用 file_extract，其他交付用 file_write / shell_exec。",
                 description: "计划拦截提示（有只读工具调用）"
             ))
 
@@ -257,7 +258,8 @@ public final class PromptTemplateStore: @unchecked Sendable {
         register(
             PromptTemplate(
                 id: "nudge.wiki_save",
-                content: "用户要求整理到 Wiki/知识库，但当前没有任何 wiki_build(save=true) 或文件写入成功记录。不要输出计划或道歉，立即基于已读材料调用 wiki_build 保存原子笔记；材料不足就先用 file_read/file_extract 继续读取。",
+                content:
+                    "用户要求整理到 Wiki/知识库，但当前没有任何 wiki_build(save=true) 或文件写入成功记录。不要输出计划或道歉，立即基于已读材料调用 wiki_build 保存原子笔记；材料不足就先用 file_read/file_extract 继续读取。",
                 description: "Wiki 保存提示"
             ))
 

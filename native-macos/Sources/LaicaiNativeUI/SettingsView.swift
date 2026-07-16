@@ -1,8 +1,8 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
-private var appVersionLabel: String {
+var appVersionLabel: String {
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
     return "v\(version) · build \(build)"
@@ -11,18 +11,15 @@ private var appVersionLabel: String {
 private var geminiBridgeDescription: String {
     let domains = GeminiOAuthBridgeManager.domains.joined(separator: "、")
     let socksAddress = "\(GeminiOAuthBridgeManager.socksHost):\(GeminiOAuthBridgeManager.socksPort)"
-    return "用于 Gemini 与 Antigravity 不吃系统代理时，临时把 \(domains) " +
-        "转发到 Veee SOCKS \(socksAddress)。"
+    return "用于 Gemini 与 Antigravity 不吃系统代理时，临时把 \(domains) " + "转发到 Veee SOCKS \(socksAddress)。"
 }
 
 private var geminiBridgePrivacyNote: String {
-    "启动会弹出 macOS 管理员授权，授权后桥在后台运行；失败会自动回滚 hosts。" +
-        "来财不会读取、保存或代理你的 Mac 密码。"
+    "启动会弹出 macOS 管理员授权，授权后桥在后台运行；失败会自动回滚 hosts。" + "来财不会读取、保存或代理你的 Mac 密码。"
 }
 
 private var feishuWebSocketHint: String {
-    "飞书使用 WebSocket 长连接，无需公网 IP。请在飞书开放平台 > 事件与回调 > " +
-        "回调配置中选择「使用长连接接收事件」。"
+    "飞书使用 WebSocket 长连接，无需公网 IP。请在飞书开放平台 > 事件与回调 > " + "回调配置中选择「使用长连接接收事件」。"
 }
 
 public struct SettingsView: View {
@@ -147,147 +144,6 @@ public struct SettingsView: View {
     }
 }
 
-// MARK: - General Settings
-
-private struct GeneralSettingsTab: View {
-    @EnvironmentObject private var store: AppStore
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AppSpace.large) {
-                // About card
-                aboutCard
-
-                settingsCard(title: "工作区") {
-                    settingsRow(label: "路径") {
-                        TextField("选择本地项目或资料目录", text: Binding(
-                            get: { store.state.settings.workspacePath },
-                            set: { store.updateWorkspacePath($0) }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-
-                        Button("浏览") {
-                            let panel = NSOpenPanel()
-                            panel.canChooseFiles = false
-                            panel.canChooseDirectories = true
-                            panel.allowsMultipleSelection = false
-                            if panel.runModal() == .OK, let url = panel.url {
-                                store.updateWorkspacePath(url.path)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                    }
-
-                    settingsRow(label: "知识库") {
-                        TextField("Obsidian 知识库路径；留空则使用工作区", text: Binding(
-                            get: { store.state.settings.vaultPath },
-                            set: { store.updateVaultPath($0) }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-
-                        Button("浏览") {
-                            let panel = NSOpenPanel()
-                            panel.canChooseFiles = false
-                            panel.canChooseDirectories = true
-                            panel.allowsMultipleSelection = false
-                            if panel.runModal() == .OK, let url = panel.url {
-                                store.updateVaultPath(url.path)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-
-                settingsCard(title: "默认模型") {
-                    settingsRow(label: "连接器") {
-                        Picker("", selection: Binding(
-                            get: { store.state.activeConnectorID ?? UUID() },
-                            set: { store.selectConnector(id: $0) }
-                        )) {
-                            Text("无").tag(UUID())
-                            ForEach(store.state.connectors) { connector in
-                                Text(connector.name).tag(connector.id)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: 260, alignment: .leading)
-                    }
-                }
-
-                // Data stats
-                dataCard
-            }
-            .padding(AppSpace.extraLarge)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var aboutCard: some View {
-        HStack(spacing: AppSpace.large) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Brand.subtleGradient)
-                    .frame(width: 48, height: 48)
-                Image(systemName: "sparkle")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(Brand.primary)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text("来财 Laicai")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(TextGrade.primary)
-                Text("macOS 本机 AI 编排助手")
-                    .font(.system(size: 11))
-                    .foregroundStyle(TextGrade.muted)
-                Text(appVersionLabel)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(TextGrade.ghost)
-            }
-            Spacer()
-        }
-        .padding(AppSpace.large)
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .fill(SurfaceGrade.card)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .strokeBorder(Brand.primary.opacity(0.15), lineWidth: 0.5)
-        )
-    }
-
-    private var dataCard: some View {
-        let totals = UsageTracker.shared.totals(days: 9999)
-        let threadCount = store.state.threads.count
-        let projectCount = ProjectManager.shared.projects.count
-
-        return settingsCard(title: "数据概览") {
-            HStack(spacing: AppSpace.extraLarge) {
-                statPill(value: "\(projectCount)", label: "项目")
-                statPill(value: "\(threadCount)", label: "对话")
-                statPill(value: "\(totals.requestCount)", label: "请求")
-                statPill(value: formatCostBrief(totals.estimatedCost), label: "费用")
-            }
-        }
-    }
-
-    private func statPill(value: String, label: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(TextGrade.primary)
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(TextGrade.ghost)
-        }
-    }
-
-    private func formatCostBrief(_ cost: Double) -> String {
-        if cost < 1 { return String(format: "¥%.2f", cost * 7.2) }
-        return String(format: "$%.1f", cost)
-    }
-}
-
 // MARK: - Connectors Settings
 
 private struct ConnectorsSettingsTab: View {
@@ -351,7 +207,7 @@ private struct ConnectorsSettingsTab: View {
                                 onEdit: { editingConnectorID = conn.id },
                                 onDelete: { deletingConnector = conn }
                             )
-                                .onTapGesture { editingConnectorID = conn.id }
+                            .onTapGesture { editingConnectorID = conn.id }
                             Divider().padding(.leading, AppSpace.xxl)
                         }
                     }
@@ -369,12 +225,15 @@ private struct ConnectorsSettingsTab: View {
                 ToastCenter.shared.show("正在测试 \(conn.name)")
             }
         }
-        .sheet(isPresented: Binding(
-            get: { editingConnectorID != nil },
-            set: { if !$0 { editingConnectorID = nil } }
-        )) {
+        .sheet(
+            isPresented: Binding(
+                get: { editingConnectorID != nil },
+                set: { if !$0 { editingConnectorID = nil } }
+            )
+        ) {
             if let connID = editingConnectorID,
-               let conn = store.state.connectors.first(where: { $0.id == connID }) {
+                let conn = store.state.connectors.first(where: { $0.id == connID })
+            {
                 ConnectorEditSheet(mode: .edit(conn)) { updated in
                     store.updateConnector(updated)
                     ToastCenter.shared.success("已更新 \(updated.name)")
@@ -385,10 +244,13 @@ private struct ConnectorsSettingsTab: View {
                 }
             }
         }
-        .alert("删除连接器", isPresented: Binding(
-            get: { deletingConnector != nil },
-            set: { if !$0 { deletingConnector = nil } }
-        )) {
+        .alert(
+            "删除连接器",
+            isPresented: Binding(
+                get: { deletingConnector != nil },
+                set: { if !$0 { deletingConnector = nil } }
+            )
+        ) {
             Button("取消", role: .cancel) { deletingConnector = nil }
             Button("删除", role: .destructive) {
                 if let conn = deletingConnector { store.deleteConnector(id: conn.id) }
@@ -511,23 +373,27 @@ private struct ToolsSettingsTab: View {
 
                 settingsCard(title: "ComfyUI 图片生成") {
                     settingsRow(label: "服务地址") {
-                        TextField("http://127.0.0.1:8188", text: Binding(
-                            get: { store.state.settings.comfyUIServerURL },
-                            set: { store.updateComfyUIServerURL($0) }
-                        ))
+                        TextField(
+                            "http://127.0.0.1:8188",
+                            text: Binding(
+                                get: { store.state.settings.comfyUIServerURL },
+                                set: { store.updateComfyUIServerURL($0) }
+                            )
+                        )
                         .textFieldStyle(.roundedBorder)
 
                         Button("测试连接") {
                             Task {
-                                 let url = store.state.settings.comfyUIServerURL.isEmpty
-                                     ? "http://127.0.0.1:8188" : store.state.settings.comfyUIServerURL
-                                 serverStatus = "连接中…"
-                                 do {
-                                      guard let statsURL = URL(string: "\(url)/system_stats") else {
-                                          serverStatus = "❌ URL 无效"
-                                          return
-                                      }
-                                      var request = URLRequest(url: statsURL)
+                                let url =
+                                    store.state.settings.comfyUIServerURL.isEmpty
+                                    ? "http://127.0.0.1:8188" : store.state.settings.comfyUIServerURL
+                                serverStatus = "连接中…"
+                                do {
+                                    guard let statsURL = URL(string: "\(url)/system_stats") else {
+                                        serverStatus = "❌ URL 无效"
+                                        return
+                                    }
+                                    var request = URLRequest(url: statsURL)
                                     request.timeoutInterval = NetworkDefaults.quickProbe
                                     let (_, response) = try await NetworkDefaults.ephemeralSession.data(for: request)
                                     if (response as? HTTPURLResponse)?.statusCode == 200 {
@@ -551,10 +417,13 @@ private struct ToolsSettingsTab: View {
                     }
 
                     settingsRow(label: "模型名称") {
-                        TextField("如 sd_xl_base_1.0.safetensors", text: Binding(
-                            get: { store.state.settings.comfyUIModelName },
-                            set: { store.updateComfyUIModelName($0) }
-                        ))
+                        TextField(
+                            "如 sd_xl_base_1.0.safetensors",
+                            text: Binding(
+                                get: { store.state.settings.comfyUIModelName },
+                                set: { store.updateComfyUIModelName($0) }
+                            )
+                        )
                         .textFieldStyle(.roundedBorder)
                     }
 
@@ -687,7 +556,7 @@ private struct ToolsSettingsTab: View {
 
 // MARK: - Shared Settings Helpers
 
-private func settingsCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+func settingsCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
     VStack(alignment: .leading, spacing: AppSpace.medium) {
         Text(title)
             .font(.system(size: 10, weight: .semibold))
@@ -706,7 +575,7 @@ private func settingsCard<Content: View>(title: String, @ViewBuilder content: ()
     )
 }
 
-private func settingsRow<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
+func settingsRow<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
     HStack(spacing: AppSpace.medium) {
         Text(label)
             .font(.system(size: 12, weight: .medium))
@@ -724,10 +593,13 @@ private struct InputSettingsTab: View {
             VStack(alignment: .leading, spacing: AppSpace.large) {
                 settingsCard(title: "上下文") {
                     settingsRow(label: "模式") {
-                        Picker("", selection: Binding(
-                            get: { store.state.settings.contextMode },
-                            set: { store.updateContextMode($0) }
-                        )) {
+                        Picker(
+                            "",
+                            selection: Binding(
+                                get: { store.state.settings.contextMode },
+                                set: { store.updateContextMode($0) }
+                            )
+                        ) {
                             ForEach(ContextMode.allCases) { mode in
                                 Text(mode.title).tag(mode)
                             }
@@ -744,19 +616,25 @@ private struct InputSettingsTab: View {
 
                 settingsCard(title: "界面") {
                     settingsRow(label: "输入框") {
-                        Toggle("紧凑模式", isOn: Binding(
-                            get: { store.state.settings.compactComposer },
-                            set: { store.toggleCompactComposer($0) }
-                        ))
+                        Toggle(
+                            "紧凑模式",
+                            isOn: Binding(
+                                get: { store.state.settings.compactComposer },
+                                set: { store.toggleCompactComposer($0) }
+                            )
+                        )
                         .font(.system(size: 12))
                         .toggleStyle(.switch)
                     }
 
                     settingsRow(label: "调试") {
-                        Toggle("显示日志细节", isOn: Binding(
-                            get: { store.state.settings.showDebugPanels },
-                            set: { store.toggleDebugPanels($0) }
-                        ))
+                        Toggle(
+                            "显示日志细节",
+                            isOn: Binding(
+                                get: { store.state.settings.showDebugPanels },
+                                set: { store.toggleDebugPanels($0) }
+                            )
+                        )
                         .font(.system(size: 12))
                         .toggleStyle(.switch)
                     }
@@ -782,28 +660,36 @@ private struct GatewaySettingsTab: View {
             VStack(alignment: .leading, spacing: AppSpace.large) {
                 // Status
                 settingsCard(title: "网关状态") {
-                    HStack(spacing: AppSpace.small) {
-                        Circle()
-                            .fill(gateway.isRunning ? Semantic.success : TextGrade.ghost)
-                            .frame(width: 8, height: 8)
-                        Text(gateway.isRunning ? "运行中" : "未启动")
-                            .font(AppFont.caption)
-                            .foregroundStyle(TextGrade.secondary)
-                        Spacer()
-                        Text("端口 18789")
-                            .font(AppFont.tiny)
-                            .foregroundStyle(TextGrade.ghost)
+                    VStack(alignment: .leading, spacing: AppSpace.small) {
+                        HStack(spacing: AppSpace.small) {
+                            Image(systemName: gateway.isRunning ? "checkmark.circle.fill" : "stop.circle")
+                                .foregroundStyle(gateway.isRunning ? Semantic.success : TextGrade.ghost)
+                            Text(gateway.isRunning ? "运行中" : "未启动")
+                                .font(AppFont.caption)
+                                .foregroundStyle(TextGrade.secondary)
+                            Spacer()
+                            Text("端口 18789")
+                                .font(AppFont.tiny)
+                                .foregroundStyle(TextGrade.ghost)
 
-                        Button(gateway.isRunning ? "停止" : "启动") {
-                            if gateway.isRunning {
-                                gateway.stop()
-                            } else {
-                                store.startGateway()
+                            Button(gateway.isRunning ? "停止" : "启动") {
+                                if gateway.isRunning {
+                                    gateway.stop()
+                                } else {
+                                    store.startGateway()
+                                }
                             }
+                            .buttonStyle(.borderedProminent)
+                            .tint(gateway.isRunning ? Semantic.error : Semantic.success)
+                            .controlSize(.small)
+                            .accessibilityLabel(gateway.isRunning ? "停止消息网关" : "启动消息网关")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(gateway.isRunning ? Semantic.error : Semantic.success)
-                        .controlSize(.small)
+                        if let error = gateway.gatewayError {
+                            Label(error, systemImage: "exclamationmark.triangle.fill")
+                                .font(AppFont.tiny)
+                                .foregroundStyle(Semantic.error)
+                                .accessibilityLabel("消息网关错误：\(error)")
+                        }
                     }
                 }
 
@@ -846,32 +732,48 @@ private struct GatewaySettingsTab: View {
         .sheet(item: $editingChannel) { config in
             ChannelEditSheet(channel: config)
         }
+        .onAppear {
+            _ = gateway.prepare(workspaceRoot: store.state.settings.workspacePath)
+        }
     }
 
     private func channelRow(_ config: ChannelConfig) -> some View {
-        HStack(spacing: AppSpace.medium) {
+        let status = channelStatus(config)
+        return HStack(spacing: AppSpace.medium) {
             Image(systemName: config.type.icon)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(gateway.connectedChannels.contains(config.id) ? Semantic.success : TextGrade.ghost)
+                .foregroundStyle(channelStatusColor(status))
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(config.name)
                     .font(AppFont.caption.bold())
                     .foregroundStyle(TextGrade.primary)
-                Text(config.type.displayName)
+                Text("\(config.type.displayName) · \(status.title)")
                     .font(AppFont.tiny)
-                    .foregroundStyle(TextGrade.muted)
+                    .foregroundStyle(channelStatusColor(status))
+                if let detail = status.detail {
+                    Text(detail)
+                        .font(AppFont.tiny)
+                        .foregroundStyle(TextGrade.muted)
+                        .lineLimit(2)
+                }
             }
 
             Spacer()
 
-            Toggle("", isOn: Binding(
-                get: { config.enabled },
-                set: { _ in gateway.toggleChannel(id: config.id) }
-            ))
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { config.enabled },
+                    set: { _ in gateway.toggleChannel(id: config.id) }
+                )
+            )
             .toggleStyle(.switch)
             .controlSize(.small)
+            .disabled(!config.type.isAvailable)
+            .accessibilityLabel("\(config.name)通道")
+            .accessibilityValue(status.title)
 
             Button {
                 editingChannel = config
@@ -881,6 +783,7 @@ private struct GatewaySettingsTab: View {
                     .foregroundStyle(TextGrade.muted)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("编辑\(config.name)")
 
             Button {
                 gateway.removeChannel(id: config.id)
@@ -890,12 +793,31 @@ private struct GatewaySettingsTab: View {
                     .foregroundStyle(Semantic.error)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("删除\(config.name)")
         }
         .padding(AppSpace.small)
+        .opacity(config.type.isAvailable ? 1 : 0.62)
         .background(
             RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                 .fill(SurfaceGrade.elevated)
         )
+    }
+
+    private func channelStatus(_ config: ChannelConfig) -> ChannelConnectionState {
+        if !config.type.isAvailable {
+            return .unavailable(config.type.availabilityDescription)
+        }
+        if !config.enabled { return .disabled }
+        return gateway.connectionStates[config.id] ?? (gateway.isRunning ? .connecting : .disabled)
+    }
+
+    private func channelStatusColor(_ status: ChannelConnectionState) -> Color {
+        switch status {
+        case .connected: return Semantic.success
+        case .connecting: return Semantic.warning
+        case .failed: return Semantic.error
+        case .disabled, .unavailable: return TextGrade.muted
+        }
     }
 }
 
@@ -918,6 +840,7 @@ private struct ChannelEditSheet: View {
     @State private var agentID: String = ""
     @State private var webhookURL: String = ""
     @State private var allowedSenders: String = ""
+    @State private var saveError: String?
 
     init(channel: ChannelConfig?) {
         self.channel = channel
@@ -945,7 +868,9 @@ private struct ChannelEditSheet: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(TextGrade.primary)
                 Spacer()
-                Button { dismiss() } label: {
+                Button {
+                    dismiss()
+                } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(TextGrade.muted)
@@ -977,6 +902,10 @@ private struct ChannelEditSheet: View {
                                                 .font(.system(size: 10))
                                             Text(type.displayName)
                                                 .font(AppFont.tiny)
+                                            if !type.isAvailable {
+                                                Text("未实现")
+                                                    .font(.system(size: 8, weight: .semibold))
+                                            }
                                         }
                                         .padding(.horizontal, AppSpace.small)
                                         .padding(.vertical, 5)
@@ -986,8 +915,14 @@ private struct ChannelEditSheet: View {
                                         .foregroundStyle(selectedType == type ? Brand.primary : TextGrade.secondary)
                                     }
                                     .buttonStyle(.plain)
+                                    .disabled(!type.isAvailable)
+                                    .opacity(type.isAvailable ? 1 : 0.5)
+                                    .accessibilityLabel("\(type.displayName)，\(type.availabilityDescription)")
                                 }
                             }
+                            Text(selectedType.availabilityDescription)
+                                .font(AppFont.tiny)
+                                .foregroundStyle(selectedType.isAvailable ? TextGrade.muted : Semantic.warning)
                         }
                     }
 
@@ -1021,7 +956,15 @@ private struct ChannelEditSheet: View {
                         configField("App Token", text: $appSecret, placeholder: "xapp-xxxxx (Socket Mode)", isSecure: true)
 
                     case .webhook:
-                        configField("Webhook URL", text: $webhookURL, placeholder: "用于发送回复的外部 URL")
+                        VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
+                            Text("接收地址").font(AppFont.caption.bold()).foregroundStyle(TextGrade.secondary)
+                            Text("POST http://127.0.0.1:18789/webhook")
+                                .font(AppFont.tiny.monospaced())
+                                .foregroundStyle(TextGrade.secondary)
+                            Text("Webhook 当前仅接收入站消息；JSON 需包含非空 text 或 message。")
+                                .font(AppFont.tiny)
+                                .foregroundStyle(TextGrade.muted)
+                        }
                     }
 
                     // Allowed senders
@@ -1042,17 +985,24 @@ private struct ChannelEditSheet: View {
 
             // Actions
             HStack {
+                if let saveError {
+                    Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                        .font(AppFont.tiny)
+                        .foregroundStyle(Semantic.error)
+                        .accessibilityLabel("保存失败：\(saveError)")
+                }
                 Spacer()
                 Button("取消") { dismiss() }
                     .buttonStyle(.plain)
                     .foregroundStyle(TextGrade.secondary)
 
                 Button(channel == nil ? "添加" : "保存") {
-                    save()
-                    dismiss()
+                    if save() { dismiss() }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Brand.primary)
+                .disabled(!selectedType.isAvailable || !hasRequiredConfiguration)
+                .accessibilityHint("保存后会立即验证并连接已启用的通道")
             }
             .padding(AppSpace.large)
         }
@@ -1067,15 +1017,53 @@ private struct ChannelEditSheet: View {
                 SecureField(placeholder, text: text)
                     .textFieldStyle(.roundedBorder)
                     .font(AppFont.caption)
+                    .accessibilityLabel(label)
             } else {
                 TextField(placeholder, text: text)
                     .textFieldStyle(.roundedBorder)
                     .font(AppFont.caption)
+                    .accessibilityLabel(label)
             }
         }
     }
 
-    private func save() {
+    private var hasRequiredConfiguration: Bool {
+        switch selectedType {
+        case .feishu:
+            return !appID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !appSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .telegram: return !botToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .webhook: return true
+        case .wecom, .slack: return false
+        }
+    }
+
+    @discardableResult
+    private func save() -> Bool {
+        guard selectedType.isAvailable else {
+            saveError = selectedType.availabilityDescription
+            return false
+        }
+        guard hasRequiredConfiguration else {
+            saveError = "请填写当前平台的必填配置。"
+            return false
+        }
+
+        let config = channelConfigFields()
+        let senders =
+            allowedSenders
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard persistChannel(config: config, allowedSenders: senders) else {
+            return false
+        }
+        saveError = nil
+        return true
+    }
+
+    private func channelConfigFields() -> [String: String] {
         var config: [String: String] = [:]
         switch selectedType {
         case .feishu:
@@ -1095,34 +1083,36 @@ private struct ChannelEditSheet: View {
         case .webhook:
             config["webhook_url"] = webhookURL
         }
+        return config
+    }
 
-        let senders = allowedSenders
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
+    private func persistChannel(config: [String: String], allowedSenders: [String]) -> Bool {
         if let existing = channel {
-            // Update existing channel
-            gateway.removeChannel(id: existing.id)
             let updated = ChannelConfig(
                 id: existing.id,
                 type: selectedType,
                 name: name.isEmpty ? selectedType.displayName : name,
                 enabled: existing.enabled,
                 config: config,
-                allowedSenders: senders
+                allowedSenders: allowedSenders
             )
-            gateway.addChannel(updated)
+            guard gateway.updateChannel(updated) else {
+                saveError = gateway.gatewayError ?? "通道保存失败"
+                return false
+            }
         } else {
-            // Add new channel
             let newChannel = ChannelConfig(
                 type: selectedType,
                 name: name.isEmpty ? selectedType.displayName : name,
                 config: config,
-                allowedSenders: senders
+                allowedSenders: allowedSenders
             )
-            gateway.addChannel(newChannel)
+            guard gateway.addChannel(newChannel) else {
+                saveError = gateway.gatewayError ?? "通道保存失败"
+                return false
+            }
         }
+        return true
     }
 }
 

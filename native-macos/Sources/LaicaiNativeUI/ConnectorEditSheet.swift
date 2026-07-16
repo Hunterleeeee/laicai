@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Connector Edit Mode
 
@@ -59,7 +59,9 @@ struct ConnectorEditSheet: View {
                     .font(AppFont.headline)
                     .foregroundStyle(TextGrade.primary)
                 Spacer()
-                Button { dismiss() } label: {
+                Button {
+                    dismiss()
+                } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16))
                         .foregroundStyle(TextGrade.muted)
@@ -78,12 +80,21 @@ struct ConnectorEditSheet: View {
                         .textFieldStyle(.plain)
 
                     Picker("类型", selection: $kind) {
-                        HStack { Image(systemName: "globe"); Text("OpenAI 兼容") }
-                            .tag("openai-compatible")
-                        HStack { Image(systemName: "brain.head.profile"); Text("Anthropic") }
-                            .tag("anthropic")
-                        HStack { Image(systemName: "laptopcomputer"); Text("Ollama 本地") }
-                            .tag("ollama")
+                        HStack {
+                            Image(systemName: "globe")
+                            Text("OpenAI 兼容")
+                        }
+                        .tag("openai-compatible")
+                        HStack {
+                            Image(systemName: "brain.head.profile")
+                            Text("Anthropic")
+                        }
+                        .tag("anthropic")
+                        HStack {
+                            Image(systemName: "laptopcomputer")
+                            Text("Ollama 本地")
+                        }
+                        .tag("ollama")
                     }
                     .pickerStyle(.segmented)
                 } header: {
@@ -285,10 +296,11 @@ struct ConnectorEditSheet: View {
     private var isEndpointValid: Bool {
         let endpointValue = endpoint.trimmingCharacters(in: .whitespaces)
         guard !endpointValue.isEmpty,
-              let components = URLComponents(string: endpointValue),
-              let scheme = components.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              components.host != nil else {
+            let components = URLComponents(string: endpointValue),
+            let scheme = components.scheme?.lowercased(),
+            scheme == "http" || scheme == "https",
+            components.host != nil
+        else {
             return false
         }
 
@@ -309,20 +321,23 @@ struct ConnectorEditSheet: View {
         let endpointValue = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         let modelValue = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
         if toolCallingPolicy == .automatic,
-           previewConnector.toolCallingCapability == nil,
-           endpointValue.isEmpty || modelValue.isEmpty {
+            previewConnector.toolCallingCapability == nil,
+            endpointValue.isEmpty || modelValue.isEmpty
+        {
             return "当前生效：等待端点和模型填写完整后再自动判断工具调用能力。"
         }
         let capability = ConnectorCapabilityProfile.infer(for: previewConnector, mode: .balanced)
         let tools = capability.supportsToolCalling ? "工具调用已开启" : "工具调用已关闭"
         var lines = ["当前生效：\(tools) · \(capability.toolCallingSourceDetail)"]
         if let conflict = capability.toolCallingConflict {
-            let followup = conflict == .unsupported
+            let followup =
+                conflict == .unsupported
                 ? "如果切回自动，后续会话会默认不再发送 tools。"
                 : "如果切回自动，后续会话会恢复发送 tools。"
             lines.append("系统记录：\(conflict.title)。\(followup)")
         } else if toolCallingPolicy == .automatic,
-                  let learned = capability.learnedToolCallingDetail {
+            let learned = capability.learnedToolCallingDetail
+        {
             if let learnedAt = capability.learnedToolCallingLearnedAt {
                 lines.append("系统记录：\(learned) · \(RelativeTimeFormatter.string(for: learnedAt))。")
             } else {

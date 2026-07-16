@@ -22,7 +22,8 @@ extension AppStore {
         if requestedImageGeneration,
             let imageConnector = ConnectorCapabilityProfile.isImageOnlyModel(connector.modelName)
                 ? connector
-                : Self.imageGenerationConnector(from: state.connectors, activeID: state.activeConnectorID) {
+                : Self.imageGenerationConnector(from: state.connectors, activeID: state.activeConnectorID)
+        {
             let imageDecision = PlannerDecision(
                 intent: .task,
                 confidence: max(decision.confidence, 0.84),
@@ -74,7 +75,8 @@ extension AppStore {
             && state.selectedThread?.status == .running
             && selectedThreadProjectID != nil
         let newThreadProjectID =
-            shouldContinueSelectedThread || shouldPromoteSelectedPlaceholder || shouldStartBesideRunningProjectThread ? selectedThreadProjectID : nil
+            shouldContinueSelectedThread || shouldPromoteSelectedPlaceholder || shouldStartBesideRunningProjectThread
+            ? selectedThreadProjectID : nil
 
         if decision.intent != .chat && !shouldContinueSelectedThread {
             let workspacePath = state.settings.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -84,7 +86,8 @@ extension AppStore {
             }
             if !Self.isRunningTests
                 && (WorkspaceSandbox.isOverlyBroadWorkspace(workspacePath)
-                    || WorkspaceSandbox.isDisposableSmokeWorkspace(workspacePath)) {
+                    || WorkspaceSandbox.isDisposableSmokeWorkspace(workspacePath))
+            {
                 notify("工作区不能设为 home、/tmp 或来财测试目录，请指定一个真实项目文件夹。", style: .error)
                 return
             }
@@ -129,7 +132,8 @@ extension AppStore {
                 intent: intent,
                 connectors: state.connectors,
                 activeConnectorID: state.activeConnectorID
-            ) {
+            )
+        {
             createMultiAgentPlanDraft(
                 message: message,
                 context: context,
@@ -173,7 +177,8 @@ extension AppStore {
         if let selectedID = continuationTargetID,
             let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }),
             state.threads[threadIndex].status != .running,
-            shouldContinueSelectedThread {
+            shouldContinueSelectedThread
+        {
             let isEmptyPlaceholder = state.threads[threadIndex].steps.isEmpty
             shouldRemovePlaceholdersAfterResume = true
             if !isEmptyPlaceholder {
@@ -201,7 +206,8 @@ extension AppStore {
             }
             let plan = state.threads[threadIndex].currentPlan
             if !isChatIntent,
-                state.threads[threadIndex].taskProtocol == nil || state.threads[threadIndex].taskProtocol?.threadID != selectedID {
+                state.threads[threadIndex].taskProtocol == nil || state.threads[threadIndex].taskProtocol?.threadID != selectedID
+            {
                 state.threads[threadIndex].taskProtocol = Self.makeTaskProtocol(
                     threadID: selectedID,
                     message: state.threads[threadIndex].goal ?? message,
@@ -244,7 +250,8 @@ extension AppStore {
             targetTaskID = selectedID
         } else if shouldPromoteSelectedPlaceholder,
             let selectedID = selectedPlaceholderID,
-            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }) {
+            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID })
+        {
             let plan = Self.agentPlanLines(for: decision, message: message)
             let taskProtocol =
                 isChatIntent
@@ -381,12 +388,14 @@ extension AppStore {
             state.threads[threadIdx].context.metadata["expectedIterations"] = "\(Int(ceil(avgIter)))"
             if let taskProtocol = state.threads[threadIdx].taskProtocol,
                 let data = try? JSONEncoder().encode(taskProtocol),
-                let json = String(data: data, encoding: .utf8) {
+                let json = String(data: data, encoding: .utf8)
+            {
                 state.threads[threadIdx].context.metadata["taskProtocolJSON"] = json
             }
             if let ledger = state.threads[threadIdx].executionLedger,
                 let data = try? JSONEncoder().encode(ledger),
-                let json = String(data: data, encoding: .utf8) {
+                let json = String(data: data, encoding: .utf8)
+            {
                 state.threads[threadIdx].context.metadata["executionLedgerJSON"] = json
             }
             context = state.threads[threadIdx].context
@@ -530,7 +539,8 @@ extension AppStore {
         }
         if Self.isContinuationCommand(trimmed)
             || Self.isContextualFollowUp(trimmed, thread: thread)
-            || UserFrustrationDetector.shouldRecoverRecentTask(trimmed) {
+            || UserFrustrationDetector.shouldRecoverRecentTask(trimmed)
+        {
             return true
         }
         if intent == .chat {
@@ -568,7 +578,8 @@ extension AppStore {
         guard !normalized.isEmpty else { return false }
         if isStandaloneCapabilityOrConceptQuestion(normalized)
             || isStandaloneInfoQuestion(normalized)
-            || isStandaloneGeneralQuestion(normalized) {
+            || isStandaloneGeneralQuestion(normalized)
+        {
             return false
         }
         if isTinyFollowUp(normalized) && !isExplicitRecentTaskFollowUp(normalized) {
@@ -590,7 +601,8 @@ extension AppStore {
             || isWikiPersistenceFollowUp(normalized)
             || isContextualTaskReference(normalized)
             || isTaskStatusQuestion(normalized)
-            || UserFrustrationDetector.shouldRecoverRecentTask(normalized) {
+            || UserFrustrationDetector.shouldRecoverRecentTask(normalized)
+        {
             return true
         }
         if isContextualFollowUp(normalized, thread: thread) {
@@ -610,7 +622,7 @@ extension AppStore {
             "文件在哪", "产物在哪", "继续这个", "接着这个", "继续当前", "接着当前",
             "刚才那个", "上个任务", "上一轮", "这个任务", "这个会话", "这个agent",
             "沉淀到wiki", "保存到wiki", "写到wiki", "写进wiki", "生成wiki", "收进知识库",
-            "没发完", "被截断", "没写完", "没说完"
+            "没发完", "被截断", "没写完", "没说完",
         ]
         return explicitMarkers.contains { normalized.localizedCaseInsensitiveContains($0) }
     }
@@ -622,7 +634,9 @@ extension AppStore {
         if taskHasTruncatedOutput(AgentTask(thread: thread)), isTruncationContinuation(normalized) {
             return true
         }
-        if isStandaloneCapabilityOrConceptQuestion(normalized) || isStandaloneInfoQuestion(normalized) || isStandaloneGeneralQuestion(normalized) {
+        if isStandaloneCapabilityOrConceptQuestion(normalized) || isStandaloneInfoQuestion(normalized)
+            || isStandaloneGeneralQuestion(normalized)
+        {
             return false
         }
         let contextualMarkers = [
@@ -630,7 +644,7 @@ extension AppStore {
             "还有", "还要", "继续", "接着", "为什么", "为啥",
             "对吗", "不对", "没反应", "没生效", "还是", "又", "仍然",
             "这个逻辑", "这个页面", "这个按钮", "这个会话", "这个agent", "这个任务", "当前",
-            "窗口", "页面", "按钮", "bug", "Bug", "卡顿", "历史任务", "左边", "右边", "追问", "新会话"
+            "窗口", "页面", "按钮", "bug", "Bug", "卡顿", "历史任务", "左边", "右边", "追问", "新会话",
         ]
         if contextualMarkers.contains(where: { normalized.contains($0) }) { return true }
 
@@ -646,12 +660,14 @@ extension AppStore {
         let trimmed = incomingMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         if isContinuation,
             let existing = thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !existing.isEmpty {
+            !existing.isEmpty
+        {
             return existing
         }
         if isContinuation,
             let firstUser = thread.steps.first(where: { $0.kind == .userInput })?.text.trimmingCharacters(in: .whitespacesAndNewlines),
-            !firstUser.isEmpty {
+            !firstUser.isEmpty
+        {
             return firstUser
         }
         return trimmed

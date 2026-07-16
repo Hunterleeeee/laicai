@@ -30,7 +30,7 @@ public struct SearchTool: LaicaiTool {
                         description: "搜索范围：files（文件名）或 content（文件内容）",
                         enumValues: ["files", "content"]
                     ),
-                    "maxResults": FunctionProperty(type: "integer", description: "最大结果数（可选，默认50）")
+                    "maxResults": FunctionProperty(type: "integer", description: "最大结果数（可选，默认50）"),
                 ],
                 required: ["query"]
             )
@@ -95,7 +95,7 @@ public struct SearchTool: LaicaiTool {
         if words.count >= 5 {
             let commonWords: Set<String> = [
                 "the", "a", "an", "is", "are", "was", "were", "i", "you", "we", "they", "it",
-                "do", "does", "did", "can", "could", "would", "should", "please", "help", "want"
+                "do", "does", "did", "can", "could", "would", "should", "please", "help", "want",
             ]
             let commonCount = words.filter { commonWords.contains($0.lowercased()) }.count
             if commonCount >= 3 { return true }
@@ -108,14 +108,15 @@ public struct SearchTool: LaicaiTool {
         var results: [String] = []
         let enumerator = fileManager.enumerator(atPath: root)
         let ignoredDirs: Set<String> = [
-            ".git", "node_modules", ".build", "DerivedData", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv"
+            ".git", "node_modules", ".build", "DerivedData", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv",
         ]
         // Short ASCII queries (≤4 chars like "RAG") use word-boundary matching
         // to avoid "RAG" matching "draggable", "LLM" matching "scrolllm", etc.
         let isShortAscii = query.count <= 4 && query.allSatisfy(\.isASCII)
         let wordBoundaryRegex =
             isShortAscii
-            ? try? NSRegularExpression(pattern: "(?:^|[^a-zA-Z])\(NSRegularExpression.escapedPattern(for: query))(?:[^a-zA-Z]|$)", options: .caseInsensitive)
+            ? try? NSRegularExpression(
+                pattern: "(?:^|[^a-zA-Z])\(NSRegularExpression.escapedPattern(for: query))(?:[^a-zA-Z]|$)", options: .caseInsensitive)
             : nil
         while let file = enumerator?.nextObject() as? String {
             let filename = (file as NSString).lastPathComponent
@@ -140,34 +141,31 @@ public struct SearchTool: LaicaiTool {
         return ToolResult(output: results.joined(separator: "\n"), data: ["count": "\(results.count)"])
     }
 
-    private func searchContent(query: String, root: String, maxResults: Int, contextMode: ContextMode = .balanced) async throws -> ToolResult {
+    private func searchContent(query: String, root: String, maxResults: Int, contextMode: ContextMode = .balanced) async throws
+        -> ToolResult
+    {
         guard Self.commandExists("rg") else {
-            return ToolResult(output: "未找到 ripgrep（rg）。请安装 rg 后再使用 code.search，或改用 file.read 精确读取已知文件。", success: false, error: "rg_missing")
+            return ToolResult(
+                output: "未找到 ripgrep（rg）。请安装 rg 后再使用 code.search，或改用 file.read 精确读取已知文件。", success: false, error: "rg_missing")
         }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         // Short ASCII queries get -w (whole word) to avoid "RAG" matching "draggable" etc.
         let isShortAscii = query.count <= 4 && query.allSatisfy(\.isASCII)
         var args = [
             "rg", "--no-heading", "-n", "--max-count", "\(maxResults)",
             "--max-filesize", "1M", "--glob", "!**/.git/**", "--glob", "!**/.build/**",
-            "--glob", "!**/node_modules/**", "--glob", "!**/DerivedData/**"
+            "--glob", "!**/node_modules/**", "--glob", "!**/DerivedData/**",
         ]
         if isShortAscii { args.append("-w") }
         args.append(contentsOf: [query, root])
-        process.arguments = args
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        try process.run()
-        let timedOut = await waitForExit(process, timeoutSeconds: 8)
-        if timedOut {
-            process.terminate()
-            process.waitUntilExit()
+        let result = try await ProcessRunner.runAsync(
+            executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+            arguments: args,
+            timeout: 8
+        )
+        if result.timedOut {
             return ToolResult(output: "搜索超时：\(query)", success: false, error: "search_timeout")
         }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
+        let output = result.stdoutString
         if output.isEmpty {
             return ToolResult(output: "未找到匹配内容：\(query)", success: true)
         }
@@ -183,44 +181,15 @@ public struct SearchTool: LaicaiTool {
     }
 
     private static func commandExists(_ name: String) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["which", name]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
         do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["which", name],
+                timeout: 5
+            )
+            return result.exitCode == 0 && !result.timedOut
         } catch {
             return false
-        }
-    }
-
-    private func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) async -> Bool {
-        await withCheckedContinuation { continuation in
-            let finished = Locked(false)
-            process.terminationHandler = { _ in
-                let shouldResume = finished.withValue { value in
-                    guard !value else { return false }
-                    value = true
-                    return true
-                }
-                if shouldResume {
-                    continuation.resume(returning: false)
-                }
-            }
-            Task {
-                try? await Task.sleep(for: .milliseconds(Int(timeoutSeconds * 1_000)))
-                let shouldResume = finished.withValue { value in
-                    guard !value else { return false }
-                    value = true
-                    return true
-                }
-                if shouldResume {
-                    continuation.resume(returning: true)
-                }
-            }
         }
     }
 }
@@ -242,7 +211,7 @@ public struct WorkspaceIndexTool: LaicaiTool {
             parameters: FunctionParameters(
                 properties: [
                     "maxFiles": FunctionProperty(type: "integer", description: "最多扫描文件数，默认300"),
-                    "maxDepth": FunctionProperty(type: "integer", description: "最多目录深度，默认5")
+                    "maxDepth": FunctionProperty(type: "integer", description: "最多目录深度，默认5"),
                 ],
                 required: []
             )
@@ -274,9 +243,11 @@ public struct WorkspaceIndexTool: LaicaiTool {
 
         // Return cached result if indexed recently (prevents wasteful re-scans)
         if let cached = Self.indexCache[root],
-            Date().timeIntervalSince(cached.at) < Self.cacheTTL {
+            Date().timeIntervalSince(cached.at) < Self.cacheTTL
+        {
             return ToolResult(
-                output: "（缓存）" + cached.result.output + "\n\n⚠️ 该工作区在 \(Int(Date().timeIntervalSince(cached.at))) 秒前刚索引过，返回缓存结果。请勿重复调用 workspace.index。",
+                output: "（缓存）" + cached.result.output
+                    + "\n\n⚠️ 该工作区在 \(Int(Date().timeIntervalSince(cached.at))) 秒前刚索引过，返回缓存结果。请勿重复调用 workspace.index。",
                 data: cached.result.data
             )
         }
@@ -320,7 +291,8 @@ public struct WorkspaceIndexTool: LaicaiTool {
         let sourceKitAvailable = Self.commandAvailable("sourcekit-lsp")
         let treeSitterAvailable = Self.commandAvailable("tree-sitter")
         let indexEngine =
-            sourceKitAvailable ? "sourcekit-ready+regex-lightweight" : (treeSitterAvailable ? "tree-sitter-ready+regex-lightweight" : "regex-lightweight")
+            sourceKitAvailable
+            ? "sourcekit-ready+regex-lightweight" : (treeSitterAvailable ? "tree-sitter-ready+regex-lightweight" : "regex-lightweight")
 
         let output = """
             工作区：\(root)
@@ -389,7 +361,7 @@ public struct WorkspaceIndexTool: LaicaiTool {
                 "root": root,
                 "indexEngine": indexEngine,
                 "sourceKitAvailable": "\(sourceKitAvailable)",
-                "treeSitterAvailable": "\(treeSitterAvailable)"
+                "treeSitterAvailable": "\(treeSitterAvailable)",
             ]
         )
         Self.indexCache[root] = (result, Date())
@@ -401,25 +373,25 @@ public struct WorkspaceIndexTool: LaicaiTool {
     private static let ignoredIndexNames: Set<String> = [
         ".git", ".build", "DerivedData", "node_modules", "__pycache__", ".pytest_cache",
         ".mypy_cache", ".ruff_cache", ".venv", "venv", "venv3", "dist", "build",
-        ".DS_Store"
+        ".DS_Store",
     ]
 
     private static let importantIndexNames: Set<String> = [
         "README.md", "AGENTS.md", "CLAUDE.md", "Package.swift", "pyproject.toml",
-        "package.json", "Cargo.toml", "go.mod", "Makefile", "Dockerfile", "ROADMAP.md"
+        "package.json", "Cargo.toml", "go.mod", "Makefile", "Dockerfile", "ROADMAP.md",
     ]
 
     private static let configIndexNames: Set<String> = [
         "package.json", "pyproject.toml", "Package.swift", "Cargo.toml",
-        "go.mod", "requirements.txt", "tsconfig.json"
+        "go.mod", "requirements.txt", "tsconfig.json",
     ]
 
     private static let entryIndexNames: Set<String> = [
-        "main.swift", "main.py", "app.py", "index.ts", "index.js", "main.ts", "main.js"
+        "main.swift", "main.py", "app.py", "index.ts", "index.js", "main.ts", "main.js",
     ]
 
     private static let riskIndexTerms: [String] = [
-        "todo", "fixme", "security", "secret", "auth", "token", "credential"
+        "todo", "fixme", "security", "secret", "auth", "token", "credential",
     ]
 
     private static func scanWorkspace(root: String, maxFiles: Int, maxDepth: Int) -> WorkspaceIndexScan {
@@ -518,15 +490,13 @@ public struct WorkspaceIndexTool: LaicaiTool {
     }
 
     private static func commandAvailable(_ command: String) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["which", command]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
         do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["which", command],
+                timeout: 5
+            )
+            return result.exitCode == 0 && !result.timedOut
         } catch {
             return false
         }
@@ -597,7 +567,8 @@ public struct WorkspaceIndexTool: LaicaiTool {
                 "from '",
                 { line in
                     if let start = line.range(of: "from '")?.upperBound,
-                        let end = line[start...].firstIndex(of: "'") {
+                        let end = line[start...].firstIndex(of: "'")
+                    {
                         return String(line[start..<end])
                     }
                     return nil
@@ -607,12 +578,13 @@ public struct WorkspaceIndexTool: LaicaiTool {
                 "from \"",
                 { line in
                     if let start = line.range(of: "from \"")?.upperBound,
-                        let end = line[start...].firstIndex(of: "\"") {
+                        let end = line[start...].firstIndex(of: "\"")
+                    {
                         return String(line[start..<end])
                     }
                     return nil
                 }
-            )
+            ),
         ]
 
         for file in files.prefix(80) {
@@ -633,18 +605,15 @@ public struct WorkspaceIndexTool: LaicaiTool {
 
     /// Detect recently changed files via `git log --since=7.days`.
     private static func detectRecentChangeHotspots(root: String) -> [String] {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "log", "--name-only", "--pretty=format:", "--since=7.days", "--no-merges"]
-        process.currentDirectoryURL = URL(fileURLWithPath: root)
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
         do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git", "log", "--name-only", "--pretty=format:", "--since=7.days", "--no-merges"],
+                currentDirectoryURL: URL(fileURLWithPath: root),
+                timeout: 20
+            )
+            guard result.exitCode == 0, !result.timedOut else { return [] }
+            let output = result.stdoutString
             let files = output.components(separatedBy: "\n")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }
@@ -747,7 +716,10 @@ public struct WorkspaceIndexTool: LaicaiTool {
             let testName = (testFile as NSString).lastPathComponent
             // Strip test suffixes to find matching source
             var baseName = testName
-            for suffix in ["Tests.swift", "Test.swift", "Spec.swift", "_test.py", "_spec.py", ".test.js", ".test.ts", ".spec.js", ".spec.ts", "_test.go"]
+            for suffix in [
+                "Tests.swift", "Test.swift", "Spec.swift", "_test.py", "_spec.py", ".test.js", ".test.ts", ".spec.js", ".spec.ts",
+                "_test.go",
+            ]
             where baseName.hasSuffix(suffix) {
                 baseName = String(baseName.dropLast(suffix.count))
                 break
@@ -817,7 +789,7 @@ public struct WorkspaceIndexTool: LaicaiTool {
             ("ts", #"(?:export\s+)?(?:class|interface|type|function|const)\s+(\w+)"#),
             ("js", #"(?:export\s+)?(?:class|function|const)\s+(\w+)"#),
             ("go", #"(?:func|type)\s+(\w+)"#),
-            ("rs", #"(?:pub\s+)?(?:fn|struct|enum|trait|impl|type)\s+(\w+)"#)
+            ("rs", #"(?:pub\s+)?(?:fn|struct|enum|trait|impl|type)\s+(\w+)"#),
         ]
 
         var compiled: [String: [NSRegularExpression]] = [:]
@@ -876,7 +848,8 @@ public struct WorkspaceIndexTool: LaicaiTool {
 
         if let typeRegex = try? NSRegularExpression(pattern: typePattern),
             let funcRegex = try? NSRegularExpression(pattern: funcPattern),
-            let varRegex = try? NSRegularExpression(pattern: varPattern) {
+            let varRegex = try? NSRegularExpression(pattern: varPattern)
+        {
             let nsContent = lines.joined(separator: "\n") as NSString
             let fullRange = NSRange(location: 0, length: nsContent.length)
 

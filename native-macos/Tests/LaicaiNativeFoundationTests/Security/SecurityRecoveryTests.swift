@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
@@ -30,9 +31,12 @@ final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
         defer { SecurityManager.shared.sandboxConfig = previousSandboxConfig }
 
         let pwd = try await ShellTool().execute(argumentsJSON: #"{"command":"pwd"}"#, context: TaskContext(workspaceRoot: workspace.path))
-        let sudo = try await ShellTool().execute(argumentsJSON: #"{"command":"sudo ls"}"#, context: TaskContext(workspaceRoot: workspace.path))
-        let findFiles = try await ShellTool().execute(argumentsJSON: #"{"command":"find . -type f"}"#, context: TaskContext(workspaceRoot: workspace.path))
-        let recursiveList = try await ShellTool().execute(argumentsJSON: #"{"command":"ls -R ."}"#, context: TaskContext(workspaceRoot: workspace.path))
+        let sudo = try await ShellTool().execute(
+            argumentsJSON: #"{"command":"sudo ls"}"#, context: TaskContext(workspaceRoot: workspace.path))
+        let findFiles = try await ShellTool().execute(
+            argumentsJSON: #"{"command":"find . -type f"}"#, context: TaskContext(workspaceRoot: workspace.path))
+        let recursiveList = try await ShellTool().execute(
+            argumentsJSON: #"{"command":"ls -R ."}"#, context: TaskContext(workspaceRoot: workspace.path))
 
         XCTAssertTrue(pwd.success)
         XCTAssertTrue(pwd.output.contains(workspace.path))
@@ -44,6 +48,98 @@ final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(recursiveList.success)
         XCTAssertEqual(recursiveList.error, "security_denied")
     }
+    func testShellAllowlistValidatesEveryCommandAndRejectsEvaluationOrWrites() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let context = TaskContext(workspaceRoot: workspace.path)
+
+        let allowedPipeline = try await ShellTool().execute(
+            argumentsJSON: #"{"command":"echo ok | head -1"}"#,
+            context: context
+        )
+        let chainedUnknown = try await ShellTool().execute(
+            argumentsJSON: #"{"command":"echo ok; osascript -e 'return 1'"}"#,
+            context: context
+        )
+        let inlineEvaluation = try await ShellTool().execute(
+            argumentsJSON: #"{"command":"python3 -c 'print(1)'"}"#,
+            context: context
+        )
+        let redirectedWrite = try await ShellTool().execute(
+            argumentsJSON: #"{"command":"echo hacked > sentinel.txt"}"#,
+            context: context
+        )
+
+        XCTAssertTrue(allowedPipeline.success)
+        XCTAssertEqual(allowedPipeline.output.trimmingCharacters(in: .whitespacesAndNewlines), "ok")
+        for result in [chainedUnknown, inlineEvaluation, redirectedWrite] {
+            XCTAssertFalse(result.success)
+            XCTAssertEqual(result.error, "security_denied")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("sentinel.txt").path))
+    }
+    func testShellAllowlistAcceptsQuotedSeparatorsAndValidatedEnvWrapper() {
+        let policy = SandboxPolicy()
+
+        XCTAssertTrue(policy.isCommandAllowed("echo 'a;b'"))
+        XCTAssertTrue(policy.isCommandAllowed("/usr/bin/env python3 --version"))
+        XCTAssertTrue(policy.isCommandAllowed("echo ok && pwd"))
+        XCTAssertTrue(policy.isCommandAllowed("echo '$(literal)'"))
+        XCTAssertFalse(policy.isCommandAllowed("/usr/bin/env osascript -e test"))
+        XCTAssertFalse(policy.isCommandAllowed("echo $(osascript -e test)"))
+        XCTAssertFalse(policy.isCommandAllowed(#"echo "$(osascript -e test)""#))
+        XCTAssertFalse(policy.isCommandAllowed(#"echo "`osascript -e test`""#))
+    }
+    func testFileEditCircuitBreakerNeverBuildsAnAutomaticWrite() async {
+        let step = TaskStep(
+            kind: .toolCall,
+            text: "edit",
+            toolName: "file.edit",
+            toolParams: ["path": "Sources/App.swift", "edits": #"[{"oldText":"a","newText":"b"}]"#]
+        )
+
+        let result = await AgentLoop.attemptCircuitBreakerRepair(
+            toolName: "file.edit",
+            callStep: step,
+            taskContext: TaskContext(workspaceRoot: NSTemporaryDirectory()),
+            toolRegistry: ToolRegistry.shared
+        )
+
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.error, "file_edit_circuit_broken")
+        XCTAssertNil(result.data?["diffNew"])
+    }
+    func testWritePatchRejectsEmptyOrUnlocatableOldContent() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let target = workspace.appendingPathComponent("sample.txt")
+        try "alpha beta gamma\nkeep me\n".write(to: target, atomically: true, encoding: .utf8)
+        let context = TaskContext(workspaceRoot: workspace.path)
+
+        func arguments(oldContent: String, newContent: String) throws -> String {
+            let data = try JSONSerialization.data(withJSONObject: [
+                "path": "sample.txt",
+                "oldContent": oldContent,
+                "newContent": newContent,
+            ])
+            return try XCTUnwrap(String(data: data, encoding: .utf8))
+        }
+
+        let emptyOld = try await WriteFileTool().execute(
+            argumentsJSON: try arguments(oldContent: "", newContent: "replacement"),
+            context: context
+        )
+        let differentLineLayout = try await WriteFileTool().execute(
+            argumentsJSON: try arguments(oldContent: "alpha\nbeta\ngamma", newContent: "replacement"),
+            context: context
+        )
+
+        XCTAssertFalse(emptyOld.success)
+        XCTAssertEqual(emptyOld.error, "patch_empty_old_content")
+        XCTAssertFalse(differentLineLayout.success)
+        XCTAssertEqual(differentLineLayout.error, "patch_not_found")
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "alpha beta gamma\nkeep me\n")
+    }
     func testShellPolicyRecoveryFallsBackToWorkspaceIndex() {
         let plan = ErrorRecoveryEngine.planRecovery(
             error: "工具策略拦截：不要用 shell 遍历项目结构。",
@@ -52,7 +148,7 @@ final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
             attemptCount: 0
         )
 
-        guard case let .fallbackTool(toolName, argumentsJSON) = plan.action else {
+        guard case .fallbackTool(let toolName, let argumentsJSON) = plan.action else {
             XCTFail("Expected fallback tool recovery")
             return
         }
@@ -68,7 +164,7 @@ final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
             attemptCount: 0
         )
 
-        guard case let .fallbackTool(toolName, _) = plan.action else {
+        guard case .fallbackTool(let toolName, _) = plan.action else {
             XCTFail("Expected fallback tool recovery")
             return
         }
@@ -83,7 +179,7 @@ final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
             attemptCount: 0
         )
 
-        guard case let .fallbackTool(toolName, argumentsJSON) = plan.action else {
+        guard case .fallbackTool(let toolName, let argumentsJSON) = plan.action else {
             XCTFail("Expected file.extract fallback")
             return
         }
@@ -129,7 +225,8 @@ final class SecurityRecoveryTests: LaicaiNativeFoundationTestCase {
             AgentLoop.checkpointPaths(toolName: "file.write", arguments: ["path": "Sources/App.swift"], workspaceRoot: workspace.path),
             ["Sources/App.swift"]
         )
-        XCTAssertTrue(AgentLoop.checkpointPaths(toolName: "shell.exec", arguments: ["command": "touch x"], workspaceRoot: workspace.path).isEmpty)
+        XCTAssertTrue(
+            AgentLoop.checkpointPaths(toolName: "shell.exec", arguments: ["command": "touch x"], workspaceRoot: workspace.path).isEmpty)
     }
     func testGitStatusLinePathParsingHandlesRenamesAndUntrackedFiles() {
         XCTAssertEqual(GitTool.pathFromStatusLine(" M native-macos/build.sh"), "native-macos/build.sh")

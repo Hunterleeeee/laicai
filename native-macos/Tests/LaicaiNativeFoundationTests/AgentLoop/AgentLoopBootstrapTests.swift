@@ -13,7 +13,7 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
             TaskStep(kind: .toolResult, text: "读取 README", toolName: "file.read", toolParams: ["path": "README.md"]),
             TaskStep(kind: .toolResult, text: "失败：工具策略拦截", toolName: "shell.exec", isFailure: true),
             TaskStep(kind: .textOutput, text: "项目入口在 native-macos。"),
-            TaskStep(kind: .aiThinking, text: "任务检查点\n状态：失败\n建议下一步：继续读入口")
+            TaskStep(kind: .aiThinking, text: "任务检查点\n状态：失败\n建议下一步：继续读入口"),
         ]
 
         let memory = AgentLoop.structuredTaskMemory(from: steps)
@@ -38,7 +38,7 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
         let priorSteps = [
             TaskStep(kind: .userInput, text: "今天有什么 AI 新闻？"),
             TaskStep(kind: .textOutput, text: "前半段新闻内容"),
-            TaskStep(kind: .error, text: "输出达到当前上限（1024 tokens），内容可能被截断。", recoverable: true)
+            TaskStep(kind: .error, text: "输出达到当前上限（1024 tokens），内容可能被截断。", recoverable: true),
         ]
 
         let task = try await loop.run(
@@ -104,7 +104,7 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
     func testGenericWebFollowUpCarriesPreviousSubject() {
         let prior = [
             TaskStep(kind: .userInput, text: "glm-5.1和kimi k2.6 能力对比"),
-            TaskStep(kind: .textOutput, text: "初步回答")
+            TaskStep(kind: .textOutput, text: "初步回答"),
         ]
 
         let message = AgentLoop.bootstrapWebSearchMessage(
@@ -138,7 +138,9 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "file.read" })
         XCTAssertTrue(task.steps.contains { $0.kind == .toolResult && $0.toolName == "file.read" && $0.text.contains("README.md") })
         XCTAssertTrue(runtime.requests.first?.messages?.contains { ($0.content ?? "").contains("自动读取的首个高相关文件片段") } == true)
-        XCTAssertFalse(AgentLoop.shouldBootstrapWorkspaceSearch(for: "帮我整理今天的 AI 新闻", intent: .task, context: TaskContext(workspaceRoot: workspace.path)))
+        XCTAssertFalse(
+            AgentLoop.shouldBootstrapWorkspaceSearch(
+                for: "帮我整理今天的 AI 新闻", intent: .task, context: TaskContext(workspaceRoot: workspace.path)))
     }
     func testAgentLoopBootstrapsLocalPathReadBeforeWorkspaceSearch() async throws {
         let workspace = try makeTemporaryWorkspace()
@@ -181,9 +183,12 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
             context: TaskContext(workspaceRoot: workspace.path, vaultRoot: workspace.path)
         )
 
-        XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "file.extract" && $0.toolCallId == "call_bootstrap_file_extract" })
-        XCTAssertTrue(task.steps.contains { $0.kind == .toolResult && $0.toolName == "file.extract" && !$0.isFailure && $0.text.contains("会员系统") })
-        XCTAssertFalse(task.steps.contains { $0.kind == .toolCall && $0.toolName == "file.read" && $0.toolCallId == "call_bootstrap_file_read" })
+        XCTAssertTrue(
+            task.steps.contains { $0.kind == .toolCall && $0.toolName == "file.extract" && $0.toolCallId == "call_bootstrap_file_extract" })
+        XCTAssertTrue(
+            task.steps.contains { $0.kind == .toolResult && $0.toolName == "file.extract" && !$0.isFailure && $0.text.contains("会员系统") })
+        XCTAssertFalse(
+            task.steps.contains { $0.kind == .toolCall && $0.toolName == "file.read" && $0.toolCallId == "call_bootstrap_file_read" })
         XCTAssertTrue(runtime.requests.first?.messages?.contains { ($0.content ?? "").contains("我已直接提取用户提供的表格/文档") } == true)
     }
     func testAgentLoopBootstrapsWorkspaceIndexForWholeProjectRequests() async throws {
@@ -230,7 +235,7 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
             "数据不对",
             "我说让你干啊 我只要结果",
             "这个skill都能干嘛呢",
-            "我想知道拓日新能这个股票下午能涨到多少"
+            "我想知道拓日新能这个股票下午能涨到多少",
         ]
 
         for prompt in prompts {
@@ -274,7 +279,7 @@ final class AgentLoopBootstrapTests: LaicaiNativeFoundationTestCase {
             task.steps.filter { $0.kind == .textOutput }.map(\.text),
             [
                 "这是一段被供应商截断的回复",
-                "这是自动续写的第二段。"
+                "这是自动续写的第二段。",
             ])
     }
     func testAgentLoopBootstrapsWebFetchForExplicitURL() {

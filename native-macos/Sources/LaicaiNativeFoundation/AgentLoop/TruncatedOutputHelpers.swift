@@ -20,7 +20,7 @@ extension AgentLoop {
         guard !text.isEmpty else { return false }
         let markers = [
             "继续", "接着说", "继续输出", "继续说", "接着输出", "没发完", "没写完",
-            "没说完", "没结束", "被截断", "截断了", "断了", "后面呢", "剩下的", "接上"
+            "没说完", "没结束", "被截断", "截断了", "断了", "后面呢", "剩下的", "接上",
         ]
         return markers.contains { text.localizedCaseInsensitiveContains($0) }
     }
@@ -44,33 +44,36 @@ extension AgentLoop {
     static func continueTruncatedOutput(_ request: TruncatedContinuationRequest) async throws -> TaskStep? {
         var continuationMessages = request.messages
         continuationMessages.append(ChatMessage(role: "assistant", content: request.previousText))
-        continuationMessages.append(ChatMessage(
-            role: "user",
-            content: """
-            上一条回复因为输出上限被截断。请从截断处无缝继续，直接输出剩余内容：
-            - 不要重写开头
-            - 不要总结已经写过的部分
-            - 不要重新调用工具
-            - 如果确实已经完成，只输出最后缺失的收尾
+        continuationMessages.append(
+            ChatMessage(
+                role: "user",
+                content: """
+                    上一条回复因为输出上限被截断。请从截断处无缝继续，直接输出剩余内容：
+                    - 不要重写开头
+                    - 不要总结已经写过的部分
+                    - 不要重新调用工具
+                    - 如果确实已经完成，只输出最后缺失的收尾
 
-            原始用户目标：\(request.originalMessage)
-            """
-        ))
+                    原始用户目标：\(request.originalMessage)
+                    """
+            ))
 
-        let response = try await request.runtime.sendMessage(SendMessageRequest(
-            sessionID: request.taskID,
-            message: "继续输出被截断的上一段",
-            connector: request.connector,
-            modeLabel: "会话 执行",
-            history: [],
-            systemPrompt: nil,
-            tools: nil,
-            messages: continuationMessages,
-            maxOutputTokens: request.maxOutputTokens
-        ))
+        let response = try await request.runtime.sendMessage(
+            SendMessageRequest(
+                sessionID: request.taskID,
+                message: "继续输出被截断的上一段",
+                connector: request.connector,
+                modeLabel: "会话 执行",
+                history: [],
+                systemPrompt: nil,
+                tools: nil,
+                messages: continuationMessages,
+                maxOutputTokens: request.maxOutputTokens
+            ))
         let text = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !looksLikeProviderError(text) else { return nil }
-        let finalText = response.finishReason == "length"
+        let finalText =
+            response.finishReason == "length"
             ? text + "\n\n（回复仍被截断，可以继续在当前会话 里发送“接着说”。）"
             : text
         return TaskStep(

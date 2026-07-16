@@ -38,8 +38,9 @@ extension AgentLoop {
             for batchIndex in 0..<batchCount {
                 let prefix = "batch\(batchIndex)"
                 guard let filePath = data["\(prefix).path"],
-                      let oldContent = data["\(prefix).diffOld"],
-                      let newContent = data["\(prefix).diffNew"] else { continue }
+                    let oldContent = data["\(prefix).diffOld"],
+                    let newContent = data["\(prefix).diffNew"]
+                else { continue }
 
                 var reviewParams = toolParams
                 for (key, value) in data where key.hasPrefix(prefix + ".") {
@@ -48,40 +49,43 @@ extension AgentLoop {
                 reviewParams["batchIndex"] = "\(batchIndex + 1)"
                 reviewParams["batchCount"] = "\(batchCount)"
 
-                steps.append(fileChangeReviewStep(
-                    FileChangeReviewStepRequest(
-                        text: "待审查文件变更（\(batchIndex + 1)/\(batchCount)）：\(filePath)",
-                        toolName: toolName,
-                        toolParams: reviewParams,
-                        callId: callId,
-                        filePath: filePath,
-                        oldContent: oldContent,
-                        newContent: newContent
-                    )
-                ))
+                steps.append(
+                    fileChangeReviewStep(
+                        FileChangeReviewStepRequest(
+                            text: "待审查文件变更（\(batchIndex + 1)/\(batchCount)）：\(filePath)",
+                            toolName: toolName,
+                            toolParams: reviewParams,
+                            callId: callId,
+                            filePath: filePath,
+                            oldContent: oldContent,
+                            newContent: newContent
+                        )
+                    ))
             }
             return steps
         }
 
         guard let filePath = data["path"] ?? toolParams["path"],
-              let oldContent = data["diffOld"],
-              let newContent = data["diffNew"] else { return steps }
+            let oldContent = data["diffOld"],
+            let newContent = data["diffNew"]
+        else { return steps }
 
         var reviewParams = toolParams
         for (key, value) in data {
             reviewParams[key] = value
         }
-        steps.append(fileChangeReviewStep(
-            FileChangeReviewStepRequest(
-                text: "待审查文件变更：\(filePath)",
-                toolName: toolName,
-                toolParams: reviewParams,
-                callId: callId,
-                filePath: filePath,
-                oldContent: oldContent,
-                newContent: newContent
-            )
-        ))
+        steps.append(
+            fileChangeReviewStep(
+                FileChangeReviewStepRequest(
+                    text: "待审查文件变更：\(filePath)",
+                    toolName: toolName,
+                    toolParams: reviewParams,
+                    callId: callId,
+                    filePath: filePath,
+                    oldContent: oldContent,
+                    newContent: newContent
+                )
+            ))
         return steps
     }
 

@@ -26,7 +26,7 @@ public struct CustomToolDefinition: Identifiable, Equatable, Codable, Sendable {
     }
 
     public enum ExecutionMode: Equatable, Codable, Sendable {
-        case shell(template: String)      // e.g. "curl -s {{url}}"
+        case shell(template: String)  // e.g. "curl -s {{url}}"
         case http(method: String, urlTemplate: String, headers: [String: String], bodyTemplate: String)
         case script(path: String, interpreter: String)  // e.g. path: "./tools/my_tool.py", interpreter: "python3"
 
@@ -121,10 +121,13 @@ public final class CustomToolRegistry: ObservableObject {
 
     public static func loadLocalTools(workspaceRoot: String) -> [CustomToolDefinition] {
         let dir = toolsDirectory(workspaceRoot: workspaceRoot)
-        guard let urls = try? FileManager.default.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
-        ) else { return [] }
-        return urls
+        guard
+            let urls = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+            )
+        else { return [] }
+        return
+            urls
             .filter { $0.pathExtension.lowercased() == "json" }
             .compactMap { url -> CustomToolDefinition? in
                 guard let data = try? Data(contentsOf: url) else { return nil }
@@ -149,7 +152,7 @@ public final class CustomToolRegistry: ObservableObject {
     public static let builtinTools = [
         "code.search", "file.read", "file.extract", "document.transform", "file.write", "file.edit", "diff.apply",
         "shell.exec", "web.search", "web.fetch", "workspace.index",
-        "verify.build", "skill.manage"
+        "verify.build", "skill.manage",
     ]
 
     public func allToolNames() -> [String] {

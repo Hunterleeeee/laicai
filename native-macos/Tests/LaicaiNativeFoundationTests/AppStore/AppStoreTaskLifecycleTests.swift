@@ -23,7 +23,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false)
             ),
             environment: AppEnvironment(
@@ -81,7 +82,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false)
             ),
             environment: AppEnvironment(
@@ -120,7 +122,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             modelName: "test",
             turns: [
                 ChatTurn(role: .user, text: "旧问题"),
-                ChatTurn(role: .assistant, text: "旧回答")
+                ChatTurn(role: .assistant, text: "旧回答"),
             ]
         )
         let thread = Thread(
@@ -151,7 +153,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false)
             ),
             environment: AppEnvironment(
@@ -181,7 +184,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             status: .failed,
             steps: [
                 TaskStep(kind: .userInput, text: "重新整理今天的 AI 新闻", isCollapsible: false, isCollapsed: false),
-                TaskStep(kind: .error, text: "请求失败", isFailure: true, recoverable: true)
+                TaskStep(kind: .error, text: "请求失败", isFailure: true, recoverable: true),
             ],
             connectorID: connector.id
         )
@@ -214,7 +217,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false)
             ))
 
@@ -257,7 +261,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             title: "任务", status: .completed,
             steps: [
                 TaskStep(kind: .userInput, text: "帮我生成 README"),
-                TaskStep(kind: .textOutput, text: "完成")
+                TaskStep(kind: .textOutput, text: "完成"),
             ])
         let thread = Thread(
             id: task.id,
@@ -289,7 +293,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false)
             ),
             environment: AppEnvironment(
@@ -315,7 +320,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             title: "读取项目", status: .running,
             steps: [
                 TaskStep(kind: .userInput, text: "读取本地项目并优化"),
-                TaskStep(kind: .toolCall, text: "正在搜索项目内容", toolName: "code.search")
+                TaskStep(kind: .toolCall, text: "正在搜索项目内容", toolName: "code.search"),
             ])
         let thread = Thread(
             id: task.id,
@@ -347,7 +352,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false)
             ),
             environment: AppEnvironment(
@@ -413,7 +419,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             status: .cancelled,
             steps: [
                 TaskStep(kind: .userInput, text: "修复继续按钮"),
-                TaskStep(kind: .toolResult, text: "读取完成", toolName: "file.read", toolParams: ["path": "Sources/AppStore.swift"])
+                TaskStep(kind: .toolResult, text: "读取完成", toolName: "file.read", toolParams: ["path": "Sources/AppStore.swift"]),
             ],
             connectorID: connector.id,
             context: TaskContext(workspaceRoot: "/tmp"),
@@ -450,7 +456,8 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         try await waitUntilIdle(store)
 
         XCTAssertEqual(store.state.selectedThreadID, task.id)
-        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .userInput && $0.text.contains("恢复 pendingFollowUp 并继续验证") } == true)
+        XCTAssertTrue(
+            store.state.selectedThread?.steps.contains { $0.kind == .userInput && $0.text.contains("恢复 pendingFollowUp 并继续验证") } == true)
         XCTAssertTrue(runtime.requests.last?.messages?.contains { ($0.content ?? "").contains("execution-ledger") } == true)
     }
 
@@ -552,7 +559,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
             status: .failed,
             steps: [
                 TaskStep(kind: .userInput, text: "修复文件"),
-                TaskStep(kind: .toolResult, text: "oldText 匹配失败", toolName: "file.edit", isFailure: true)
+                TaskStep(kind: .toolResult, text: "oldText 匹配失败", toolName: "file.edit", isFailure: true),
             ],
             executionState: .failed,
             goal: "修复文件"

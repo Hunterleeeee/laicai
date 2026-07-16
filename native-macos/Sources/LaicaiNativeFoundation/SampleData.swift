@@ -5,8 +5,12 @@ enum SampleData {
     static let now = Date()
 
     static let connectors: [ConnectorProfile] = [
-        ConnectorProfile(name: "Preview", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "preview-model", note: "", health: .ready),
-        ConnectorProfile(name: "Preview Local", kind: "ollama", endpoint: "http://127.0.0.1:11434/v1", modelName: "qwen3.5:9b-q4_K_M", note: "", health: .ready)
+        ConnectorProfile(
+            name: "Preview", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "preview-model", note: "",
+            health: .ready),
+        ConnectorProfile(
+            name: "Preview Local", kind: "ollama", endpoint: "http://127.0.0.1:11434/v1", modelName: "qwen3.5:9b-q4_K_M", note: "",
+            health: .ready),
     ]
 
     static let sessions: [ChatSession] = [
@@ -17,7 +21,7 @@ enum SampleData {
             modelName: "preview-model",
             turns: [
                 ChatTurn(role: .user, text: "你好"),
-                ChatTurn(role: .assistant, text: "你好，我是来财。")
+                ChatTurn(role: .assistant, text: "你好，我是来财。"),
             ]
         )
     ]

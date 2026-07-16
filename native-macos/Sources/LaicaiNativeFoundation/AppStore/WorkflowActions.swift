@@ -34,7 +34,7 @@ extension AppStore {
                 text: "规划：工作流 \(workflow.name) 正在准备执行。",
                 isCollapsible: true,
                 isCollapsed: true
-            )
+            ),
         ]
         let threadID = reuseThreadID ?? UUID()
         let plan = Self.agentPlanLines(for: plannerDecision, message: message)
@@ -49,7 +49,8 @@ extension AppStore {
             state.threads[index].executionState = .running
             state.threads[index].goal = message
             state.threads[index].currentPlan = plan
-            state.threads[index].taskProtocol = Self.makeTaskProtocol(threadID: threadID, message: message, context: context, decision: plannerDecision)
+            state.threads[index].taskProtocol = Self.makeTaskProtocol(
+                threadID: threadID, message: message, context: context, decision: plannerDecision)
             state.threads[index].executionLedger = Self.makeExecutionLedger(
                 threadID: threadID, message: message, context: context, decision: plannerDecision, plan: plan)
             state.threads[index].updatedAt = .now
@@ -67,7 +68,8 @@ extension AppStore {
                 goal: message,
                 currentPlan: plan,
                 taskProtocol: Self.makeTaskProtocol(threadID: threadID, message: message, context: context, decision: plannerDecision),
-                executionLedger: Self.makeExecutionLedger(threadID: threadID, message: message, context: context, decision: plannerDecision, plan: plan)
+                executionLedger: Self.makeExecutionLedger(
+                    threadID: threadID, message: message, context: context, decision: plannerDecision, plan: plan)
             )
             state.threads.insert(thread, at: 0)
         }
@@ -158,7 +160,8 @@ extension AppStore {
 
     public func useSkill(_ skill: SkillDefinition) {
         if let connector = ModelRouter.selectModel(for: skill, connectors: state.connectors, activeConnectorID: state.activeConnectorID),
-            connector.id != state.activeConnectorID {
+            connector.id != state.activeConnectorID
+        {
             selectConnector(id: connector.id)
         }
 

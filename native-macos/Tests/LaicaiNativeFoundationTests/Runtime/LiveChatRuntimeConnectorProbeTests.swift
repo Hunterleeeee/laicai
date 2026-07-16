@@ -115,7 +115,8 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
                 sessionID: UUID(),
                 message: "ping",
                 connector: ConnectorProfile(
-                    name: "Test", kind: "openai-compatible", endpoint: "https://api.example.com/v1/chat/completions", modelName: "test", note: "",
+                    name: "Test", kind: "openai-compatible", endpoint: "https://api.example.com/v1/chat/completions", modelName: "test",
+                    note: "",
                     health: .ready),
                 modeLabel: "测试"
             ))
@@ -237,10 +238,10 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
         let sseBody = [
             #"data: {"choices":[{"delta":{"reasoning_content":"先看"},"finish_reason":null}]}"#,
             #"data: {"choices":[{"delta":{"content":"结"},"finish_reason":null}]}"#,
-            #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"file_read","# +
-                #""arguments":"{\"path\":"}}]},"finish_reason":null}]}"#,
+            #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"file_read","#
+                + #""arguments":"{\"path\":"}}]},"finish_reason":null}]}"#,
             #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"README.md\"}"}}]},"finish_reason":"tool_calls"}]}"#,
-            "data: [DONE]"
+            "data: [DONE]",
         ].joined(separator: "\n")
         let session = makeStubbedSession(body: sseBody.data(using: .utf8)!)
         let runtime = LiveChatRuntime(session: session)
@@ -282,7 +283,9 @@ final class LiveChatRuntimeConnectorProbeTests: LaicaiNativeFoundationTestCase {
                 SendMessageResponse(assistantText: "fallback")
             }
 
-            func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
+            func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void) async throws
+                -> SendMessageResponse
+            {
                 onChunk("alpha")
                 onChunk("beta")
                 return SendMessageResponse(assistantText: "alphabeta")

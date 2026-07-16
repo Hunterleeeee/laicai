@@ -1,27 +1,27 @@
-import Foundation
 import AppKit
-import UserNotifications
+import Foundation
 import LaicaiNativeDomain
+import UserNotifications
 
 // MARK: - Menu Bar Agent
 
 public final class MenuBarAgent: NSObject, ObservableObject {
     public static let shared = MenuBarAgent()
-    
+
     @Published public private(set) var statusItem: NSStatusItem?
     @Published public private(set) var isActive: Bool = true
-    
+
     private var statusBarButton: NSStatusBarButton?
     private var openMainWindowHandler: (() -> Void)?
-    
+
     private override init() { super.init() }
-    
+
     public func install() {
         guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "来财"
         item.button?.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .medium)
-        
+
         let menu = NSMenu()
         menu.addItem(makeItem("打开来财", action: #selector(activateApp)))
         menu.addItem(.separator())
@@ -35,12 +35,12 @@ public final class MenuBarAgent: NSObject, ObservableObject {
         menu.addItem(makeItem("退出来财", action: #selector(quitApp), key: "q"))
         menu.delegate = self
         item.menu = menu
-        
+
         statusItem = item
         statusBarButton = item.button
         updateStatusBar()
     }
-    
+
     public func updateStatusBar() {
         let title = isActive ? "来财" : "来财⏸"
         statusBarButton?.title = title
@@ -49,7 +49,7 @@ public final class MenuBarAgent: NSObject, ObservableObject {
     public func setOpenMainWindowHandler(_ handler: @escaping () -> Void) {
         openMainWindowHandler = handler
     }
-    
+
     public func showMainWindow() {
         NSApp.activate(ignoringOtherApps: true)
         if let window = NSApp.windows.first(where: { $0.isVisible }) {
@@ -62,17 +62,17 @@ public final class MenuBarAgent: NSObject, ObservableObject {
     @objc private func activateApp() {
         showMainWindow()
     }
-    
+
     @objc private func newThread() {
         NotificationCenter.default.post(name: .laicaiNewThread, object: nil)
         showMainWindow()
     }
-    
+
     @objc private func continueLastTask() {
         NotificationCenter.default.post(name: .laicaiContinueLastTask, object: nil)
         showMainWindow()
     }
-    
+
     @objc private func toggleActive() {
         isActive.toggle()
         updateStatusBar()
@@ -80,7 +80,7 @@ public final class MenuBarAgent: NSObject, ObservableObject {
             toggleItem.title = isActive ? "暂停后台智能" : "恢复后台智能"
         }
     }
-    
+
     @objc private func quitApp() {
         NSApp.terminate(nil)
     }
@@ -121,11 +121,11 @@ extension Notification.Name {
 
 public final class GlobalShortcutManager {
     public static let shared = GlobalShortcutManager()
-    
+
     private var eventMonitor: Any?
-    
+
     private init() {}
-    
+
     public func install() {
         // Global shortcut: ⌘+Shift+L to bring to front
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
@@ -150,7 +150,7 @@ public final class GlobalShortcutManager {
             }
         }
     }
-    
+
     public func uninstall() {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
@@ -163,9 +163,9 @@ public final class GlobalShortcutManager {
 
 public final class NotificationManager {
     public static let shared = NotificationManager()
-    
+
     private init() {}
-    
+
     public func requestPermission() {
         guard Self.canUseUserNotifications else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
@@ -205,7 +205,7 @@ public final class NotificationManager {
         // bundle; UserNotifications raises an Objective-C exception there.
         return Bundle.main.bundleURL.pathExtension == "app"
     }
-    
+
     public func notifyBackgroundTaskCompleted(taskTitle: String, threadID: String) {
         post(title: "后台会话完成", body: taskTitle, threadID: threadID)
         NotificationCenter.default.post(name: .laicaiBackgroundTaskCompleted, object: nil, userInfo: ["threadID": threadID])
@@ -221,14 +221,14 @@ public enum BackgroundTaskStatus: String, Sendable {
 @MainActor
 public final class BackgroundTaskManager: ObservableObject {
     public static let shared = BackgroundTaskManager()
-    
+
     @Published public private(set) var runningTasks: [BackgroundTask] = []
     @Published public private(set) var completedTasks: [BackgroundTask] = []
-    
+
     private var timer: Timer?
-    
+
     private init() {}
-    
+
     public struct BackgroundTask: Identifiable, Equatable {
         public let id: UUID
         public var title: String
@@ -237,13 +237,13 @@ public final class BackgroundTaskManager: ObservableObject {
         public var completedAt: Date?
         public var result: String?
     }
-    
+
     public func startTask(title: String) -> UUID {
         let task = BackgroundTask(id: UUID(), title: title, status: .running, createdAt: Date())
         runningTasks.append(task)
         return task.id
     }
-    
+
     public func completeTask(id: UUID, result: String? = nil) {
         guard let index = runningTasks.firstIndex(where: { $0.id == id }) else { return }
         var task = runningTasks.remove(at: index)
@@ -254,7 +254,7 @@ public final class BackgroundTaskManager: ObservableObject {
         if completedTasks.count > 50 { completedTasks.removeFirst(completedTasks.count - 50) }
         NotificationManager.shared.notifyBackgroundTaskCompleted(taskTitle: task.title, threadID: task.id.uuidString)
     }
-    
+
     public func failTask(id: UUID, error: String) {
         guard let index = runningTasks.firstIndex(where: { $0.id == id }) else { return }
         var task = runningTasks.remove(at: index)
@@ -303,7 +303,7 @@ public struct ReportGenerator {
             "| 活跃会话| \(todayThreads.count) |",
             "| 会话状态 | ✅ \(completedAgents.count)　❌ \(failedAgents.count)　🔄 \(runningAgents.count) |",
             "| 工具调用 | \(countToolCalls(todayThreads)) 次 |",
-            "| 文件变更 | \(countFileChanges(todayThreads)) 个文件 |"
+            "| 文件变更 | \(countFileChanges(todayThreads)) 个文件 |",
         ]
     }
 
@@ -457,7 +457,7 @@ public struct ReportGenerator {
             "| 完成会话 | \(completedAgents.count) |",
             "| 失败会话 | \(failedAgents.count) |",
             "| 工具调用 | \(countToolCalls(weekThreads)) 次 |",
-            "| 文件变更 | \(countFileChanges(weekThreads)) 个文件 |"
+            "| 文件变更 | \(countFileChanges(weekThreads)) 个文件 |",
         ]
     }
 
@@ -607,24 +607,26 @@ public struct ReportGenerator {
             // Debug / fix tasks — document the problem + solution
             if thread.title.containsAny(["调试", "debug", "修复", "fix", "bug", "错误"]) && thread.status == .completed {
                 let conclusion = aiOutputs.last?.text ?? ""
-                suggestions.append(WikiSuggestion(
-                    topic: "问题排查：\(String(thread.title.prefix(30)))",
-                    reason: "成功修复的 bug/问题，记录排查过程可避免重复踩坑",
-                    keyContent: String(conclusion.prefix(200)),
-                    sourceThread: thread.title
-                ))
+                suggestions.append(
+                    WikiSuggestion(
+                        topic: "问题排查：\(String(thread.title.prefix(30)))",
+                        reason: "成功修复的 bug/问题，记录排查过程可避免重复踩坑",
+                        keyContent: String(conclusion.prefix(200)),
+                        sourceThread: thread.title
+                    ))
             }
 
             // Architecture / refactor discussions
             if thread.title.containsAny(["重构", "refactor", "架构", "设计", "design", "优化"]) {
                 let content = aiOutputs.map(\.text).joined(separator: " ")
                 if content.count > 300 {
-                    suggestions.append(WikiSuggestion(
-                        topic: "架构决策：\(String(thread.title.prefix(30)))",
-                        reason: "包含架构分析或重构方案，值得作为设计决策记录",
-                        keyContent: String(content.prefix(200)),
-                        sourceThread: thread.title
-                    ))
+                    suggestions.append(
+                        WikiSuggestion(
+                            topic: "架构决策：\(String(thread.title.prefix(30)))",
+                            reason: "包含架构分析或重构方案，值得作为设计决策记录",
+                            keyContent: String(content.prefix(200)),
+                            sourceThread: thread.title
+                        ))
                 }
             }
 
@@ -632,12 +634,13 @@ public struct ReportGenerator {
             if toolCalls.count >= 5 && aiOutputs.count >= 2 {
                 let userInput = thread.steps.first { $0.kind == .userInput }?.text ?? ""
                 if !suggestions.contains(where: { $0.sourceThread == thread.title }) {
-                    suggestions.append(WikiSuggestion(
-                        topic: "工作记录：\(String(thread.title.prefix(30)))",
-                        reason: "涉及 \(toolCalls.count) 次工具调用的深度工作，包含有价值的分析过程",
-                        keyContent: String(userInput.prefix(150)),
-                        sourceThread: thread.title
-                    ))
+                    suggestions.append(
+                        WikiSuggestion(
+                            topic: "工作记录：\(String(thread.title.prefix(30)))",
+                            reason: "涉及 \(toolCalls.count) 次工具调用的深度工作，包含有价值的分析过程",
+                            keyContent: String(userInput.prefix(150)),
+                            sourceThread: thread.title
+                        ))
                 }
             }
 
@@ -645,12 +648,13 @@ public struct ReportGenerator {
             if thread.workflowName == "code-review" && thread.status == .completed {
                 let review = aiOutputs.last?.text ?? ""
                 if !review.isEmpty {
-                    suggestions.append(WikiSuggestion(
-                        topic: "代码审查记录",
-                        reason: "代码审查发现的问题和建议，可沉淀为编码规范",
-                        keyContent: String(review.prefix(200)),
-                        sourceThread: thread.title
-                    ))
+                    suggestions.append(
+                        WikiSuggestion(
+                            topic: "代码审查记录",
+                            reason: "代码审查发现的问题和建议，可沉淀为编码规范",
+                            keyContent: String(review.prefix(200)),
+                            sourceThread: thread.title
+                        ))
                 }
             }
 
@@ -660,12 +664,13 @@ public struct ReportGenerator {
             if userSteps.count >= 3 && aiSteps.count >= 3 {
                 let topics = extractTopicsFromText(userSteps.map(\.text).joined(separator: " "))
                 if !topics.isEmpty {
-                    suggestions.append(WikiSuggestion(
-                        topic: topics.first ?? "会话 知识点",
-                        reason: "这个会话多轮讨论了 \(topics.joined(separator: "、")) 等话题",
-                        keyContent: String((aiSteps.last?.text ?? "").prefix(200)),
-                        sourceThread: thread.title
-                    ))
+                    suggestions.append(
+                        WikiSuggestion(
+                            topic: topics.first ?? "会话 知识点",
+                            reason: "这个会话多轮讨论了 \(topics.joined(separator: "、")) 等话题",
+                            keyContent: String((aiSteps.last?.text ?? "").prefix(200)),
+                            sourceThread: thread.title
+                        ))
                 }
             }
         }
@@ -697,7 +702,7 @@ public struct ReportGenerator {
             ("ui", "UI/UX 设计"),
             ("ux", "UI/UX 设计"),
             ("架构", "系统架构"),
-            ("architecture", "系统架构")
+            ("architecture", "系统架构"),
         ]
         let lower = text.lowercased()
         var found: [String] = []
@@ -708,8 +713,8 @@ public struct ReportGenerator {
     }
 }
 
-private extension String {
-    func containsAny(_ terms: [String]) -> Bool {
+extension String {
+    fileprivate func containsAny(_ terms: [String]) -> Bool {
         let lower = self.lowercased()
         return terms.contains { lower.contains($0.lowercased()) }
     }
@@ -753,47 +758,49 @@ public final class ProjectChangeMonitor: ObservableObject {
 
         let paths = [root] as CFArray
         let flags: FSEventStreamCreateFlags =
-            UInt32(kFSEventStreamCreateFlagUseCFTypes) |
-            UInt32(kFSEventStreamCreateFlagFileEvents) |
-            UInt32(kFSEventStreamCreateFlagNoDefer)
+            UInt32(kFSEventStreamCreateFlagUseCFTypes) | UInt32(kFSEventStreamCreateFlagFileEvents)
+            | UInt32(kFSEventStreamCreateFlagNoDefer)
 
-        guard let stream = FSEventStreamCreate(
-            nil,
-            { _, info, numEvents, eventPaths, eventFlags, _ in
-                guard let info else { return }
-                let monitor = Unmanaged<ProjectChangeMonitor>.fromOpaque(info).takeUnretainedValue()
-                guard let cfPaths = unsafeBitCast(eventPaths, to: NSArray.self) as? [String] else { return }
-                var changes: [ProjectChange] = []
-                for index in 0..<numEvents {
-                    let path = cfPaths[index]
-                    let name = (path as NSString).lastPathComponent
-                    if ProjectChangeMonitor.ignored.contains(name) { continue }
-                    let flags = Int(eventFlags[index])
-                    let kind: ProjectChangeKind
-                    if flags & kFSEventStreamEventFlagItemRemoved != 0 {
-                        kind = .removed
-                    } else if flags & kFSEventStreamEventFlagItemCreated != 0 || flags & kFSEventStreamEventFlagItemRenamed != 0 {
-                        kind = .added
-                    } else {
-                        kind = .modified
+        guard
+            let stream = FSEventStreamCreate(
+                nil,
+                { _, info, numEvents, eventPaths, eventFlags, _ in
+                    guard let info else { return }
+                    let monitor = Unmanaged<ProjectChangeMonitor>.fromOpaque(info).takeUnretainedValue()
+                    guard let cfPaths = unsafeBitCast(eventPaths, to: NSArray.self) as? [String] else { return }
+                    var changes: [ProjectChange] = []
+                    for index in 0..<numEvents {
+                        let path = cfPaths[index]
+                        let name = (path as NSString).lastPathComponent
+                        if ProjectChangeMonitor.ignored.contains(name) { continue }
+                        let flags = Int(eventFlags[index])
+                        let kind: ProjectChangeKind
+                        if flags & kFSEventStreamEventFlagItemRemoved != 0 {
+                            kind = .removed
+                        } else if flags & kFSEventStreamEventFlagItemCreated != 0 || flags & kFSEventStreamEventFlagItemRenamed != 0 {
+                            kind = .added
+                        } else {
+                            kind = .modified
+                        }
+                        let relPath =
+                            path.hasPrefix(monitor.monitoredRoot)
+                            ? String(path.dropFirst(monitor.monitoredRoot.count + 1))
+                            : path
+                        changes.append(ProjectChange(path: relPath, kind: kind, timestamp: .now))
                     }
-                    let relPath = path.hasPrefix(monitor.monitoredRoot)
-                        ? String(path.dropFirst(monitor.monitoredRoot.count + 1))
-                        : path
-                    changes.append(ProjectChange(path: relPath, kind: kind, timestamp: .now))
-                }
-                if !changes.isEmpty {
-                    Task { @MainActor in
-                        monitor.handleChanges(changes)
+                    if !changes.isEmpty {
+                        Task { @MainActor in
+                            monitor.handleChanges(changes)
+                        }
                     }
-                }
-            },
-            &context,
-            paths,
-            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-            1.5,
-            flags
-        ) else {
+                },
+                &context,
+                paths,
+                FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+                1.5,
+                flags
+            )
+        else {
             isMonitoring = false
             return
         }
@@ -821,7 +828,8 @@ public final class ProjectChangeMonitor: ObservableObject {
             try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled, let self else { return }
             self.recentChanges = Array(changes.prefix(30))
-            let summary = changes.count <= 3
+            let summary =
+                changes.count <= 3
                 ? changes.map { "\($0.kind.rawValue)：\($0.path)" }.joined(separator: "、")
                 : "\(changes.count) 个文件变更"
             NotificationManager.shared.post(title: "项目变更", body: summary)

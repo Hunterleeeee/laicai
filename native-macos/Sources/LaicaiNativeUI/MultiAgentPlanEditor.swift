@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Plan Templates
 
@@ -46,7 +46,7 @@ public struct PlanTemplate: Identifiable {
             description: "编码员重构 → 测试员验证 → 审查员检查",
             icon: "arrow.2.squarepath",
             roles: [.coder, .tester, .reviewer]
-        )
+        ),
     ]
 }
 
@@ -221,10 +221,12 @@ struct MultiAgentPlanEditorView: View {
                 .font(AppFont.captionMedium)
                 .foregroundStyle(TextGrade.muted)
 
-            LazyVGrid(columns: [
-                GridItem(.flexible(), spacing: AppSpace.small),
-                GridItem(.flexible(), spacing: AppSpace.small)
-            ], spacing: AppSpace.small) {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: AppSpace.small),
+                    GridItem(.flexible(), spacing: AppSpace.small),
+                ], spacing: AppSpace.small
+            ) {
                 ForEach(PlanTemplate.templates) { template in
                     templateCard(template)
                 }
@@ -512,11 +514,12 @@ struct MultiAgentPlanEditorView: View {
         }
         var handoffs: [AgentHandoff] = []
         for index in 1..<agents.count {
-            handoffs.append(AgentHandoff(
-                fromAgentID: agents[index - 1].id,
-                toAgentID: agents[index].id,
-                artifact: ""
-            ))
+            handoffs.append(
+                AgentHandoff(
+                    fromAgentID: agents[index - 1].id,
+                    toAgentID: agents[index].id,
+                    artifact: ""
+                ))
         }
         plan = MultiAgentPlan(
             title: template.roles.map { $0.title }.joined(separator: " → "),

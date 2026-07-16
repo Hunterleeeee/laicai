@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 public struct RootView: View {
     @EnvironmentObject private var store: AppStore
@@ -96,10 +96,10 @@ public struct RootView: View {
         .onChange(of: store.state.notice?.id) { _, _ in
             guard let notice = store.state.notice else { return }
             switch notice.style {
-            case .info:    ToastCenter.shared.show(notice.message, style: .info)
+            case .info: ToastCenter.shared.show(notice.message, style: .info)
             case .success: ToastCenter.shared.success(notice.message)
             case .warning: ToastCenter.shared.warn(notice.message)
-            case .error:   ToastCenter.shared.error(notice.message)
+            case .error: ToastCenter.shared.error(notice.message)
             }
         }
         .onChange(of: store.state.activeConnectorID) { _, newID in
@@ -162,7 +162,7 @@ public struct RootView: View {
                 colors: [
                     Color.white.opacity(0.72),
                     SurfaceGrade.base.opacity(0.95),
-                    SurfaceGrade.panel.opacity(0.44)
+                    SurfaceGrade.panel.opacity(0.44),
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -292,7 +292,8 @@ private struct AppTopBar: View {
 
     private var selectedThreadProjectName: String? {
         guard let projectID = store.state.selectedThread?.projectID,
-              let project = projectManager.projects.first(where: { $0.id == projectID }) else {
+            let project = projectManager.projects.first(where: { $0.id == projectID })
+        else {
             return nil
         }
         return project.name

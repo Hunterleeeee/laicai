@@ -1,8 +1,8 @@
 import AppKit
-import SwiftUI
-import UniformTypeIdentifiers
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
+import UniformTypeIdentifiers
 
 private struct ChatIntentModeLabel {
     let text: String
@@ -194,7 +194,7 @@ struct ChatDetailView: View {
                 colors: [
                     SurfaceGrade.base.opacity(0.0),
                     SurfaceGrade.base.opacity(0.82),
-                    SurfaceGrade.base
+                    SurfaceGrade.base,
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -510,7 +510,8 @@ struct ChatDetailView: View {
                             .fill(hasPendingFollowUp ? Brand.primary.opacity(0.22) : SurfaceGrade.elevated)
                             .frame(width: 27, height: 27)
                             .overlay(
-                                Circle().strokeBorder(hasPendingFollowUp ? Brand.primary.opacity(0.40) : SurfaceGrade.border.opacity(0.45), lineWidth: 0.7)
+                                Circle().strokeBorder(
+                                    hasPendingFollowUp ? Brand.primary.opacity(0.40) : SurfaceGrade.border.opacity(0.45), lineWidth: 0.7)
                             )
                         Image(systemName: "plus.bubble.fill")
                             .font(.system(size: 11, weight: .semibold))
@@ -536,7 +537,8 @@ struct ChatDetailView: View {
     }
 
     private var canSend: Bool {
-        let hasText = !localDraftMessage
+        let hasText =
+            !localDraftMessage
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .isEmpty
         return (hasText || !store.state.draftAttachments.isEmpty || !store.state.draftImages.isEmpty) && store.state.activeConnector != nil
@@ -681,7 +683,8 @@ struct ChatDetailView: View {
         defer { lastPublishedDraftMessage = storeDraft }
         guard force || localDraftMessage != storeDraft else { return }
         guard force || storeDraft != lastPublishedDraftMessage else { return }
-        let isActivelyEditing = composerFocused
+        let isActivelyEditing =
+            composerFocused
             && Date().timeIntervalSince(lastLocalDraftEditAt) < 1.2
         guard force || !isActivelyEditing else { return }
         localDraftMessage = storeDraft

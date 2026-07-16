@@ -19,7 +19,7 @@ public struct BrowserTool: LaicaiTool {
                     "action": FunctionProperty(type: "string", description: "动作：navigate / extract / screenshot / script / close"),
                     "url": FunctionProperty(type: "string", description: "目标 URL（navigate 时必填）"),
                     "selector": FunctionProperty(type: "string", description: "CSS 选择器（extract 时用）"),
-                    "script": FunctionProperty(type: "string", description: "JavaScript 代码（script 动作时必填）")
+                    "script": FunctionProperty(type: "string", description: "JavaScript 代码（script 动作时必填）"),
                 ],
                 required: ["action"]
             )
@@ -66,7 +66,9 @@ public struct BrowserTool: LaicaiTool {
             return ToolResult(output: "浏览器已关闭")
 
         default:
-            return ToolResult(output: "未知动作 '\(params.action)'，支持：navigate / extract / screenshot / script / close", success: false, error: "unknown_action")
+            return ToolResult(
+                output: "未知动作 '\(params.action)'，支持：navigate / extract / screenshot / script / close", success: false,
+                error: "unknown_action")
         }
     }
 }
@@ -92,7 +94,8 @@ final class BrowserSession: NSObject, WKNavigationDelegate {
         config.preferences.isElementFullscreenEnabled = false
         let newWebView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
         newWebView.navigationDelegate = self
-        newWebView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        newWebView.customUserAgent =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         webView = newWebView
         return newWebView
     }
@@ -134,7 +137,8 @@ final class BrowserSession: NSObject, WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             self.isLoading = false
-            self.navigationContinuation?.resume(returning: ToolResult(output: "加载失败：\(error.localizedDescription)", success: false, error: "load_failed"))
+            self.navigationContinuation?.resume(
+                returning: ToolResult(output: "加载失败：\(error.localizedDescription)", success: false, error: "load_failed"))
             self.navigationContinuation = nil
         }
     }
@@ -142,7 +146,8 @@ final class BrowserSession: NSObject, WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             self.isLoading = false
-            self.navigationContinuation?.resume(returning: ToolResult(output: "导航失败：\(error.localizedDescription)", success: false, error: "nav_failed"))
+            self.navigationContinuation?.resume(
+                returning: ToolResult(output: "导航失败：\(error.localizedDescription)", success: false, error: "nav_failed"))
             self.navigationContinuation = nil
         }
     }
@@ -157,30 +162,33 @@ final class BrowserSession: NSObject, WKNavigationDelegate {
         let script: String
         if let sel = selector, !sel.isEmpty {
             script = """
-            (function() {
-                var els = document.querySelectorAll('\(sel.replacingOccurrences(of: "'", with: "\\'"))');
-                return Array.from(els).map(function(el) {
-                    return el.innerText || el.textContent || '';
-                }).join('\\n---\\n');
-            })()
-            """
+                (function() {
+                    var els = document.querySelectorAll('\(sel.replacingOccurrences(of: "'", with: "\\'"))');
+                    return Array.from(els).map(function(el) {
+                        return el.innerText || el.textContent || '';
+                    }).join('\\n---\\n');
+                })()
+                """
         } else {
             // Extract main content heuristic
             script = """
-            (function() {
-                var article = document.querySelector('article') || document.querySelector('main') || document.querySelector('[role="main"]') || document.body;
-                // Remove scripts, styles, nav
-                var clone = article.cloneNode(true);
-                clone.querySelectorAll('script, style, nav, header, footer, aside, iframe').forEach(function(el) { el.remove(); });
-                var text = clone.innerText || clone.textContent || '';
-                // Trim excessive whitespace
-                text = text.replace(/\\n{3,}/g, '\\n\\n').trim();
-                var title = document.title || '';
-                var meta = document.querySelector('meta[name="description"]');
-                var desc = meta ? meta.content : '';
-                return '# ' + title + '\\n' + (desc ? desc + '\\n\\n' : '') + text.substring(0, 8000);
-            })()
-            """
+                (function() {
+                    var article = document.querySelector('article')
+                        || document.querySelector('main')
+                        || document.querySelector('[role="main"]')
+                        || document.body;
+                    // Remove scripts, styles, nav
+                    var clone = article.cloneNode(true);
+                    clone.querySelectorAll('script, style, nav, header, footer, aside, iframe').forEach(function(el) { el.remove(); });
+                    var text = clone.innerText || clone.textContent || '';
+                    // Trim excessive whitespace
+                    text = text.replace(/\\n{3,}/g, '\\n\\n').trim();
+                    var title = document.title || '';
+                    var meta = document.querySelector('meta[name="description"]');
+                    var desc = meta ? meta.content : '';
+                    return '# ' + title + '\\n' + (desc ? desc + '\\n\\n' : '') + text.substring(0, 8000);
+                })()
+                """
         }
 
         do {
@@ -231,8 +239,9 @@ final class BrowserSession: NSObject, WKNavigationDelegate {
             let path = (tempDir as NSString).appendingPathComponent(filename)
 
             guard let tiffData = image.tiffRepresentation,
-                  let bitmap = NSBitmapImageRep(data: tiffData),
-                  let pngData = bitmap.representation(using: .png, properties: [:]) else {
+                let bitmap = NSBitmapImageRep(data: tiffData),
+                let pngData = bitmap.representation(using: .png, properties: [:])
+            else {
                 return ToolResult(output: "截图转换失败", success: false, error: "convert_failed")
             }
             try pngData.write(to: URL(fileURLWithPath: path))

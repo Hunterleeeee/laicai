@@ -35,14 +35,16 @@ public struct RealBrowserTool: LaicaiTool {
                 properties: [
                     "action": FunctionProperty(
                         type: "string",
-                        description: "动作：open / tabs / extract / js / click / fill / screenshot / scroll / back / forward / close_tab / switch_tab / wait_for"),
+                        description:
+                            "动作：open / tabs / extract / js / click / fill / screenshot / scroll / back / forward / close_tab / switch_tab / wait_for"
+                    ),
                     "url": FunctionProperty(type: "string", description: "目标 URL（open 时必填）"),
                     "selector": FunctionProperty(type: "string", description: "CSS 选择器（extract/click/fill 时用）"),
                     "script": FunctionProperty(type: "string", description: "JavaScript 代码（js 动作时必填）"),
                     "text": FunctionProperty(type: "string", description: "文本内容（fill 动作时用）"),
                     "browser": FunctionProperty(type: "string", description: "浏览器：safari / chrome（默认自动检测）"),
                     "tab_index": FunctionProperty(type: "integer", description: "标签页索引（switch_tab/close_tab 时用，从1开始）"),
-                    "timeout": FunctionProperty(type: "integer", description: "wait_for 超时秒数（默认 10）")
+                    "timeout": FunctionProperty(type: "integer", description: "wait_for 超时秒数（默认 10）"),
                 ],
                 required: ["action"]
             )
@@ -76,11 +78,10 @@ public struct RealBrowserTool: LaicaiTool {
             return await executeSimpleAction(params, browser: browser)
         default:
             return ToolResult(
-                output:
-                    [
-                        "未知动作 '\(params.action)'，支持：open / tabs / extract / js / click / fill / screenshot",
-                        "/ scroll / back / forward / close_tab / switch_tab / wait_for"
-                    ].joined(separator: " "),
+                output: [
+                    "未知动作 '\(params.action)'，支持：open / tabs / extract / js / click / fill / screenshot",
+                    "/ scroll / back / forward / close_tab / switch_tab / wait_for",
+                ].joined(separator: " "),
                 success: false,
                 error: "unknown_action"
             )
@@ -542,7 +543,8 @@ public struct RealBrowserTool: LaicaiTool {
             if let ownerPID = window[kCGWindowOwnerPID as String] as? Int32,
                 ownerPID == pid,
                 let layer = window[kCGWindowLayer as String] as? Int, layer == 0,
-                let windowNumber = window[kCGWindowNumber as String] as? Int {
+                let windowNumber = window[kCGWindowNumber as String] as? Int
+            {
                 return String(windowNumber)
             }
         }

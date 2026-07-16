@@ -3,12 +3,17 @@ import LaicaiNativeDomain
 
 enum LegacyJSONMigration {
     static func applicationSupportDirectory(fileManager: FileManager = .default) -> URL? {
-        guard let base = try? fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: false
-        ) else { return nil }
+        if fileManager === FileManager.default {
+            return LaicaiStoragePaths.legacyAppDirectory
+        }
+        guard
+            let base = try? fileManager.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: false
+            )
+        else { return nil }
         return base.appendingPathComponent("LaicaiNative", isDirectory: true)
     }
 

@@ -2,7 +2,7 @@ import Foundation
 import LaicaiNativeDomain
 
 #if canImport(SQLite3)
-import SQLite3
+    import SQLite3
 #endif
 
 // MARK: - Goal Definition
@@ -95,13 +95,11 @@ public final class GoalEngine: ObservableObject {
     private let dbPath: String
 
     /// Callback to execute a goal step through the main app
-    public var onExecuteStep: ((String, UUID?) async -> (success: Bool, result: String))? // (message, threadID) -> result
+    public var onExecuteStep: ((String, UUID?) async -> (success: Bool, result: String))?  // (message, threadID) -> result
 
     private init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory()
-        let dir = (base as NSString).appendingPathComponent("Laicai")
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        dbPath = (dir as NSString).appendingPathComponent("goals.sqlite3")
+        let directory = LaicaiStoragePaths.ensureDirectory(LaicaiStoragePaths.appDirectory)
+        dbPath = directory.appendingPathComponent("goals.sqlite3").path
         open()
         migrate()
         loadGoals()
@@ -123,15 +121,16 @@ public final class GoalEngine: ObservableObject {
     }
 
     private func migrate() {
-        exec("""
-        CREATE TABLE IF NOT EXISTS goals (
-            id TEXT PRIMARY KEY,
-            data TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending',
-            created_at REAL NOT NULL,
-            updated_at REAL NOT NULL
-        );
-        """)
+        exec(
+            """
+            CREATE TABLE IF NOT EXISTS goals (
+                id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            """)
         exec("CREATE INDEX IF NOT EXISTS idx_goal_status ON goals(status);")
     }
 
@@ -171,7 +170,8 @@ public final class GoalEngine: ObservableObject {
 
     public func resumeGoal(id: UUID) {
         guard let index = goals.firstIndex(where: { $0.id == id }),
-              [.paused, .pending, .failed].contains(goals[index].status) else { return }
+            [.paused, .pending, .failed].contains(goals[index].status)
+        else { return }
         goals[index].status = .running
         goals[index].updatedAt = Date()
         persistGoal(goals[index])
@@ -194,7 +194,7 @@ public final class GoalEngine: ObservableObject {
         let sql = "DELETE FROM goals WHERE id = ?;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-        sqlite3_bind_text_safe(stmt, 1, id.uuidString)
+        sqlite3BindTextSafe(stmt, 1, id.uuidString)
         sqlite3_step(stmt)
         sqlite3_finalize(stmt)
     }
@@ -256,17 +256,18 @@ public final class GoalEngine: ObservableObject {
     private func persistGoal(_ goal: Goal) {
         guard let database else { return }
         guard let data = try? JSONEncoder().encode(goal),
-              let json = String(data: data, encoding: .utf8) else { return }
+            let json = String(data: data, encoding: .utf8)
+        else { return }
 
         let sql = """
-        INSERT OR REPLACE INTO goals (id, data, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?);
-        """
+            INSERT OR REPLACE INTO goals (id, data, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?);
+            """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-        sqlite3_bind_text_safe(stmt, 1, goal.id.uuidString)
-        sqlite3_bind_text_safe(stmt, 2, json)
-        sqlite3_bind_text_safe(stmt, 3, goal.status.rawValue)
+        sqlite3BindTextSafe(stmt, 1, goal.id.uuidString)
+        sqlite3BindTextSafe(stmt, 2, json)
+        sqlite3BindTextSafe(stmt, 3, goal.status.rawValue)
         sqlite3_bind_double(stmt, 4, goal.createdAt.timeIntervalSince1970)
         sqlite3_bind_double(stmt, 5, goal.updatedAt.timeIntervalSince1970)
         sqlite3_step(stmt)
@@ -283,7 +284,8 @@ public final class GoalEngine: ObservableObject {
         while sqlite3_step(stmt) == SQLITE_ROW {
             let json = String(cString: sqlite3_column_text(stmt, 0))
             guard let data = json.data(using: .utf8),
-                  let goal = try? JSONDecoder().decode(Goal.self, from: data) else { continue }
+                let goal = try? JSONDecoder().decode(Goal.self, from: data)
+            else { continue }
             loaded.append(goal)
         }
         sqlite3_finalize(stmt)

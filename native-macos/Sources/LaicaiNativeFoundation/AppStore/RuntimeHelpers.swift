@@ -6,10 +6,11 @@ import LaicaiNativeDomain
 extension AppStore {
     func handleShellStreamNotification(_ info: [AnyHashable: Any]) {
         guard let stepID = info["stepID"] as? UUID,
-              let callID = info["callID"] as? String,
-              let command = info["command"] as? String,
-              let text = info["text"] as? String,
-              let isFailure = info["isFailure"] as? Bool else { return }
+            let callID = info["callID"] as? String,
+            let command = info["command"] as? String,
+            let text = info["text"] as? String,
+            let isFailure = info["isFailure"] as? Bool
+        else { return }
         let isFinal = info["isFinal"] as? Bool ?? false
 
         let step = TaskStep(
@@ -43,12 +44,14 @@ extension AppStore {
 
     private func shellStreamTargetThreadIndex(info: [AnyHashable: Any], stepID: UUID) -> Int? {
         if let threadID = info["threadID"] as? UUID,
-           let index = state.threads.firstIndex(where: { $0.id == threadID }) {
+            let index = state.threads.firstIndex(where: { $0.id == threadID })
+        {
             return index
         }
         if let threadIDString = info["threadID"] as? String,
-           let threadID = UUID(uuidString: threadIDString),
-           let index = state.threads.firstIndex(where: { $0.id == threadID }) {
+            let threadID = UUID(uuidString: threadIDString),
+            let index = state.threads.firstIndex(where: { $0.id == threadID })
+        {
             return index
         }
         if let index = state.threads.firstIndex(where: { thread in
@@ -99,7 +102,8 @@ extension AppStore {
 
     func promoteSelectedAgentToExecutionIfNeeded() {
         guard let agentID = state.selectedAgentID,
-              let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }) else { return }
+            let threadIndex = state.threads.firstIndex(where: { $0.id == agentID })
+        else { return }
         let thread = state.threads[threadIndex]
         guard thread.isChatOnly && !thread.steps.isEmpty else { return }
         // The Agent already has a unified event stream; add workspace context to enable tools.
@@ -133,10 +137,11 @@ extension AppStore {
 
     func recordToolActivity(_ activity: ToolActivity) {
         if let first = state.toolActivities.first,
-           first.name == activity.name,
-           first.summary == activity.summary,
-           first.statusLine == activity.statusLine,
-           first.isFailure == activity.isFailure {
+            first.name == activity.name,
+            first.summary == activity.summary,
+            first.statusLine == activity.statusLine,
+            first.isFailure == activity.isFailure
+        {
             return
         }
         state.toolActivities.removeAll {
@@ -150,11 +155,14 @@ extension AppStore {
     }
 
     func directSessionTitle(for message: String) -> String {
-        let normalized = message
+        let normalized =
+            message
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return "新会话" }
-        if Self.isTinyFollowUp(normalized), let title = state.selectedThread?.title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if Self.isTinyFollowUp(normalized), let title = state.selectedThread?.title,
+            !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
             return title
         }
         return String(normalized.prefix(32))
@@ -162,31 +170,34 @@ extension AppStore {
 
     func reconcileSelectedRunningTaskIfIdle() {
         guard let taskID = state.selectedThreadID,
-              !isThreadGenerating(taskID),
-              let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }),
-              state.threads[threadIndex].status == .running else { return }
+            !isThreadGenerating(taskID),
+            let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }),
+            state.threads[threadIndex].status == .running
+        else { return }
 
         state.threads[threadIndex].status = .cancelled
         syncAgentSnapshot(at: threadIndex)
         state.threads[threadIndex].updatedAt = .now
-        state.threads[threadIndex].steps.append(TaskStep(
-            kind: .error,
-            text: "上次执行没有正常结束，已转为可继续状态。本轮会沿着这个会话继续。",
-            isCollapsible: true,
-            isCollapsed: true,
-            isFailure: false,
-            recoverable: true,
-            retryAction: "继续"
-        ))
+        state.threads[threadIndex].steps.append(
+            TaskStep(
+                kind: .error,
+                text: "上次执行没有正常结束，已转为可继续状态。本轮会沿着这个会话继续。",
+                isCollapsible: true,
+                isCollapsed: true,
+                isFailure: false,
+                recoverable: true,
+                retryAction: "继续"
+            ))
         persistThreads()
     }
 
     func answerSelectedTaskStatusQuestion(_ message: String) -> Bool {
         guard let agentID = state.selectedAgentID,
-              let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }),
-              state.threads[threadIndex].isExecution,
-              state.threads[threadIndex].status != .running,
-              Self.isTaskStatusQuestion(message) else { return false }
+            let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }),
+            state.threads[threadIndex].isExecution,
+            state.threads[threadIndex].status != .running,
+            Self.isTaskStatusQuestion(message)
+        else { return false }
 
         let answer = Self.taskStatusAnswer(for: AgentTask(thread: state.threads[threadIndex]), question: message)
         state.threads[threadIndex].steps.append(TaskStep(kind: .userInput, text: message, isCollapsible: false, isCollapsed: false))

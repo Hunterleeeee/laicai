@@ -68,7 +68,17 @@ extension AppStore {
     }
 
     func persistSettings() {
-        AppSettingsStorage.save(state.settings)
+        do {
+            try AppSettingsStorage.save(state.settings)
+        } catch {
+            notify("应用设置保存失败：\(error.localizedDescription)", style: .error)
+            recordToolActivity(
+                name: "settings.save",
+                summary: "应用设置保存失败",
+                statusLine: error.localizedDescription,
+                isFailure: true
+            )
+        }
     }
 
     nonisolated static func isEmptyPlaceholderThread(_ thread: Thread) -> Bool {

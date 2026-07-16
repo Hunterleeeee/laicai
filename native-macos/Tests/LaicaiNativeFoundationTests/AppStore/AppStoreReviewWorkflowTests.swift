@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
@@ -132,9 +133,10 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
         let reviewSteps = store.state.selectedThread?.steps.filter { $0.kind == .reviewRequest } ?? []
         XCTAssertEqual(reviewSteps.count, 2)
         XCTAssertTrue(reviewSteps.allSatisfy { $0.approved == true })
-        XCTAssertTrue(store.state.selectedThread?.steps.contains {
-            $0.kind == .reviewResult && $0.text.contains("批量写入成功：2 个文件")
-        } == true)
+        XCTAssertTrue(
+            store.state.selectedThread?.steps.contains {
+                $0.kind == .reviewResult && $0.text.contains("批量写入成功：2 个文件")
+            } == true)
         XCTAssertTrue(AuditLog.shared.recentEntries.contains { $0.tool == "batch.apply" && $0.success })
     }
     func testRollbackBatchRestoresFilesAndReopensReviews() throws {
@@ -181,9 +183,10 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
         let reviewSteps = store.state.selectedThread?.steps.filter { $0.kind == .reviewRequest } ?? []
         XCTAssertEqual(reviewSteps.count, 2)
         XCTAssertTrue(reviewSteps.allSatisfy { $0.approved == nil })
-        XCTAssertTrue(store.state.selectedThread?.steps.contains {
-            $0.kind == .reviewResult && $0.text.contains("批量回滚完成：2/2 个文件已恢复")
-        } == true)
+        XCTAssertTrue(
+            store.state.selectedThread?.steps.contains {
+                $0.kind == .reviewResult && $0.text.contains("批量回滚完成：2/2 个文件已恢复")
+            } == true)
         XCTAssertTrue(AuditLog.shared.recentEntries.contains { $0.tool == "batch.rollback" && $0.success })
     }
     func testApproveReviewRejectsWhenFileChangedExternally() throws {
@@ -209,9 +212,10 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "external")
         XCTAssertEqual(store.state.selectedThread?.steps.first?.approved, false)
-        XCTAssertTrue(store.state.selectedThread?.steps.contains {
-            $0.kind == .reviewResult && $0.text.contains("文件在审查期间被外部修改")
-        } == true)
+        XCTAssertTrue(
+            store.state.selectedThread?.steps.contains {
+                $0.kind == .reviewResult && $0.text.contains("文件在审查期间被外部修改")
+            } == true)
         XCTAssertTrue(AuditLog.shared.recentEntries.contains { $0.tool == "file.write" && !$0.success })
     }
     func testHunkApprovalWritesOnlyAcceptedHunks() throws {
@@ -243,8 +247,9 @@ final class AppStoreReviewWorkflowTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "ALPHA\nbeta\ngamma\n")
         XCTAssertEqual(store.state.selectedThread?.steps.first?.approved, true)
         XCTAssertEqual(store.state.selectedThread?.steps.first?.diffHunks?.map { $0.approved == true }, [true, false])
-        XCTAssertTrue(store.state.selectedThread?.steps.contains {
-            $0.kind == .reviewResult && $0.text.contains("接受 1 / 拒绝 1 个 hunk")
-        } == true)
+        XCTAssertTrue(
+            store.state.selectedThread?.steps.contains {
+                $0.kind == .reviewResult && $0.text.contains("接受 1 / 拒绝 1 个 hunk")
+            } == true)
     }
 }

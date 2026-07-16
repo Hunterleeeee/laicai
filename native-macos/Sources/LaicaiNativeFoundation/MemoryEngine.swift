@@ -76,10 +76,7 @@ public final class MemoryEngine: ObservableObject {
         guard !isOpen else { return }
         let dir =
             dataDir
-            ?? {
-                let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? NSTemporaryDirectory()
-                return (appSupport as NSString).appendingPathComponent("Laicai")
-            }()
+            ?? LaicaiStoragePaths.appDirectory.path
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let dbPath = (dir as NSString).appendingPathComponent("memory.database")
 
@@ -163,16 +160,16 @@ public final class MemoryEngine: ObservableObject {
         guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text_safe(stmt, 1, entry.id.uuidString)
-        sqlite3_bind_text_safe(stmt, 2, entry.kind.rawValue)
-        sqlite3_bind_text_safe(stmt, 3, entry.content)
+        sqlite3BindTextSafe(stmt, 1, entry.id.uuidString)
+        sqlite3BindTextSafe(stmt, 2, entry.kind.rawValue)
+        sqlite3BindTextSafe(stmt, 3, entry.content)
         if let summary = entry.summary {
-            sqlite3_bind_text_safe(stmt, 4, summary)
+            sqlite3BindTextSafe(stmt, 4, summary)
         } else {
             sqlite3_bind_null(stmt, 4)
         }
-        sqlite3_bind_text_safe(stmt, 5, entry.source)
-        sqlite3_bind_text_safe(stmt, 6, entry.tags.joined(separator: ","))
+        sqlite3BindTextSafe(stmt, 5, entry.source)
+        sqlite3BindTextSafe(stmt, 6, entry.tags.joined(separator: ","))
         sqlite3_bind_double(stmt, 7, entry.score)
         sqlite3_bind_double(stmt, 8, entry.createdAt.timeIntervalSinceReferenceDate)
         sqlite3_bind_double(stmt, 9, entry.accessedAt.timeIntervalSinceReferenceDate)
@@ -210,7 +207,7 @@ public final class MemoryEngine: ObservableObject {
         guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text_safe(stmt, 1, ftsQuery)
+        sqlite3BindTextSafe(stmt, 1, ftsQuery)
         sqlite3_bind_int(stmt, 2, Int32(limit))
 
         var results: [MemoryEntry] = []
@@ -245,7 +242,7 @@ public final class MemoryEngine: ObservableObject {
 
         let pattern = "%\(keyword)%"
         for parameterIndex: Int32 in 1...3 {
-            sqlite3_bind_text_safe(stmt, parameterIndex, pattern)
+            sqlite3BindTextSafe(stmt, parameterIndex, pattern)
         }
         sqlite3_bind_int(stmt, 4, Int32(limit))
 
@@ -284,7 +281,7 @@ public final class MemoryEngine: ObservableObject {
         guard isOpen else { return }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(database, "DELETE FROM memories WHERE id = ?", -1, &stmt, nil) == SQLITE_OK else { return }
-        sqlite3_bind_text_safe(stmt, 1, id.uuidString)
+        sqlite3BindTextSafe(stmt, 1, id.uuidString)
         sqlite3_step(stmt)
         sqlite3_finalize(stmt)
         refreshCount()
@@ -294,7 +291,9 @@ public final class MemoryEngine: ObservableObject {
         guard isOpen else { return }
         let cutoff = Date().addingTimeInterval(Double(-days * 86400)).timeIntervalSinceReferenceDate
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(database, "DELETE FROM memories WHERE score < ? AND accessed_at < ?", -1, &stmt, nil) == SQLITE_OK else { return }
+        guard sqlite3_prepare_v2(database, "DELETE FROM memories WHERE score < ? AND accessed_at < ?", -1, &stmt, nil) == SQLITE_OK else {
+            return
+        }
         sqlite3_bind_double(stmt, 1, 5.0)
         sqlite3_bind_double(stmt, 2, cutoff)
         sqlite3_step(stmt)
@@ -351,7 +350,7 @@ public final class MemoryEngine: ObservableObject {
     public func extractPreferences(from steps: [TaskStep], source: String) {
         let preferenceMarkers = [
             "以后", "永远", "每次", "都要", "不要", "不用", "一律", "默认",
-            "记住", "偏好", "习惯", "规则", "always", "never", "prefer"
+            "记住", "偏好", "习惯", "规则", "always", "never", "prefer",
         ]
         let userInputs = steps.filter { $0.kind == .userInput }
         for input in userInputs {
@@ -465,10 +464,12 @@ public final class MemoryEngine: ObservableObject {
 
     private func bumpAccess(id: UUID) {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(database, "UPDATE memories SET accessed_at = ?, access_count = access_count + 1 WHERE id = ?", -1, &stmt, nil) == SQLITE_OK
+        guard
+            sqlite3_prepare_v2(
+                database, "UPDATE memories SET accessed_at = ?, access_count = access_count + 1 WHERE id = ?", -1, &stmt, nil) == SQLITE_OK
         else { return }
         sqlite3_bind_double(stmt, 1, Date().timeIntervalSinceReferenceDate)
-        sqlite3_bind_text_safe(stmt, 2, id.uuidString)
+        sqlite3BindTextSafe(stmt, 2, id.uuidString)
         sqlite3_step(stmt)
         sqlite3_finalize(stmt)
     }

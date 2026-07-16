@@ -3,264 +3,6 @@ import LaicaiNativeDomain
 import LaicaiNativeFoundation
 import SwiftUI
 
-// MARK: - Connectors Panel
-
-struct ConnectorsPanel: View {
-    @EnvironmentObject private var store: AppStore
-    @State private var showingAddSheet = false
-    @State private var editingConnector: ConnectorProfile?
-    @State private var deletingConnector: ConnectorProfile?
-    @State private var isCheckingAll = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.medium) {
-            connectorOverview
-
-            if store.state.connectors.isEmpty {
-                emptyHint(
-                    icon: "link.badge.plus",
-                    title: "暂无连接器",
-                    hint: "添加模型 API 或本地 Ollama"
-                )
-            } else {
-                VStack(spacing: AppSpace.small) {
-                    ForEach(store.state.connectors) { conn in
-                        ConnectorRow(conn: conn)
-                            .onTapGesture { store.selectConnector(id: conn.id) }
-                            .contextMenu {
-                                Button {
-                                    store.checkConnectorHealth(id: conn.id)
-                                } label: {
-                                    Label("健康检查", systemImage: "heart")
-                                }
-                                if conn.toolCallingCapability != nil {
-                                    Button {
-                                        store.clearLearnedToolCallingCapability(id: conn.id)
-                                    } label: {
-                                        Label("清除已学习兼容性", systemImage: "arrow.counterclockwise.circle")
-                                    }
-                                }
-                                Button {
-                                    editingConnector = conn
-                                } label: {
-                                    Label("编辑", systemImage: "pencil")
-                                }
-                                Divider()
-                                Button(role: .destructive) {
-                                    deletingConnector = conn
-                                } label: {
-                                    Label("删除", systemImage: "trash")
-                                }
-                            }
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showingAddSheet) {
-            ConnectorEditSheet(mode: .add) { conn in
-                store.addConnector(conn)
-                store.checkAllConnectorsHealth()
-                ToastCenter.shared.success("已添加 \(conn.name)")
-            } onSaveAndTest: { conn in
-                store.addConnector(conn)
-                store.checkConnectorHealth(id: conn.id)
-                ToastCenter.shared.show("正在测试 \(conn.name)")
-            }
-        }
-        .sheet(item: $editingConnector) { conn in
-            ConnectorEditSheet(mode: .edit(conn)) { updated in
-                store.updateConnector(updated)
-                ToastCenter.shared.success("已更新 \(updated.name)")
-            } onSaveAndTest: { updated in
-                store.updateConnector(updated)
-                store.checkConnectorHealth(id: updated.id)
-                ToastCenter.shared.show("正在测试 \(updated.name)")
-            }
-        }
-        .alert(
-            "删除连接器",
-            isPresented: Binding(
-                get: { deletingConnector != nil },
-                set: { if !$0 { deletingConnector = nil } }
-            )
-        ) {
-            Button("取消", role: .cancel) { deletingConnector = nil }
-            Button("删除", role: .destructive) {
-                if let conn = deletingConnector { store.deleteConnector(id: conn.id) }
-                deletingConnector = nil
-            }
-        } message: {
-            Text("删除后这个模型配置会从本机移除。")
-        }
-    }
-
-    private var connectorOverview: some View {
-        let online = store.state.connectors.filter { $0.health == .ready }.count
-        let total = store.state.connectors.count
-        let active = store.state.activeConnector
-
-        return VStack(alignment: .leading, spacing: AppSpace.medium) {
-            HStack(alignment: .top, spacing: AppSpace.small) {
-                Image(systemName: active?.health == .ready ? "checkmark.seal.fill" : "link")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(active?.health == .ready ? Semantic.success : Brand.primary)
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill((active?.health == .ready ? Semantic.success : Brand.primary).opacity(0.10)))
-
-                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
-                    Text(active == nil ? "模型连接" : (active?.modelName.isEmpty == false ? active?.modelName ?? "模型连接" : active?.name ?? "模型连接"))
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(TextGrade.primary)
-                        .lineLimit(1)
-                    Text(total == 0 ? "添加模型后即可开始使用。" : "\(online)/\(total) 在线 · 点击下方连接器即可切换")
-                        .font(AppFont.caption)
-                        .foregroundStyle(TextGrade.muted)
-                        .lineLimit(2)
-                }
-
-                Spacer()
-            }
-
-            HStack(spacing: AppSpace.extraSmall) {
-                Button {
-                    isCheckingAll = true
-                    store.checkAllConnectorsHealth()
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .seconds(3))
-                        isCheckingAll = false
-                    }
-                } label: {
-                    Label(isCheckingAll ? "检查中" : "检查", systemImage: isCheckingAll ? "arrow.triangle.2.circlepath" : "heart.text.square")
-                        .font(AppFont.captionMedium)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(total == 0 ? TextGrade.ghost : Brand.primary)
-                .padding(.vertical, AppSpace.small)
-                .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.60)))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.8), lineWidth: 0.6))
-                .disabled(total == 0)
-
-                Button {
-                    showingAddSheet = true
-                } label: {
-                    Label("添加", systemImage: "plus")
-                        .font(AppFont.captionMedium)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Brand.primary)
-                .padding(.vertical, AppSpace.small)
-                .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(Brand.primary.opacity(0.10)))
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(Brand.primary.opacity(0.18), lineWidth: 0.6))
-            }
-        }
-        .padding(AppSpace.large)
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .fill(LinearGradient(colors: [SurfaceGrade.card, SurfaceGrade.elevated.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .strokeBorder(SurfaceGrade.hairline.opacity(0.9), lineWidth: 0.7)
-        )
-        .shadow(color: AppShadow.small.color, radius: AppShadow.small.radius, y: AppShadow.small.verticalOffset)
-    }
-
-    private func emptyHint(icon: String, title: String, hint: String) -> some View {
-        VStack(spacing: AppSpace.medium) {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Brand.primary)
-                .frame(width: 36, height: 36)
-                .background(Circle().fill(Brand.primary.opacity(0.10)))
-            VStack(spacing: AppSpace.extraSmall) {
-                Text(title)
-                    .font(AppFont.captionMedium)
-                    .foregroundStyle(TextGrade.secondary)
-                Text(hint)
-                    .font(AppFont.tiny)
-                    .foregroundStyle(TextGrade.muted)
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, AppSpace.large)
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .fill(SurfaceGrade.card.opacity(0.62))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6)
-        )
-    }
-}
-
-struct ConnectorRow: View {
-    let conn: ConnectorProfile
-    @EnvironmentObject private var store: AppStore
-
-    var body: some View {
-        let capability = ConnectorCapabilityProfile.infer(for: conn, mode: store.state.settings.contextMode)
-        HStack(spacing: AppSpace.small) {
-            // Status dot with glow
-            Circle()
-                .fill(conn.health.color)
-                .frame(width: 7, height: 7)
-                .shadow(color: conn.health.color.opacity(0.5), radius: 3)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: AppSpace.extraSmall) {
-                    Text(conn.name)
-                        .font(AppFont.captionMedium)
-                        .foregroundStyle(TextGrade.primary)
-                        .lineLimit(1)
-                    if conn.id == store.state.activeConnectorID {
-                        Text("使用中")
-                            .font(AppFont.tiny)
-                            .foregroundStyle(Brand.primary)
-                    }
-                }
-
-                Text(connectorCapabilitySummary(for: conn, capability: capability))
-                    .font(AppFont.tiny)
-                    .foregroundStyle(TextGrade.muted)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            Text(conn.health.title)
-                .font(AppFont.tiny)
-                .foregroundStyle(conn.health == .ready ? Semantic.success : conn.health.color)
-                .padding(.horizontal, AppSpace.extraSmall + 2)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(conn.health.color.opacity(0.10)))
-        }
-        .padding(AppSpace.medium)
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                .fill(
-                    conn.id == store.state.activeConnectorID
-                        ? AnyShapeStyle(
-                            LinearGradient(
-                                colors: [Brand.primary.opacity(0.12), SurfaceGrade.card.opacity(0.86)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        : AnyShapeStyle(SurfaceGrade.card.opacity(0.72))
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                .strokeBorder(
-                    conn.id == store.state.activeConnectorID ? Brand.primary.opacity(0.24) : SurfaceGrade.hairline.opacity(0.75),
-                    lineWidth: 0.7
-                )
-        )
-        .shadow(
-            color: conn.id == store.state.activeConnectorID ? AppShadow.small.color : .clear, radius: AppShadow.small.radius, y: AppShadow.small.verticalOffset)
-    }
-}
-
 // MARK: - Activity Panel
 
 struct ActivityPanel: View {
@@ -344,7 +86,9 @@ struct ActivityPanel: View {
                 .menuIndicator(.hidden)
 
                 LazyVGrid(columns: twoColumns, spacing: AppSpace.extraSmall) {
-                    InspectorMetricTile(icon: "rectangle.compress.vertical", label: "窗口", value: compactTokenCount(profile.contextWindow), tint: Brand.primary)
+                    InspectorMetricTile(
+                        icon: "rectangle.compress.vertical", label: "窗口", value: compactTokenCount(profile.contextWindow),
+                        tint: Brand.primary)
                     InspectorMetricTile(
                         icon: profile.supportsToolCalling ? "checkmark.seal" : "slash.circle",
                         label: "工具",
@@ -408,7 +152,9 @@ struct ActivityPanel: View {
     private var commandSection: some View {
         InspectorBlock(title: "操作") {
             LazyVGrid(columns: twoColumns, spacing: AppSpace.small) {
-                InspectorCommandTile(icon: "arrow.down.to.line.compact", title: "最新", tint: Brand.primary, isEnabled: store.state.selectedThread != nil) {
+                InspectorCommandTile(
+                    icon: "arrow.down.to.line.compact", title: "最新", tint: Brand.primary, isEnabled: store.state.selectedThread != nil
+                ) {
                     NotificationCenter.default.post(name: .laicaiScrollToBottom, object: nil)
                 }
                 InspectorCommandTile(icon: "arrow.clockwise", title: "重试", tint: Brand.purple, isEnabled: canRetry) {
@@ -435,11 +181,14 @@ struct ActivityPanel: View {
 
     private var recentActivitySection: some View {
         let total = store.state.toolActivities.count + composition.activePipelines.count
-        return InspectorBlock(title: "最近活动", trailing: total == 0 ? nil : AnyView(Text("\(total)").font(AppFont.tiny).foregroundStyle(TextGrade.ghost))) {
+        return InspectorBlock(
+            title: "最近活动", trailing: total == 0 ? nil : AnyView(Text("\(total)").font(AppFont.tiny).foregroundStyle(TextGrade.ghost))
+        ) {
             VStack(spacing: 0) {
                 if !composition.activePipelines.isEmpty {
                     ForEach(composition.activePipelines) { pipe in
-                        InspectorActivityLine(icon: "arrow.triangle.branch", title: pipe.name, subtitle: "\(pipe.steps.count) 步 · 进行中", tint: Brand.teal)
+                        InspectorActivityLine(
+                            icon: "arrow.triangle.branch", title: pipe.name, subtitle: "\(pipe.steps.count) 步 · 进行中", tint: Brand.teal)
                         if pipe.id != composition.activePipelines.last?.id || !store.state.toolActivities.isEmpty {
                             InspectorDivider()
                         }
@@ -452,7 +201,8 @@ struct ActivityPanel: View {
                         InspectorActivityLine(
                             icon: activity.isFailure ? "xmark.circle.fill" : "checkmark.circle.fill",
                             title: activity.summary.isEmpty ? activity.name : activity.summary,
-                            subtitle: activity.statusLine.isEmpty ? RelativeTimeFormatter.string(for: activity.timestamp) : activity.statusLine,
+                            subtitle: activity.statusLine.isEmpty
+                                ? RelativeTimeFormatter.string(for: activity.timestamp) : activity.statusLine,
                             tint: activity.isFailure ? Semantic.error : Semantic.success
                         )
                         if activity.id != store.state.toolActivities.prefix(5).last?.id {
@@ -483,7 +233,9 @@ struct ActivityPanel: View {
         .padding(AppSpace.small)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(SurfaceGrade.elevated.opacity(0.62)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(
+                SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6))
     }
 
     private func agentPlanCard(for thread: Thread) -> some View {
@@ -516,7 +268,9 @@ struct ActivityPanel: View {
         .padding(AppSpace.small)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(SurfaceGrade.card.opacity(0.64)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(
+                SurfaceGrade.hairline.opacity(0.70), lineWidth: 0.6))
     }
 
     private func agentArtifactCard(for thread: Thread) -> some View {
@@ -538,7 +292,9 @@ struct ActivityPanel: View {
         .padding(AppSpace.small)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(SurfaceGrade.card.opacity(0.54)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.65), lineWidth: 0.6))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(
+                SurfaceGrade.hairline.opacity(0.65), lineWidth: 0.6))
     }
 
     private func agentLedgerCard(for thread: Thread) -> some View {
@@ -570,7 +326,8 @@ struct ActivityPanel: View {
                 InspectorMetricTile(icon: "square.and.pencil", label: "改动", value: "\(modifiedCount)", tint: Brand.teal)
                 InspectorMetricTile(icon: "checkmark.seal", label: "验证", value: "\(verificationCount)", tint: Semantic.success)
                 InspectorMetricTile(
-                    icon: "exclamationmark.triangle", label: "失败", value: "\(failedCount)", tint: failedCount > 0 ? Semantic.error : TextGrade.ghost)
+                    icon: "exclamationmark.triangle", label: "失败", value: "\(failedCount)",
+                    tint: failedCount > 0 ? Semantic.error : TextGrade.ghost)
             }
 
             if !nextAction.isEmpty {
@@ -594,7 +351,9 @@ struct ActivityPanel: View {
         .padding(AppSpace.small)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(SurfaceGrade.card.opacity(0.58)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(SurfaceGrade.hairline.opacity(0.65), lineWidth: 0.6))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).strokeBorder(
+                SurfaceGrade.hairline.opacity(0.65), lineWidth: 0.6))
     }
 
     private var canRetry: Bool {
@@ -668,7 +427,8 @@ struct ActivityPanel: View {
             return live
         }
         if let followUp = thread.executionLedger?.pendingFollowUp?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !followUp.isEmpty {
+            !followUp.isEmpty
+        {
             return "已收到补充：\(followUp)"
         }
         if thread.isExecution && thread.status == .failed {
@@ -685,7 +445,8 @@ struct ActivityPanel: View {
 
     private func fallbackAgentGoal(for thread: Thread) -> String {
         if let firstUser = thread.steps.first(where: { $0.kind == .userInput })?.text.trimmingCharacters(in: .whitespacesAndNewlines),
-            !firstUser.isEmpty {
+            !firstUser.isEmpty
+        {
             return firstUser
         }
         return thread.title.isEmpty ? "等待用户输入目标。" : thread.title
@@ -732,7 +493,8 @@ struct ActivityPanel: View {
                 kind = "file"
             }
             guard let path, !path.isEmpty, seen.insert(path).inserted else { continue }
-            result.append(AgentArtifact(title: URL(fileURLWithPath: path).lastPathComponent, path: path, kind: kind, createdAt: step.createdAt))
+            result.append(
+                AgentArtifact(title: URL(fileURLWithPath: path).lastPathComponent, path: path, kind: kind, createdAt: step.createdAt))
         }
         return result
     }
@@ -744,7 +506,7 @@ struct ActivityPanel: View {
             .init(
                 icon: thread.projectID == nil ? "tray" : "folder", title: "空间", value: projectLabel(for: thread),
                 tint: thread.projectID == nil ? TextGrade.muted : Brand.teal),
-            .init(icon: "clock", title: "更新", value: RelativeTimeFormatter.string(for: thread.updatedAt), tint: TextGrade.muted)
+            .init(icon: "clock", title: "更新", value: RelativeTimeFormatter.string(for: thread.updatedAt), tint: TextGrade.muted),
         ]
         if thread.isExecution {
             facts[1] = .init(icon: "doc.text", title: "文件", value: "\(thread.context.relevantFiles.count)", tint: Brand.teal)
@@ -757,7 +519,8 @@ struct ActivityPanel: View {
 
     private func projectLabel(for thread: Thread) -> String {
         if let projectID = thread.projectID,
-            let project = projectManager.projects.first(where: { $0.id == projectID }) {
+            let project = projectManager.projects.first(where: { $0.id == projectID })
+        {
             return project.name
         }
         return "全局"
@@ -776,7 +539,7 @@ struct ActivityPanel: View {
     private var twoColumns: [GridItem] {
         [
             GridItem(.flexible(), spacing: AppSpace.small),
-            GridItem(.flexible(), spacing: AppSpace.small)
+            GridItem(.flexible(), spacing: AppSpace.small),
         ]
     }
 
@@ -1276,7 +1039,8 @@ private struct ModelContextCard: View {
             VStack(alignment: .leading, spacing: AppSpace.small) {
                 summaryRow(icon: "cpu", label: "模型", value: connector.modelName.isEmpty ? connector.name : connector.modelName)
                 summaryRow(icon: "link", label: "连接", value: connector.name)
-                summaryRow(icon: "wrench.and.screwdriver", label: "工具", value: connectorCapabilitySummary(for: connector, capability: capability))
+                summaryRow(
+                    icon: "wrench.and.screwdriver", label: "工具", value: connectorCapabilitySummary(for: connector, capability: capability))
                 if let learned = learnedCapabilitySummary(for: capability) {
                     summaryRow(icon: "clock.arrow.circlepath", label: "记录", value: learned)
                 }
@@ -1286,7 +1050,7 @@ private struct ModelContextCard: View {
     }
 }
 
-private func connectorCapabilitySummary(for connector: ConnectorProfile, capability: ConnectorCapabilityProfile) -> String {
+func connectorCapabilitySummary(for connector: ConnectorProfile, capability: ConnectorCapabilityProfile) -> String {
     let model = connector.modelName.isEmpty ? connector.kind : connector.modelName
     let tools = capability.supportsToolCalling ? "支持工具调用" : "不支持工具调用"
     return "\(model) · \(tools) · \(capability.speedTier.title) · \(capability.stabilityScore.title)"
@@ -1412,54 +1176,5 @@ private struct CurrentFocusCard: View {
                 .lineLimit(5)
                 .fixedSize(horizontal: false, vertical: true)
         }
-    }
-}
-
-private struct ActivityRow: View {
-    let activity: ToolActivity
-
-    var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.small) {
-            Image(systemName: activity.isFailure ? "xmark.circle.fill" : "checkmark.circle.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(statusColor)
-                .frame(width: 16, height: 16)
-                .padding(.top, 1)
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: AppSpace.extraSmall) {
-                    Text(activity.summary.isEmpty ? activity.name : activity.summary)
-                        .font(AppFont.captionMedium)
-                        .foregroundStyle(TextGrade.primary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(RelativeTimeFormatter.string(for: activity.timestamp))
-                        .font(AppFont.tiny)
-                        .foregroundStyle(TextGrade.ghost)
-                        .lineLimit(1)
-                }
-
-                if !activity.statusLine.isEmpty {
-                    Text(activity.statusLine)
-                        .font(AppFont.tiny)
-                        .foregroundStyle(activity.isFailure ? Semantic.error : TextGrade.muted)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Text(activity.name)
-                    .font(AppFont.codeSmall)
-                    .foregroundStyle(TextGrade.ghost)
-                    .lineLimit(1)
-                    .opacity(activity.name.isEmpty || activity.name == activity.summary ? 0 : 1)
-            }
-        }
-        .padding(.vertical, AppSpace.small)
-        .padding(.horizontal, AppSpace.extraSmall)
-    }
-
-    private var statusColor: Color {
-        activity.isFailure ? Semantic.error : Semantic.success
     }
 }

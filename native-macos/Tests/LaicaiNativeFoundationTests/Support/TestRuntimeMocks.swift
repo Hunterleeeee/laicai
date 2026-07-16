@@ -38,7 +38,9 @@ final class ToolRejectedThenPlainRuntime: ChatRuntimeClient {
         if request.tools?.isEmpty == false {
             return SendMessageResponse(
                 assistantText: "请求格式不被 qwen 接受，请检查端点、模型名和请求兼容性。\nURL: http://127.0.0.1:11434/api/chat",
-                toolActivities: [ToolActivity(name: "chat.error", summary: "qwen 返回 HTTP 400", statusLine: "tool_calls bad request", isFailure: true)]
+                toolActivities: [
+                    ToolActivity(name: "chat.error", summary: "qwen 返回 HTTP 400", statusLine: "tool_calls bad request", isFailure: true)
+                ]
             )
         }
         return SendMessageResponse(assistantText: "当前连接器暂不兼容工具调用；我已改为无工具模式继续回答。")
@@ -103,13 +105,17 @@ final class BlockingMessageRuntime: ChatRuntimeClient {
     func resumeAll(_ response: SendMessageResponse = SendMessageResponse(assistantText: "完成")) {
         let pending = continuations
         continuations.removeAll()
-        pending.forEach { $0.resume(returning: response) }
+        for continuation in pending {
+            continuation.resume(returning: response)
+        }
     }
 
     func cancelAll() {
         let pending = continuations
         continuations.removeAll()
-        pending.forEach { $0.resume(throwing: CancellationError()) }
+        for continuation in pending {
+            continuation.resume(throwing: CancellationError())
+        }
     }
 }
 
@@ -132,8 +138,8 @@ final class WikiBuildWhenAvailableRuntime: ChatRuntimeClient {
                         function: FunctionCallDetail(
                             name: "wiki_build",
                             arguments:
-                                #"{"topic":"Vibe Coding 安全检查清单","mode":"atomic","save":true,"sourceTitle":"已整理输出","# +
-                                #""sourceText":"根据上一轮已读取的文章整理出的 Vibe Coding 产品上线安全检查清单。"}"#
+                                #"{"topic":"Vibe Coding 安全检查清单","mode":"atomic","save":true,"sourceTitle":"已整理输出","#
+                                + #""sourceText":"根据上一轮已读取的文章整理出的 Vibe Coding 产品上线安全检查清单。"}"#
                         )
                     )
                 ]
@@ -194,8 +200,8 @@ final class InlineCommandJSONRuntime: ChatRuntimeClient {
         requests.append(request)
         return SendMessageResponse(
             assistantText:
-                #"我先查看一下当前工作区，了解需要修改/生成什么文件。{"cmd":"ls -la /tmp/laicai-pptx-smoke && find . "# +
-                    #"-maxdepth 2 -type f","cwd":"/tmp/laicai-pptx-smoke","max_output_tokens":12000}可以整理成一段给 Gemini 的完整提示词。"#
+                #"我先查看一下当前工作区，了解需要修改/生成什么文件。{"cmd":"ls -la /tmp/laicai-pptx-smoke && find . "#
+                + #"-maxdepth 2 -type f","cwd":"/tmp/laicai-pptx-smoke","max_output_tokens":12000}可以整理成一段给 Gemini 的完整提示词。"#
         )
     }
 }
@@ -210,7 +216,7 @@ final class FakeToolCallBlockThenToolRuntime: ChatRuntimeClient {
             return SendMessageResponse(
                 assistantText:
                     "我先查看目录。\n\n<|tool_call|>\n```json\n{\n  \"name\": \"list_directory\",\n"
-                        + "  \"arguments\": {\"path\": \"/var/folders/aa/bb/T/demo\"}\n}\n```\n</|tool_call|>",
+                    + "  \"arguments\": {\"path\": \"/var/folders/aa/bb/T/demo\"}\n}\n```\n</|tool_call|>",
                 toolCalls: [
                     FunctionCallResponse(
                         id: "call_index",
@@ -361,7 +367,9 @@ final class StreamingRuntime: ChatRuntimeClient {
         return SendMessageResponse(assistantText: "你好，世界")
     }
 
-    func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void) async throws -> SendMessageResponse {
+    func sendMessageStream(_ request: SendMessageRequest, onChunk: @Sendable @MainActor (String) -> Void) async throws
+        -> SendMessageResponse
+    {
         requests.append(request)
         onChunk("你好，")
         onChunk("世界")
@@ -425,7 +433,9 @@ final class ProbeHealthRuntime: ChatRuntimeClient {
         SendMessageResponse(assistantText: "完成")
     }
 
-    func probeConnector(endpoint: String, model: String, apiKey: String, kind: String, probeToolCalling: Bool) async throws -> ConnectorProbeResult {
+    func probeConnector(endpoint: String, model: String, apiKey: String, kind: String, probeToolCalling: Bool) async throws
+        -> ConnectorProbeResult
+    {
         probeRequests.append(
             ConnectorProbeRequest(
                 endpoint: endpoint,

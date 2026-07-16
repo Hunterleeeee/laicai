@@ -3,15 +3,18 @@ import LaicaiNativeDomain
 
 extension AppStore {
     static func taskMemory(from thread: Thread) -> TaskMemory {
-        let readFiles = uniqueMemoryValues(thread.steps
-            .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] })
-        let searchedQueries = uniqueMemoryValues(thread.steps
-            .filter { $0.kind == .toolCall && $0.toolName == "code.search" }
-            .compactMap { $0.toolParams?["query"] })
-        let failedTools = uniqueMemoryValues(Dictionary(grouping: thread.steps.filter { $0.kind == .toolResult && $0.isFailure }, by: { $0.toolName ?? "tool" })
-            .map { "\($0.key) ×\($0.value.count)" }
-            .sorted())
+        let readFiles = uniqueMemoryValues(
+            thread.steps
+                .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
+                .compactMap { $0.toolParams?["path"] })
+        let searchedQueries = uniqueMemoryValues(
+            thread.steps
+                .filter { $0.kind == .toolCall && $0.toolName == "code.search" }
+                .compactMap { $0.toolParams?["query"] })
+        let failedTools = uniqueMemoryValues(
+            Dictionary(grouping: thread.steps.filter { $0.kind == .toolResult && $0.isFailure }, by: { $0.toolName ?? "tool" })
+                .map { "\($0.key) ×\($0.value.count)" }
+                .sorted())
         let conclusions = thread.steps
             .filter { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .suffix(3)
@@ -118,14 +121,16 @@ extension AppStore {
                 kind = "file"
             }
             guard let path,
-                  !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  seen.insert(path).inserted else { continue }
-            artifacts.append(AgentArtifact(
-                title: URL(fileURLWithPath: path).lastPathComponent,
-                path: path,
-                kind: kind,
-                createdAt: step.createdAt
-            ))
+                !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                seen.insert(path).inserted
+            else { continue }
+            artifacts.append(
+                AgentArtifact(
+                    title: URL(fileURLWithPath: path).lastPathComponent,
+                    path: path,
+                    kind: kind,
+                    createdAt: step.createdAt
+                ))
         }
         return artifacts
     }

@@ -16,7 +16,7 @@ public struct ReadFileTool: LaicaiTool {
                 properties: [
                     "path": FunctionProperty(type: "string", description: "文件路径（相对或绝对路径）"),
                     "offset": FunctionProperty(type: "integer", description: "起始行号（可选，从1开始）"),
-                    "limit": FunctionProperty(type: "integer", description: "最大读取行数（可选，默认读取全部）")
+                    "limit": FunctionProperty(type: "integer", description: "最大读取行数（可选，默认读取全部）"),
                 ],
                 required: ["path"]
             )
@@ -56,13 +56,15 @@ public struct ReadFileTool: LaicaiTool {
         }
 
         if isDirectory.boolValue {
-            return await Self.readDirectory(path: path, fullPath: fullPath, limit: params.limit, argumentsJSON: argumentsJSON, toolName: name)
+            return await Self.readDirectory(
+                path: path, fullPath: fullPath, limit: params.limit, argumentsJSON: argumentsJSON, toolName: name)
         }
 
         let ext = (fullPath as NSString).pathExtension.lowercased()
         if Self.extractOnlyExtensions.contains(ext) {
             return ToolResult(
-                output: "这是 \(ext.uppercased()) 文档/表格，不适合用 file.read 按文本读取。请改用 file_extract 提取文本后再整理；如果目标是整理到 Wiki，提取后继续调用 wiki_build(save=true)。",
+                output:
+                    "这是 \(ext.uppercased()) 文档/表格，不适合用 file.read 按文本读取。请改用 file_extract 提取文本后再整理；如果目标是整理到 Wiki，提取后继续调用 wiki_build(save=true)。",
                 data: ["path": path, "extension": ext, "recommendedTool": "file.extract"],
                 success: false,
                 error: "unsupported_binary_file"
@@ -82,7 +84,7 @@ public struct ReadFileTool: LaicaiTool {
     }
 
     private static let extractOnlyExtensions: Set<String> = [
-        "xlsx", "xlsm", "xls", "csv", "tsv", "docx", "doc", "pptx", "ppt", "pdf", "numbers", "pages", "key"
+        "xlsx", "xlsm", "xls", "csv", "tsv", "docx", "doc", "pptx", "ppt", "pdf", "numbers", "pages", "key",
     ]
 
     private struct ReadTextFileRequest {
@@ -206,7 +208,7 @@ public struct ExtractFileTool: LaicaiTool {
             parameters: FunctionParameters(
                 properties: [
                     "path": FunctionProperty(type: "string", description: "文件路径（相对或绝对路径）"),
-                    "limit": FunctionProperty(type: "integer", description: "最大输出字符数（可选，默认 50000）")
+                    "limit": FunctionProperty(type: "integer", description: "最大输出字符数（可选，默认 50000）"),
                 ],
                 required: ["path"]
             )
@@ -262,7 +264,7 @@ public struct ExtractFileTool: LaicaiTool {
     }
 
     private static let plainTextExtractExtensions: Set<String> = [
-        "txt", "markdown", "json", "yaml", "yml", "xml", "html", "htm", "log"
+        "txt", "markdown", "json", "yaml", "yml", "xml", "html", "htm", "log",
     ]
 
     private static func fullPath(for path: String, workspaceRoot: String) -> String {
@@ -404,38 +406,21 @@ public struct ExtractFileTool: LaicaiTool {
     }
 
     private static func runPython(script: String, arguments: [String]) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        process.arguments = ["-c", script] + arguments
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        try process.run()
-        guard waitForExit(process, timeoutSeconds: 60) else {
-            process.terminate()
-            if !waitForExit(process, timeoutSeconds: 2) {
-                Darwin.kill(process.processIdentifier, SIGKILL)
-                _ = waitForExit(process, timeoutSeconds: 1)
-            }
+        let result = try ProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/python3"),
+            arguments: ["-c", script] + arguments,
+            timeout: 60
+        )
+        guard !result.timedOut else {
             throw NSError(domain: "ExtractFileTool", code: -1, userInfo: [NSLocalizedDescriptionKey: "python3 提取超时"])
         }
-        let out = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        guard process.terminationStatus == 0 else {
+        let err = result.stderrString
+        guard result.exitCode == 0 else {
             throw NSError(
-                domain: "ExtractFileTool", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: err.isEmpty ? "python3 提取失败" : err])
+                domain: "ExtractFileTool", code: Int(result.exitCode),
+                userInfo: [NSLocalizedDescriptionKey: err.isEmpty ? "python3 提取失败" : err])
         }
-        return out
-    }
-
-    private static func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) -> Bool {
-        let semaphore = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in semaphore.signal() }
-        if !process.isRunning { return true }
-        let result = semaphore.wait(timeout: .now() + timeoutSeconds)
-        process.terminationHandler = nil
-        return result == .success || !process.isRunning
+        return result.stdoutString
     }
 }
 
@@ -459,11 +444,14 @@ public struct FileEditTool: LaicaiTool {
             parameters: FunctionParameters(
                 properties: [
                     "path": FunctionProperty(type: "string", description: "文件路径（相对或绝对路径）"),
-                    "edits": FunctionProperty(type: "string", description: "JSON 数组，每项含 oldText 和 newText。例：[{\"oldText\":\"foo\",\"newText\":\"bar\"}]"),
+                    "edits": FunctionProperty(
+                        type: "string", description: "JSON 数组，每项含 oldText 和 newText。例：[{\"oldText\":\"foo\",\"newText\":\"bar\"}]"),
                     "batchEdits": FunctionProperty(
                         type: "string",
-                        description: "可选，批量编辑 JSON 数组，每项含 path 和 edits。例：[{\"path\":\"a.swift\",\"edits\":[{\"oldText\":\"foo\",\"newText\":\"bar\"}]}]"),
-                    "createIfMissing": FunctionProperty(type: "boolean", description: "文件不存在时是否用第一条 edit 的 newText 创建（可选，默认 false）")
+                        description:
+                            "可选，批量编辑 JSON 数组，每项含 path 和 edits。例：[{\"path\":\"a.swift\",\"edits\":[{\"oldText\":\"foo\",\"newText\":\"bar\"}]}]"
+                    ),
+                    "createIfMissing": FunctionProperty(type: "boolean", description: "文件不存在时是否用第一条 edit 的 newText 创建（可选，默认 false）"),
                 ],
                 required: []
             )
@@ -519,7 +507,8 @@ public struct FileEditTool: LaicaiTool {
         }
 
         if let batchEdits = params.batchEdits,
-            !batchEdits.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            !batchEdits.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
             return try await executeBatch(batchEditsJSON: batchEdits, createIfMissing: params.createIfMissing == true, context: context)
         }
 
@@ -536,7 +525,8 @@ public struct FileEditTool: LaicaiTool {
             if let repaired = Self.repairEditsJSON(editsJSON) {
                 edits = repaired
             } else {
-                return ToolResult(output: "edits 参数格式错误，需要 JSON 数组 [{\"oldText\":\"...\",\"newText\":\"...\"}]", success: false, error: "invalid_edits")
+                return ToolResult(
+                    output: "edits 参数格式错误，需要 JSON 数组 [{\"oldText\":\"...\",\"newText\":\"...\"}]", success: false, error: "invalid_edits")
             }
         }
 
@@ -573,7 +563,10 @@ public struct FileEditTool: LaicaiTool {
 
     private func executeSingle(path: String, edits: [EditOp], createIfMissing: Bool, context: TaskContext) async throws -> ToolResult {
         let fullPath = try resolveWritePath(path: path, context: context)
-        if let securityError = await SecurityManager.shared.checkWrite(path: fullPath) {
+        if let securityError = await SecurityManager.shared.checkWrite(
+            path: fullPath,
+            workspaceRoot: context.workspaceRoot
+        ) {
             return ToolResult(output: securityError, success: false, error: "security_denied")
         }
         var content: String
@@ -592,7 +585,8 @@ public struct FileEditTool: LaicaiTool {
         let resolvedPath = path.hasPrefix("/") ? path : (context.workspaceRoot as NSString).appendingPathComponent(path)
         var externalChangeWarning: String?
         if let cachedContent = context.memory.fileContentCache[resolvedPath],
-            content != cachedContent {
+            content != cachedContent
+        {
             externalChangeWarning = "⚠️ 文件 \(path) 自上次读取后已被外部修改（磁盘版本与缓存不同）。编辑基于最新磁盘版本。"
             await AuditLog.shared.record(tool: name, input: path, output: externalChangeWarning!, success: true)
         }
@@ -765,7 +759,8 @@ public struct FileEditTool: LaicaiTool {
         if trimmed.hasPrefix("{") && !trimmed.hasPrefix("[") {
             let wrapped = "[\(trimmed)]"
             if let data = wrapped.data(using: .utf8),
-                let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+                let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty
+            {
                 return ops
             }
         }
@@ -778,7 +773,8 @@ public struct FileEditTool: LaicaiTool {
                 .replacingOccurrences(of: "\\\\", with: "\\")
                 .replacingOccurrences(of: "\\/", with: "/")
             if let data = inner.data(using: .utf8),
-                let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+                let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty
+            {
                 return ops
             }
         }
@@ -791,7 +787,8 @@ public struct FileEditTool: LaicaiTool {
             let filtered = lines.filter { !$0.hasPrefix("```") }
             stripped = filtered.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             if let data = stripped.data(using: .utf8),
-                let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+                let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty
+            {
                 return ops
             }
         }
@@ -802,13 +799,15 @@ public struct FileEditTool: LaicaiTool {
             .replacingOccurrences(of: "\t", with: "\\t")
         // Replace actual newlines between quotes (crude but effective)
         if let data = escaped.data(using: .utf8),
-            let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty {
+            let ops = try? JSONDecoder().decode([EditOp].self, from: data), !ops.isEmpty
+        {
             return ops
         }
 
         // Strategy 5: Alternative key names (old_text/new_text, old/new, before/after)
         if let data = trimmed.data(using: .utf8),
-            let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        {
             let ops: [EditOp] = arr.compactMap { dict in
                 let old =
                     dict["oldText"] as? String
@@ -983,7 +982,7 @@ public struct FileEditTool: LaicaiTool {
         ("（", "("), ("）", ")"), ("：", ":"), ("；", ";"),
         ("，", ","), ("。", "."), ("！", "!"), ("？", "?"),
         ("【", "["), ("】", "]"), ("「", "\""), ("」", "\""),
-        ("\u{3000}", " ")
+        ("\u{3000}", " "),
     ]
 
     private static func normalizeWidth(_ string: String) -> String {
@@ -1079,7 +1078,7 @@ public struct FileEditTool: LaicaiTool {
             "appliedEdits": "\(appliedCount)",
             "totalEdits": "\(totalCount)",
             "createDirectories": "true",
-            "hunkCount": "\(appliedEdits.count)"
+            "hunkCount": "\(appliedEdits.count)",
         ]
         for (index, edit) in appliedEdits.enumerated() {
             data["hunk\(index).oldText"] = edit.oldText

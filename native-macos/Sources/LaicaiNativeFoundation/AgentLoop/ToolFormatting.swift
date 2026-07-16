@@ -19,7 +19,7 @@ enum ToolResultFormatter {
         "wiki.build": { arguments, result in wikiBuildDisplay(arguments: arguments, result: result) },
         "skill.manage": { arguments, result in skillManageDisplay(arguments: arguments, result: result) },
         "shell.exec": { _, result in shellExecDisplay(result: result) },
-        "git": { _, result in gitDisplay(result: result) }
+        "git": { _, result in gitDisplay(result: result) },
     ]
 
     static func displayText(toolName: String, arguments: [String: String], result: ToolResult) -> String {
@@ -195,8 +195,11 @@ enum ToolResultFormatter {
             return errorContent
         }
 
-        if toolName == "code.search" && (result.output.hasPrefix("未找到") || result.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-            return (result.output.isEmpty ? "未找到匹配结果。" : result.output) + "\n\n提示：本地搜索未找到结果。如果这是一个外部工具、库或概念，请调用 web_search 联网搜索了解它是什么，不要直接放弃。"
+        if toolName == "code.search"
+            && (result.output.hasPrefix("未找到") || result.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        {
+            return (result.output.isEmpty ? "未找到匹配结果。" : result.output)
+                + "\n\n提示：本地搜索未找到结果。如果这是一个外部工具、库或概念，请调用 web_search 联网搜索了解它是什么，不要直接放弃。"
         }
 
         // Dynamic cap: scale with model's context window. 1M-class models can handle much more.
@@ -232,12 +235,12 @@ enum ToolResultFormatter {
         let head = result.output.prefix(headCount)
         let tail = result.output.suffix(tailCount)
         return """
-        \(head)
+            \(head)
 
-        ... 中间内容已省略 \(omitted) 字符 ...
+            ... 中间内容已省略 \(omitted) 字符 ...
 
-        \(tail)
-        """
+            \(tail)
+            """
     }
 
     /// Smart truncation for code: keep imports, class/struct/func signatures, skip function bodies.
@@ -251,7 +254,7 @@ enum ToolResultFormatter {
             "import ", "func ", "class ", "struct ", "enum ", "protocol ",
             "public ", "private ", "internal ", "extension ", "typealias ",
             "var ", "let ", "case ", "// MARK:", "/// ", "def ", "async ",
-            "interface ", "export ", "const ", "type ", "from "
+            "interface ", "export ", "const ", "type ", "from ",
         ]
 
         for line in lines {
@@ -276,7 +279,8 @@ enum ToolResultFormatter {
     }
 
     private static func compact(_ text: String, limit: Int) -> String {
-        let cleaned = text
+        let cleaned =
+            text
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleaned.count > limit else { return cleaned }
@@ -312,7 +316,7 @@ enum ToolStepFormatter {
         "wiki.build": { "正在整理 Wiki：\($0["topic"] ?? "主题")" },
         "skill.manage": { skillManageCallText(arguments: $0) },
         "file.write": { "准备写入文件：\($0["path"] ?? "目标文件")" },
-        "git": { "正在检查 Git：\($0["subcommand"] ?? "status")" }
+        "git": { "正在检查 Git：\($0["subcommand"] ?? "status")" },
     ]
 
     static func callText(toolName: String, arguments: [String: String]) -> String {

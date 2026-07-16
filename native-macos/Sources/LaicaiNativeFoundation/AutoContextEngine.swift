@@ -15,7 +15,8 @@ public struct AutoContextEngine {
         let cleanVault = vaultRoot?.trimmingCharacters(in: .whitespacesAndNewlines)
         let safeWorkspaceRoot: String
         if WorkspaceSandbox.isOverlyBroadWorkspace(workspaceRoot)
-            || WorkspaceSandbox.isDisposableSmokeWorkspace(workspaceRoot) {
+            || WorkspaceSandbox.isDisposableSmokeWorkspace(workspaceRoot)
+        {
             safeWorkspaceRoot = ""
         } else {
             safeWorkspaceRoot = workspaceRoot
@@ -81,7 +82,7 @@ public struct AutoContextEngine {
             ".claude/CLAUDE.md",
             ".laicai/CLAUDE.md",
             ".cursor/rules",
-            ".cursorrules"
+            ".cursorrules",
         ]
         let loaded = instructionFiles.compactMap { relativePath -> String? in
             let fullPath = (workspaceRoot as NSString).appendingPathComponent(relativePath)
@@ -120,7 +121,7 @@ public struct AutoContextEngine {
             ("build.gradle", "Gradle Project"),
             ("Gemfile", "Ruby Gems"),
             ("requirements.txt", "Python Requirements"),
-            ("Podfile", "CocoaPods")
+            ("Podfile", "CocoaPods"),
         ]
         let packageSummaries = packageConfigs.compactMap { config -> String? in
             let fullPath = (workspaceRoot as NSString).appendingPathComponent(config.path)
@@ -184,38 +185,30 @@ public struct AutoContextEngine {
     }
 
     private static func currentGitBranch(workspaceRoot: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "rev-parse", "--abbrev-ref", "HEAD"]
-        process.currentDirectoryURL = URL(fileURLWithPath: workspaceRoot)
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
         do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                currentDirectoryURL: URL(fileURLWithPath: workspaceRoot),
+                timeout: 10
+            )
+            guard result.exitCode == 0, !result.timedOut else { return nil }
+            return result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
             return nil
         }
     }
 
     private static func currentGitDiff(workspaceRoot: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "diff", "--stat"]
-        process.currentDirectoryURL = URL(fileURLWithPath: workspaceRoot)
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
         do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git", "diff", "--stat"],
+                currentDirectoryURL: URL(fileURLWithPath: workspaceRoot),
+                timeout: 10
+            )
+            guard result.exitCode == 0, !result.timedOut else { return nil }
+            let output = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
             return output.isEmpty ? nil : output
         } catch {
             return nil
@@ -231,11 +224,12 @@ public struct AutoContextEngine {
             ".git", "node_modules", ".build", "DerivedData", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
             ".venv", "venv", ".next", "dist", "build",
             ".config", ".ssh", ".aws", ".gnupg", ".docker", ".kube", ".cursor", "Library", "Applications", "Downloads",
-            "Movies", "Music", "Pictures", "Public"
+            "Movies", "Music", "Pictures", "Public",
         ]
         let sensitiveNames: Set<String> = ["auth.json", "credentials", "credentials.json", ".env", ".env.local", "id_rsa", "id_ed25519"]
         let codeExtensions: Set<String> = [
-            "swift", "py", "js", "ts", "tsx", "jsx", "go", "rs", "rb", "java", "kt", "c", "cpp", "h", "hpp", "css", "html", "yaml", "yml", "json", "toml", "md"
+            "swift", "py", "js", "ts", "tsx", "jsx", "go", "rs", "rb", "java", "kt", "c", "cpp", "h", "hpp", "css", "html", "yaml", "yml",
+            "json", "toml", "md",
         ]
 
         let enumerator = fileManager.enumerator(atPath: workspaceRoot)
@@ -244,7 +238,9 @@ public struct AutoContextEngine {
             let name = (file as NSString).lastPathComponent
             let components = file.components(separatedBy: "/")
             let dir = components.first ?? ""
-            if ignored.contains(name) || ignored.contains(dir) || components.contains(where: { ignored.contains($0) }) || sensitiveNames.contains(name) {
+            if ignored.contains(name) || ignored.contains(dir) || components.contains(where: { ignored.contains($0) })
+                || sensitiveNames.contains(name)
+            {
                 enumerator?.skipDescendants()
                 continue
             }

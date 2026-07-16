@@ -64,7 +64,8 @@ extension AppStore {
     private func pendingReviewWriteOp(threadIndex: Int, stepIndex: Int) -> PendingReviewWriteOp? {
         let step = state.threads[threadIndex].steps[stepIndex]
         guard let filePath = step.diffFilePath, let newContent = step.diffNewContent else { return nil }
-        let fullPath = step.toolParams?["fullPath"]
+        let fullPath =
+            step.toolParams?["fullPath"]
             ?? absolutePath(for: filePath, workspaceRoot: state.threads[threadIndex].context.workspaceRoot)
         return PendingReviewWriteOp(
             stepIndex: stepIndex,
@@ -98,8 +99,9 @@ extension AppStore {
 
     private func pendingReviewWasExternallyModified(_ writeOp: PendingReviewWriteOp) -> Bool {
         guard let oldContent = writeOp.oldContent,
-              FileManager.default.fileExists(atPath: writeOp.fullPath),
-              let currentContent = try? String(contentsOfFile: writeOp.fullPath, encoding: .utf8) else { return false }
+            FileManager.default.fileExists(atPath: writeOp.fullPath),
+            let currentContent = try? String(contentsOfFile: writeOp.fullPath, encoding: .utf8)
+        else { return false }
         return currentContent != oldContent
     }
 
@@ -128,15 +130,16 @@ extension AppStore {
                 state.threads[threadIndex].steps[writeOp.stepIndex].approved = true
                 applied.append(writeOp.stepIndex)
             } catch {
-                rollbackPendingReviewWrites(PendingReviewRollbackRequest(
-                    threadIndex: threadIndex,
-                    pendingIndices: pendingIndices,
-                    writeOps: writeOps,
-                    backups: backups,
-                    applied: applied,
-                    failedWriteOp: writeOp,
-                    error: error
-                ))
+                rollbackPendingReviewWrites(
+                    PendingReviewRollbackRequest(
+                        threadIndex: threadIndex,
+                        pendingIndices: pendingIndices,
+                        writeOps: writeOps,
+                        backups: backups,
+                        applied: applied,
+                        failedWriteOp: writeOp,
+                        error: error
+                    ))
                 return false
             }
         }
@@ -190,7 +193,9 @@ extension AppStore {
         appendReviewResult(to: threadIndex, approved: true, text: "批量写入成功：\(paths.count) 个文件\n" + paths.joined(separator: "\n"))
         AuditLog.shared.record(tool: "batch.apply", input: "\(paths.count) files", output: "批量写入成功", success: true)
         recordToolActivity(name: "batch.apply", summary: "批量写入 \(paths.count) 个文件", statusLine: paths.first ?? "", isFailure: false)
-        paths.forEach { refreshSkillsIfNeeded(filePath: $0) }
+        for path in paths {
+            refreshSkillsIfNeeded(filePath: path)
+        }
         schedulePostWriteVerification(threadIndex: threadIndex, filePath: firstSourceFilePath(in: paths))
     }
 

@@ -14,9 +14,10 @@ extension AppStore {
     public func isThreadGenerating(_ threadID: UUID) -> Bool {
         if generationTasks[threadID] != nil { return true }
         guard generationTasks.isEmpty,
-              state.isGenerating,
-              state.selectedThreadID == threadID,
-              let thread = state.threads.first(where: { $0.id == threadID }) else {
+            state.isGenerating,
+            state.selectedThreadID == threadID,
+            let thread = state.threads.first(where: { $0.id == threadID })
+        else {
             return false
         }
         return thread.status == .running || thread.executionState == .running
@@ -44,7 +45,8 @@ extension AppStore {
 
     public func estimatedProgress(for threadID: UUID) -> Double? {
         guard isThreadGenerating(threadID),
-              let thread = state.threads.first(where: { $0.id == threadID }) else {
+            let thread = state.threads.first(where: { $0.id == threadID })
+        else {
             return nil
         }
         let toolCalls = thread.steps.filter { $0.kind == .toolCall }.count
@@ -169,7 +171,8 @@ extension AppStore {
 
     func syncPendingFollowUpForSelectedThread() {
         guard let threadID = state.selectedThreadID,
-              let thread = state.threads.first(where: { $0.id == threadID }) else {
+            let thread = state.threads.first(where: { $0.id == threadID })
+        else {
             state.pendingFollowUp = nil
             return
         }

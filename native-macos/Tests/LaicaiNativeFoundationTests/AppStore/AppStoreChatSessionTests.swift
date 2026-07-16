@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
@@ -30,11 +31,12 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
     }
     func testSendDraftCreatesUnifiedTaskThreadImmediately() {
         let connector = makeConnector()
-        let store = AppStore(state: testState(
-            defaultConnectorName: "Test",
-            connectors: [connector],
-            activeConnectorID: connector.id
-        ))
+        let store = AppStore(
+            state: testState(
+                defaultConnectorName: "Test",
+                connectors: [connector],
+                activeConnectorID: connector.id
+            ))
         defer { store.stopGenerating() }
 
         store.updateDraft("请继续 native rewrite")
@@ -72,7 +74,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .userInput, text: "修复 UI 白屏"),
                 TaskStep(kind: .toolCall, text: "读取 ChatDetailView", toolName: "file.read"),
                 TaskStep(kind: .toolResult, text: "已读取", toolName: "file.read"),
-                TaskStep(kind: .textOutput, text: "已修复")
+                TaskStep(kind: .textOutput, text: "已修复"),
             ],
             connectorID: connector.id
         )
@@ -105,7 +107,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
             modelName: "test",
             turns: [
                 ChatTurn(role: .user, text: "帮我删除 Obsidian 文件"),
-                ChatTurn(role: .assistant, text: "删除前需要确认路径。")
+                ChatTurn(role: .assistant, text: "删除前需要确认路径。"),
             ]
         )
         let runtime = CapturingToolsRuntime()
@@ -134,7 +136,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
             modelName: "test",
             turns: [
                 ChatTurn(role: .user, text: "解释一下 token 指标"),
-                ChatTurn(role: .assistant, text: "token 指标包含输入、输出和速度。")
+                ChatTurn(role: .assistant, text: "token 指标包含输入、输出和速度。"),
             ]
         )
         let runtime = CapturingToolsRuntime()
@@ -166,7 +168,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
             modelName: "test",
             turns: [
                 ChatTurn(role: .user, text: "帮我解释一下模型上下文窗口"),
-                ChatTurn(role: .assistant, text: "上下文窗口决定模型一次能参考多少输入。")
+                ChatTurn(role: .assistant, text: "上下文窗口决定模型一次能参考多少输入。"),
             ]
         )
         let runtime = CapturingToolsRuntime()
@@ -226,7 +228,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
             modelName: "test",
             turns: [
                 ChatTurn(role: .user, text: "看下左边历史任务滚动卡顿"),
-                ChatTurn(role: .assistant, text: "我会先检查列表渲染和滚动容器。")
+                ChatTurn(role: .assistant, text: "我会先检查列表渲染和滚动容器。"),
             ]
         )
         let runtime = CapturingToolsRuntime()

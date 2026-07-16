@@ -143,7 +143,9 @@ cat > "$APP/Contents/Info.plist" << EOF
 </plist>
 EOF
 
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+echo "=== Sign and verify App ==="
+codesign --force --deep --sign - "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
 
 cp "$B/laicai" "$DIST/laicai"
 chmod +x "$DIST/laicai"

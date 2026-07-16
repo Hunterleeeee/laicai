@@ -34,7 +34,7 @@ extension AppStore {
             currentPlan: [
                 "定位自我改进问题：\(diagnosis.description)",
                 "修改最小必要代码",
-                "运行构建验证并记录结果"
+                "运行构建验证并记录结果",
             ]
         )
         state.threads.insert(thread, at: 0)
@@ -51,7 +51,7 @@ extension AppStore {
             modelName: connector.modelName
         )
         loopConfig.allowedTools = [
-            "file.read", "file.edit", "diff.apply", "code.search", "workspace.index", "shell.exec", "verify.build", "skill.manage", "git"
+            "file.read", "file.edit", "diff.apply", "code.search", "workspace.index", "shell.exec", "verify.build", "skill.manage", "git",
         ]
 
         let loop = AgentLoop(config: loopConfig, runtime: environment.runtimeClient)

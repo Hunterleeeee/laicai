@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Workflows Panel
 
@@ -13,10 +13,12 @@ struct WorkflowsPanel: View {
 
     var body: some View {
         let allWorkflows = WorkflowLibrary.available(workspaceRoot: store.state.settings.workspacePath)
-        let workflows = searchText.isEmpty ? allWorkflows : allWorkflows.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText) ||
-            $0.description.localizedCaseInsensitiveContains(searchText)
-        }
+        let workflows =
+            searchText.isEmpty
+            ? allWorkflows
+            : allWorkflows.filter {
+                $0.name.localizedCaseInsensitiveContains(searchText) || $0.description.localizedCaseInsensitiveContains(searchText)
+            }
         let loadErrors = WorkflowLibrary.shared.lastLoadErrors
 
         VStack(alignment: .leading, spacing: AppSpace.large) {
@@ -116,7 +118,9 @@ struct WorkflowsPanel: View {
                         }
                         .padding(AppSpace.small)
                         .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.66)))
-                        .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(
+                                SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
                     }
                 }
             }
@@ -132,7 +136,8 @@ struct WorkflowsPanel: View {
                     }
                     .padding(AppSpace.medium)
                     .background(RoundedRectangle(cornerRadius: AppRadius.medium).fill(SurfaceGrade.card.opacity(0.66)))
-                    .overlay(RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppRadius.medium).strokeBorder(SurfaceGrade.hairline.opacity(0.75), lineWidth: 0.6))
                 }
             }
         }
@@ -179,7 +184,9 @@ struct WorkflowsPanel: View {
                 )
             }
 
-            Button { showEditor = true } label: {
+            Button {
+                showEditor = true
+            } label: {
                 Label("新建流程", systemImage: "plus")
                     .font(AppFont.captionMedium)
                     .frame(maxWidth: .infinity)
@@ -193,7 +200,10 @@ struct WorkflowsPanel: View {
         .padding(AppSpace.large)
         .background(
             RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .fill(LinearGradient(colors: [SurfaceGrade.card, SurfaceGrade.elevated.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .fill(
+                    LinearGradient(
+                        colors: [SurfaceGrade.card, SurfaceGrade.elevated.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)

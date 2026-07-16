@@ -20,7 +20,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 TaskStep(
                     kind: .toolResult, text: "已读取网页：mp.weixin.qq.com · 4188 字符", toolName: "web.fetch",
                     toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
-                TaskStep(kind: .textOutput, text: "## Vibe Coding 产品上线安全检查清单\n\n- 供应链安全\n- 权限边界\n- 上线前验证")
+                TaskStep(kind: .textOutput, text: "## Vibe Coding 产品上线安全检查清单\n\n- 供应链安全\n- 权限边界\n- 上线前验证"),
             ],
             connectorID: connector.id,
             updatedAt: .now.addingTimeInterval(-30),
@@ -43,12 +43,15 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
         try await waitUntilIdle(store)
 
         let selected = try XCTUnwrap(store.state.selectedThread)
-        let stepDump = selected.steps.map { "\($0.kind.rawValue):\($0.toolName ?? "-"):\($0.toolParams ?? [:]):\($0.text.prefix(80))" }.joined(separator: "\n")
+        let stepDump = selected.steps.map { "\($0.kind.rawValue):\($0.toolName ?? "-"):\($0.toolParams ?? [:]):\($0.text.prefix(80))" }
+            .joined(separator: "\n")
         XCTAssertEqual(selected.id, original.id)
         XCTAssertTrue(runtime.requests.first?.tools?.contains { ToolNameCodec.canonicalName($0.function.name) == "wiki.build" } == true)
-        XCTAssertTrue(selected.steps.contains { $0.kind == .toolCall && $0.toolName == "wiki.build" && $0.toolParams?["save"] == "true" }, stepDump)
+        XCTAssertTrue(
+            selected.steps.contains { $0.kind == .toolCall && $0.toolName == "wiki.build" && $0.toolParams?["save"] == "true" }, stepDump)
         XCTAssertTrue(selected.steps.contains { $0.kind == .toolResult && $0.toolName == "wiki.build" && !$0.isFailure }, stepDump)
-        XCTAssertFalse(selected.steps.contains { $0.toolName == "wiki.build" && ($0.toolParams?["topic"] ?? "").contains("__thread_output") })
+        XCTAssertFalse(
+            selected.steps.contains { $0.toolName == "wiki.build" && ($0.toolParams?["topic"] ?? "").contains("__thread_output") })
         XCTAssertTrue(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("02 Atomic/Vibe Coding 产品上线安全检查清单.md").path))
     }
 
@@ -66,7 +69,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 TaskStep(
                     kind: .toolResult, text: "已读取网页：mp.weixin.qq.com · 4188 字符", toolName: "web.fetch",
                     toolParams: ["url": "https://mp.weixin.qq.com/s/JKfkgANWrjU94PyBrVgwOA"]),
-                TaskStep(kind: .textOutput, text: "已基于微信文章整理出 Vibe Coding 产品上线安全检查清单，包含供应链、权限、代码审查、上线前验证等要点。")
+                TaskStep(kind: .textOutput, text: "已基于微信文章整理出 Vibe Coding 产品上线安全检查清单，包含供应链、权限、代码审查、上线前验证等要点。"),
             ],
             connectorID: connector.id,
             updatedAt: .now.addingTimeInterval(-30),
@@ -95,7 +98,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
         let requestedTools = runtime.requests.first?.tools?.map { ToolNameCodec.canonicalName($0.function.name) } ?? []
         XCTAssertTrue(requestedTools.contains("wiki.build"))
         XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .toolCall && $0.toolName == "wiki.build" } == true)
-        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .toolResult && $0.toolName == "wiki.build" && !$0.isFailure } == true)
+        XCTAssertTrue(
+            store.state.selectedThread?.steps.contains { $0.kind == .toolResult && $0.toolName == "wiki.build" && !$0.isFailure } == true)
     }
 
     func testPreviewFollowUpFromNewPlaceholderRestoresRecentDeliverableTask() async throws {
@@ -106,14 +110,15 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             steps: [
                 TaskStep(kind: .userInput, text: "出一个水生万物，财自流转的icon图"),
                 TaskStep(
-                    kind: .toolCall, text: "准备写入文件：water-wealth-cycle-icon.svg", toolName: "file.write", toolParams: ["path": "water-wealth-cycle-icon.svg"]),
+                    kind: .toolCall, text: "准备写入文件：water-wealth-cycle-icon.svg", toolName: "file.write",
+                    toolParams: ["path": "water-wealth-cycle-icon.svg"]),
                 TaskStep(
                     kind: .reviewRequest, text: "已写入文件（可回滚）：/tmp/water-wealth-cycle-icon.svg", toolName: "file.write",
                     diffFilePath: "/tmp/water-wealth-cycle-icon.svg"),
                 TaskStep(
                     kind: .toolResult, text: "已准备文件写入 · /tmp/water-wealth-cycle-icon.svg", toolName: "file.write",
                     toolParams: ["path": "/tmp/water-wealth-cycle-icon.svg"]),
-                TaskStep(kind: .textOutput, text: "已生成 SVG icon 文件：/tmp/water-wealth-cycle-icon.svg")
+                TaskStep(kind: .textOutput, text: "已生成 SVG icon 文件：/tmp/water-wealth-cycle-icon.svg"),
             ],
             updatedAt: .now.addingTimeInterval(-30),
             goal: "出一个水生万物，财自流转的icon图"
@@ -147,7 +152,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             steps: [
                 TaskStep(kind: .userInput, text: "出一个 icon"),
                 TaskStep(kind: .toolCall, text: "写文件", toolName: "file.write"),
-                TaskStep(kind: .toolResult, text: "已写入", toolName: "file.write")
+                TaskStep(kind: .toolResult, text: "已写入", toolName: "file.write"),
             ],
             executionState: .idle
         )
@@ -196,7 +201,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false)
             ),
             environment: AppEnvironment(
@@ -266,7 +272,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false)
             ),
             environment: AppEnvironment(
@@ -293,7 +300,7 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
             status: .completed,
             steps: [
                 TaskStep(kind: .userInput, text: "读取本地项目"),
-                TaskStep(kind: .textOutput, text: "输出达到当前上限，回复已被截断。")
+                TaskStep(kind: .textOutput, text: "输出达到当前上限，回复已被截断。"),
             ],
             updatedAt: .now
         )
@@ -335,7 +342,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false)
             ),
             environment: AppEnvironment(
@@ -401,7 +409,8 @@ final class AppStoreTaskFollowUpRoutingTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "Test",
+                    compactComposer: false,
                     showDebugPanels: false)
             ),
             environment: AppEnvironment(

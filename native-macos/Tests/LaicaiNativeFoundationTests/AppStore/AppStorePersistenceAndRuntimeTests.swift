@@ -3,6 +3,10 @@ import XCTest
 @testable import LaicaiNativeDomain
 @testable import LaicaiNativeFoundation
 
+#if canImport(SQLite3)
+    import SQLite3
+#endif
+
 @MainActor
 final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
     func testSQLiteRepositoryPersistsTaskContext() throws {
@@ -22,7 +26,7 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
                 workspaceRoot: "/tmp/workspace",
                 relevantFiles: [
                     FileInfo(path: "README.md", language: "md", summary: "项目说明"),
-                    FileInfo(path: "Sources/App.swift", language: "swift", summary: "入口")
+                    FileInfo(path: "Sources/App.swift", language: "swift", summary: "入口"),
                 ],
                 claudeMD: "记忆",
                 gitBranch: "main",
@@ -69,6 +73,81 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(restored.toolCallingCapabilityLearnedAt, learnedAt)
         XCTAssertEqual(catalog.activeConnectorID, connector.id)
     }
+
+    #if canImport(SQLite3)
+        func testConnectorSaveRollsBackWhenAnyInsertFails() throws {
+            let base = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: base) }
+            let repository = SQLiteRepository(path: base.path)
+            let original = ConnectorProfile(
+                name: "Original",
+                kind: "openai-compatible",
+                endpoint: "https://example.com/v1",
+                modelName: "original",
+                note: "",
+                health: .ready
+            )
+            try repository.saveConnectors([original], activeConnectorID: original.id)
+
+            let databasePath = base.appendingPathComponent("Laicai/store.sqlite3").path
+            try executeSQLite(
+                path: databasePath,
+                sql: "CREATE TRIGGER fail_connector_insert BEFORE INSERT ON connectors BEGIN SELECT RAISE(ABORT, 'forced failure'); END;"
+            )
+            let replacement = ConnectorProfile(
+                name: "Replacement",
+                kind: "openai-compatible",
+                endpoint: "https://example.com/v1",
+                modelName: "replacement",
+                note: "",
+                health: .ready
+            )
+
+            XCTAssertThrowsError(
+                try repository.saveConnectors([replacement], activeConnectorID: replacement.id)
+            )
+            try executeSQLite(path: databasePath, sql: "DROP TRIGGER fail_connector_insert;")
+
+            let restored = try XCTUnwrap(repository.loadConnectorCatalog())
+            XCTAssertEqual(restored.connectors.map(\.id), [original.id])
+            XCTAssertEqual(restored.activeConnectorID, original.id)
+        }
+
+        func testConnectorSecretRotationDeletesObsoleteKeychainReferences() throws {
+            let base = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: base) }
+            let repository = SQLiteRepository(path: base.path)
+            var connector = ConnectorProfile(
+                name: "Secret",
+                kind: "openai-compatible",
+                endpoint: "https://example.com/v1",
+                modelName: "secret-model",
+                note: "first-key",
+                health: .ready
+            )
+            let databasePath = base.appendingPathComponent("Laicai/store.sqlite3").path
+
+            try repository.saveConnectors([connector], activeConnectorID: connector.id)
+            let firstReference = try XCTUnwrap(querySingleText(path: databasePath, sql: "SELECT api_key FROM connectors LIMIT 1"))
+            XCTAssertEqual(SecretStore.resolve(firstReference), "first-key")
+
+            connector.note = "second-key"
+            try repository.saveConnectors([connector], activeConnectorID: connector.id)
+            let secondReference = try XCTUnwrap(querySingleText(path: databasePath, sql: "SELECT api_key FROM connectors LIMIT 1"))
+            XCTAssertNotEqual(secondReference, firstReference)
+            XCTAssertEqual(SecretStore.resolve(firstReference), "")
+            XCTAssertEqual(SecretStore.resolve(secondReference), "second-key")
+
+            connector.note = ""
+            try repository.saveConnectors([connector], activeConnectorID: connector.id)
+            XCTAssertEqual(try querySingleText(path: databasePath, sql: "SELECT api_key FROM connectors LIMIT 1"), "")
+            XCTAssertEqual(SecretStore.resolve(secondReference), "")
+        }
+    #endif
 
     func testLegacyJSONMigrationLoadsOldSessionsAndConnectors() throws {
         let directory = FileManager.default.temporaryDirectory
@@ -134,7 +213,7 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
             status: .completed,
             steps: [
                 TaskStep(kind: .userInput, text: "生成 README", isCollapsible: false, isCollapsed: false),
-                TaskStep(kind: .textOutput, text: "已生成")
+                TaskStep(kind: .textOutput, text: "已生成"),
             ],
             context: TaskContext(workspaceRoot: "/tmp/workspace")
         )
@@ -373,6 +452,34 @@ final class AppStorePersistenceAndRuntimeTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(summary.contains("3 行"))
         XCTAssertFalse(summary.contains("line 1"))
     }
+
+    #if canImport(SQLite3)
+        private func executeSQLite(path: String, sql: String) throws {
+            var database: OpaquePointer?
+            XCTAssertEqual(sqlite3_open_v2(path, &database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil), SQLITE_OK)
+            let opened = try XCTUnwrap(database)
+            defer { sqlite3_close(opened) }
+            var errorPointer: UnsafeMutablePointer<CChar>?
+            let code = sqlite3_exec(opened, sql, nil, nil, &errorPointer)
+            let message = errorPointer.map { String(cString: $0) }
+            if let errorPointer { sqlite3_free(errorPointer) }
+            XCTAssertEqual(code, SQLITE_OK, message ?? "SQLite error \(code)")
+        }
+
+        private func querySingleText(path: String, sql: String) throws -> String? {
+            var database: OpaquePointer?
+            XCTAssertEqual(sqlite3_open_v2(path, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil), SQLITE_OK)
+            let opened = try XCTUnwrap(database)
+            defer { sqlite3_close(opened) }
+            var statement: OpaquePointer?
+            XCTAssertEqual(sqlite3_prepare_v2(opened, sql, -1, &statement, nil), SQLITE_OK)
+            let prepared = try XCTUnwrap(statement)
+            defer { sqlite3_finalize(prepared) }
+            guard sqlite3_step(prepared) == SQLITE_ROW else { return nil }
+            guard let text = sqlite3_column_text(prepared, 0) else { return "" }
+            return String(cString: text)
+        }
+    #endif
     func testToolResultFormatterCompressesLongModelContent() {
         let output = String(repeating: "abcdefg\n", count: 600)
         let content = ToolResultFormatter.modelContent(

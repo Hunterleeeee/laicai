@@ -39,7 +39,8 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None",
+                    compactComposer: false,
                     showDebugPanels: false),
                 tasks: [task],
                 selectedTaskID: task.id
@@ -66,7 +67,7 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
             title: "任务",
             steps: [
                 TaskStep(kind: .toolCall, text: "正在读取文件", toolName: "file.read"),
-                TaskStep(kind: .toolResult, text: "发现 selectedThreadID 双轨状态")
+                TaskStep(kind: .toolResult, text: "发现 selectedThreadID 双轨状态"),
             ])
         var state = testState(sessions: [session], tasks: [task])
         state.searchText = "selectedThreadID"
@@ -104,7 +105,7 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
                     diffFilePath: "App.swift",
                     diffOldContent: "old",
                     diffNewContent: "new"
-                )
+                ),
             ]
         )
 
@@ -133,7 +134,8 @@ final class AppStoreThreadStateTests: LaicaiNativeFoundationTestCase {
                 draftMessage: "",
                 isGenerating: false,
                 settings: .init(
-                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None", compactComposer: false,
+                    workspacePath: LaicaiNativeFoundationTestCase.safeTestWorkspacePath, defaultConnectorName: "None",
+                    compactComposer: false,
                     showDebugPanels: false)
             ))
 

@@ -18,13 +18,14 @@ extension AppStore {
                 })
                 state.selectThread(id: latest.id)
                 if !hasResumeHint {
-                    state.threads[idx].steps.append(TaskStep(
-                        kind: .error,
-                        text: "检测到上次会话被中断（\(Self.relativeTimeString(latest.updatedAt))）。点击「继续 会话」自动恢复，或发送新目标启动新的会话。",
-                        isFailure: false,
-                        recoverable: true,
-                        retryAction: "继续执行"
-                    ))
+                    state.threads[idx].steps.append(
+                        TaskStep(
+                            kind: .error,
+                            text: "检测到上次会话被中断（\(Self.relativeTimeString(latest.updatedAt))）。点击「继续 会话」自动恢复，或发送新目标启动新的会话。",
+                            isFailure: false,
+                            recoverable: true,
+                            retryAction: "继续执行"
+                        ))
                 }
                 persistThreads()
             }

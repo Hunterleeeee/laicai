@@ -14,9 +14,10 @@ public struct VerifyBuildTool: LaicaiTool {
             description: description,
             parameters: FunctionParameters(
                 properties: [
-                    "command": FunctionProperty(type: "string", description: "可选，自定义构建/测试命令。留空则自动检测（swift build / npm test / cargo build / make 等）"),
+                    "command": FunctionProperty(
+                        type: "string", description: "可选，自定义构建/测试命令。留空则自动检测（swift build / npm test / cargo build / make 等）"),
                     "changedFiles": FunctionProperty(type: "string", description: "可选，逗号或换行分隔的变更文件列表；提供后会优先选择相关测试"),
-                    "fix": FunctionProperty(type: "boolean", description: "如果构建失败，是否返回错误详情供模型自动修复（默认 true）")
+                    "fix": FunctionProperty(type: "boolean", description: "如果构建失败，是否返回错误详情供模型自动修复（默认 true）"),
                 ],
                 required: []
             )
@@ -24,13 +25,13 @@ public struct VerifyBuildTool: LaicaiTool {
     }
 
     private static let suspiciousVerifyCommandPatterns = [
-        "python", "ruby", "node ", "curl ", "wget ", "rm -", "<<", "eval ", "exec ", "sudo ", "cat ", "echo ", "pip ", "brew "
+        "python", "ruby", "node ", "curl ", "wget ", "rm -", "<<", "eval ", "exec ", "sudo ", "cat ", "echo ", "pip ", "brew ",
     ]
 
     private static let allowedBuildPrefixes = [
         "swift ", "xcodebuild", "cargo ", "make", "npm ", "yarn ", "pnpm ", "go ",
         "gradle", "mvn ", "cmake", "dotnet ", "gcc ", "g++ ", "clang",
-        "bash build", "pytest", "npm run build", "npm run test"
+        "bash build", "pytest", "npm run build", "npm run test",
     ]
 
     private static let contentCheckPatterns = ["assert", "read_text", "readtext", "path(", "from pathlib"]
@@ -63,18 +64,17 @@ public struct VerifyBuildTool: LaicaiTool {
 
         guard !buildCommand.isEmpty else {
             return ToolResult(
-                output: "当前工作区无构建系统（未找到 Package.swift / package.json / Cargo.toml / Makefile 等）。无需调用 verify.build。", success: false, error: "no_build_system")
+                output: "当前工作区无构建系统（未找到 Package.swift / package.json / Cargo.toml / Makefile 等）。无需调用 verify.build。", success: false,
+                error: "no_build_system")
         }
 
-        // Execute build command — use login shell so user PATH (brew, node, etc.) is available
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", "cd \(shellEscape(workspaceRoot)) && \(buildCommand) 2>&1"]
+        // Execute build command — use login shell so user PATH (brew, node, etc.) is available.
+        // ProcessRunner drains stdout/stderr concurrently to prevent large builds deadlocking.
         var buildEnv = ProcessInfo.processInfo.environment
         let commonPaths = [
             "/opt/homebrew/bin", "/opt/homebrew/sbin",
             "/usr/local/bin", "/usr/local/sbin",
-            "/usr/bin", "/usr/sbin", "/bin", "/sbin"
+            "/usr/bin", "/usr/sbin", "/bin", "/sbin",
         ]
         let existingPath = buildEnv["PATH"] ?? ""
         let existingParts = Set(existingPath.components(separatedBy: ":"))
@@ -85,32 +85,27 @@ public struct VerifyBuildTool: LaicaiTool {
         buildEnv["HOME"] = NSHomeDirectory()
         if buildEnv["LANG"] == nil { buildEnv["LANG"] = "en_US.UTF-8" }
         if buildEnv["LC_ALL"] == nil { buildEnv["LC_ALL"] = "en_US.UTF-8" }
-        process.environment = buildEnv
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
+        let processResult: ProcessRunResult
         do {
-            try process.run()
+            processResult = try await ProcessRunner.runAsync(
+                executableURL: URL(fileURLWithPath: "/bin/zsh"),
+                arguments: ["-lc", buildCommand],
+                currentDirectoryURL: URL(fileURLWithPath: workspaceRoot),
+                environment: buildEnv,
+                timeout: 120
+            )
         } catch {
             return ToolResult(output: "无法启动构建命令：\(error.localizedDescription)", success: false, error: "exec_failed")
         }
 
-        // Wait with timeout
-        let timeout: TimeInterval = 120
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning && Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(200))
-        }
-        if process.isRunning {
-            process.terminate()
-            return ToolResult(output: "构建命令超时（\(Int(timeout))秒）：\(buildCommand)", success: false, error: "timeout")
+        if processResult.timedOut {
+            return ToolResult(output: "构建命令超时（120秒）：\(buildCommand)", success: false, error: "timeout")
         }
 
-        let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: outputData, encoding: .utf8) ?? ""
-        let exitCode = process.terminationStatus
+        let output = [processResult.stdoutString, processResult.stderrString]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        let exitCode = processResult.exitCode
         let truncatedOutput = output.count > 8000 ? String(output.suffix(8000)) : output
 
         await AuditLog.shared.record(
@@ -253,23 +248,19 @@ public struct VerifyBuildTool: LaicaiTool {
 
     private static func detectChangedFiles(workspaceRoot: String) -> [String] {
         guard GitTool.isGitRepository(workspaceRoot) else { return [] }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "status", "--short"]
-        process.currentDirectoryURL = URL(fileURLWithPath: workspaceRoot)
         var gitEnv = ProcessInfo.processInfo.environment
         if gitEnv["LANG"] == nil { gitEnv["LANG"] = "en_US.UTF-8" }
         if gitEnv["LC_ALL"] == nil { gitEnv["LC_ALL"] = "en_US.UTF-8" }
-        process.environment = gitEnv
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
         do {
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return [] }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["git", "status", "--short"],
+                currentDirectoryURL: URL(fileURLWithPath: workspaceRoot),
+                environment: gitEnv,
+                timeout: 10
+            )
+            guard result.exitCode == 0, !result.timedOut else { return [] }
+            let output = result.stdoutString
             return output.components(separatedBy: .newlines).compactMap { line in
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard trimmed.count > 3 else { return nil }
@@ -333,7 +324,7 @@ public struct WriteFileTool: LaicaiTool {
                     "content": FunctionProperty(type: "string", description: "文件完整内容（与 oldContent/newContent 二选一）"),
                     "oldContent": FunctionProperty(type: "string", description: "要替换的原始内容片段（patch 模式，精确匹配）"),
                     "newContent": FunctionProperty(type: "string", description: "替换后的新内容片段（patch 模式）"),
-                    "createDirectories": FunctionProperty(type: "boolean", description: "是否自动创建父目录（可选，默认 true）")
+                    "createDirectories": FunctionProperty(type: "boolean", description: "是否自动创建父目录（可选，默认 true）"),
                 ],
                 required: ["path"]
             )
@@ -360,7 +351,10 @@ public struct WriteFileTool: LaicaiTool {
         }
 
         // Security check
-        if let securityError = await SecurityManager.shared.checkWrite(path: fullPath) {
+        if let securityError = await SecurityManager.shared.checkWrite(
+            path: fullPath,
+            workspaceRoot: context.workspaceRoot
+        ) {
             return ToolResult(output: securityError, success: false, error: "security_denied")
         }
 
@@ -405,7 +399,7 @@ public struct WriteFileTool: LaicaiTool {
                 "diffNew": finalContent,
                 "addedLines": "\(diff.addedLines)",
                 "removedLines": "\(diff.removedLines)",
-                "createDirectories": createDirs ? "true" : "false"
+                "createDirectories": createDirs ? "true" : "false",
             ],
             success: true
         )
@@ -417,7 +411,8 @@ public struct WriteFileTool: LaicaiTool {
         fullPath: String
     ) -> WriteContentResolution {
         if let oldSnippet = params.oldContent, let newSnippet = params.newContent,
-            !oldSnippet.isEmpty || !newSnippet.isEmpty {
+            !oldSnippet.isEmpty || !newSnippet.isEmpty
+        {
             return resolvePatchContent(
                 oldSnippet: oldSnippet,
                 newSnippet: newSnippet,
@@ -443,8 +438,17 @@ public struct WriteFileTool: LaicaiTool {
         fullPath: String
     ) -> WriteContentResolution {
         let trimmedOld = oldSnippet.trimmingCharacters(in: .whitespacesAndNewlines)
-        if oldContent.isEmpty || !FileManager.default.fileExists(atPath: fullPath) || trimmedOld.isEmpty {
+        if oldContent.isEmpty || !FileManager.default.fileExists(atPath: fullPath) {
             return .content(newSnippet)
+        }
+        guard !trimmedOld.isEmpty else {
+            return .failure(
+                ToolResult(
+                    output: "patch 模式失败：现有文件的 oldContent 不能为空；如需全量替换请使用 content 参数。",
+                    success: false,
+                    error: "patch_empty_old_content"
+                )
+            )
         }
         if oldContent.contains(oldSnippet) {
             return exactPatchContent(oldSnippet: oldSnippet, newSnippet: newSnippet, oldContent: oldContent)
@@ -483,12 +487,18 @@ public struct WriteFileTool: LaicaiTool {
         let normalizedFile = normalizedWhitespace(oldContent)
         let normalizedSnippet = normalizedWhitespace(trimmedOld)
         guard normalizedFile.contains(normalizedSnippet) else {
-            return unmatchedPatchContent(newSnippet: newSnippet, oldContent: oldContent, trimmedOld: trimmedOld)
+            return unmatchedPatchContent(oldContent: oldContent, trimmedOld: trimmedOld)
         }
         let lines = oldContent.components(separatedBy: "\n")
         let snippetLines = oldSnippet.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
         guard let matchStart = fuzzyLineMatchStart(lines: lines, snippetLines: snippetLines) else {
-            return .content(newSnippet)
+            return .failure(
+                ToolResult(
+                    output: "patch 模式失败：空白归一化后相似，但无法唯一定位原始行。请重新读取文件并提供精确 oldContent。",
+                    success: false,
+                    error: "patch_not_found"
+                )
+            )
         }
         var result = lines
         result.replaceSubrange(matchStart..<matchStart + snippetLines.count, with: newSnippet.components(separatedBy: "\n"))
@@ -496,16 +506,13 @@ public struct WriteFileTool: LaicaiTool {
     }
 
     private static func unmatchedPatchContent(
-        newSnippet: String,
         oldContent: String,
         trimmedOld: String
     ) -> WriteContentResolution {
-        if trimmedOld.count > oldContent.count * 4 / 5 {
-            return .content(newSnippet)
-        }
         return .failure(
             ToolResult(
-                output: "patch 模式失败：在文件中未找到要替换的内容。请使用 file.read 先确认当前内容，或使用 content 参数全量写入。\n文件实际前 200 字符：\(String(oldContent.prefix(200)))",
+                output:
+                    "patch 模式失败：在文件中未找到要替换的内容。请使用 file.read 先确认当前内容，或使用 content 参数全量写入。\n文件实际前 200 字符：\(String(oldContent.prefix(200)))",
                 success: false,
                 error: "patch_not_found"
             ))
@@ -581,15 +588,14 @@ public struct ShellTool: LaicaiTool {
         "python3", "python", "pip3", "pip", "uv", "pipx", "poetry", "conda",
         "swift", "xcodebuild", "swiftc", "xcrun",
         "brew", "curl", "wget",
-        "echo", "which", "env", "pwd", "date", "touch", "mkdir", "cp", "mv",
+        "echo", "which", "env", "pwd", "date",
         "cargo", "rustc", "go",
         "make", "cmake",
         "diff", "patch",
         "ruby", "gem", "pod", "flutter", "dart",
         "docker", "docker-compose",
-        "sed", "awk", "sort", "uniq", "tr", "cut", "tee",
-        "open", "pbcopy", "pbpaste",
-        "laicai"
+        "sed", "awk", "sort", "uniq", "tr", "cut",
+        "laicai",
     ]
 
     public var functionDefinition: FunctionDefinition {
@@ -600,15 +606,14 @@ public struct ShellTool: LaicaiTool {
                 properties: [
                     "command": FunctionProperty(
                         type: "string",
-                        description:
-                            [
-                                "要执行的终端命令。仅用于测试、构建、git、包管理脚本或小范围诊断；",
-                                "不要用 find/ls -R/tree/grep 等方式遍历或读取整个项目，项目结构请用 workspace_index，",
-                                "内容查找请用 code_search，文件读取请用 file_read。"
-                            ].joined()
+                        description: [
+                            "要执行的终端命令。仅用于测试、构建、git、包管理脚本或小范围诊断；",
+                            "不要用 find/ls -R/tree/grep 等方式遍历或读取整个项目，项目结构请用 workspace_index，",
+                            "内容查找请用 code_search，文件读取请用 file_read。",
+                        ].joined()
                     ),
                     "timeout": FunctionProperty(type: "integer", description: "超时时间（秒），默认30秒"),
-                    "background": FunctionProperty(type: "boolean", description: "后台运行（默认 false）。设为 true 可启动 dev server 等长运行进程而不阻塞。")
+                    "background": FunctionProperty(type: "boolean", description: "后台运行（默认 false）。设为 true 可启动 dev server 等长运行进程而不阻塞。"),
                 ],
                 required: ["command"]
             )
@@ -653,62 +658,34 @@ public struct ShellTool: LaicaiTool {
             return sandboxResult
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", command]
-        process.environment = Self.shellEnvironment()
-        if !context.workspaceRoot.isEmpty {
-            process.currentDirectoryURL = URL(fileURLWithPath: context.workspaceRoot)
-        }
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
+        let result: ProcessRunResult
         do {
-            try process.run()
+            result = try await ProcessRunner.runAsync(
+                executableURL: URL(fileURLWithPath: "/bin/zsh"),
+                arguments: ["-lc", command],
+                currentDirectoryURL: context.workspaceRoot.isEmpty ? nil : URL(fileURLWithPath: context.workspaceRoot),
+                environment: Self.shellEnvironment(),
+                timeout: timeout
+            )
         } catch {
             return ToolResult(output: "无法启动命令：\(error.localizedDescription)", success: false, error: "launch_failed")
         }
-
-        return await Task.detached(priority: .utility) {
-            let stdoutHandle = stdout.fileHandleForReading
-            let stderrHandle = stderr.fileHandleForReading
-
-            let didTimeout = await Self.waitForExit(process, timeoutSeconds: timeout)
-            if didTimeout {
-                process.terminate()
-                if await Self.waitForExit(process, timeoutSeconds: 2) {
-                    Darwin.kill(process.processIdentifier, SIGKILL)
-                    _ = await Self.waitForExit(process, timeoutSeconds: 1)
-                }
-            }
-
-            let exitCode = process.terminationStatus
-            let outData = stdoutHandle.readDataToEndOfFile()
-            let errData = stderrHandle.readDataToEndOfFile()
-            let output = String(data: outData, encoding: .utf8) ?? ""
-            let errorOutput = String(data: errData, encoding: .utf8) ?? ""
-
-            Task { @MainActor in
-                let auditOutput =
-                    exitCode == 0
-                    ? "exit code 0"
-                    : "exit code \(exitCode)：\(String(errorOutput.prefix(300)))"
-                AuditLog.shared.record(
-                    tool: name,
-                    input: command,
-                    output: auditOutput,
-                    success: exitCode == 0
-                )
-            }
-
-            if didTimeout {
-                return ToolResult(output: "命令执行超时（\(Int(timeout))秒）：\(command)", success: false, error: "timeout")
-            }
-            return Self.makeShellResult(exitCode: exitCode, stdout: output, stderr: errorOutput)
-        }.value
+        let output = result.stdoutString
+        let errorOutput = result.stderrString
+        let auditOutput =
+            result.exitCode == 0
+            ? "exit code 0"
+            : "exit code \(result.exitCode)：\(String(errorOutput.prefix(300)))"
+        await AuditLog.shared.record(
+            tool: name,
+            input: command,
+            output: auditOutput,
+            success: result.exitCode == 0
+        )
+        if result.timedOut {
+            return ToolResult(output: "命令执行超时（\(Int(timeout))秒）：\(command)", success: false, error: "timeout")
+        }
+        return Self.makeShellResult(exitCode: result.exitCode, stdout: output, stderr: errorOutput)
     }
 
     private static func sandboxedResultIfNeeded(command: String, context: TaskContext) async -> ToolResult? {
@@ -741,7 +718,7 @@ public struct ShellTool: LaicaiTool {
             "/usr/bin", "/bin", "/usr/sbin", "/sbin",
             "\(NSHomeDirectory())/.local/bin",
             "\(NSHomeDirectory())/.cargo/bin",
-            "\(NSHomeDirectory())/.bun/bin"
+            "\(NSHomeDirectory())/.bun/bin",
         ]
         let existingPath = environment["PATH"] ?? ""
         environment["PATH"] = mergedPath(commonPaths: commonPaths, existingPath: existingPath)
@@ -758,46 +735,6 @@ public struct ShellTool: LaicaiTool {
                 if !path.isEmpty && !result.contains(path) { result.append(path) }
             }
             .joined(separator: ":")
-    }
-
-    private static func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) async -> Bool {
-        if !process.isRunning { return false }
-        return await withCheckedContinuation { continuation in
-            let finished = Locked(false)
-            process.terminationHandler = { _ in
-                let shouldResume = finished.withValue { value in
-                    guard !value else { return false }
-                    value = true
-                    return true
-                }
-                if shouldResume {
-                    continuation.resume(returning: false)
-                }
-            }
-            if !process.isRunning {
-                let shouldResume = finished.withValue { value in
-                    guard !value else { return false }
-                    value = true
-                    return true
-                }
-                if shouldResume {
-                    continuation.resume(returning: false)
-                }
-                return
-            }
-            Task {
-                let nanoseconds = UInt64(max(0, timeoutSeconds) * 1_000_000_000)
-                try? await Task.sleep(nanoseconds: nanoseconds)
-                let shouldResume = finished.withValue { value in
-                    guard !value else { return false }
-                    value = true
-                    return true
-                }
-                if shouldResume {
-                    continuation.resume(returning: true)
-                }
-            }
-        }
     }
 
     static let retryablePatterns = ["command not found", "No such file or directory", "not found in PATH"]
@@ -845,7 +782,7 @@ public struct ShellTool: LaicaiTool {
         environment["PATH"] = [
             "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/bin", "/bin",
             "\(NSHomeDirectory())/.local/bin", "\(NSHomeDirectory())/.cargo/bin", "\(NSHomeDirectory())/.bun/bin",
-            environment["PATH"] ?? ""
+            environment["PATH"] ?? "",
         ].joined(separator: ":")
         process.environment = environment
         if !context.workspaceRoot.isEmpty {

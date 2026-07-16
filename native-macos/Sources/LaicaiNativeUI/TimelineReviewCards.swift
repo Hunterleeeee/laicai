@@ -1,7 +1,7 @@
 import AppKit
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Review Cards
 
@@ -50,8 +50,9 @@ struct ReviewCard: View {
                     }
                 }
             } else if let filePath = step.diffFilePath,
-               let old = step.diffOldContent,
-               let new = step.diffNewContent {
+                let old = step.diffOldContent,
+                let new = step.diffNewContent
+            {
                 DiffPreviewCard(filePath: filePath, oldContent: old, newContent: new)
             }
 
@@ -558,8 +559,9 @@ struct DiffPreviewCard: View {
         var lineIndex = 0
         while lineIndex < lines.count {
             if lines[lineIndex].type == .removed,
-               lineIndex + 1 < lines.count,
-               lines[lineIndex + 1].type == .added {
+                lineIndex + 1 < lines.count,
+                lines[lineIndex + 1].type == .added
+            {
                 result.append((line: lines[lineIndex], pairedContent: lines[lineIndex + 1].content))
                 result.append((line: lines[lineIndex + 1], pairedContent: lines[lineIndex].content))
                 lineIndex += 2
@@ -651,7 +653,9 @@ struct DiffPreviewCard: View {
             while let range = result[searchRange].range(of: keyword, options: []) {
                 let absRange = range
                 // Check word boundaries
-                let beforeOK = absRange.lowerBound == result.startIndex || !result.characters[result.characters.index(before: absRange.lowerBound)].isLetter
+                let beforeOK =
+                    absRange.lowerBound == result.startIndex
+                    || !result.characters[result.characters.index(before: absRange.lowerBound)].isLetter
                 let afterOK = absRange.upperBound == result.endIndex || !result.characters[absRange.upperBound].isLetter
                 if beforeOK && afterOK {
                     result[absRange].foregroundColor = .init(red: 0.7, green: 0.4, blue: 0.9)  // purple for keywords
@@ -679,7 +683,7 @@ struct DiffPreviewCard: View {
 
         // Highlight comments (//)
         if let commentRange = result.range(of: "//") {
-            result[commentRange.lowerBound..<result.endIndex].foregroundColor = .init(white: 0.5) // gray for comments
+            result[commentRange.lowerBound..<result.endIndex].foregroundColor = .init(white: 0.5)  // gray for comments
         }
 
         return result
@@ -691,30 +695,30 @@ struct DiffPreviewCard: View {
             return [
                 "func", "var", "let", "if", "else", "guard", "return", "import", "struct", "class", "enum",
                 "case", "self", "private", "public", "static", "override", "init", "for", "while", "in",
-                "try", "catch", "throw", "async", "await", "some", "nil", "true", "false"
+                "try", "catch", "throw", "async", "await", "some", "nil", "true", "false",
             ]
         case "py":
             return [
                 "def", "class", "if", "else", "elif", "return", "import", "from", "for", "while", "in",
                 "try", "except", "with", "as", "self", "None", "True", "False", "async", "await",
-                "raise", "yield"
+                "raise", "yield",
             ]
         case "js", "ts", "jsx", "tsx":
             return [
                 "function", "const", "let", "var", "if", "else", "return", "import", "export", "class",
                 "new", "this", "for", "while", "try", "catch", "throw", "async", "await", "null",
-                "undefined", "true", "false", "from"
+                "undefined", "true", "false", "from",
             ]
         case "rs":
             return [
                 "fn", "let", "mut", "if", "else", "return", "use", "struct", "enum", "impl", "pub",
                 "self", "for", "while", "in", "match", "Some", "None", "Ok", "Err", "async", "await",
-                "true", "false"
+                "true", "false",
             ]
         case "go":
             return [
                 "func", "var", "if", "else", "return", "import", "struct", "type", "for", "range",
-                "package", "defer", "go", "chan", "select", "nil", "true", "false"
+                "package", "defer", "go", "chan", "select", "nil", "true", "false",
             ]
         default:
             return []
@@ -849,32 +853,36 @@ struct DiffPreviewCard: View {
         while lineIndex < lines.count {
             let line = lines[lineIndex]
             if line.type == .context {
-                pairs.append(SideBySideLine(
-                    oldNum: line.oldNum, oldText: line.content, oldType: .context,
-                    newNum: line.newNum, newText: line.content, newType: .context
-                ))
+                pairs.append(
+                    SideBySideLine(
+                        oldNum: line.oldNum, oldText: line.content, oldType: .context,
+                        newNum: line.newNum, newText: line.content, newType: .context
+                    ))
                 lineIndex += 1
             } else if line.type == .removed {
                 // Check if next line is added (paired change)
                 if lineIndex + 1 < lines.count && lines[lineIndex + 1].type == .added {
                     let next = lines[lineIndex + 1]
-                    pairs.append(SideBySideLine(
-                        oldNum: line.oldNum, oldText: line.content, oldType: .removed,
-                        newNum: next.newNum, newText: next.content, newType: .added
-                    ))
+                    pairs.append(
+                        SideBySideLine(
+                            oldNum: line.oldNum, oldText: line.content, oldType: .removed,
+                            newNum: next.newNum, newText: next.content, newType: .added
+                        ))
                     lineIndex += 2
                 } else {
-                    pairs.append(SideBySideLine(
-                        oldNum: line.oldNum, oldText: line.content, oldType: .removed,
-                        newNum: nil, newText: nil, newType: .context
-                    ))
+                    pairs.append(
+                        SideBySideLine(
+                            oldNum: line.oldNum, oldText: line.content, oldType: .removed,
+                            newNum: nil, newText: nil, newType: .context
+                        ))
                     lineIndex += 1
                 }
             } else {
-                pairs.append(SideBySideLine(
-                    oldNum: nil, oldText: nil, oldType: .context,
-                    newNum: line.newNum, newText: line.content, newType: .added
-                ))
+                pairs.append(
+                    SideBySideLine(
+                        oldNum: nil, oldText: nil, oldType: .context,
+                        newNum: line.newNum, newText: line.content, newType: .added
+                    ))
                 lineIndex += 1
             }
         }

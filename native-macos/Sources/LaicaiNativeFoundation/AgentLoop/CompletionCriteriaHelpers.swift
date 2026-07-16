@@ -55,13 +55,16 @@ extension AgentLoop {
     ) -> CompletionCheck {
         let successfulResults = task.steps.filter { $0.kind == .toolResult && !$0.isFailure }
         let failedResults = task.steps.filter { $0.kind == .toolResult && $0.isFailure }
-        let hasFinalOutput = task.steps.contains { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let hasFinalOutput = task.steps.contains {
+            $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
         let message = task.steps.filter { $0.kind == .userInput }.map(\.text).joined(separator: "\n").lowercased()
         let hasWrite = Self.hasSuccessfulWrite(in: task)
         let hasSavedWiki = Self.hasSavedWiki(in: task)
         let expectsWikiOutput = Self.expectsWikiOutput(message)
         let riskPolicy = task.taskProtocol?.riskPolicy
-        let hasEvidence = hasActionableEvidence(task: task, successfulResults: successfulResults)
+        let hasEvidence =
+            hasActionableEvidence(task: task, successfulResults: successfulResults)
             || task.steps.contains { $0.kind == .reviewRequest && $0.approved == true }
         let missingDeliverables = expectedDeliverablePaths(from: message, workspaceRoot: task.context.workspaceRoot).filter { path in
             var isDirectory: ObjCBool = false
@@ -71,7 +74,8 @@ extension AgentLoop {
         let hasVerificationFailure = task.steps.contains { $0.toolName == "verify.build" && $0.isFailure }
         let requiresUIEvidence = Self.expectsUIEvidence(message: message, protocolCriteria: task.taskProtocol?.completionCriteria ?? [])
         let hasUIEvidence = Self.hasUIEvidence(in: task)
-        let requiresEvidence = intent != .chat
+        let requiresEvidence =
+            intent != .chat
             && configRequiresEvidence(task: task, isReadOnlyRun: isReadOnlyRun)
         return CompletionCheck(
             task: task,
@@ -147,8 +151,9 @@ extension AgentLoop {
             return check.hasFinalOutput && hasSatisfiedDocumentDelivery(in: check.task, originalMessage: check.message)
         }
         if check.hadFailure,
-           check.failedResults.count >= check.successfulResults.count,
-           !hasRecoveryAfterLastFailure(check.task) {
+            check.failedResults.count >= check.successfulResults.count,
+            !hasRecoveryAfterLastFailure(check.task)
+        {
             return false
         }
         if check.hasWrite {
@@ -164,7 +169,9 @@ extension AgentLoop {
         guard let ledger = task.executionLedger else {
             return false
         }
-        if !ledger.readFiles.isEmpty || !ledger.searches.isEmpty || !ledger.modifiedFiles.isEmpty || !ledger.commands.isEmpty || !ledger.verification.isEmpty {
+        if !ledger.readFiles.isEmpty || !ledger.searches.isEmpty || !ledger.modifiedFiles.isEmpty || !ledger.commands.isEmpty
+            || !ledger.verification.isEmpty
+        {
             return true
         }
         return ledger.pages.contains { page in
@@ -197,7 +204,7 @@ extension AgentLoop {
             "页面", "按钮", "bug", "报错", "异常", "卡顿", "卡死", "性能",
             "优化", "修复", "调整", "改进", "实现", "创建", "修改", "读取",
             "查看", "检查", "排查", "诊断", "不生效", "测试", "构建", "编译",
-            "workspace", "code", "file", "bug", "error", "fix", "implement", "optimize", "performance", "test", "build"
+            "workspace", "code", "file", "bug", "error", "fix", "implement", "optimize", "performance", "test", "build",
         ]
         return evidenceMarkers.contains { message.contains($0) } || expectsWriteOutput(message) || isReadOnlyRun
     }
@@ -211,7 +218,7 @@ extension AgentLoop {
             if step.kind == .toolResult, !step.isFailure {
                 let recoveryTools: Set<String> = [
                     "file.extract", "document.transform", "file.read", "wiki.build", "file.write", "file.edit",
-                    "diff.apply", "workspace.index", "code.search", "shell.exec", "web.fetch", "web.search"
+                    "diff.apply", "workspace.index", "code.search", "shell.exec", "web.fetch", "web.search",
                 ]
                 return recoveryTools.contains(step.toolName ?? "")
             }
@@ -226,7 +233,7 @@ extension AgentLoop {
         let haystack = ([message] + protocolCriteria).joined(separator: "\n").lowercased()
         let markers = [
             "ui", "页面", "界面", "按钮", "窗口", "截图", "可访问性", "accessibility",
-            "browser", "浏览器", "前端", "视觉", "布局", "样式", "点击", "scroll", "滚动"
+            "browser", "浏览器", "前端", "视觉", "布局", "样式", "点击", "scroll", "滚动",
         ]
         return markers.contains { haystack.contains($0.lowercased()) }
     }
@@ -282,8 +289,9 @@ extension AgentLoop {
 
     nonisolated static func isSuccessfulDocumentWrite(_ step: TaskStep) -> Bool {
         guard step.kind == .toolResult,
-              step.toolName == "document.transform",
-              !step.isFailure else { return false }
+            step.toolName == "document.transform",
+            !step.isFailure
+        else { return false }
         let action = step.toolParams?["action"] ?? ""
         guard ["apply", "copy", "render"].contains(action) else { return false }
         let path: String?
@@ -311,7 +319,8 @@ extension AgentLoop {
         let writes = task.steps.filter { isSuccessfulDocumentWrite($0) }
         guard !writes.isEmpty else { return false }
 
-        let expectsTranslation = originalMessage.contains("翻译")
+        let expectsTranslation =
+            originalMessage.contains("翻译")
             || originalMessage.contains("英文")
             || originalMessage.localizedCaseInsensitiveContains("english")
         guard expectsTranslation else { return true }
@@ -393,7 +402,8 @@ extension AgentLoop {
         }
 
         let lower = message.lowercased()
-        let expectsWrite = lower.contains("创建") || lower.contains("写入") || lower.contains("新建") || lower.contains("修改") || lower.contains("修复")
+        let expectsWrite =
+            lower.contains("创建") || lower.contains("写入") || lower.contains("新建") || lower.contains("修改") || lower.contains("修复")
         if expectsWrite && !hasWritten {
             issues.append("用户要求创建/修改文件，但没有任何写入操作")
         }
@@ -419,7 +429,8 @@ extension AgentLoop {
         return paths.compactMap { raw in
             let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !path.isEmpty else { return nil }
-            let absolute = path.hasPrefix("/")
+            let absolute =
+                path.hasPrefix("/")
                 ? path
                 : (workspaceRoot.isEmpty ? path : (workspaceRoot as NSString).appendingPathComponent(path))
             guard likelyDeliverablePath(absolute), seen.insert(absolute).inserted else { return nil }
@@ -437,7 +448,7 @@ extension AgentLoop {
         guard !ext.isEmpty else { return false }
         let deliverableExts: Set<String> = [
             "pptx", "ppt", "pdf", "docx", "xlsx", "csv", "txt", "md", "json",
-            "png", "jpg", "jpeg", "webp", "html", "zip"
+            "png", "jpg", "jpeg", "webp", "html", "zip",
         ]
         return deliverableExts.contains(ext)
     }
@@ -460,7 +471,7 @@ extension AgentLoop {
 
         let explicitNamePatterns = [
             #"([^\s\n，。；;：:「」"'`]+(?:_English|_EN)[^\s\n，。；;：:「」"'`]*)"#,
-            #"([^\s\n，。；;：:「」"'`]*(?:英文版|English|EN)[^\s\n，。；;：:「」"'`]*)"#
+            #"([^\s\n，。；;：:「」"'`]*(?:英文版|English|EN)[^\s\n，。；;：:「」"'`]*)"#,
         ]
         for pattern in explicitNamePatterns {
             if let match = firstDeliverableName(in: message, pattern: pattern) {
@@ -469,7 +480,8 @@ extension AgentLoop {
         }
 
         guard message.contains("英文") || message.localizedCaseInsensitiveContains("english"),
-              let sourcePath = extractAbsolutePaths(from: message).first(where: { likelyDeliverablePath($0) }) else {
+            let sourcePath = extractAbsolutePaths(from: message).first(where: { likelyDeliverablePath($0) })
+        else {
             return []
         }
         let url = URL(fileURLWithPath: sourcePath)
@@ -478,7 +490,7 @@ extension AgentLoop {
         guard !base.isEmpty, !ext.isEmpty else { return [] }
         return [
             desktopPath(fileName: "\(base)_English.\(ext)"),
-            desktopPath(fileName: "\(base)_EN.\(ext)")
+            desktopPath(fileName: "\(base)_EN.\(ext)"),
         ]
     }
 
@@ -487,7 +499,8 @@ extension AgentLoop {
         let range = NSRange(text.startIndex..., in: text)
         for match in regex.matches(in: text, range: range) {
             guard match.numberOfRanges > 1,
-                  let swiftRange = Range(match.range(at: 1), in: text) else { continue }
+                let swiftRange = Range(match.range(at: 1), in: text)
+            else { continue }
             let name = String(text[swiftRange])
                 .trimmingCharacters(in: CharacterSet(charactersIn: "。，、；;：:）)]}>\"'`"))
             guard likelyDeliverablePath(name), !name.contains("/") else { continue }

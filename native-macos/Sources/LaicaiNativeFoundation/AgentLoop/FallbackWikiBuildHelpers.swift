@@ -20,7 +20,8 @@ extension AgentLoop {
         onStep: @MainActor (TaskStep) -> Void
     ) async -> Bool? {
         guard Self.expectsWikiOutput(message),
-              !Self.hasSavedWiki(in: task) else {
+            !Self.hasSavedWiki(in: task)
+        else {
             return nil
         }
 
@@ -72,17 +73,19 @@ extension AgentLoop {
         onStep(gateStep)
 
         let topic = Self.fallbackWikiTopic(message: message, source: source)
-        guard let atomicResult = await executeFallbackWikiBuild(
-            FallbackWikiBuildRequest(
-                tool: wikiTool,
-                topic: topic,
-                mode: "atomic",
-                source: source,
-                taskContext: taskContext
-            ),
-            task: &task,
-            onStep: onStep
-        ) else {
+        guard
+            let atomicResult = await executeFallbackWikiBuild(
+                FallbackWikiBuildRequest(
+                    tool: wikiTool,
+                    topic: topic,
+                    mode: "atomic",
+                    source: source,
+                    taskContext: taskContext
+                ),
+                task: &task,
+                onStep: onStep
+            )
+        else {
             return false
         }
         guard atomicResult.success else {
@@ -131,9 +134,10 @@ extension AgentLoop {
             "topK": 8,
             "sourceTitle": source.title,
             "sourcePath": source.path,
-            "sourceText": String(source.text.prefix(40_000))
+            "sourceText": String(source.text.prefix(40_000)),
         ]
-        let argumentsJSON = (try? JSONSerialization.data(withJSONObject: args))
+        let argumentsJSON =
+            (try? JSONSerialization.data(withJSONObject: args))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         let params = Self.displayParamsFromJSON(argumentsJSON)
         let callId = "call_fallback_wiki_\(request.mode)_\(UUID().uuidString.prefix(8))"
@@ -197,10 +201,12 @@ extension AgentLoop {
             guard !path.isEmpty, seen.insert(path).inserted else { continue }
             let variants = [
                 path,
-                path.hasPrefix("/") ? path : (taskContext.workspaceRoot as NSString).appendingPathComponent(path)
+                path.hasPrefix("/") ? path : (taskContext.workspaceRoot as NSString).appendingPathComponent(path),
             ]
             for variant in variants {
-                guard let content = taskContext.memory.fileContentCache[variant] ?? taskContext.memory.fileContentCache[path] else { continue }
+                guard let content = taskContext.memory.fileContentCache[variant] ?? taskContext.memory.fileContentCache[path] else {
+                    continue
+                }
                 let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { continue }
                 if path.hasPrefix("__thread_output_") {
@@ -231,8 +237,9 @@ extension AgentLoop {
 
     private static func fallbackWikiTopic(message: String, source: FallbackWikiSource) -> String {
         if source.path == "current-thread-output",
-           let title = cleanFallbackTopic(source.title),
-           title != "当前会话输出" {
+            let title = cleanFallbackTopic(source.title),
+            title != "当前会话输出"
+        {
             return title
         }
         let internalSourcePaths: Set<String> = ["current-thread-output"]
@@ -243,7 +250,8 @@ extension AgentLoop {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !fileBase.isEmpty { return String(fileBase.prefix(80)) }
         }
-        let compact = message
+        let compact =
+            message
             .components(separatedBy: .newlines)
             .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
             .replacingOccurrences(of: "我觉得你的这个输出，需要", with: "")
@@ -268,23 +276,28 @@ extension AgentLoop {
     }
 
     private static func inferredTitle(from text: String) -> String? {
-        let lines = text
+        let lines =
+            text
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         for line in lines.prefix(20) {
-            let stripped = line
+            let stripped =
+                line
                 .replacingOccurrences(of: #"^#+\s*"#, with: "", options: .regularExpression)
                 .replacingOccurrences(of: #"^\*\*(.+)\*\*$"#, with: "$1", options: .regularExpression)
                 .trimmingCharacters(in: CharacterSet(charactersIn: " -:：`*"))
             guard stripped.count >= 4,
-                  stripped.count <= 80,
-                  !stripped.contains("```"),
-                  !stripped.hasPrefix("|"),
-                  !stripped.hasPrefix(">") else {
+                stripped.count <= 80,
+                !stripped.contains("```"),
+                !stripped.hasPrefix("|"),
+                !stripped.hasPrefix(">")
+            else {
                 continue
             }
-            if stripped.contains("标题") || stripped.contains("清单") || stripped.contains("总结") || stripped.contains("方案") || stripped.contains("要点") {
+            if stripped.contains("标题") || stripped.contains("清单") || stripped.contains("总结") || stripped.contains("方案")
+                || stripped.contains("要点")
+            {
                 return stripped
             }
             if line.hasPrefix("#") {
@@ -295,7 +308,8 @@ extension AgentLoop {
     }
 
     private static func cleanFallbackTopic(_ raw: String) -> String? {
-        let cleaned = raw
+        let cleaned =
+            raw
             .replacingOccurrences(of: "标题可以叫", with: "")
             .replacingOccurrences(of: "标题", with: "")
             .replacingOccurrences(of: "#", with: "")

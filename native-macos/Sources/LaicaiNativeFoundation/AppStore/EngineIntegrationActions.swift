@@ -46,10 +46,12 @@ extension AppStore {
         }
         SkillCompositionEngine.shared.onExpandGlob = { glob, wsRoot in
             let dir = URL(fileURLWithPath: wsRoot)
-            guard let enumerator = FileManager.default.enumerator(
-                at: dir, includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            ) else { return [] }
+            guard
+                let enumerator = FileManager.default.enumerator(
+                    at: dir, includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                )
+            else { return [] }
             let ext = glob.replacingOccurrences(of: "*.", with: "")
             var files: [String] = []
             while let url = enumerator.nextObject() as? URL {
@@ -64,7 +66,8 @@ extension AppStore {
 
     public func sendToBackground(threadID: UUID) {
         guard let index = state.threads.firstIndex(where: { $0.id == threadID }),
-              state.threads[index].status == .running else { return }
+            state.threads[index].status == .running
+        else { return }
         let title = state.threads[index].title
         let bgTaskID = BackgroundTaskManager.shared.startTask(title: title)
         state.threads[index].context.metadata["backgroundTaskID"] = bgTaskID.uuidString
@@ -89,8 +92,14 @@ extension AppStore {
     public func cancelGoal(id: UUID) { GoalEngine.shared.cancelGoal(id: id) }
 
     public func startGateway(port: Int = 18789) {
-        MessagingGateway.shared.start(workspaceRoot: state.settings.workspacePath, port: port)
-        notify("消息网关已启动（端口 \(port)）", style: .success)
+        if MessagingGateway.shared.start(workspaceRoot: state.settings.workspacePath, port: port) {
+            notify("消息网关已启动（端口 \(port)）", style: .success)
+        } else {
+            notify(
+                MessagingGateway.shared.gatewayError ?? "消息网关启动失败",
+                style: .error
+            )
+        }
     }
 
     public func stopGateway() {

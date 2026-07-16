@@ -4,17 +4,20 @@ import LaicaiNativeDomain
 extension AppStore {
     public func rollbackLastApprovedWrite(taskID: UUID) {
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
-        guard let step = state.threads[threadIndex].steps.reversed().first(where: {
-            $0.kind == .reviewRequest && $0.approved == true && $0.diffFilePath != nil && $0.diffOldContent != nil
-        }) else {
-            state.threads[threadIndex].steps.append(TaskStep(
-                kind: .error,
-                text: "没有可回滚的已批准文件变更。",
-                isCollapsible: true,
-                isCollapsed: true,
-                isFailure: false,
-                recoverable: false
-            ))
+        guard
+            let step = state.threads[threadIndex].steps.reversed().first(where: {
+                $0.kind == .reviewRequest && $0.approved == true && $0.diffFilePath != nil && $0.diffOldContent != nil
+            })
+        else {
+            state.threads[threadIndex].steps.append(
+                TaskStep(
+                    kind: .error,
+                    text: "没有可回滚的已批准文件变更。",
+                    isCollapsible: true,
+                    isCollapsed: true,
+                    isFailure: false,
+                    recoverable: false
+                ))
             syncAgentSnapshot(at: threadIndex)
             state.threads[threadIndex].updatedAt = .now
             persistThreads()
@@ -26,7 +29,8 @@ extension AppStore {
     public func rollbackBatch(taskID: UUID) {
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
         let approvedSteps = state.threads[threadIndex].steps.enumerated().compactMap { index, step -> (Int, TaskStep)? in
-            step.kind == .reviewRequest && step.approved == true && step.diffFilePath != nil && step.diffOldContent != nil ? (index, step) : nil
+            step.kind == .reviewRequest && step.approved == true && step.diffFilePath != nil && step.diffOldContent != nil
+                ? (index, step) : nil
         }
         guard !approvedSteps.isEmpty else {
             notify("没有可回滚的已批准变更")
@@ -35,7 +39,8 @@ extension AppStore {
         var rolledBack = 0
         for (_, step) in approvedSteps.reversed() {
             let filePath = step.diffFilePath ?? ""
-            let fullPath = step.toolParams?["fullPath"]
+            let fullPath =
+                step.toolParams?["fullPath"]
                 ?? absolutePath(for: filePath, workspaceRoot: state.threads[threadIndex].context.workspaceRoot)
             if SecurityManager.shared.checkWrite(path: fullPath) != nil { continue }
             do {
@@ -58,9 +63,11 @@ extension AppStore {
 
     public func rollbackApprovedWrite(taskID: UUID, stepID: UUID) {
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
-        guard let step = state.threads[threadIndex].steps.first(where: {
-            $0.id == stepID && $0.kind == .reviewRequest && $0.approved == true && $0.diffFilePath != nil && $0.diffOldContent != nil
-        }) else {
+        guard
+            let step = state.threads[threadIndex].steps.first(where: {
+                $0.id == stepID && $0.kind == .reviewRequest && $0.approved == true && $0.diffFilePath != nil && $0.diffOldContent != nil
+            })
+        else {
             notify("该步骤不可回滚", style: .warning)
             return
         }
@@ -69,7 +76,8 @@ extension AppStore {
 
     private func performRollback(threadIndex: Int, step: TaskStep) {
         let filePath = step.diffFilePath ?? "文件变更"
-        let fullPath = step.toolParams?["fullPath"]
+        let fullPath =
+            step.toolParams?["fullPath"]
             ?? absolutePath(for: filePath, workspaceRoot: state.threads[threadIndex].context.workspaceRoot)
         if let securityError = SecurityManager.shared.checkWrite(path: fullPath) {
             appendReviewResult(to: threadIndex, approved: false, text: "回滚被安全策略拦截：\(securityError)")

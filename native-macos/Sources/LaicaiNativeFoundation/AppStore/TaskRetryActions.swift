@@ -65,7 +65,8 @@ extension AppStore {
 
     public func clearSelectedThread() {
         guard let threadID = state.selectedThreadID,
-              let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }) else { return }
+            let threadIndex = state.threads.firstIndex(where: { $0.id == threadID })
+        else { return }
         cancelGenerationTask(for: threadID)
         state.threads[threadIndex].steps = []
         state.threads[threadIndex].status = .queued

@@ -1,6 +1,8 @@
+import Darwin
+
 @main
 struct LaicaiCLIEntry {
     static func main() async {
-        await LaicaiCLI.main()
+        exit(await LaicaiCLI.run())
     }
 }

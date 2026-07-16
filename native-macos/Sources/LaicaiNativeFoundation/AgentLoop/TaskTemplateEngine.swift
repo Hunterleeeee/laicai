@@ -37,7 +37,8 @@ extension AgentLoop {
 
         if isDocumentDeliveryTask(message, paths: mentionedPaths),
             let documentTool = toolRegistry.tool(named: "document_transform") ?? toolRegistry.tool(named: "document.transform"),
-            let sourcePath = mentionedPaths.first(where: { isSupportedOfficeDocument($0) }) {
+            let sourcePath = mentionedPaths.first(where: { isSupportedOfficeDocument($0) })
+        {
             result.templateName = "文档交付"
             let outputPath = inferredDocumentOutputPath(from: message, sourcePath: sourcePath)
             let workspaceArgs: [String: Any] = [
@@ -45,9 +46,10 @@ extension AgentLoop {
                 "sourcePath": sourcePath,
                 "outputPath": outputPath,
                 "onlyChinese": shouldPreferChineseTextOnly(message),
-                "granularity": preferredDocumentGranularity(for: sourcePath)
+                "granularity": preferredDocumentGranularity(for: sourcePath),
             ]
-            let workspaceJSON = (try? JSONSerialization.data(withJSONObject: workspaceArgs)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            let workspaceJSON =
+                (try? JSONSerialization.data(withJSONObject: workspaceArgs)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
             let workspaceParams = workspaceArgs.mapValues { "\($0)" }
             let workspaceCallId = "call_template_document_transform_workspace"
             let callStep = TaskStep(
@@ -66,12 +68,14 @@ extension AgentLoop {
 
             let workspaceResult = try? await documentTool.execute(argumentsJSON: workspaceJSON, context: taskContext)
             if let workspaceResult {
-                let display = ToolResultFormatter.displayText(toolName: "document.transform", arguments: workspaceParams, result: workspaceResult)
+                let display = ToolResultFormatter.displayText(
+                    toolName: "document.transform", arguments: workspaceParams, result: workspaceResult)
                 let resultStep = TaskStep(
                     kind: .toolResult,
                     text: display,
                     toolName: "document.transform",
-                    toolParams: AgentLoop.resultStepParams(toolName: "document.transform", arguments: workspaceParams, result: workspaceResult),
+                    toolParams: AgentLoop.resultStepParams(
+                        toolName: "document.transform", arguments: workspaceParams, result: workspaceResult),
                     toolCallId: workspaceCallId,
                     isCollapsible: true,
                     isCollapsed: true,
@@ -99,9 +103,10 @@ extension AgentLoop {
                 "chunkIndex": 0,
                 "chunkSize": 60,
                 "onlyChinese": shouldPreferChineseTextOnly(message),
-                "granularity": preferredDocumentGranularity(for: sourcePath)
+                "granularity": preferredDocumentGranularity(for: sourcePath),
             ]
-            let prepareJSON = (try? JSONSerialization.data(withJSONObject: prepareArgs)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            let prepareJSON =
+                (try? JSONSerialization.data(withJSONObject: prepareArgs)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
             let prepareParams = prepareArgs.mapValues { "\($0)" }
             let prepareCallId = "call_template_document_transform_prepare_0"
             let prepareCall = TaskStep(
@@ -155,7 +160,8 @@ extension AgentLoop {
             result.templateName = "整理到 Wiki"
             var collected: [String] = []
             if let extractTool = toolRegistry.tool(named: "file_extract") ?? toolRegistry.tool(named: "file.extract"),
-                let readTool = toolRegistry.tool(named: "file_read") ?? toolRegistry.tool(named: "file.read") {
+                let readTool = toolRegistry.tool(named: "file_read") ?? toolRegistry.tool(named: "file.read")
+            {
                 for path in mentionedPaths.prefix(5) {
                     if let cached = taskContext.memory.fileContentCache[path] {
                         collected.append("### \(URL(fileURLWithPath: path).lastPathComponent)\n\(String(cached.prefix(12000)))")
@@ -205,7 +211,8 @@ extension AgentLoop {
                         if extracted.success {
                             taskContext.memory.readFiles.append(path)
                             taskContext.memory.fileContentCache[path] = extracted.output
-                            collected.append("### \(URL(fileURLWithPath: path).lastPathComponent)\n\(String(extracted.output.prefix(12000)))")
+                            collected.append(
+                                "### \(URL(fileURLWithPath: path).lastPathComponent)\n\(String(extracted.output.prefix(12000)))")
                             result.executedSteps += 1
                         } else if isDirectory.boolValue {
                             collected.append("### \(URL(fileURLWithPath: path).lastPathComponent)\n\(extracted.output)")
@@ -229,7 +236,8 @@ extension AgentLoop {
 
         // Template 1: "修改/修复/改 文件X 做Y" — search, read, then let LLM edit
         let isModifyTask =
-            (lowerMsg.contains("修改") || lowerMsg.contains("修复") || lowerMsg.contains("改一下") || lowerMsg.contains("fix") || lowerMsg.contains("修")
+            (lowerMsg.contains("修改") || lowerMsg.contains("修复") || lowerMsg.contains("改一下") || lowerMsg.contains("fix")
+                || lowerMsg.contains("修")
                 || lowerMsg.contains("改"))
             && (hasPaths || lowerMsg.contains("文件"))
         if isModifyTask && hasPaths {
@@ -250,30 +258,36 @@ extension AgentLoop {
                 }
             }
             if !readContent.isEmpty {
-                result.directive = "已预读所有目标文件：\n\n\(readContent.joined(separator: "\n\n"))\n\n请直接用 file_edit 修改，不需要先 file_read。修改后需要 verify_build。"
+                result.directive =
+                    "已预读所有目标文件：\n\n\(readContent.joined(separator: "\n\n"))\n\n请直接用 file_edit 修改，不需要先 file_read。修改后需要 verify_build。"
             }
             return result
         }
 
         // Template 2: "搜索/查找/找 KEYWORD" — search + pre-read best result
         let isSearchTask =
-            (lowerMsg.contains("搜索") || lowerMsg.contains("查找") || lowerMsg.contains("找一下") || lowerMsg.contains("grep") || lowerMsg.contains("search")
+            (lowerMsg.contains("搜索") || lowerMsg.contains("查找") || lowerMsg.contains("找一下") || lowerMsg.contains("grep")
+                || lowerMsg.contains("search")
                 || lowerMsg.contains("找"))
             && !lowerMsg.contains("创建") && !lowerMsg.contains("修改") && !lowerMsg.contains("写入")
         if isSearchTask {
             let searchKeywords = extractSearchKeywords(from: message)
             if let keywords = searchKeywords, !keywords.isEmpty,
-                let searchTool = toolRegistry.tool(named: "code_search") ?? toolRegistry.tool(named: "code.search") {
+                let searchTool = toolRegistry.tool(named: "code_search") ?? toolRegistry.tool(named: "code.search")
+            {
                 result.templateName = "搜索代码"
-                let searchStep = TaskStep(kind: .toolCall, text: "预搜索：\(keywords)", toolName: "code.search", isCollapsible: true, isCollapsed: true)
+                let searchStep = TaskStep(
+                    kind: .toolCall, text: "预搜索：\(keywords)", toolName: "code.search", isCollapsible: true, isCollapsed: true)
                 if emitDebugSteps {
                     task.steps.append(searchStep)
                     onStep(searchStep)
                 }
-                let searchJSON = (try? JSONSerialization.data(withJSONObject: ["query": keywords])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                let searchJSON =
+                    (try? JSONSerialization.data(withJSONObject: ["query": keywords])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
                 if let searchResult = try? await searchTool.execute(argumentsJSON: searchJSON, context: taskContext), searchResult.success {
                     let resultStep = TaskStep(
-                        kind: .toolResult, text: String(searchResult.output.prefix(500)), toolName: "code.search", isCollapsible: true, isCollapsed: true)
+                        kind: .toolResult, text: String(searchResult.output.prefix(500)), toolName: "code.search", isCollapsible: true,
+                        isCollapsed: true)
                     if emitDebugSteps {
                         task.steps.append(resultStep)
                         onStep(resultStep)
@@ -283,7 +297,8 @@ extension AgentLoop {
 
                     // Pre-read the best result file
                     if let bestPath = firstReadablePath(inSearchOutput: searchResult.output, workspaceRoot: taskContext.workspaceRoot),
-                        !taskContext.memory.readFiles.contains(bestPath) {
+                        !taskContext.memory.readFiles.contains(bestPath)
+                    {
                         if let content = try? String(contentsOfFile: bestPath, encoding: .utf8) {
                             taskContext.memory.readFiles.append(bestPath)
                             taskContext.memory.fileContentCache[bestPath] = content
@@ -293,7 +308,8 @@ extension AgentLoop {
                             result.executedSteps += 1
                         }
                     } else {
-                        result.directive = "已预搜索「\(keywords)」，结果：\n\(String(searchResult.output.prefix(2000)))\n\n请基于搜索结果继续完成用户目标；需要落地时继续读文件、修改或验证。"
+                        result.directive =
+                            "已预搜索「\(keywords)」，结果：\n\(String(searchResult.output.prefix(2000)))\n\n请基于搜索结果继续完成用户目标；需要落地时继续读文件、修改或验证。"
                     }
                 }
             }
@@ -302,7 +318,7 @@ extension AgentLoop {
 
         // Template 3: "解释/看看/分析 文件X" — just read and ask LLM to analyze
         let isExplainTask = [
-            "解释", "分析", "看看", "说明", "explain", "what does", "这是什么"
+            "解释", "分析", "看看", "说明", "explain", "what does", "这是什么",
         ].contains { lowerMsg.contains($0) }
         if isExplainTask && hasPaths {
             result.templateName = "解释代码"
@@ -315,7 +331,8 @@ extension AgentLoop {
                 }
             }
             if !readContent.isEmpty {
-                result.directive = "已预读文件：\n\n\(readContent.joined(separator: "\n\n"))\n\n请基于以上代码继续完成用户目标；如果只是解释就直接说明，如果需要修复/优化/生成，请继续调用工具落地。"
+                result.directive =
+                    "已预读文件：\n\n\(readContent.joined(separator: "\n\n"))\n\n请基于以上代码继续完成用户目标；如果只是解释就直接说明，如果需要修复/优化/生成，请继续调用工具落地。"
             }
             return result
         }
@@ -324,17 +341,22 @@ extension AgentLoop {
         let isRunTask = lowerMsg.contains("运行") || lowerMsg.contains("执行") || lowerMsg.contains("跑一下")
         if isRunTask {
             if let cmdMatch = firstLocalPath(in: message),
-                let shellTool = toolRegistry.tool(named: "shell_exec") ?? toolRegistry.tool(named: "shell.exec") {
+                let shellTool = toolRegistry.tool(named: "shell_exec") ?? toolRegistry.tool(named: "shell.exec")
+            {
                 result.templateName = "执行命令"
-                let shellStep = TaskStep(kind: .toolCall, text: "预执行：\(cmdMatch)", toolName: "shell.exec", isCollapsible: true, isCollapsed: true)
+                let shellStep = TaskStep(
+                    kind: .toolCall, text: "预执行：\(cmdMatch)", toolName: "shell.exec", isCollapsible: true, isCollapsed: true)
                 if emitDebugSteps {
                     task.steps.append(shellStep)
                     onStep(shellStep)
                 }
-                let shellJSON = (try? JSONSerialization.data(withJSONObject: ["command": cmdMatch])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                let shellJSON =
+                    (try? JSONSerialization.data(withJSONObject: ["command": cmdMatch])).flatMap { String(data: $0, encoding: .utf8) }
+                    ?? "{}"
                 if let shellResult = try? await shellTool.execute(argumentsJSON: shellJSON, context: taskContext) {
                     let truncatedOutput = String(shellResult.output.prefix(3000))
-                    result.directive = "已预执行命令 `\(cmdMatch)`，结果：\n```\n\(truncatedOutput)\n```\n\n\(shellResult.success ? "执行成功。" : "执行失败。")请基于结果继续。"
+                    result.directive =
+                        "已预执行命令 `\(cmdMatch)`，结果：\n```\n\(truncatedOutput)\n```\n\n\(shellResult.success ? "执行成功。" : "执行失败。")请基于结果继续。"
                     result.executedSteps += 1
                 }
             }
@@ -343,7 +365,8 @@ extension AgentLoop {
 
         // Template 5: Codebase exploration — no specific path, needs workspace index + search
         let isExploreTask =
-            (lowerMsg.contains("哪") || lowerMsg.contains("怎么") || lowerMsg.contains("where") || lowerMsg.contains("how") || lowerMsg.contains("有没有")
+            (lowerMsg.contains("哪") || lowerMsg.contains("怎么") || lowerMsg.contains("where") || lowerMsg.contains("how")
+                || lowerMsg.contains("有没有")
                 || lowerMsg.contains("什么"))
             && !hasPaths
             && message.count > 10
@@ -352,7 +375,8 @@ extension AgentLoop {
             if !taskContext.memory.userDecisions.contains(where: { $0.hasPrefix("工作区索引：") }) {
                 if let indexTool = toolRegistry.tool(named: "workspace_index") ?? toolRegistry.tool(named: "workspace.index") {
                     result.templateName = "探索项目"
-                    let idxStep = TaskStep(kind: .toolCall, text: "预索引工作区", toolName: "workspace.index", isCollapsible: true, isCollapsed: true)
+                    let idxStep = TaskStep(
+                        kind: .toolCall, text: "预索引工作区", toolName: "workspace.index", isCollapsible: true, isCollapsed: true)
                     if emitDebugSteps {
                         task.steps.append(idxStep)
                         onStep(idxStep)
@@ -367,12 +391,15 @@ extension AgentLoop {
             // Then try a targeted search
             let searchKeywords = extractSearchKeywords(from: message)
             if let keywords = searchKeywords, !keywords.isEmpty,
-                let searchTool = toolRegistry.tool(named: "code_search") ?? toolRegistry.tool(named: "code.search") {
-                let searchJSON = (try? JSONSerialization.data(withJSONObject: ["query": keywords])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                let searchTool = toolRegistry.tool(named: "code_search") ?? toolRegistry.tool(named: "code.search")
+            {
+                let searchJSON =
+                    (try? JSONSerialization.data(withJSONObject: ["query": keywords])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
                 if let searchResult = try? await searchTool.execute(argumentsJSON: searchJSON, context: taskContext), searchResult.success {
                     taskContext.memory.searchedQueries.append(keywords)
                     result.executedSteps += 1
-                    result.directive = "已索引工作区并预搜索「\(keywords)」，结果：\n\(String(searchResult.output.prefix(2000)))\n\n请基于这些信息继续完成用户目标；需要落地时继续读关键文件、修改或验证。"
+                    result.directive =
+                        "已索引工作区并预搜索「\(keywords)」，结果：\n\(String(searchResult.output.prefix(2000)))\n\n请基于这些信息继续完成用户目标；需要落地时继续读关键文件、修改或验证。"
                 }
             }
             if result.directive.isEmpty && result.executedSteps > 0 {
@@ -389,7 +416,7 @@ extension AgentLoop {
         guard paths.contains(where: isSupportedOfficeDocument) else { return false }
         let markers = [
             "翻译", "英文", "english", "转换", "转化", "改写", "替换", "修改",
-            "输出", "导出", "保存", "存到", "生成", "副本", "交付"
+            "输出", "导出", "保存", "存到", "生成", "副本", "交付",
         ]
         return markers.contains { message.localizedCaseInsensitiveContains($0) }
     }
@@ -410,7 +437,7 @@ extension AgentLoop {
     private static func inferredDocumentOutputPath(from message: String, sourcePath: String) -> String {
         let explicitNames = [
             #"([^\s\n，。；;：:「」"'`]+(?:_English|_EN)[^\s\n，。；;：:「」"'`]*)"#,
-            #"([^\s\n，。；;：:「」"'`]*(?:英文版|English)[^\s\n，。；;：:「」"'`]*)"#
+            #"([^\s\n，。；;：:「」"'`]*(?:英文版|English)[^\s\n，。；;：:「」"'`]*)"#,
         ]
         for pattern in explicitNames {
             if let name = firstDocumentFileName(in: message, pattern: pattern) {

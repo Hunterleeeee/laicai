@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
@@ -30,7 +31,8 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
         let workspace = try makeTemporaryWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let chatConnector = makeConnector(name: "GPT", endpoint: "https://duckcu.tech/v1", modelName: "gpt-5.5", note: "chat-key")
-        var offlineImageConnector = makeConnector(name: "旧图片", endpoint: "https://duckcu.tech", modelName: "gpt-image-2", note: "old-image-key")
+        var offlineImageConnector = makeConnector(
+            name: "旧图片", endpoint: "https://duckcu.tech", modelName: "gpt-image-2", note: "old-image-key")
         offlineImageConnector.health = .offline
         let agnesImageConnector = makeConnector(
             name: "Agnes Image 2.1 Flash",
@@ -310,13 +312,16 @@ final class ImageGenerationToolTests: LaicaiNativeFoundationTestCase {
             title: "访问前端并重新生成页面图",
             steps: [
                 TaskStep(kind: .userInput, text: "访问这个项目的前端，然后重新生成一个前端页面图"),
-                TaskStep(kind: .toolResult, text: "图片已生成：/tmp/generated.png", toolName: "image.generate", toolParams: ["imagePath": "/tmp/generated.png"]),
-                TaskStep(kind: .toolResult, text: "失败：工具执行超时（30秒）", toolName: "image.generate", isFailure: true)
+                TaskStep(
+                    kind: .toolResult, text: "图片已生成：/tmp/generated.png", toolName: "image.generate",
+                    toolParams: ["imagePath": "/tmp/generated.png"]),
+                TaskStep(kind: .toolResult, text: "失败：工具执行超时（30秒）", toolName: "image.generate", isFailure: true),
             ]
         )
 
         XCTAssertTrue(AgentLoop.hasSatisfiedImageGenerationRequest(task))
-        XCTAssertTrue(AgentLoop.meetsCompletionCriteria(task: task, intent: .task, didComplete: true, hadFailure: true, wasTruncated: false))
+        XCTAssertTrue(
+            AgentLoop.meetsCompletionCriteria(task: task, intent: .task, didComplete: true, hadFailure: true, wasTruncated: false))
         let check = AgentLoop.completionCheckStep(for: task, didComplete: true, hadFailure: true)
         XCTAssertFalse(check.isFailure)
         XCTAssertTrue(check.text.contains("图片已成功生成"))

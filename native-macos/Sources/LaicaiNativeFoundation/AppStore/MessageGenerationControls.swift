@@ -25,7 +25,8 @@ extension AppStore {
     /// Unlike stop, this does NOT cancel the task; it redirects it.
     public func steerRunningTask(_ message: String) {
         guard let threadID = state.selectedThreadID,
-              let loop = agentLoops[threadID] else { return }
+            let loop = agentLoops[threadID]
+        else { return }
         loop.steer(message)
         notify("已发送方向修正")
     }
@@ -56,7 +57,8 @@ extension AppStore {
                 continue
             }
             if isExecution && !state.threads[threadIndex].steps.contains(where: { $0.kind == .error && $0.text == "已中断" }) {
-                state.threads[threadIndex].steps.append(TaskStep(kind: .error, text: "已中断", isFailure: false, recoverable: true, retryAction: "重试"))
+                state.threads[threadIndex].steps.append(
+                    TaskStep(kind: .error, text: "已中断", isFailure: false, recoverable: true, retryAction: "重试"))
             }
             state.threads[threadIndex].status = .cancelled
             if isExecution {
@@ -73,8 +75,9 @@ extension AppStore {
         }
 
         if let threadID = state.selectedThreadID,
-           let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }),
-           state.threads[threadIndex].isChatOnly {
+            let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }),
+            state.threads[threadIndex].isChatOnly
+        {
             var steps = state.threads[threadIndex].steps
             if let lastStep = steps.last, lastStep.kind == .textOutput {
                 if lastStep.text.isEmpty {

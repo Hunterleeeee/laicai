@@ -1,5 +1,5 @@
-import Foundation
 import Darwin
+import Foundation
 import LaicaiNativeDomain
 
 // MARK: - Hook Definition
@@ -77,8 +77,7 @@ public final class HookEngine: ObservableObject {
         guard !root.isEmpty else { return }
 
         var hookDirs = [
-            (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path ?? "")
-                .appending("/Laicai/hooks")
+            LaicaiStoragePaths.appDirectory.appendingPathComponent("hooks", isDirectory: true).path
         ]
         if WorkspaceTrust.isTrusted(root) {
             hookDirs.insert((root as NSString).appendingPathComponent(".laicai/hooks"), at: 0)
@@ -92,7 +91,8 @@ public final class HookEngine: ObservableObject {
             for file in files where file.hasSuffix(".json") {
                 let path = (dir as NSString).appendingPathComponent(file)
                 guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-                      let hook = try? decoder.decode(HookDefinition.self, from: data) else { continue }
+                    let hook = try? decoder.decode(HookDefinition.self, from: data)
+                else { continue }
                 loadedHooks.append(hook)
             }
         }
@@ -152,35 +152,22 @@ public final class HookEngine: ObservableObject {
             cmd = cmd.replacingOccurrences(of: "{{\(key)}}", with: value)
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", cmd]
-        process.currentDirectoryURL = URL(fileURLWithPath: context.workspaceRoot.isEmpty ? NSHomeDirectory() : context.workspaceRoot)
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
         do {
-            try process.run()
-
-            if !Self.waitForExit(process, timeoutSeconds: 10) {
-                process.terminate()
-                if !Self.waitForExit(process, timeoutSeconds: 2) {
-                    Darwin.kill(process.processIdentifier, SIGKILL)
-                    _ = Self.waitForExit(process, timeoutSeconds: 1)
-                }
-            }
-
-            let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-            let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let errOutput = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let result = try await ProcessRunner.runAsync(
+                executableURL: URL(fileURLWithPath: "/bin/zsh"),
+                arguments: ["-lc", cmd],
+                currentDirectoryURL: URL(
+                    fileURLWithPath: context.workspaceRoot.isEmpty ? NSHomeDirectory() : context.workspaceRoot
+                ),
+                timeout: 10
+            )
+            let output = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+            let errOutput = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
             let duration = CFAbsoluteTimeGetCurrent() - start
 
-            let success = process.terminationStatus == 0
-            let combinedOutput = [output, errOutput].filter { !$0.isEmpty }.joined(separator: "\n")
+            let success = result.exitCode == 0 && !result.timedOut
+            let timeoutOutput = result.timedOut ? "Hook 执行超时（10秒）" : ""
+            let combinedOutput = [output, errOutput, timeoutOutput].filter { !$0.isEmpty }.joined(separator: "\n")
 
             return HookResult(hookName: hook.name, output: String(combinedOutput.prefix(500)), success: success, duration: duration)
         } catch {
@@ -221,12 +208,4 @@ public final class HookEngine: ObservableObject {
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
-    private static func waitForExit(_ process: Process, timeoutSeconds: TimeInterval) -> Bool {
-        let semaphore = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in semaphore.signal() }
-        if !process.isRunning { return true }
-        let result = semaphore.wait(timeout: .now() + timeoutSeconds)
-        process.terminationHandler = nil
-        return result == .success || !process.isRunning
-    }
 }

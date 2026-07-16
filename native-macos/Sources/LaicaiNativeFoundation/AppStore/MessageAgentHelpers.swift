@@ -10,7 +10,8 @@ extension AppStore {
     func customAgentInvocation(from message: String) -> CustomAgentInvocation? {
         let prefix = "[Agent:"
         guard message.hasPrefix(prefix),
-              let endIndex = message.firstIndex(of: "]") else {
+            let endIndex = message.firstIndex(of: "]")
+        else {
             return nil
         }
         let nameStart = message.index(message.startIndex, offsetBy: prefix.count)

@@ -60,7 +60,8 @@ struct IntentSignals {
         let promptMarkers = ["prompt", "提示词", "描述词", "描述prompt", "怎么描述", "描述一下", "梳理一下", "帮我梳理", "润色"]
         let creativeTargets = ["gemini", "歌曲", "写歌", "作一首歌", "作歌", "音乐", "歌词", "mv", "视频", "短片", "画面", "风格", "电影感", "古风", "电子"]
         if promptMarkers.contains(where: { input.localizedCaseInsensitiveContains($0) })
-            && creativeTargets.contains(where: { input.localizedCaseInsensitiveContains($0) }) {
+            && creativeTargets.contains(where: { input.localizedCaseInsensitiveContains($0) })
+        {
             return true
         }
 
@@ -156,7 +157,8 @@ struct IntentSignals {
     var shouldInspectBeforeActing: Bool {
         let contextualInspection =
             hasInspectableLocalContext
-            && (requestsDiagnosis || requestsAdvice || requestsEvaluation || requestsSummary || requestsPlanOnly || reportsInspectableProblem)
+            && (requestsDiagnosis || requestsAdvice || requestsEvaluation || requestsSummary || requestsPlanOnly
+                || reportsInspectableProblem)
         return requestsLocalIO || contextualInspection
     }
 
@@ -185,15 +187,15 @@ struct IntentSignals {
         }
         let deviceMarkers = [
             "我的电脑", "电脑", "macos", "系统", "本机", "网络", "网卡", "虚拟网卡",
-            "vpn", "终端", "命令行", "浏览器", "键盘", "鼠标", "显示器"
+            "vpn", "终端", "命令行", "浏览器", "键盘", "鼠标", "显示器",
         ]
         let howToMarkers = [
             "怎么弄", "怎么设置", "如何设置", "怎么开", "如何开启", "怎么打开",
-            "怎么配置", "如何配置", "应该怎么", "怎么办", "怎么用"
+            "怎么配置", "如何配置", "应该怎么", "怎么办", "怎么用",
         ]
         let explicitExecutionMarkers = [
             "帮我运行", "帮我执行", "直接运行", "直接执行", "现在运行", "现在执行",
-            "帮我安装", "直接安装", "帮我创建", "直接创建", "跑一下"
+            "帮我安装", "直接安装", "帮我创建", "直接创建", "跑一下",
         ]
         return deviceMarkers.contains { input.localizedCaseInsensitiveContains($0) }
             && howToMarkers.contains { input.localizedCaseInsensitiveContains($0) }
@@ -209,14 +211,18 @@ struct IntentSignals {
     }
 
     private var referencesOfficeDocument: Bool {
-        input.range(of: #"[A-Za-z0-9_./\-\u{4e00}-\u{9fff}]+\.(pptx|docx|xlsx|xlsm|ppt|doc|xls)"#, options: [.regularExpression, .caseInsensitive]) != nil
+        input.range(
+            of: #"[A-Za-z0-9_./\-\u{4e00}-\u{9fff}]+\.(pptx|docx|xlsx|xlsm|ppt|doc|xls)"#, options: [.regularExpression, .caseInsensitive])
+            != nil
     }
 
     /// URL presence alone should not trigger execution. Only trigger if user explicitly
     /// wants to act on the URL (read, fetch, visit, open, download).
     private var containsExplicitURLAction: Bool {
         guard containsURL else { return false }
-        let actionMarkers = ["打开", "访问", "读取", "获取", "下载", "fetch", "download", "visit", "read this", "open this", "看看这个链接", "看看这个网页", "访问一下", "打开这个"]
+        let actionMarkers = [
+            "打开", "访问", "读取", "获取", "下载", "fetch", "download", "visit", "read this", "open this", "看看这个链接", "看看这个网页", "访问一下", "打开这个",
+        ]
         return actionMarkers.contains(where: { input.contains($0) })
     }
 
@@ -257,7 +263,7 @@ struct IntentSignals {
         return [
             "读取", "读一下", "打开文件", "看这个文件", "这个路径", "这些路径", "搜索", "搜索项目", "搜索代码", "查找文件", "当前项目", "工作区",
             "看看项目", "看下项目", "看一下项目", "看看代码", "看下代码", "查看项目", "查看代码",
-            "检查项目", "检查代码", "分析项目", "分析代码", "找到", "找一下", "定位"
+            "检查项目", "检查代码", "分析项目", "分析代码", "找到", "找一下", "定位",
         ].contains {
             input.contains($0)
         }
@@ -266,7 +272,7 @@ struct IntentSignals {
     private var requestsDiagnosis: Bool {
         [
             "诊断", "排查", "分析一下", "看下原因", "为什么", "哪里出问题", "问题在哪", "哪里不好", "不对劲", "不好用", "难用", "卡住",
-            "卡顿", "卡死", "很卡", "各种卡", "慢", "很慢", "延迟", "掉帧", "性能"
+            "卡顿", "卡死", "很卡", "各种卡", "慢", "很慢", "延迟", "掉帧", "性能",
         ].contains {
             input.contains($0)
         }
@@ -307,14 +313,14 @@ struct IntentSignals {
         let adviceMarkers = [
             "优化建议", "改进建议", "怎么优化", "如何优化", "哪里能优化", "哪些能优化",
             "怎么改进", "如何改进", "哪里能改进", "哪些能改进",
-            "应该怎么", "给建议", "出方案", "给思路", "看法", "优缺点", "利弊"
+            "应该怎么", "给建议", "出方案", "给思路", "看法", "优缺点", "利弊",
         ]
         guard adviceMarkers.contains(where: { effectiveInput.contains($0) }) else { return false }
         let explicitMutationMarkers = [
             "直接改", "帮我改", "修改", "写入", "创建文件", "删除文件", "实现", "修复",
             "改一下", "改写", "接入", "集成", "迁移", "替换", "重命名", "保存",
             "改成", "换成", "改为", "重写", "拆分", "合并",
-            "fix", "implement", "create", "add", "remove", "update", "refactor", "rewrite"
+            "fix", "implement", "create", "add", "remove", "update", "refactor", "rewrite",
         ]
         return !explicitMutationMarkers.contains { input.contains($0) }
     }
@@ -324,7 +330,7 @@ struct IntentSignals {
             "运行", "执行命令", "跑测试", "构建", "部署", "启动服务",
             "安装", "卸载", "升级", "更新", "下载", "编译", "打包", "发布",
             "npm install", "pip install", "brew install", "cargo install", "apt install", "yarn add", "pnpm add",
-            "make", "cmake", "build", "run", "setup"
+            "make", "cmake", "build", "run", "setup",
         ].contains { input.contains($0) }
     }
 
@@ -336,18 +342,18 @@ struct IntentSignals {
             "导入", "导出", "初始化", "保存", "另存", "翻译成", "转成",
             "改成", "换成", "改为", "重写", "拆分", "合并",
             "记住", "记下", "长期记忆", "写进记忆", "保存偏好", "保存到记忆", "remember",
-            "fix", "implement", "create", "add", "remove", "update", "refactor", "rewrite"
+            "fix", "implement", "create", "add", "remove", "update", "refactor", "rewrite",
         ]
         if strongMutationMarkers.contains(where: { input.contains($0) }) { return true }
 
         let broadMutationMarkers = [
             "添加", "增加", "配置", "设置", "加入", "注册",
-            "调整", "改进", "优化", "优化下", "优化一下", "性能优化", "提升性能", "提速", "加速"
+            "调整", "改进", "优化", "优化下", "优化一下", "性能优化", "提升性能", "提速", "加速",
         ]
         guard broadMutationMarkers.contains(where: { input.contains($0) }) else { return false }
         let questionOrAdviceMarkers = [
             "怎么", "如何", "哪里", "哪些", "什么", "建议", "方案", "思路", "看法",
-            "可不可以", "能不能", "是否", "要不要", "该不该"
+            "可不可以", "能不能", "是否", "要不要", "该不该",
         ]
         return !questionOrAdviceMarkers.contains { input.contains($0) }
     }
@@ -378,7 +384,7 @@ struct IntentSignals {
             "jtbd", "JTBD", "验收标准", "acceptance criteria",
             "边界用例", "edge case", "方案简述", "solution brief",
             "架构决策", "adr", "ADR", "问题定义", "problem statement",
-            "假设验证", "hypothesis", "干系人汇报"
+            "假设验证", "hypothesis", "干系人汇报",
         ]
         return pmMarkers.contains { input.localizedCaseInsensitiveContains($0) }
     }
@@ -398,7 +404,8 @@ struct IntentSignals {
     private var wantsDebugWorkflow: Bool {
         let debugMarkers = ["调试", "诊断", "排查", "排查报错", "分析报错", "定位报错", "这个报错"]
         guard debugMarkers.contains(where: { input.contains($0) }) else { return false }
-        return codeOrProjectContext || input.contains("日志") || input.contains("堆栈") || input.contains("异常") || input.contains("报错") || input.contains("crash")
+        return codeOrProjectContext || input.contains("日志") || input.contains("堆栈") || input.contains("异常") || input.contains("报错")
+            || input.contains("crash")
     }
 
     private var wantsRefactorWorkflow: Bool {
@@ -422,7 +429,7 @@ struct IntentSignals {
         let markers = [
             "代码", "项目", "文件", "模块", "函数", "类", "组件", "接口", "仓库",
             "diff", "commit", "pr", "分支", "变更", "改动", ".swift", ".ts", ".tsx",
-            ".js", ".py", ".md", ".pptx", ".docx", ".xlsx", ".xlsm", "package.json", "readme"
+            ".js", ".py", ".md", ".pptx", ".docx", ".xlsx", ".xlsm", "package.json", "readme",
         ]
         return markers.contains { input.contains($0) }
     }
@@ -434,7 +441,7 @@ struct IntentSignals {
         let appContextMarkers = [
             "页面", "界面", "按钮", "输入", "输入框", "交互", "性能", "侧栏", "左边", "右边", "窗口",
             "会话", "追问", "历史任务", "新会话", "上下文", "agent", "Agent",
-            "连接器", "工具调用", "工具", "来财", "app", "应用", "UI", "ui"
+            "连接器", "工具调用", "工具", "来财", "app", "应用", "UI", "ui",
         ]
         return appContextMarkers.contains { input.contains($0) }
     }
@@ -443,7 +450,7 @@ struct IntentSignals {
         guard hasInspectableLocalContext else { return false }
         let problemMarkers = [
             "有问题", "不对", "丢失", "没反应", "没生效", "坏了", "异常",
-            "报错", "bug", "Bug", "卡", "慢", "卡顿", "不好用", "难用"
+            "报错", "bug", "Bug", "卡", "慢", "卡顿", "不好用", "难用",
         ]
         return problemMarkers.contains { input.contains($0) }
     }
@@ -519,11 +526,14 @@ struct IntentSignals {
         if requestsFreshInformation || requestsWebResearch || requestsModelCurrentInfo || containsURL { capabilities.append("联网检索") }
         let contextualInspection =
             hasInspectableLocalContext
-            && (requestsDiagnosis || requestsAdvice || requestsEvaluation || requestsSummary || requestsPlanOnly || reportsInspectableProblem)
+            && (requestsDiagnosis || requestsAdvice || requestsEvaluation || requestsSummary || requestsPlanOnly
+                || reportsInspectableProblem)
         if requestsLocalIO || contextualInspection { capabilities.append("读取工作区") }
         if requestsShellExecution { capabilities.append("运行命令") }
         if requestsWikiPersistence { capabilities.append("写入知识库") }
-        if requestsMutation || (!prefersAnalysisOnly && hasInspectableLocalContext && (requestsDiagnosis || requestsAdvice || reportsInspectableProblem)) {
+        if requestsMutation
+            || (!prefersAnalysisOnly && hasInspectableLocalContext && (requestsDiagnosis || requestsAdvice || reportsInspectableProblem))
+        {
             capabilities.append("提出文件修改")
         }
         if requestedDeliverable || requestsWikiPersistence { capabilities.append("整理交付") }

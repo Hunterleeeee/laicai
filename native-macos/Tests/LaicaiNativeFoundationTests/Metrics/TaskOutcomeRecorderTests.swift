@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class TaskOutcomeRecorderTests: LaicaiNativeFoundationTestCase {
@@ -25,24 +26,25 @@ final class TaskOutcomeRecorderTests: LaicaiNativeFoundationTestCase {
             for index in 0..<80 {
                 group.addTask {
                     let id = "task-\(index)"
-                    recorder.record(TaskOutcomeRecord(
-                        taskID: id,
-                        intent: "task",
-                        routeLabel: "会话 执行",
-                        executionMode: "auto",
-                        iterations: index % 5 + 1,
-                        status: index.isMultiple(of: 7) ? .failed : .completed,
-                        hadFailure: index.isMultiple(of: 7),
-                        wasCancelled: false,
-                        wasTruncated: false,
-                        toolCalls: 1,
-                        toolFailures: index.isMultiple(of: 7) ? 1 : 0,
-                        durationSeconds: 0.1,
-                        userFollowupCount: 0,
-                        promptTag: "baseline",
-                        userRating: 0,
-                        modelName: "test-model"
-                    ))
+                    recorder.record(
+                        TaskOutcomeRecord(
+                            taskID: id,
+                            intent: "task",
+                            routeLabel: "会话 执行",
+                            executionMode: "auto",
+                            iterations: index % 5 + 1,
+                            status: index.isMultiple(of: 7) ? .failed : .completed,
+                            hadFailure: index.isMultiple(of: 7),
+                            wasCancelled: false,
+                            wasTruncated: false,
+                            toolCalls: 1,
+                            toolFailures: index.isMultiple(of: 7) ? 1 : 0,
+                            durationSeconds: 0.1,
+                            userFollowupCount: 0,
+                            promptTag: "baseline",
+                            userRating: 0,
+                            modelName: "test-model"
+                        ))
                     recorder.recordToolOutcome(
                         taskID: id,
                         toolName: "file.read",
@@ -73,42 +75,44 @@ final class TaskOutcomeRecorderTests: LaicaiNativeFoundationTestCase {
         defer { try? FileManager.default.removeItem(at: base) }
         let recorder = TaskOutcomeRecorder(path: base.path)
 
-        recorder.record(TaskOutcomeRecord(
-            taskID: "legacy-1",
-            intent: "task",
-            routeLabel: "会话 执行",
-            executionMode: "pipeline",
-            iterations: 4,
-            status: .completed,
-            hadFailure: false,
-            wasCancelled: false,
-            wasTruncated: false,
-            toolCalls: 3,
-            toolFailures: 0,
-            durationSeconds: 1.2,
-            userFollowupCount: 0,
-            promptTag: "",
-            userRating: 0,
-            modelName: "test-model"
-        ))
-        recorder.record(TaskOutcomeRecord(
-            taskID: "codex-1",
-            intent: "task",
-            routeLabel: "会话 执行",
-            executionMode: "codexFull",
-            iterations: 6,
-            status: .failed,
-            hadFailure: true,
-            wasCancelled: false,
-            wasTruncated: false,
-            toolCalls: 4,
-            toolFailures: 1,
-            durationSeconds: 2.3,
-            userFollowupCount: 1,
-            promptTag: "",
-            userRating: 0,
-            modelName: "test-model"
-        ))
+        recorder.record(
+            TaskOutcomeRecord(
+                taskID: "legacy-1",
+                intent: "task",
+                routeLabel: "会话 执行",
+                executionMode: "pipeline",
+                iterations: 4,
+                status: .completed,
+                hadFailure: false,
+                wasCancelled: false,
+                wasTruncated: false,
+                toolCalls: 3,
+                toolFailures: 0,
+                durationSeconds: 1.2,
+                userFollowupCount: 0,
+                promptTag: "",
+                userRating: 0,
+                modelName: "test-model"
+            ))
+        recorder.record(
+            TaskOutcomeRecord(
+                taskID: "codex-1",
+                intent: "task",
+                routeLabel: "会话 执行",
+                executionMode: "codexFull",
+                iterations: 6,
+                status: .failed,
+                hadFailure: true,
+                wasCancelled: false,
+                wasTruncated: false,
+                toolCalls: 4,
+                toolFailures: 1,
+                durationSeconds: 2.3,
+                userFollowupCount: 1,
+                promptTag: "",
+                userRating: 0,
+                modelName: "test-model"
+            ))
 
         try await Task.sleep(nanoseconds: 200_000_000)
         let rows = recorder.stats(days: 1).filter { $0.intent == "task" && $0.routeLabel == "会话 执行" }

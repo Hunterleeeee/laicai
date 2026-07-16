@@ -7,7 +7,9 @@ extension AgentLoop {
     private static var toolDefCache: [String: [ToolDefinition]] = [:]
     private static var lastRegistryCount: Int = 0
 
-    public static func toolDefinitions(for intent: UserIntent, phase: TaskPhase = .explore, registry: ToolRegistry? = nil) -> [ToolDefinition] {
+    public static func toolDefinitions(for intent: UserIntent, phase: TaskPhase = .explore, registry: ToolRegistry? = nil)
+        -> [ToolDefinition]
+    {
         let currentRegistry = registry ?? .shared
         let cacheKey = "\(intent)-\(phase)"
 
@@ -31,7 +33,7 @@ extension AgentLoop {
             // when needed, without risking mutations.
             let allowed: Set<String> = [
                 "file.read", "file.extract", "code.search", "workspace.index",
-                "web.search", "web.fetch"
+                "web.search", "web.fetch",
             ]
             phaseDefs = allDefs.filter { def in
                 allowed.contains(ToolNameCodec.canonicalName(def.function.name))
@@ -39,7 +41,7 @@ extension AgentLoop {
         case .research:
             let allowed: Set<String> = [
                 "web.search", "web.fetch", "file.read", "file.extract", "document.transform",
-                "code.search", "workspace.index"
+                "code.search", "workspace.index",
             ]
             phaseDefs = allDefs.filter { def in
                 allowed.contains(ToolNameCodec.canonicalName(def.function.name))
@@ -75,7 +77,7 @@ extension AgentLoop {
                 "file.read": 2,
                 "file.extract": 3,
                 "code.search": 4,
-                "workspace.index": 5
+                "workspace.index": 5,
             ][canonical] ?? 20
         case .chat:
             return [
@@ -85,7 +87,7 @@ extension AgentLoop {
                 "code.search": 3,
                 "web.search": 4,
                 "web.fetch": 5,
-                "workspace.index": 6
+                "workspace.index": 6,
             ][canonical] ?? 20
         case .task, .workflow:
             let base: [String: Int]
@@ -99,7 +101,7 @@ extension AgentLoop {
                     "document.transform": 4,
                     "web.search": 5,
                     "web.fetch": 6,
-                    "wiki.build": 7
+                    "wiki.build": 7,
                 ]
             case .execute:
                 base = [
@@ -114,7 +116,7 @@ extension AgentLoop {
                     "wiki.build": 8,
                     "web.fetch": 9,
                     "web.search": 10,
-                    "skill.manage": 11
+                    "skill.manage": 11,
                 ]
             case .verify:
                 base = [
@@ -127,7 +129,7 @@ extension AgentLoop {
                     "file.edit": 6,
                     "diff.apply": 7,
                     "skill.manage": 8,
-                    "git": 9
+                    "git": 9,
                 ]
             case .summarize:
                 base = [
@@ -137,7 +139,7 @@ extension AgentLoop {
                     "file.extract": 3,
                     "document.transform": 4,
                     "verify.build": 5,
-                    "code.search": 6
+                    "code.search": 6,
                 ]
             }
             return base[canonical] ?? 20

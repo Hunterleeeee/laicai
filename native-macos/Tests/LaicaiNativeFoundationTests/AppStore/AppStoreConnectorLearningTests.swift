@@ -7,7 +7,8 @@ import XCTest
 final class AppStoreConnectorLearningTests: LaicaiNativeFoundationTestCase {
     func testDirectProviderFailureMarksConnectorAttention() async throws {
         let connector = ConnectorProfile(
-            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .ready)
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key",
+            health: .ready)
         let store = AppStore(
             state: testState(connectors: [connector], activeConnectorID: connector.id),
             environment: AppEnvironment(
@@ -27,7 +28,8 @@ final class AppStoreConnectorLearningTests: LaicaiNativeFoundationTestCase {
     }
     func testTaskProviderFailureMarksConnectorAttention() async throws {
         let connector = ConnectorProfile(
-            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .ready)
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key",
+            health: .ready)
         let store = AppStore(
             state: testState(connectors: [connector], activeConnectorID: connector.id),
             environment: AppEnvironment(
@@ -47,7 +49,8 @@ final class AppStoreConnectorLearningTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.connectors.first?.health, .attention)
     }
     func testTaskCompatibilityFallbackDisablesToolsForFutureRuns() async throws {
-        let connector = ConnectorProfile(name: "qwen", kind: "ollama", endpoint: "http://127.0.0.1:11434", modelName: "qwen", note: "", health: .ready)
+        let connector = ConnectorProfile(
+            name: "qwen", kind: "ollama", endpoint: "http://127.0.0.1:11434", modelName: "qwen", note: "", health: .ready)
         let runtime = ToolRejectedThenPlainRuntime()
         let store = AppStore(
             state: testState(connectors: [connector], activeConnectorID: connector.id),
@@ -159,7 +162,8 @@ final class AppStoreConnectorLearningTests: LaicaiNativeFoundationTestCase {
     }
     func testSuccessfulChatMarksAttentionConnectorReady() async throws {
         let connector = ConnectorProfile(
-            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .attention)
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key",
+            health: .attention)
         let store = AppStore(
             state: testState(connectors: [connector], activeConnectorID: connector.id),
             environment: AppEnvironment(
@@ -179,14 +183,15 @@ final class AppStoreConnectorLearningTests: LaicaiNativeFoundationTestCase {
     }
     func testPreviouslySuccessfulConnectorStillNeedsRecheckOnLaunch() {
         let connector = ConnectorProfile(
-            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key", health: .attention)
+            name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test-model", note: "key",
+            health: .attention)
         let session = ChatSession(
             title: "已调通模型",
             preview: "你好",
             modelName: "Test",
             turns: [
                 ChatTurn(role: .user, text: "你好"),
-                ChatTurn(role: .assistant, text: "你好，世界")
+                ChatTurn(role: .assistant, text: "你好，世界"),
             ]
         )
 

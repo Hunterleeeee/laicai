@@ -1,7 +1,8 @@
 import Foundation
 
 func normalizedSessionPreview(_ text: String, limit: Int = 80) -> String {
-    let preview = text
+    let preview =
+        text
         .replacingOccurrences(of: "\n", with: " ")
         .trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -20,7 +21,8 @@ func normalizedSessionPreview(_ text: String, limit: Int = 80) -> String {
         || preview.contains("provider returned")
         || preview.contains("{\"error\"")
         || preview.localizedCaseInsensitiveContains("\"error\"")
-        || preview.localizedCaseInsensitiveContains("invalid_request_error") {
+        || preview.localizedCaseInsensitiveContains("invalid_request_error")
+    {
         return "请求失败，请检查连接器配置。"
     }
     if preview.count > limit {

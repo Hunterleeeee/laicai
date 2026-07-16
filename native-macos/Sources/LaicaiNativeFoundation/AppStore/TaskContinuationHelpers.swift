@@ -7,25 +7,28 @@ extension AppStore {
         thread.steps.removeAll(where: shouldRemoveContinuationTransientStep)
 
         guard isContinuationCommand(message) || isLikelyTaskFollowUp(message),
-              !thread.context.memory.userDecisions.contains(where: { $0.contains("[continuation]") }) else { return }
+            !thread.context.memory.userDecisions.contains(where: { $0.contains("[continuation]") })
+        else { return }
         let checkpointText = checkpoint.map { "\n\n最近检查点：\($0)" } ?? ""
         let summary = continuationSummary(for: thread, checkpointText: checkpointText)
 
         thread.context.memory.appendDecision("[continuation] \(summary)")
         if !checkpointText.isEmpty {
-            thread.steps.append(TaskStep(
-                kind: .aiThinking,
-                text: "恢复现场：最近检查点已写入本轮上下文。\(checkpointText)",
-                isCollapsible: true,
-                isCollapsed: true
-            ))
+            thread.steps.append(
+                TaskStep(
+                    kind: .aiThinking,
+                    text: "恢复现场：最近检查点已写入本轮上下文。\(checkpointText)",
+                    isCollapsible: true,
+                    isCollapsed: true
+                ))
         }
     }
 
     private static func shouldRemoveContinuationTransientStep(_ step: TaskStep) -> Bool {
         if step.kind == .textOutput,
-           step.toolCallId == streamingOutputID,
-           step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            step.toolCallId == streamingOutputID,
+            step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
             return true
         }
         guard step.kind == .error else { return false }
@@ -71,7 +74,8 @@ extension AppStore {
     }
 
     static func ensureCheckpointIfNeeded(_ thread: inout Thread) {
-        guard thread.status == .failed || thread.status == .cancelled || thread.steps.contains(where: { $0.text.contains("已达到最大迭代次数") }) else { return }
+        guard thread.status == .failed || thread.status == .cancelled || thread.steps.contains(where: { $0.text.contains("已达到最大迭代次数") })
+        else { return }
         guard latestCheckpoint(in: thread) == nil else { return }
         thread.steps.append(makeCheckpointStep(for: thread))
     }
@@ -144,7 +148,8 @@ extension AppStore {
         for index in state.threads.indices {
             let isStale = now.timeIntervalSince(state.threads[index].updatedAt) > timeout
             let shouldCancelRunning = state.threads[index].status == .running && isStale
-            let shouldCancelStaleReview = state.threads[index].isExecution
+            let shouldCancelStaleReview =
+                state.threads[index].isExecution
                 && state.threads[index].status == .waitingReview
                 && isStale
             guard shouldCancelRunning || shouldCancelStaleReview else { continue }
@@ -154,13 +159,14 @@ extension AppStore {
             if state.threads[index].steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) {
                 continue
             }
-            state.threads[index].steps.append(TaskStep(
-                kind: .error,
-                text: "上次运行被中断，已自动标记为已暂停。可以从这个会话继续或重新发送。",
-                isFailure: false,
-                recoverable: true,
-                retryAction: "继续"
-            ))
+            state.threads[index].steps.append(
+                TaskStep(
+                    kind: .error,
+                    text: "上次运行被中断，已自动标记为已暂停。可以从这个会话继续或重新发送。",
+                    isFailure: false,
+                    recoverable: true,
+                    retryAction: "继续"
+                ))
             if state.threads[index].isExecution {
                 ensureCheckpointIfNeeded(&state.threads[index])
             }

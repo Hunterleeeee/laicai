@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Welcome View
 
@@ -34,7 +34,7 @@ struct WelcomeView: View {
             tint: Brand.purple,
             text: "沉淀到 Wiki",
             sub: "把结论写入知识库"
-        )
+        ),
     ]
 
     private let composerHeight: CGFloat = 132
@@ -103,7 +103,8 @@ struct WelcomeView: View {
 
     private var heroTitle: String {
         if let projectID = store.state.selectedThread?.projectID,
-           let project = projectManager.projects.first(where: { $0.id == projectID }) {
+            let project = projectManager.projects.first(where: { $0.id == projectID })
+        {
             return "在 \(project.name) 中要做什么？"
         }
         return "今天想做什么？"
@@ -171,7 +172,8 @@ struct WelcomeView: View {
     // MARK: - Primary Actions
 
     private func quickActionRow(narrow: Bool) -> some View {
-        let columns = narrow
+        let columns =
+            narrow
             ? [GridItem(.flexible())]
             : [GridItem(.flexible()), GridItem(.flexible())]
 
@@ -219,7 +221,8 @@ struct WelcomeView: View {
 
     private func contextStrip(narrow: Bool) -> some View {
         let projectLabel = projectManager.activeProject?.name ?? "未选择项目"
-        let modelLabel = store.state.activeConnector?.modelName.isEmpty == false
+        let modelLabel =
+            store.state.activeConnector?.modelName.isEmpty == false
             ? (store.state.activeConnector?.modelName ?? "已连接模型")
             : (store.state.activeConnector?.name ?? "已连接模型")
 
@@ -252,7 +255,8 @@ struct WelcomeView: View {
     }
 
     private func samplePromptsGrid(narrow: Bool) -> some View {
-        let columns = narrow
+        let columns =
+            narrow
             ? [GridItem(.flexible())]
             : [GridItem(.flexible()), GridItem(.flexible())]
 

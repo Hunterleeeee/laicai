@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 private struct WorkflowNodeTypeOption {
     let type: NodeToolType
@@ -69,11 +69,13 @@ struct WorkflowEditorView: View {
                                 draggedStep = step
                                 return NSItemProvider(object: step.id.uuidString as NSString)
                             }
-                            .onDrop(of: [.text], delegate: StepDropDelegate(
-                                targetStep: step,
-                                steps: $steps,
-                                draggedStep: $draggedStep
-                            ))
+                            .onDrop(
+                                of: [.text],
+                                delegate: StepDropDelegate(
+                                    targetStep: step,
+                                    steps: $steps,
+                                    draggedStep: $draggedStep
+                                ))
                     }
 
                     flowConnector(index: steps.count)
@@ -103,7 +105,8 @@ struct WorkflowEditorView: View {
 
             // Category pill
             Menu {
-                ForEach([WorkflowCategory.review, .generate, .debug, .refactor, .transform, .product, .project, .custom], id: \.self) { cat in
+                ForEach([WorkflowCategory.review, .generate, .debug, .refactor, .transform, .product, .project, .custom], id: \.self) {
+                    cat in
                     Button {
                         category = cat
                     } label: {
@@ -129,7 +132,9 @@ struct WorkflowEditorView: View {
             .menuIndicator(.hidden)
 
             // Cancel
-            Button { isPresented = false } label: {
+            Button {
+                isPresented = false
+            } label: {
                 Text("取消")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(TextGrade.secondary)
@@ -143,7 +148,9 @@ struct WorkflowEditorView: View {
             .buttonStyle(.plain)
 
             // Save
-            Button { saveWorkflow() } label: {
+            Button {
+                saveWorkflow()
+            } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "checkmark")
                         .font(.system(size: 10, weight: .bold))
@@ -155,7 +162,10 @@ struct WorkflowEditorView: View {
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                        .fill(canSave ? Brand.premiumGradient : LinearGradient(colors: [SurfaceGrade.elevated], startPoint: .leading, endPoint: .trailing))
+                        .fill(
+                            canSave
+                                ? Brand.premiumGradient
+                                : LinearGradient(colors: [SurfaceGrade.elevated], startPoint: .leading, endPoint: .trailing))
                 )
                 .shadow(color: canSave ? Brand.primary.opacity(0.3) : .clear, radius: 8, y: 2)
             }
@@ -174,7 +184,9 @@ struct WorkflowEditorView: View {
             ZStack {
                 Circle()
                     .fill(
-                        RadialGradient(colors: [Semantic.success.opacity(0.2), Semantic.success.opacity(0.05)], center: .center, startRadius: 0, endRadius: 20)
+                        RadialGradient(
+                            colors: [Semantic.success.opacity(0.2), Semantic.success.opacity(0.05)], center: .center, startRadius: 0,
+                            endRadius: 20)
                     )
                     .frame(width: 40, height: 40)
                 Image(systemName: "play.fill")
@@ -200,7 +212,9 @@ struct WorkflowEditorView: View {
                 }
             }
             Spacer()
-            Button { showAddParam = true } label: {
+            Button {
+                showAddParam = true
+            } label: {
                 Image(systemName: "plus.circle")
                     .font(.system(size: 13))
                     .foregroundStyle(TextGrade.muted)
@@ -344,7 +358,7 @@ struct WorkflowEditorView: View {
                     LinearGradient(
                         colors: [
                             (prevIsCondition ? Color(hex: "F59E0B") : SurfaceGrade.border).opacity(0.3),
-                            SurfaceGrade.border.opacity(0.15)
+                            SurfaceGrade.border.opacity(0.15),
                         ],
                         startPoint: .top, endPoint: .bottom
                     )
@@ -360,13 +374,37 @@ struct WorkflowEditorView: View {
 
     private var addNodeButton: some View {
         Menu {
-            Button { addStep(toolType: .tool) } label: { Label("工具节点", systemImage: "wrench") }
-            Button { addStep(toolType: .llm) } label: { Label("LLM 节点", systemImage: "brain") }
-            Button { addStep(toolType: .code) } label: { Label("代码节点", systemImage: "chevron.left.forwardslash.chevron.right") }
+            Button {
+                addStep(toolType: .tool)
+            } label: {
+                Label("工具节点", systemImage: "wrench")
+            }
+            Button {
+                addStep(toolType: .llm)
+            } label: {
+                Label("LLM 节点", systemImage: "brain")
+            }
+            Button {
+                addStep(toolType: .code)
+            } label: {
+                Label("代码节点", systemImage: "chevron.left.forwardslash.chevron.right")
+            }
             Divider()
-            Button { addStep(toolType: .condition) } label: { Label("条件分支", systemImage: "arrow.branch") }
-            Button { addStep(toolType: .humanInput) } label: { Label("人工确认", systemImage: "person.crop.circle.badge.checkmark") }
-            Button { addStep(toolType: .http) } label: { Label("HTTP 请求", systemImage: "globe") }
+            Button {
+                addStep(toolType: .condition)
+            } label: {
+                Label("条件分支", systemImage: "arrow.branch")
+            }
+            Button {
+                addStep(toolType: .humanInput)
+            } label: {
+                Label("人工确认", systemImage: "person.crop.circle.badge.checkmark")
+            }
+            Button {
+                addStep(toolType: .http)
+            } label: {
+                Label("HTTP 请求", systemImage: "globe")
+            }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "plus")
@@ -496,10 +534,12 @@ struct WorkflowEditorView: View {
             // Prompt
             if steps[index].toolType == .llm {
                 inspectorField("提示词") {
-                    TextEditor(text: Binding(
-                        get: { steps[index].prompt ?? "" },
-                        set: { steps[index].prompt = $0 }
-                    ))
+                    TextEditor(
+                        text: Binding(
+                            get: { steps[index].prompt ?? "" },
+                            set: { steps[index].prompt = $0 }
+                        )
+                    )
                     .font(.system(size: 11, design: .monospaced))
                     .frame(minHeight: 120)
                     .scrollContentBackground(.hidden)
@@ -522,10 +562,13 @@ struct WorkflowEditorView: View {
             // Condition
             if steps[index].toolType == .condition {
                 inspectorField("条件表达式") {
-                    TextField("previous.success / previous.failure", text: Binding(
-                        get: { steps[index].condition ?? "" },
-                        set: { steps[index].condition = $0 }
-                    ))
+                    TextField(
+                        "previous.success / previous.failure",
+                        text: Binding(
+                            get: { steps[index].condition ?? "" },
+                            set: { steps[index].condition = $0 }
+                        )
+                    )
                     .textFieldStyle(.plain)
                     .font(.system(size: 11, design: .monospaced))
                 }
@@ -540,10 +583,11 @@ struct WorkflowEditorView: View {
 
             // On failure — custom button row
             inspectorField("失败策略") {
-                failurePolicyPicker(selection: Binding(
-                    get: { steps[index].onFailure ?? "continue" },
-                    set: { steps[index].onFailure = $0 == "continue" ? nil : $0 }
-                ))
+                failurePolicyPicker(
+                    selection: Binding(
+                        get: { steps[index].onFailure ?? "continue" },
+                        set: { steps[index].onFailure = $0 == "continue" ? nil : $0 }
+                    ))
             }
         }
     }
@@ -557,14 +601,16 @@ struct WorkflowEditorView: View {
             WorkflowNodeTypeOption(type: .code, icon: "chevron.left.forwardslash.chevron.right", label: "代码"),
             WorkflowNodeTypeOption(type: .condition, icon: "arrow.branch", label: "条件"),
             WorkflowNodeTypeOption(type: .humanInput, icon: "person.crop.circle.badge.checkmark", label: "确认"),
-            WorkflowNodeTypeOption(type: .http, icon: "globe", label: "HTTP")
+            WorkflowNodeTypeOption(type: .http, icon: "globe", label: "HTTP"),
         ]
 
-        return LazyVGrid(columns: [
-            GridItem(.flexible(), spacing: 6),
-            GridItem(.flexible(), spacing: 6),
-            GridItem(.flexible(), spacing: 6)
-        ], spacing: 6) {
+        return LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 6),
+                GridItem(.flexible(), spacing: 6),
+                GridItem(.flexible(), spacing: 6),
+            ], spacing: 6
+        ) {
             ForEach(types, id: \.type) { option in
                 let isActive = selection.wrappedValue == option.type
                 let color = nodeColor(for: option.type)
@@ -599,7 +645,7 @@ struct WorkflowEditorView: View {
             ("continue", "arrow.right", "继续"),
             ("abort", "xmark.circle", "中止"),
             ("skip", "forward", "跳过"),
-            ("retry", "arrow.counterclockwise", "重试")
+            ("retry", "arrow.counterclockwise", "重试"),
         ]
 
         return HStack(spacing: 6) {
@@ -659,10 +705,13 @@ struct WorkflowEditorView: View {
         VStack(spacing: AppSpace.extraSmall) {
             ForEach(Array(steps[stepIndex].paramPairs.enumerated()), id: \.offset) { pairIndex, _ in
                 HStack(spacing: AppSpace.extraSmall) {
-                    TextField("key", text: Binding(
-                        get: { steps[stepIndex].paramPairs[pairIndex].key },
-                        set: { steps[stepIndex].paramPairs[pairIndex].key = $0 }
-                    ))
+                    TextField(
+                        "key",
+                        text: Binding(
+                            get: { steps[stepIndex].paramPairs[pairIndex].key },
+                            set: { steps[stepIndex].paramPairs[pairIndex].key = $0 }
+                        )
+                    )
                     .textFieldStyle(.plain)
                     .font(.system(size: 11, design: .monospaced))
                     .frame(width: 80)
@@ -671,10 +720,13 @@ struct WorkflowEditorView: View {
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(TextGrade.ghost)
 
-                    TextField("value", text: Binding(
-                        get: { steps[stepIndex].paramPairs[pairIndex].value },
-                        set: { steps[stepIndex].paramPairs[pairIndex].value = $0 }
-                    ))
+                    TextField(
+                        "value",
+                        text: Binding(
+                            get: { steps[stepIndex].paramPairs[pairIndex].value },
+                            set: { steps[stepIndex].paramPairs[pairIndex].value = $0 }
+                        )
+                    )
                     .textFieldStyle(.plain)
                     .font(.system(size: 11, design: .monospaced))
 
@@ -940,11 +992,12 @@ enum DAGLayout {
                 // Next two steps are branches (success / failure) if available
                 let branchCount = min(2, steps.count - index - 1)
                 for branchIndex in 0..<branchCount {
-                    result.append(DAGLayoutPosition(
-                        id: steps[index + 1 + branchIndex].id,
-                        col: branchIndex * 2,
-                        row: row
-                    ))
+                    result.append(
+                        DAGLayoutPosition(
+                            id: steps[index + 1 + branchIndex].id,
+                            col: branchIndex * 2,
+                            row: row
+                        ))
                 }
                 index += 1 + branchCount
                 row += 1
@@ -972,9 +1025,10 @@ struct StepDropDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         guard let dragged = draggedStep,
-              dragged.id != targetStep.id,
-              let fromIndex = steps.firstIndex(where: { $0.id == dragged.id }),
-              let toIndex = steps.firstIndex(where: { $0.id == targetStep.id }) else { return }
+            dragged.id != targetStep.id,
+            let fromIndex = steps.firstIndex(where: { $0.id == dragged.id }),
+            let toIndex = steps.firstIndex(where: { $0.id == targetStep.id })
+        else { return }
         withAnimation(AppAnimation.quick) {
             steps.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
         }
@@ -1057,12 +1111,13 @@ struct ParamEditorSheet: View {
                 Spacer()
                 Button {
                     guard !newKey.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                    params.append(WorkflowParam(
-                        key: newKey.trimmingCharacters(in: .whitespaces),
-                        label: newLabel.isEmpty ? newKey : newLabel,
-                        kind: newKind,
-                        required: newRequired
-                    ))
+                    params.append(
+                        WorkflowParam(
+                            key: newKey.trimmingCharacters(in: .whitespaces),
+                            label: newLabel.isEmpty ? newKey : newLabel,
+                            kind: newKind,
+                            required: newRequired
+                        ))
                     newKey = ""
                     newLabel = ""
                 } label: {
@@ -1076,7 +1131,9 @@ struct ParamEditorSheet: View {
                 }
                 .buttonStyle(.plain)
 
-                Button { dismiss() } label: {
+                Button {
+                    dismiss()
+                } label: {
                     Text("完成")
                         .font(AppFont.captionMedium)
                         .foregroundStyle(.white)

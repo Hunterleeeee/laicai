@@ -44,7 +44,7 @@ public final class SelfImprovementEngine: Sendable {
             environment["HARNESS_ROOT"],
             findAncestor(named: "native-macos", from: FileManager.default.currentDirectoryPath),
             findAncestor(named: "native-macos", from: Bundle.main.bundleURL.path),
-            findAncestor(named: "native-macos", from: CommandLine.arguments.first ?? "")
+            findAncestor(named: "native-macos", from: CommandLine.arguments.first ?? ""),
         ].compactMap { $0 }
 
         for candidate in candidates {
@@ -151,10 +151,12 @@ public final class SelfImprovementEngine: Sendable {
                 return Diagnosis(
                     category: .highToolFailure,
                     severity: .warning,
-                    description: "工具 \(toolStat.toolName) 失败率 \(Int(failRate * 100))%（\(toolStat.total - toolStat.successes)/\(toolStat.total)）",
+                    description:
+                        "工具 \(toolStat.toolName) 失败率 \(Int(failRate * 100))%（\(toolStat.total - toolStat.successes)/\(toolStat.total)）",
                     evidence: "Tool: \(toolStat.toolName), Total: \(toolStat.total), Successes: \(toolStat.successes)",
                     suggestedFiles: ["ToolEngine.swift", "AgentLoop.swift"],
-                    improvementPrompt: buildImprovementPrompt(for: .highToolFailure, evidence: "Tool \(toolStat.toolName) fail rate \(Int(failRate * 100))%")
+                    improvementPrompt: buildImprovementPrompt(
+                        for: .highToolFailure, evidence: "Tool \(toolStat.toolName) fail rate \(Int(failRate * 100))%")
                 )
             }
         }
@@ -169,7 +171,8 @@ public final class SelfImprovementEngine: Sendable {
                     description: "失败模式「\(pattern.rootCause)」出现 \(pattern.frequency) 次，从未成功修复",
                     evidence: "Intent: \(pattern.intent), Tools: \(pattern.triggerTools), Instruction: \(pattern.preemptiveInstruction)",
                     suggestedFiles: ["AgentLoop.swift", "FailurePatternDB.swift"],
-                    improvementPrompt: buildImprovementPrompt(for: .repeatedPattern, evidence: "Pattern: \(pattern.rootCause), freq: \(pattern.frequency)")
+                    improvementPrompt: buildImprovementPrompt(
+                        for: .repeatedPattern, evidence: "Pattern: \(pattern.rootCause), freq: \(pattern.frequency)")
                 )
             }
         }
@@ -294,7 +297,8 @@ public final class SelfImprovementEngine: Sendable {
         if !history.isEmpty {
             prompt += "\n## 历史修复（避免重复）\n"
             for historyItem in history {
-                prompt += "- [\(historyItem.buildSuccess ? "成功" : "失败")] \(historyItem.category): \(historyItem.description) → \(historyItem.filesChanged)\n"
+                prompt +=
+                    "- [\(historyItem.buildSuccess ? "成功" : "失败")] \(historyItem.category): \(historyItem.description) → \(historyItem.filesChanged)\n"
             }
         }
 
@@ -382,21 +386,15 @@ public final class SelfImprovementEngine: Sendable {
 
     /// Attempt to build the project. Returns (success, output).
     public func buildProject() -> (success: Bool, output: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [buildScript]
-        process.currentDirectoryURL = URL(fileURLWithPath: nativeMacosRoot)
-        let pipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = errPipe
         do {
-            try process.run()
-            process.waitUntilExit()
-            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let errOutput = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let combined = output + errOutput
-            return (process.terminationStatus == 0, combined)
+            let result = try ProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: [buildScript],
+                currentDirectoryURL: URL(fileURLWithPath: nativeMacosRoot),
+                timeout: 600
+            )
+            let combined = result.stdoutString + result.stderrString
+            return (result.exitCode == 0 && !result.timedOut, combined)
         } catch {
             return (false, error.localizedDescription)
         }
@@ -408,14 +406,12 @@ public final class SelfImprovementEngine: Sendable {
             LaicaiLog.warning("Self-improvement rollback skipped; set LAICAI_ALLOW_DESTRUCTIVE_ROLLBACK=1 to enable git reset --hard.")
             return
         }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "reset", "--hard", "HEAD~1"]
-        process.currentDirectoryURL = URL(fileURLWithPath: harnessRoot)
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        try? process.run()
-        process.waitUntilExit()
+        _ = try? ProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+            arguments: ["git", "reset", "--hard", "HEAD~1"],
+            currentDirectoryURL: URL(fileURLWithPath: harnessRoot),
+            timeout: 60
+        )
     }
 
     /// Restart the app by quitting and reopening.
@@ -457,10 +453,8 @@ public final class SelfImprovementEngine: Sendable {
     }
 
     private static func openDatabase() -> OpaquePointer? {
-        let baseDir = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true).first ?? NSTemporaryDirectory()
-        let dir = (baseDir as NSString).appendingPathComponent("Laicai")
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        let path = dir + "/self_improvement.sqlite3"
+        let directory = LaicaiStoragePaths.ensureDirectory(LaicaiStoragePaths.appDirectory)
+        let path = directory.appendingPathComponent("self_improvement.sqlite3").path
         var database: OpaquePointer?
         guard sqlite3_open(path, &database) == SQLITE_OK else { return nil }
         sqlite3_exec(
@@ -489,15 +483,16 @@ public final class SelfImprovementEngine: Sendable {
     ) {
         database.withValue { database in
             guard let database else { return }
-            let sql = "INSERT INTO improvements (category, description, files_changed, build_success, commit_hash, created_at) VALUES (?, ?, ?, ?, ?, ?);"
+            let sql =
+                "INSERT INTO improvements (category, description, files_changed, build_success, commit_hash, created_at) VALUES (?, ?, ?, ?, ?, ?);"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-            sqlite3_bind_text_safe(stmt, 1, category)
-            sqlite3_bind_text_safe(stmt, 2, description)
-            sqlite3_bind_text_safe(stmt, 3, filesChanged.joined(separator: ","))
+            sqlite3BindTextSafe(stmt, 1, category)
+            sqlite3BindTextSafe(stmt, 2, description)
+            sqlite3BindTextSafe(stmt, 3, filesChanged.joined(separator: ","))
             sqlite3_bind_int(stmt, 4, buildSuccess ? 1 : 0)
             if let hash = commitHash {
-                sqlite3_bind_text_safe(stmt, 5, hash)
+                sqlite3BindTextSafe(stmt, 5, hash)
             } else {
                 sqlite3_bind_null(stmt, 5)
             }
@@ -543,7 +538,7 @@ public final class SelfImprovementEngine: Sendable {
                 "total=\(row.total)",
                 "completed=\(row.completed)",
                 "cancelled=\(row.cancelled)",
-                "avgIter=\(String(format: "%.1f", row.avgIterations))"
+                "avgIter=\(String(format: "%.1f", row.avgIterations))",
             ].joined(separator: " ")
         }.joined(separator: "\n")
     }

@@ -96,16 +96,17 @@ extension AgentLoop {
             result: toolResult,
             limit: request.maxTokens
         )
-        let instruction = toolResult.success
+        let instruction =
+            toolResult.success
             ? "我已直接提取用户提供的表格/文档。请基于真实提取结果继续推进当前会话目标；如果用户要求整理到 Wiki，必须调用 wiki_build(save=true) 保存笔记。"
             : "我尝试提取用户提供的表格/文档但失败。请明确说明失败原因，不能编造文件内容。"
         return ChatMessage(
             role: "user",
             content: """
-            \(instruction)
+                \(instruction)
 
-            \(resultContent)
-            """
+                \(resultContent)
+                """
         )
     }
 
@@ -154,9 +155,9 @@ extension AgentLoop {
         )
         return """
 
-        自动读取的首个高相关文件片段（\(path)）：
-        \(readContent)
-        """
+            自动读取的首个高相关文件片段（\(path)）：
+            \(readContent)
+            """
     }
 
     static func shouldBootstrapExtract(path: String) -> Bool {

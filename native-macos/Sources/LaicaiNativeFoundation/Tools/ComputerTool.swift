@@ -1,5 +1,5 @@
-import Foundation
 import AppKit
+import Foundation
 import LaicaiNativeDomain
 
 private struct ComputerToolParams: Decodable {
@@ -59,7 +59,7 @@ public struct ComputerTool: LaicaiTool {
                     "x": FunctionProperty(type: "integer", description: "屏幕 X 坐标（click/right_click/double_click/drag 起点）"),
                     "y": FunctionProperty(type: "integer", description: "屏幕 Y 坐标（click/right_click/double_click/drag 起点）"),
                     "toX": FunctionProperty(type: "integer", description: "drag 终点 X 坐标"),
-                    "toY": FunctionProperty(type: "integer", description: "drag 终点 Y 坐标")
+                    "toY": FunctionProperty(type: "integer", description: "drag 终点 Y 坐标"),
                 ],
                 required: ["action"]
             )
@@ -232,7 +232,7 @@ public struct ComputerTool: LaicaiTool {
     private static let supportedActionsDescription = [
         "open_app", "open_url", "keystroke", "type_text", "click", "right_click", "double_click", "drag",
         "screenshot", "clipboard_read", "clipboard_write", "frontmost", "windows", "system_info", "notify",
-        "applescript"
+        "applescript",
     ].joined(separator: " / ")
 
     private func unknownActionResult(_ action: String) -> ToolResult {
@@ -281,12 +281,13 @@ public struct ComputerTool: LaicaiTool {
             "feishu": "com.bytedance.lark",
             "飞书": "com.bytedance.lark",
             "dingtalk": "com.alibaba.DingTalkMac",
-            "钉钉": "com.alibaba.DingTalkMac"
+            "钉钉": "com.alibaba.DingTalkMac",
         ]
 
         let lowerName = name.lowercased()
         if let bundleID = knownBundleIDs[lowerName],
-           let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+        {
             do {
                 try await NSWorkspace.shared.openApplication(at: appURL, configuration: config)
                 return ToolResult(output: "已打开：\(name)")
@@ -344,8 +345,9 @@ public struct ComputerTool: LaicaiTool {
         }
 
         guard let source = CGEventSource(stateID: .hidSystemState),
-              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+            let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+            let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+        else {
             return ToolResult(output: "无法创建键盘事件", success: false, error: "event_failed")
         }
 
@@ -366,8 +368,9 @@ public struct ComputerTool: LaicaiTool {
 
         // Cmd+V
         guard let source = CGEventSource(stateID: .hidSystemState),
-              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),  // V key
-              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
+            let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),  // V key
+            let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
+        else {
             // Restore clipboard before returning on failure
             snapshot.restore(to: pasteboard)
             return ToolResult(output: "无法模拟粘贴", success: false, error: "event_failed")
@@ -387,8 +390,9 @@ public struct ComputerTool: LaicaiTool {
 
     private func simulateClick(at point: CGPoint) -> ToolResult {
         guard let source = CGEventSource(stateID: .hidSystemState),
-              let mouseDown = makeMouseEvent(source: source, type: .leftMouseDown, point: point, button: .left),
-              let mouseUp = makeMouseEvent(source: source, type: .leftMouseUp, point: point, button: .left) else {
+            let mouseDown = makeMouseEvent(source: source, type: .leftMouseDown, point: point, button: .left),
+            let mouseUp = makeMouseEvent(source: source, type: .leftMouseUp, point: point, button: .left)
+        else {
             return ToolResult(output: "无法创建鼠标事件", success: false, error: "event_failed")
         }
 
@@ -400,8 +404,9 @@ public struct ComputerTool: LaicaiTool {
 
     private func simulateRightClick(at point: CGPoint) -> ToolResult {
         guard let source = CGEventSource(stateID: .hidSystemState),
-              let mouseDown = makeMouseEvent(source: source, type: .rightMouseDown, point: point, button: .right),
-              let mouseUp = makeMouseEvent(source: source, type: .rightMouseUp, point: point, button: .right) else {
+            let mouseDown = makeMouseEvent(source: source, type: .rightMouseDown, point: point, button: .right),
+            let mouseUp = makeMouseEvent(source: source, type: .rightMouseUp, point: point, button: .right)
+        else {
             return ToolResult(output: "无法创建鼠标事件", success: false, error: "event_failed")
         }
         mouseDown.post(tap: .cghidEventTap)
@@ -411,10 +416,11 @@ public struct ComputerTool: LaicaiTool {
 
     private func simulateDoubleClick(at point: CGPoint) -> ToolResult {
         guard let source = CGEventSource(stateID: .hidSystemState),
-              let down1 = makeMouseEvent(source: source, type: .leftMouseDown, point: point, button: .left),
-              let up1 = makeMouseEvent(source: source, type: .leftMouseUp, point: point, button: .left),
-              let down2 = makeMouseEvent(source: source, type: .leftMouseDown, point: point, button: .left),
-              let up2 = makeMouseEvent(source: source, type: .leftMouseUp, point: point, button: .left) else {
+            let down1 = makeMouseEvent(source: source, type: .leftMouseDown, point: point, button: .left),
+            let up1 = makeMouseEvent(source: source, type: .leftMouseUp, point: point, button: .left),
+            let down2 = makeMouseEvent(source: source, type: .leftMouseDown, point: point, button: .left),
+            let up2 = makeMouseEvent(source: source, type: .leftMouseUp, point: point, button: .left)
+        else {
             return ToolResult(output: "无法创建鼠标事件", success: false, error: "event_failed")
         }
         down1.setIntegerValueField(.mouseEventClickState, value: 1)
@@ -430,9 +436,10 @@ public struct ComputerTool: LaicaiTool {
 
     private func simulateDrag(from startPoint: CGPoint, to targetPoint: CGPoint) async -> ToolResult {
         guard let source = CGEventSource(stateID: .hidSystemState),
-              let mouseDown = makeMouseEvent(source: source, type: .leftMouseDown, point: startPoint, button: .left),
-              let mouseDrag = makeMouseEvent(source: source, type: .leftMouseDragged, point: targetPoint, button: .left),
-              let mouseUp = makeMouseEvent(source: source, type: .leftMouseUp, point: targetPoint, button: .left) else {
+            let mouseDown = makeMouseEvent(source: source, type: .leftMouseDown, point: startPoint, button: .left),
+            let mouseDrag = makeMouseEvent(source: source, type: .leftMouseDragged, point: targetPoint, button: .left),
+            let mouseUp = makeMouseEvent(source: source, type: .leftMouseUp, point: targetPoint, button: .left)
+        else {
             return ToolResult(output: "无法创建鼠标事件", success: false, error: "event_failed")
         }
         mouseDown.post(tap: .cghidEventTap)
@@ -526,10 +533,12 @@ public struct ComputerTool: LaicaiTool {
     }
 
     private func listWindows() -> ToolResult {
-        guard let windowList = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
-            kCGNullWindowID
-        ) as? [[String: Any]] else {
+        guard
+            let windowList = CGWindowListCopyWindowInfo(
+                [.optionOnScreenOnly, .excludeDesktopElements],
+                kCGNullWindowID
+            ) as? [[String: Any]]
+        else {
             return ToolResult(output: "无法获取窗口列表", success: false, error: "failed")
         }
 
@@ -574,7 +583,8 @@ public struct ComputerTool: LaicaiTool {
         // Battery
         let batteryScript = "do shell script \"pmset -g batt | grep -o '[0-9]*%'\""
         if let result = NSAppleScript(source: batteryScript)?.executeAndReturnError(nil),
-           let battery = result.stringValue {
+            let battery = result.stringValue
+        {
             lines.append("电量：\(battery)")
         }
 
@@ -583,8 +593,8 @@ public struct ComputerTool: LaicaiTool {
 
     private func sendNotification(_ text: String) -> ToolResult {
         let script = """
-        display notification "\(text.replacingOccurrences(of: "\"", with: "\\\""))" with title "Laicai" sound name "default"
-        """
+            display notification "\(text.replacingOccurrences(of: "\"", with: "\\\""))" with title "Laicai" sound name "default"
+            """
         var error: NSDictionary?
         NSAppleScript(source: script)?.executeAndReturnError(&error)
         if let error {
@@ -617,38 +627,54 @@ public struct ComputerTool: LaicaiTool {
             ("g", 5), ("h", 4), ("i", 34), ("j", 38), ("k", 40), ("l", 37),
             ("m", 46), ("n", 45), ("o", 31), ("p", 35), ("q", 12), ("r", 15),
             ("s", 1), ("t", 17), ("u", 32), ("v", 9), ("w", 13), ("x", 7),
-            ("y", 16), ("z", 6)
+            ("y", 16), ("z", 6),
         ]
         for (key, code) in letters { map[key] = code }
         // Numbers
         let numbers: [(String, CGKeyCode)] = [
             ("0", 29), ("1", 18), ("2", 19), ("3", 20), ("4", 21),
-            ("5", 23), ("6", 22), ("7", 26), ("8", 28), ("9", 25)
+            ("5", 23), ("6", 22), ("7", 26), ("8", 28), ("9", 25),
         ]
         for (key, code) in numbers { map[key] = code }
         // Special keys
-        map["return"] = 36; map["enter"] = 36
+        map["return"] = 36
+        map["enter"] = 36
         map["tab"] = 48
         map["space"] = 49
-        map["delete"] = 51; map["backspace"] = 51
-        map["escape"] = 53; map["esc"] = 53
-        map["up"] = 126; map["down"] = 125; map["left"] = 123; map["right"] = 124
-        map["home"] = 115; map["end"] = 119
-        map["pageup"] = 116; map["pagedown"] = 121
+        map["delete"] = 51
+        map["backspace"] = 51
+        map["escape"] = 53
+        map["esc"] = 53
+        map["up"] = 126
+        map["down"] = 125
+        map["left"] = 123
+        map["right"] = 124
+        map["home"] = 115
+        map["end"] = 119
+        map["pageup"] = 116
+        map["pagedown"] = 121
         // Function keys
         for functionIndex in 1...12 {
             let codes: [CGKeyCode] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111]
             map["f\(functionIndex)"] = codes[functionIndex - 1]
         }
         // Punctuation
-        map["-"] = 27; map["="] = 24; map["["] = 33; map["]"] = 30
-        map[";"] = 41; map["'"] = 39; map[","] = 43; map["."] = 47
-        map["/"] = 44; map["\\"] = 42; map["`"] = 50
+        map["-"] = 27
+        map["="] = 24
+        map["["] = 33
+        map["]"] = 30
+        map[";"] = 41
+        map["'"] = 39
+        map[","] = 43
+        map["."] = 47
+        map["/"] = 44
+        map["\\"] = 42
+        map["`"] = 50
         return map
     }()
 
     private static let supportedKeyDescription = [
         "a-z", "0-9", "return", "space", "tab", "escape", "delete",
-        "up/down/left/right", "f1-f12"
+        "up/down/left/right", "f1-f12",
     ].joined(separator: ", ")
 }

@@ -217,7 +217,8 @@ public final class SessionTeleport: ObservableObject {
         let timestamp = formatter.string(from: Date())
         let name = workspaceName.isEmpty ? "laicai" : workspaceName
         let filename = "\(name)-\(timestamp).\(fileExtension)"
-        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+        let desktop =
+            FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return desktop.appendingPathComponent(filename)
     }

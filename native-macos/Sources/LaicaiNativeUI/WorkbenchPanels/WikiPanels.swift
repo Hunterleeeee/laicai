@@ -92,14 +92,19 @@ struct WikiPanel: View {
 
             HStack(spacing: AppSpace.extraSmall) {
                 wikiStat(icon: "doc.text", value: "\(vaultNotes.count)", label: "文档", tint: Brand.primary)
-                wikiStat(icon: useWeb ? "globe" : "network.slash", value: useWeb ? "开" : "关", label: "联网", tint: useWeb ? Brand.teal : TextGrade.ghost)
+                wikiStat(
+                    icon: useWeb ? "globe" : "network.slash", value: useWeb ? "开" : "关", label: "联网",
+                    tint: useWeb ? Brand.teal : TextGrade.ghost)
                 wikiStat(icon: "folder", value: vaultLabel, label: "位置", tint: Brand.purple)
             }
         }
         .padding(AppSpace.large)
         .background(
             RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .fill(LinearGradient(colors: [SurfaceGrade.card, SurfaceGrade.elevated.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .fill(
+                    LinearGradient(
+                        colors: [SurfaceGrade.card, SurfaceGrade.elevated.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
         )
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)

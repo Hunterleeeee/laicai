@@ -72,10 +72,10 @@ public enum PipelineStepStatus: String, Codable, Sendable {
 
 /// How to transform the previous step's output into the next step's input
 public enum InputTransform: Codable, Sendable {
-    case passthrough          // Use previous output as-is
-    case template(String)     // Template with {{input}} placeholder
-    case jsonPath(String)     // Extract field from JSON output
-    case lineByLine           // Split into lines for batch processing
+    case passthrough  // Use previous output as-is
+    case template(String)  // Template with {{input}} placeholder
+    case jsonPath(String)  // Extract field from JSON output
+    case lineByLine  // Split into lines for batch processing
 
     private enum CodingKeys: String, CodingKey { case type, value }
 
@@ -144,8 +144,10 @@ public struct PipelineParser {
 
         let text = String(input[match])
         let colonIndex = text.firstIndex(of: ":")!
-        let glob = String(text[text.index(text.startIndex, offsetBy: text.range(of: " in ")!.upperBound.utf16Offset(in: text))..<colonIndex])
-            .trimmingCharacters(in: .whitespaces)
+        let glob = String(
+            text[text.index(text.startIndex, offsetBy: text.range(of: " in ")!.upperBound.utf16Offset(in: text))..<colonIndex]
+        )
+        .trimmingCharacters(in: .whitespaces)
         let message = String(text[text.index(after: colonIndex)...]).trimmingCharacters(in: .whitespaces)
 
         let step = PipelineStep(
@@ -244,7 +246,8 @@ public final class SkillCompositionEngine: ObservableObject {
             if transformedInput.isEmpty {
                 message = pipe.steps[stepIdx].message
             } else {
-                message = pipe.steps[stepIdx].message.isEmpty
+                message =
+                    pipe.steps[stepIdx].message.isEmpty
                     ? transformedInput
                     : "\(pipe.steps[stepIdx].message)\n\n上一步输出：\n\(transformedInput)"
             }
@@ -290,12 +293,13 @@ public final class SkillCompositionEngine: ObservableObject {
         case .jsonPath(let path):
             // Simple top-level key extraction
             guard let data = input.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let value = json[path] else { return input }
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let value = json[path]
+            else { return input }
             if let str = value as? String { return str }
             return "\(value)"
         case .lineByLine:
-            return input // Handled at batch level
+            return input  // Handled at batch level
         }
     }
 
@@ -319,7 +323,7 @@ public struct WorkflowChain: Codable, Sendable, Identifiable {
     public let id: UUID
     public var name: String
     public var workflowNames: [String]
-    public var paramMapping: [String: String] // "workflow2.input" -> "workflow1.output"
+    public var paramMapping: [String: String]  // "workflow2.input" -> "workflow1.output"
 
     public init(name: String, workflowNames: [String], paramMapping: [String: String] = [:]) {
         self.id = UUID()
@@ -341,7 +345,8 @@ public final class WorkflowChainRegistry: ObservableObject {
     public func load(workspaceRoot: String) {
         let path = (workspaceRoot as NSString).appendingPathComponent(".laicai/chains.json")
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              let decoded = try? JSONDecoder().decode([WorkflowChain].self, from: data) else { return }
+            let decoded = try? JSONDecoder().decode([WorkflowChain].self, from: data)
+        else { return }
         chains = decoded
     }
 

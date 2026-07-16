@@ -244,7 +244,8 @@ extension AppStore {
     private static func initialMultiAgentSteps(message: String, plan: MultiAgentPlan) -> [TaskStep] {
         let roles = plan.agents.map { $0.role.title }.joined(separator: "、")
         let suffix = roles.isEmpty ? plan.title : roles
-        let statusText = plan.isEditable
+        let statusText =
+            plan.isEditable
             ? "多会话协同已创建，等待确认：\(suffix)。"
             : "多会话协同已创建：\(suffix)。"
         return [
@@ -255,7 +256,7 @@ extension AppStore {
                 isCollapsible: true,
                 isCollapsed: true,
                 agentRole: .planner
-            )
+            ),
         ]
     }
 

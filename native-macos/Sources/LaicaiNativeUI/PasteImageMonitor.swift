@@ -15,9 +15,10 @@ final class PasteImageMonitor {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard flags.contains(.command),
-                  !flags.contains(.shift),
-                  !flags.contains(.control),
-                  event.charactersIgnoringModifiers == "v" else { return event }
+                !flags.contains(.shift),
+                !flags.contains(.control),
+                event.charactersIgnoringModifiers == "v"
+            else { return event }
 
             let pasteboard = NSPasteboard.general
             guard let pngData = extractPNG(from: pasteboard) else { return event }
@@ -41,13 +42,19 @@ final class PasteImageMonitor {
         if let data = pasteboard.data(forType: .png), !data.isEmpty { return data }
         // 2) TIFF → PNG
         if let tiffData = pasteboard.data(forType: .tiff), !tiffData.isEmpty,
-           let rep = NSBitmapImageRep(data: tiffData),
-           let png = rep.representation(using: .png, properties: [:]) { return png }
+            let rep = NSBitmapImageRep(data: tiffData),
+            let png = rep.representation(using: .png, properties: [:])
+        {
+            return png
+        }
         // 3) NSImage(pasteboard:) — catches ALL formats (JPEG, HEIC, WebP, etc.)
         if let image = NSImage(pasteboard: pasteboard),
-           let tiffData = image.tiffRepresentation,
-           let rep = NSBitmapImageRep(data: tiffData),
-           let png = rep.representation(using: .png, properties: [:]) { return png }
+            let tiffData = image.tiffRepresentation,
+            let rep = NSBitmapImageRep(data: tiffData),
+            let png = rep.representation(using: .png, properties: [:])
+        {
+            return png
+        }
         return nil
     }
 }

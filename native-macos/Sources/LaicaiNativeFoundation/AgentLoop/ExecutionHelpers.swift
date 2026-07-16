@@ -10,7 +10,8 @@ extension AgentLoop {
 
     static func displayParamsFromJSON(_ json: String) -> [String: String] {
         guard let data = json.data(using: .utf8),
-              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             return [:]
         }
         return dict.mapValues { value in
@@ -32,7 +33,7 @@ extension AgentLoop {
             params["outputPath"],
             params["pdfPath"],
             params["query"],
-            params["command"]
+            params["command"],
         ]
         return candidates.compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty } ?? "unknown"
@@ -77,13 +78,15 @@ extension AgentLoop {
 
     func hydrateRuntimeContract(from context: TaskContext, into task: inout AgentTask) {
         if let protocolJSON = context.metadata["taskProtocolJSON"],
-           let data = protocolJSON.data(using: .utf8),
-           let taskProtocol = try? JSONDecoder().decode(AgentTaskProtocol.self, from: data) {
+            let data = protocolJSON.data(using: .utf8),
+            let taskProtocol = try? JSONDecoder().decode(AgentTaskProtocol.self, from: data)
+        {
             task.taskProtocol = taskProtocol
         }
         if let ledgerJSON = context.metadata["executionLedgerJSON"],
-           let data = ledgerJSON.data(using: .utf8),
-           var ledger = try? JSONDecoder().decode(AgentExecutionLedger.self, from: data) {
+            let data = ledgerJSON.data(using: .utf8),
+            var ledger = try? JSONDecoder().decode(AgentExecutionLedger.self, from: data)
+        {
             ledger.transition(to: .gatheringEvidence, reason: "AgentLoop 开始运行")
             task.executionLedger = ledger
         }
@@ -163,7 +166,7 @@ extension AgentLoop {
     private enum ToolExclusivity {
         case notExclusive
         case fileExclusive(String)  // exclusive per-file path
-        case fullyExclusive         // must run alone
+        case fullyExclusive  // must run alone
     }
 
     private static func toolExclusivity(toolName: String, params: [String: String]) -> ToolExclusivity {

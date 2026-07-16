@@ -28,7 +28,8 @@ public enum TaskMemoryStore {
     /// Build a keyword to file paths index from file summaries for fast retrieval.
     public static func buildKeywordIndex(from memory: TaskMemory) -> [String: [String]] {
         var index: [String: [String]] = [:]
-        let stopWords: Set<String> = ["the", "a", "an", "is", "are", "was", "were", "be", "been",
+        let stopWords: Set<String> = [
+            "the", "a", "an", "is", "are", "was", "were", "be", "been",
             "being", "have", "has", "had", "do", "does", "did", "will", "would", "could",
             "should", "may", "might", "shall", "can", "need", "dare", "ought", "used",
             "to", "of", "in", "for", "on", "with", "at", "by", "from", "as", "into",
@@ -40,7 +41,8 @@ public enum TaskMemoryStore {
             "if", "when", "where", "how", "what", "which", "who", "this", "that",
             "these", "those", "的", "了", "在", "是", "我", "有", "和", "就", "不",
             "人", "都", "一", "一个", "上", "也", "很", "到", "说", "要", "去", "你",
-            "会", "着", "没有", "看", "好", "自己", "这"]
+            "会", "着", "没有", "看", "好", "自己", "这",
+        ]
 
         for (filePath, summary) in memory.fileSummaries {
             let words = summary.lowercased()
@@ -101,7 +103,8 @@ public enum TaskMemoryStore {
 
         var history: [HistoryEntry] = []
         if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-           let decoded = try? JSONDecoder().decode([HistoryEntry].self, from: data) {
+            let decoded = try? JSONDecoder().decode([HistoryEntry].self, from: data)
+        {
             history = decoded
         }
 
@@ -125,7 +128,8 @@ public enum TaskMemoryStore {
         guard !root.isEmpty else { return [] }
         let path = (root as NSString).appendingPathComponent(historyFileName)
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              let history = try? JSONDecoder().decode([HistoryEntry].self, from: data) else {
+            let history = try? JSONDecoder().decode([HistoryEntry].self, from: data)
+        else {
             return []
         }
         return history.map {
@@ -167,7 +171,8 @@ public enum TaskMemoryStore {
         guard !root.isEmpty else { return TaskMemory() }
         let path = (root as NSString).appendingPathComponent(fileName)
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              let memory = try? JSONDecoder().decode(TaskMemory.self, from: data) else {
+            let memory = try? JSONDecoder().decode(TaskMemory.self, from: data)
+        else {
             return TaskMemory()
         }
         if let updated = memory.updatedAt, Date().timeIntervalSince(updated) > 7 * 86400 {

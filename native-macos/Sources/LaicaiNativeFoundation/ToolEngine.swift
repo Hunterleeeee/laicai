@@ -23,15 +23,15 @@ public final class ToolRegistry {
         register(WikiBuildTool())
         register(GitTool())
         register(ComfyUITool())
-        register(LSPTool())         // G3: LSP go-to-definition / find-references
-        register(DiffApplyTool())   // G11: Unified diff apply
-        register(SkillManageTool()) // Agent self-creates/updates/deletes skills
-        register(BrowserTool())     // Browser control: navigate, extract, screenshot, JS
-        register(MemoryTool())      // Cross-session memory: store, recall, search
-        register(PMAgentTool())     // Product Manager agent: PRD, user stories, competitive analysis
+        register(LSPTool())  // G3: LSP go-to-definition / find-references
+        register(DiffApplyTool())  // G11: Unified diff apply
+        register(SkillManageTool())  // Agent self-creates/updates/deletes skills
+        register(BrowserTool())  // Browser control: navigate, extract, screenshot, JS
+        register(MemoryTool())  // Cross-session memory: store, recall, search
+        register(PMAgentTool())  // Product Manager agent: PRD, user stories, competitive analysis
         #if !LAICAI_CLI
-        register(ComputerTool())    // macOS automation: open apps, keystrokes, clipboard, screenshots
-        register(RealBrowserTool()) // Real browser control: Safari/Chrome via AppleScript
+            register(ComputerTool())  // macOS automation: open apps, keystrokes, clipboard, screenshots
+            register(RealBrowserTool())  // Real browser control: Safari/Chrome via AppleScript
         #endif
     }
 
@@ -77,7 +77,7 @@ public enum ToolNameCodec {
         "diff_apply": "diff.apply",
         "pm_agent": "pm.agent",
         "browser_real": "browser.real",
-        "computer_tool": "computer"
+        "computer_tool": "computer",
     ]
 
     public static func apiName(_ name: String) -> String {

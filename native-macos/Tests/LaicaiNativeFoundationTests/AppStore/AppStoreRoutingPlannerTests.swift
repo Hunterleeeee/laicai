@@ -1,6 +1,7 @@
 import XCTest
-@testable import LaicaiNativeFoundation
+
 @testable import LaicaiNativeDomain
+@testable import LaicaiNativeFoundation
 
 @MainActor
 final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
@@ -20,7 +21,7 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
             "你能生成视频吗？",
             "你可以整理资料吗？",
             "是否支持联网搜索？",
-            "能不能创建图片？"
+            "能不能创建图片？",
         ]
 
         for prompt in prompts {
@@ -49,7 +50,7 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
             "设计个产品主图",
             "来个活动海报",
             "给这个品牌做个 logo",
-            "make a poster for Sprite"
+            "make a poster for Sprite",
         ]
 
         for prompt in prompts {
@@ -71,7 +72,7 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
     func testCreativePromptHelpStaysInChatMode() {
         let prompts = [
             "我想让Gemini作一首歌，带mv的，但是我不知道怎么描述prompt，你来帮我梳理一下",
-            "古风故事，男生，古风电子，电影感"
+            "古风故事，男生，古风电子，电影感",
         ]
 
         for prompt in prompts {
@@ -236,22 +237,23 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
         )
 
         XCTAssertEqual(taskProtocol.riskPolicy, .dangerous)
-        XCTAssertFalse(AgentLoop.meetsCompletionCriteria(
-            task: AgentTask(
-                title: "危险任务",
-                status: .completed,
-                steps: [
-                    TaskStep(kind: .userInput, text: message),
-                    TaskStep(kind: .textOutput, text: "完成")
-                ],
-                context: TaskContext(workspaceRoot: "/tmp/project"),
-                taskProtocol: taskProtocol
-            ),
-            intent: .task,
-            didComplete: true,
-            hadFailure: false,
-            wasTruncated: false
-        ))
+        XCTAssertFalse(
+            AgentLoop.meetsCompletionCriteria(
+                task: AgentTask(
+                    title: "危险任务",
+                    status: .completed,
+                    steps: [
+                        TaskStep(kind: .userInput, text: message),
+                        TaskStep(kind: .textOutput, text: "完成"),
+                    ],
+                    context: TaskContext(workspaceRoot: "/tmp/project"),
+                    taskProtocol: taskProtocol
+                ),
+                intent: .task,
+                didComplete: true,
+                hadFailure: false,
+                wasTruncated: false
+            ))
     }
     func testWorkflowRequestsRouteBySemanticGoal() {
         let decision = IntentRouter.plan("帮我审查一下这次改动")

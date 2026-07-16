@@ -56,12 +56,14 @@ extension AppStore {
     }
 
     nonisolated static func errorProgressSummary(steps: [TaskStep]) -> String {
-        let filesRead = Set(steps
-            .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
-            .compactMap { $0.toolParams?["path"] })
-        let filesWritten = Set(steps
-            .filter { $0.kind == .reviewRequest && $0.approved == true }
-            .compactMap(\.diffFilePath))
+        let filesRead = Set(
+            steps
+                .filter { $0.kind == .toolResult && $0.toolName == "file.read" && !$0.isFailure }
+                .compactMap { $0.toolParams?["path"] })
+        let filesWritten = Set(
+            steps
+                .filter { $0.kind == .reviewRequest && $0.approved == true }
+                .compactMap(\.diffFilePath))
         let toolCalls = steps.filter { $0.kind == .toolCall }.count
         let searches = steps.filter { $0.kind == .toolCall && ($0.toolName == "code.search" || $0.toolName == "web.search") }.count
 

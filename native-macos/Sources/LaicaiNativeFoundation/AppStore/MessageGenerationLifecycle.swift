@@ -9,7 +9,8 @@ extension AppStore {
 
     func pendingFollowUp(for targetTaskID: UUID) -> String? {
         if let thread = state.threads.first(where: { $0.id == targetTaskID }),
-           let pending = trimmedPendingFollowUp(thread.executionLedger?.pendingFollowUp) {
+            let pending = trimmedPendingFollowUp(thread.executionLedger?.pendingFollowUp)
+        {
             return pending
         }
         guard targetTaskID == state.selectedThreadID else { return nil }

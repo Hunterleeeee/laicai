@@ -677,7 +677,9 @@ struct OrchestrationHealthSection: View {
                     }
                     if stats.circuitBroken > 0 {
                         Divider().opacity(0.3)
-                        statRow(icon: "bolt.trianglebadge.exclamationmark", label: "暂停重试", value: "\(stats.circuitBroken) 项", color: Semantic.error)
+                        statRow(
+                            icon: "bolt.trianglebadge.exclamationmark", label: "暂停重试", value: "\(stats.circuitBroken) 项",
+                            color: Semantic.error)
                     }
                     if stats.toolCalls > 0 {
                         successRateBar(stats: stats)

@@ -49,7 +49,10 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(task.status, .completed)
         XCTAssertTrue(task.steps.contains { $0.kind == .toolResult && $0.toolName == "shell.exec" && $0.isFailure })
         XCTAssertTrue(task.steps.contains { $0.kind == .toolCall && $0.toolName == "workspace.index" && $0.text.contains("自动恢复") })
-        XCTAssertTrue(task.steps.contains { $0.kind == .toolResult && $0.toolName == "workspace.index" && !$0.isFailure && $0.text.contains("自动恢复成功") })
+        XCTAssertTrue(
+            task.steps.contains {
+                $0.kind == .toolResult && $0.toolName == "workspace.index" && !$0.isFailure && $0.text.contains("自动恢复成功")
+            })
         XCTAssertTrue(
             runtime.requests.contains { request in
                 (request.messages ?? []).contains { $0.role == "user" && ($0.content ?? "").contains("自动恢复工具 workspace.index") }
@@ -88,7 +91,7 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             steps: [
                 TaskStep(kind: .userInput, text: "检查 UI 页面按钮是否正常"),
                 TaskStep(kind: .toolResult, text: "读取文件", toolName: "file.read", toolParams: ["path": "SidebarView.swift"]),
-                TaskStep(kind: .textOutput, text: "完成")
+                TaskStep(kind: .textOutput, text: "完成"),
             ],
             context: TaskContext(workspaceRoot: "/tmp")
         )
@@ -108,7 +111,7 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             steps: [
                 TaskStep(kind: .userInput, text: "检查 UI 页面按钮是否正常"),
                 TaskStep(kind: .toolResult, text: "截图已保存：/tmp/page.png", toolName: "browser", toolParams: ["action": "screenshot"]),
-                TaskStep(kind: .textOutput, text: "完成")
+                TaskStep(kind: .textOutput, text: "完成"),
             ],
             context: TaskContext(workspaceRoot: "/tmp")
         )
@@ -130,7 +133,7 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .userInput, text: "研究今天 AI 新闻"),
                 TaskStep(kind: .toolCall, text: "搜索", toolName: "web.search"),
                 TaskStep(kind: .toolResult, text: "搜索结果", toolName: "web.search"),
-                TaskStep(kind: .textOutput, text: "完成")
+                TaskStep(kind: .textOutput, text: "完成"),
             ]
         )
 
@@ -153,7 +156,7 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .toolResult, text: "搜索结果", toolName: "web.search"),
                 TaskStep(kind: .toolCall, text: "读取来源", toolName: "web.fetch"),
                 TaskStep(kind: .toolResult, text: "来源正文", toolName: "web.fetch"),
-                TaskStep(kind: .textOutput, text: "完成")
+                TaskStep(kind: .textOutput, text: "完成"),
             ]
         )
 
@@ -172,7 +175,7 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             status: .completed,
             steps: [
                 TaskStep(kind: .userInput, text: "看下项目结构"),
-                TaskStep(kind: .textOutput, text: "我已经完成了项目结构检查")
+                TaskStep(kind: .textOutput, text: "我已经完成了项目结构检查"),
             ],
             context: TaskContext(workspaceRoot: "/Users/test/project"),
             taskProtocol: AgentTaskProtocol(
@@ -207,7 +210,7 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
                 TaskStep(kind: .userInput, text: "读取 README"),
                 TaskStep(kind: .toolResult, text: "路径错误", toolName: "file.read", isFailure: true),
                 TaskStep(kind: .toolResult, text: "README 内容", toolName: "file.read", isFailure: false),
-                TaskStep(kind: .textOutput, text: "已基于 README 完成。")
+                TaskStep(kind: .textOutput, text: "已基于 README 完成。"),
             ],
             context: TaskContext(workspaceRoot: "/tmp")
         )
@@ -287,7 +290,7 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             [
                 "自动继续处理中（第 1 轮）…",
                 "自动继续处理中（第 2 轮）…",
-                "自动继续处理中（第 3 轮）…"
+                "自动继续处理中（第 3 轮）…",
             ])
         XCTAssertEqual(runtime.requests.count, 4)
         XCTAssertEqual(task.status, .failed)
@@ -373,7 +376,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "整理今天新闻",
             intent: .task,
-            connector: ConnectorProfile(name: "qwen", kind: "ollama", endpoint: "http://127.0.0.1:11434", modelName: "qwen", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "qwen", kind: "ollama", endpoint: "http://127.0.0.1:11434", modelName: "qwen", note: "", health: .ready),
             context: TaskContext(workspaceRoot: "/tmp")
         )
 
@@ -477,7 +481,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "找 README",
             intent: .task,
-            connector: ConnectorProfile(name: "Test", kind: "openai-compatible", endpoint: "http://localhost", modelName: "test", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "http://localhost", modelName: "test", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -492,7 +497,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         let task = try await loop.run(
             message: "整理今天新闻",
             intent: .task,
-            connector: ConnectorProfile(name: "qwen", kind: "ollama", endpoint: "http://127.0.0.1:11434", modelName: "qwen", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "qwen", kind: "ollama", endpoint: "http://127.0.0.1:11434", modelName: "qwen", note: "", health: .ready),
             context: TaskContext(workspaceRoot: "/tmp")
         )
 
@@ -515,7 +521,8 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
             message: "读 README",
             intent: .task,
             connector: ConnectorProfile(
-                name: "DeepSeek", kind: "openai-compatible", endpoint: "https://api.deepseek.com/v1", modelName: "deepseek-v4-pro", note: "", health: .ready),
+                name: "DeepSeek", kind: "openai-compatible", endpoint: "https://api.deepseek.com/v1", modelName: "deepseek-v4-pro",
+                note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
@@ -538,12 +545,14 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         _ = try await loop.run(
             message: "读 README",
             intent: .task,
-            connector: ConnectorProfile(name: "qwen", kind: "ollama", endpoint: "http://127.0.0.1:11434", modelName: "qwen", note: "", health: .ready),
+            connector: ConnectorProfile(
+                name: "qwen", kind: "ollama", endpoint: "http://127.0.0.1:11434", modelName: "qwen", note: "", health: .ready),
             context: TaskContext(workspaceRoot: workspace.path)
         )
 
         XCTAssertEqual(runtime.requests.count, 2)
-        XCTAssertTrue((runtime.requests[1].messages ?? []).contains { $0.role == "user" && ($0.content ?? "").contains("工具 file.read 执行结果") })
+        XCTAssertTrue(
+            (runtime.requests[1].messages ?? []).contains { $0.role == "user" && ($0.content ?? "").contains("工具 file.read 执行结果") })
         XCTAssertFalse((runtime.requests[1].messages ?? []).contains { $0.role == "tool" })
     }
 }

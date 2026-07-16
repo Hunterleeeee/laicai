@@ -16,7 +16,7 @@ extension AppStore {
             "怎么这么", "是不是", "有没有",
             "你确定", "真的吗", "对吗", "好了吗", "完事了吗",
             "卡住了吗", "出错了吗", "断了吗", "停了吗",
-            "你是什么", "你能", "你会", "现在能", "现在有"
+            "你是什么", "你能", "你会", "现在能", "现在有",
         ]
         if statusMarkers.contains(where: { normalized.contains($0) }) { return true }
         let actionVerbs = ["改", "写", "建", "做", "执行", "运行", "搜", "查", "读", "整理", "保存", "沉淀", "翻译", "重写"]
@@ -52,7 +52,7 @@ extension AppStore {
         let explicitReadOnlyMarkers = [
             "继续看", "接着看", "看看", "看下", "看一下", "分析", "诊断", "评估",
             "建议", "方案", "思路", "看法", "哪里", "为什么",
-            "先别改", "不要改", "别改", "不用改", "只分析", "只给建议", "不要执行", "先不执行"
+            "先别改", "不要改", "别改", "不用改", "只分析", "只给建议", "不要执行", "先不执行",
         ]
         guard explicitReadOnlyMarkers.contains(where: { normalized.contains($0) }) else { return false }
         return !isExplicitExecutionFollowUp(normalized)
@@ -66,7 +66,7 @@ extension AppStore {
             "继续执行", "继续做", "继续任务", "继续会话", "继续 agent", "续跑", "重试", "重新跑", "再跑",
             "直接改", "帮我改", "修复", "修改", "改一下", "写入", "保存", "实现", "落地",
             "运行", "执行命令", "跑测试", "测试一下", "验证一下", "构建", "编译", "部署",
-            "创建文件", "生成文件", "写到", "写进", "应用到"
+            "创建文件", "生成文件", "写到", "写进", "应用到",
         ]
         return executionMarkers.contains { normalized.contains($0) }
     }
@@ -77,13 +77,13 @@ extension AppStore {
         let threadMarkers = [
             "这个会话", "当前会话", "那个会话", "这个 agent", "当前 agent", "那个 agent",
             "这个会话", "那个会话", "当前会话", "这轮对话", "那轮对话", "这条对话",
-            "新会话", "上下文", "丢了", "丢失", "没上下文"
+            "新会话", "上下文", "丢了", "丢失", "没上下文",
         ]
         let taskMarkers = [
             "这个任务", "那个任务", "刚才的任务", "上个任务", "继续会话", "继续 agent", "读取本地项目",
             "本地项目", "输出没结束", "被截断", "截断了", "没发完", "没写完", "没说完",
             "在哪", "到哪", "在哪里", "预览", "打开看看", "看一下", "看下", "产物", "文件在哪",
-            "干活", "干不明白", "没做", "没干", "只回答"
+            "干活", "干不明白", "没做", "没干", "只回答",
         ]
         return threadMarkers.contains { normalized.contains($0) }
             || taskMarkers.contains { normalized.contains($0) }
@@ -99,7 +99,7 @@ extension AppStore {
             let shortTaskMarkers = [
                 "继续", "接着", "续跑", "重试", "重新跑", "跑一下", "再跑",
                 "修一下", "改一下", "优化下", "验证下", "检查下", "继续做",
-                "接着做", "按这个", "就这样", "沉淀", "存wiki"
+                "接着做", "按这个", "就这样", "沉淀", "存wiki",
             ]
             return shortTaskMarkers.contains { normalized.contains($0) }
         }
@@ -110,7 +110,7 @@ extension AppStore {
             "刚才", "之前", "上面的", "这样", "那样", "把它", "把这个", "把那个",
             "沉淀", "保存到wiki", "写到wiki", "写进wiki", "生成wiki", "收进知识库", "整理到知识库",
             "在哪", "到哪", "在哪里", "预览", "打开看看", "看一下", "看下", "文件在哪", "产物在哪",
-            "干活", "干不明白", "没做", "没干", "只回答"
+            "干活", "干不明白", "没做", "没干", "只回答",
         ]
         if actionMarkers.contains(where: { normalized.contains($0) }) { return true }
         if (normalized.hasSuffix("？") || normalized.hasSuffix("?")) && normalized.count <= 24 {
@@ -131,13 +131,13 @@ extension AppStore {
     private static let explicitTaskMarkers = [
         "这个会话", "当前会话", "那个会话", "这个 agent", "当前 agent", "那个 agent", "继续会话", "继续 agent",
         "这个任务", "那个任务", "这个会话", "那个会话", "当前会话", "这轮对话", "这条任务", "刚才", "最近的",
-        "最近这个", "上个", "上一轮", "前面", "上面", "上下文", "新会话", "丢失", "接着这个", "继续这个"
+        "最近这个", "上个", "上一轮", "前面", "上面", "上下文", "新会话", "丢失", "接着这个", "继续这个",
     ]
 
     private static let taskActionMarkers = [
         "再读", "补读", "继续读", "总结", "列出", "修复", "修改", "优化", "跑一下", "测试一下", "重新跑", "重试",
         "按这个", "基于这个", "把它", "沉淀", "保存到wiki", "写到wiki", "收进知识库", "在哪", "到哪", "在哪里",
-        "预览", "打开看看", "看一下", "看下", "文件在哪", "产物在哪", "干活", "干不明白", "没做", "没干", "只回答"
+        "预览", "打开看看", "看一下", "看下", "文件在哪", "产物在哪", "干活", "干不明白", "没做", "没干", "只回答",
     ]
 
     private static let pronounOnlyMarkers = ["这个", "那个", "它", "这里", "上面的"]
@@ -177,10 +177,12 @@ extension AppStore {
 
     static func isStandaloneCapabilityOrConceptQuestion(_ message: String) -> Bool {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard normalized.hasSuffix("？") || normalized.hasSuffix("?") || normalized.contains("吗") || normalized.contains("呢") else { return false }
+        guard normalized.hasSuffix("？") || normalized.hasSuffix("?") || normalized.contains("吗") || normalized.contains("呢") else {
+            return false
+        }
         let capabilityStarts = [
             "你能", "你现在能", "你可以", "你会", "能不能", "能否", "是否可以",
-            "可不可以", "会不会", "你支持", "你是什么", "你是谁"
+            "可不可以", "会不会", "你支持", "你是什么", "你是谁",
         ]
         let personalKnowledgeStarts = ["你了解", "你知道", "你熟悉", "你听说过"]
         let conceptStarts = ["什么是", "为什么", "怎么理解", "如何理解", "这个skill", "这个 skill", "skill都", "skill 都"]
@@ -195,7 +197,7 @@ extension AppStore {
             "这个任务", "这条任务", "刚才", "上面", "前面", "继续", "接着", "被截断",
             "没发完", "文件", "代码", "项目", "报错", "工具失败",
             "两个窗口", "这个窗口", "那个窗口", "这个页面", "这个按钮", "没反应",
-            "bug", "Bug", "卡顿", "历史任务", "左边", "右边", "追问", "新会话"
+            "bug", "Bug", "卡顿", "历史任务", "左边", "右边", "追问", "新会话",
         ]
         return !taskAnchors.contains { normalized.contains($0) }
     }
@@ -215,7 +217,7 @@ extension AppStore {
             "这个会话", "那个会话", "当前会话", "刚才", "上面", "前面", "继续", "接着",
             "这个", "那个", "它", "这里", "上面的",
             "文件", "代码", "项目", "工作区", "报错", "工具", "失败", "按钮", "页面", "窗口",
-            "bug", "Bug", "白屏", "卡顿", "追问", "新会话", "上下文"
+            "bug", "Bug", "白屏", "卡顿", "追问", "新会话", "上下文",
         ]
         if taskAnchors.contains(where: { normalized.contains($0) }) {
             return false
@@ -239,7 +241,7 @@ extension AppStore {
         let markers = [
             "接着说", "继续输出", "继续说", "接着输出", "没发完", "没写完",
             "没说完", "没结束", "被截断", "截断了", "断了", "后面呢",
-            "剩下的", "接上", "继续"
+            "剩下的", "接上", "继续",
         ]
         return markers.contains { normalized.contains($0) }
     }
@@ -278,7 +280,8 @@ extension AppStore {
             || ["?", "？"].contains(normalized)
         guard asksStatus else { return false }
         let actionMarkers = [
-            "继续执行", "继续做", "继续任务", "继续会话", "继续 agent", "重试", "重新跑", "改", "修复", "写入", "读取", "搜索", "联网", "跑测试", "接着说", "继续输出", "没发完", "没写完", "没说完", "被截断"
+            "继续执行", "继续做", "继续任务", "继续会话", "继续 agent", "重试", "重新跑", "改", "修复", "写入", "读取", "搜索", "联网", "跑测试", "接着说", "继续输出", "没发完", "没写完",
+            "没说完", "被截断",
         ]
         return !actionMarkers.contains { normalized.contains($0) }
     }

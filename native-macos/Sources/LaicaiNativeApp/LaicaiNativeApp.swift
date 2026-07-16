@@ -1,7 +1,7 @@
 import AppKit
-import SwiftUI
 import LaicaiNativeFoundation
 import LaicaiNativeUI
+import SwiftUI
 
 @main
 @MainActor
@@ -114,7 +114,10 @@ private enum LaicaiRuntimeServices {
 
     static func start(store: AppStore, appDelegate: LaicaiAppDelegate) async {
         if HeadlessRunner.shared.isHeadless {
-            _ = HeadlessRunner.shared.runIfNeeded(store: store)
+            guard HeadlessRunner.shared.runIfNeeded(store: store) else {
+                fputs("Laicai headless mode requires a non-empty task. Set LAICAI_TASK or pass --task.\n", stderr)
+                exit(64)
+            }
             return
         }
         guard !didStart else { return }

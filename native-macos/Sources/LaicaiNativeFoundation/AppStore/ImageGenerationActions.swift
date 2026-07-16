@@ -28,7 +28,8 @@ extension AppStore {
             return
         }
         if WorkspaceSandbox.isOverlyBroadWorkspace(workspaceRoot)
-            || WorkspaceSandbox.isDisposableSmokeWorkspace(workspaceRoot) {
+            || WorkspaceSandbox.isDisposableSmokeWorkspace(workspaceRoot)
+        {
             notify("工作区不能设为 home、/tmp 或来财测试目录，请指定一个真实项目文件夹。", style: .error)
             return
         }
@@ -52,13 +53,14 @@ extension AppStore {
             isCollapsed: true
         )
         let initialSteps = [userStep, planStep]
-        let target = prepareImageGenerationThread(ImageGenerationThreadRequest(
-            message: message,
-            decision: decision,
-            connector: connector,
-            initialSteps: initialSteps,
-            context: context
-        ))
+        let target = prepareImageGenerationThread(
+            ImageGenerationThreadRequest(
+                message: message,
+                decision: decision,
+                connector: connector,
+                initialSteps: initialSteps,
+                context: context
+            ))
         context = target.context
         let targetThreadID = target.threadID
         state.selectThread(id: targetThreadID)
@@ -101,7 +103,8 @@ extension AppStore {
                 )
             } catch {
                 guard self.shouldAcceptGenerationCallback(for: targetThreadID, runID: generationRunID) else { return }
-                let errorStep = TaskStep(kind: .error, text: error.localizedDescription, isFailure: true, recoverable: true, retryAction: "重试")
+                let errorStep = TaskStep(
+                    kind: .error, text: error.localizedDescription, isFailure: true, recoverable: true, retryAction: "重试")
                 self.appendTaskStep(errorStep, to: targetThreadID)
                 if let index = self.state.threads.firstIndex(where: { $0.id == targetThreadID }) {
                     self.state.threads[index].status = .failed
@@ -135,10 +138,12 @@ extension AppStore {
         let continuationTargetID = continuationTargetThreadID(message: message, intent: intent)
         let selectedPlaceholderID = selectedImageGenerationPlaceholderID()
         let shouldPromotePlaceholder = continuationTargetID == nil && selectedPlaceholderID != nil
-        let shouldStartBesideRunningProjectThread = continuationTargetID == nil
+        let shouldStartBesideRunningProjectThread =
+            continuationTargetID == nil
             && state.selectedThread?.status == .running
             && selectedThreadProjectID != nil
-        let shouldUseProject = continuationTargetID != nil
+        let shouldUseProject =
+            continuationTargetID != nil
             || shouldPromotePlaceholder
             || shouldStartBesideRunningProjectThread
         return ImageGenerationThreadRouting(
@@ -163,12 +168,14 @@ extension AppStore {
         continuationTargetID: UUID?
     ) -> ImageGenerationThreadTarget? {
         guard let selectedID = continuationTargetID,
-              let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }),
-              state.threads[threadIndex].status != .running else { return nil }
+            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }),
+            state.threads[threadIndex].status != .running
+        else { return nil }
         var context = request.context
         let isEmptyPlaceholder = state.threads[threadIndex].steps.isEmpty
         if !isEmptyPlaceholder {
-            context.memory = state.threads[threadIndex].context.memory.isEmpty
+            context.memory =
+                state.threads[threadIndex].context.memory.isEmpty
                 ? context.memory
                 : state.threads[threadIndex].context.memory
             Self.prepareThreadForContinuation(&state.threads[threadIndex], message: request.message)
@@ -234,7 +241,8 @@ extension AppStore {
         projectID: UUID?
     ) -> ImageGenerationThreadTarget? {
         guard let selectedID = selectedPlaceholderID,
-              let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }) else { return nil }
+            let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID })
+        else { return nil }
         state.threads[threadIndex].title = String(request.message.prefix(32))
         state.threads[threadIndex].status = .running
         state.threads[threadIndex].steps = request.initialSteps
@@ -300,7 +308,7 @@ extension AppStore {
         let payload: [String: Any] = [
             "prompt": prompt,
             "width": 1024,
-            "height": 1024
+            "height": 1024,
         ]
         let data = try? JSONSerialization.data(withJSONObject: payload)
         return data.flatMap { String(data: $0, encoding: .utf8) } ?? #"{"prompt":""}"#

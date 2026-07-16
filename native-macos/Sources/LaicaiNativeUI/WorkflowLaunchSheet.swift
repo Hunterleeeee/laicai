@@ -1,6 +1,6 @@
-import SwiftUI
 import LaicaiNativeDomain
 import LaicaiNativeFoundation
+import SwiftUI
 
 // MARK: - Workflow Launch Sheet
 
@@ -84,7 +84,9 @@ struct WorkflowLaunchSheet: View {
 
             Spacer()
 
-            Button { onDismiss() } label: {
+            Button {
+                onDismiss()
+            } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(TextGrade.muted)
@@ -403,7 +405,9 @@ struct WorkflowLaunchSheet: View {
 
             Spacer()
 
-            Button { onDismiss() } label: {
+            Button {
+                onDismiss()
+            } label: {
                 Text("取消")
                     .font(AppFont.captionMedium)
                     .foregroundStyle(TextGrade.muted)
@@ -412,7 +416,9 @@ struct WorkflowLaunchSheet: View {
             }
             .buttonStyle(.plain)
 
-            Button { launch() } label: {
+            Button {
+                launch()
+            } label: {
                 HStack(spacing: AppSpace.extraSmall) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 10, weight: .bold))
@@ -424,7 +430,10 @@ struct WorkflowLaunchSheet: View {
                 .padding(.vertical, AppSpace.small)
                 .background(
                     Capsule()
-                        .fill(canLaunch ? Brand.premiumGradient : LinearGradient(colors: [TextGrade.ghost], startPoint: .leading, endPoint: .trailing))
+                        .fill(
+                            canLaunch
+                                ? Brand.premiumGradient
+                                : LinearGradient(colors: [TextGrade.ghost], startPoint: .leading, endPoint: .trailing))
                 )
                 .shadow(color: canLaunch ? Brand.primary.opacity(0.3) : .clear, radius: 8, y: 2)
             }

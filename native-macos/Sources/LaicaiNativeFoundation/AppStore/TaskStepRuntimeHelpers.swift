@@ -19,7 +19,8 @@ extension AppStore {
         }
 
         if step.kind == .textOutput,
-           let streamingIndex = steps.lastIndex(where: { $0.kind == .textOutput && $0.toolCallId == Self.streamingOutputID }) {
+            let streamingIndex = steps.lastIndex(where: { $0.kind == .textOutput && $0.toolCallId == Self.streamingOutputID })
+        {
             streamBuffers.removeValue(forKey: taskID)
             streamLastFlushAt.removeValue(forKey: taskID)
             var finalStep = step
@@ -95,17 +96,20 @@ extension AppStore {
         thinkingLastFlushAt[taskID] = Date()
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
         setLiveActivity("正在思考…", for: taskID)
-        if let idx = state.threads[threadIndex].steps.lastIndex(where: { $0.kind == .aiThinking && $0.toolCallId == Self.thinkingStreamID }) {
-            state.threads[threadIndex].steps[idx].reasoningContent = (state.threads[threadIndex].steps[idx].reasoningContent ?? "") + pending
+        if let idx = state.threads[threadIndex].steps.lastIndex(where: { $0.kind == .aiThinking && $0.toolCallId == Self.thinkingStreamID })
+        {
+            state.threads[threadIndex].steps[idx].reasoningContent =
+                (state.threads[threadIndex].steps[idx].reasoningContent ?? "") + pending
         } else {
-            state.threads[threadIndex].steps.append(TaskStep(
-                kind: .aiThinking,
-                text: "思考中…",
-                toolCallId: Self.thinkingStreamID,
-                isCollapsible: true,
-                isCollapsed: false,
-                reasoningContent: pending
-            ))
+            state.threads[threadIndex].steps.append(
+                TaskStep(
+                    kind: .aiThinking,
+                    text: "思考中…",
+                    toolCallId: Self.thinkingStreamID,
+                    isCollapsible: true,
+                    isCollapsed: false,
+                    reasoningContent: pending
+                ))
         }
     }
 
@@ -115,16 +119,19 @@ extension AppStore {
         streamLastFlushAt[taskID] = Date()
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
         setLiveActivity("正在生成回复…", for: taskID)
-        if let streamIndex = state.threads[threadIndex].steps.lastIndex(where: { $0.kind == .textOutput && $0.toolCallId == Self.streamingOutputID }) {
+        if let streamIndex = state.threads[threadIndex].steps.lastIndex(where: {
+            $0.kind == .textOutput && $0.toolCallId == Self.streamingOutputID
+        }) {
             state.threads[threadIndex].steps[streamIndex].text += pending
         } else {
-            state.threads[threadIndex].steps.append(TaskStep(
-                kind: .textOutput,
-                text: pending,
-                toolCallId: Self.streamingOutputID,
-                isCollapsible: false,
-                isCollapsed: false
-            ))
+            state.threads[threadIndex].steps.append(
+                TaskStep(
+                    kind: .textOutput,
+                    text: pending,
+                    toolCallId: Self.streamingOutputID,
+                    isCollapsible: false,
+                    isCollapsed: false
+                ))
         }
     }
 
@@ -191,12 +198,14 @@ extension AppStore {
     }
 
     nonisolated static func ensureAgentRuntimeContract(_ thread: inout Thread) {
-        let goal = (thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+        let goal =
+            (thread.goal?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
             ?? thread.steps.first(where: { $0.kind == .userInput })?.text.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? thread.title
         if !thread.steps.contains(where: { $0.kind == .aiThinking && $0.text == "正在理解会话目标并准备执行。" }) {
             let insertIndex = thread.steps.firstIndex { $0.kind != .userInput } ?? thread.steps.count
-            thread.steps.insert(TaskStep(kind: .aiThinking, text: "正在理解会话目标并准备执行。", isCollapsible: true, isCollapsed: true), at: insertIndex)
+            thread.steps.insert(
+                TaskStep(kind: .aiThinking, text: "正在理解会话目标并准备执行。", isCollapsible: true, isCollapsed: true), at: insertIndex)
         }
         guard !isPureChatLikeThread(thread) else {
             thread.taskProtocol = nil
@@ -240,13 +249,15 @@ extension AppStore {
             return
         }
         ensureAgentRuntimeContract(&thread)
-        var ledger = thread.executionLedger ?? AgentExecutionLedger(
-            originalRequest: thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title,
-            goal: thread.goal ?? thread.title,
-            state: .created,
-            plan: thread.currentPlan,
-            nextAction: "继续处理当前会话"
-        )
+        var ledger =
+            thread.executionLedger
+            ?? AgentExecutionLedger(
+                originalRequest: thread.steps.first(where: { $0.kind == .userInput })?.text ?? thread.title,
+                goal: thread.goal ?? thread.title,
+                state: .created,
+                plan: thread.currentPlan,
+                nextAction: "继续处理当前会话"
+            )
         ledger.goal = thread.goal ?? ledger.goal
         ledger.plan = thread.currentPlan
         thread.executionLedger = ledger
@@ -290,7 +301,8 @@ extension AppStore {
                 || step.kind == .reviewResult
         }
         let explicitlyChat = intent == "chat"
-        let legacyChatWithoutEvidence = intent == nil
+        let legacyChatWithoutEvidence =
+            intent == nil
             && thread.workflowName == nil
             && thread.multiAgentPlan == nil
         return !hasExecutionEvidence && (explicitlyChat || legacyChatWithoutEvidence)
@@ -473,10 +485,11 @@ extension AppStore {
         let request = [
             thread.executionLedger?.originalRequest,
             thread.goal,
-            thread.taskProtocol?.completionCriteria.joined(separator: " ")
+            thread.taskProtocol?.completionCriteria.joined(separator: " "),
         ].compactMap { $0 }.joined(separator: " ")
         if AgentLoop.expectsUIEvidence(message: request, protocolCriteria: thread.taskProtocol?.completionCriteria ?? []),
-           AgentLoop.hasUIEvidence(in: AgentTask(thread: thread)) == false {
+            AgentLoop.hasUIEvidence(in: AgentTask(thread: thread)) == false
+        {
             items.append("UI 任务缺少页面、截图或交互验证")
         }
         if thread.status == .running {
@@ -514,7 +527,7 @@ extension AppStore {
     private nonisolated static func pathFromText(_ text: String) -> String? {
         let patterns = [
             #"/[^\s]+\.png"#,
-            #"file://[^\s]+"#
+            #"file://[^\s]+"#,
         ]
         for pattern in patterns {
             if let range = text.range(of: pattern, options: .regularExpression) {

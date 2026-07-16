@@ -174,8 +174,9 @@ struct CommandPaletteView: View {
             .init(kind: .newTask, icon: "hammer", title: "新任务", subtitle: "预填执行目标，适合需要读项目和跑工具", keywords: ["new", "task", "执行"]),
             .init(kind: .newThread, icon: "plus.message", title: "新会话", subtitle: "空白聊天，不预设执行目标", keywords: ["new", "chat", "thread"]),
             .init(kind: .search, icon: "magnifyingglass", title: "搜索", subtitle: "打开侧栏搜索", keywords: ["find", "search"]),
-            .init(kind: .toggleWorkbench, icon: "sidebar.right", title: "打开检查器", subtitle: "查看状态、计划和模型连接", keywords: ["workbench", "panel"]),
-            .init(kind: .settings, icon: "gearshape", title: "设置", subtitle: "模型、工作区与运行配置", keywords: ["settings", "model"])
+            .init(
+                kind: .toggleWorkbench, icon: "sidebar.right", title: "打开检查器", subtitle: "查看状态、计划和模型连接", keywords: ["workbench", "panel"]),
+            .init(kind: .settings, icon: "gearshape", title: "设置", subtitle: "模型、工作区与运行配置", keywords: ["settings", "model"]),
         ]
 
         if store.state.selectedThread?.canContinue == true {
@@ -187,9 +188,12 @@ struct CommandPaletteView: View {
         if store.state.selectedThread != nil {
             result.append(
                 .init(
-                    kind: .copyMarkdown, icon: "doc.on.doc", title: "复制当前 \(typeLabel) Markdown", subtitle: "导出可读记录", keywords: ["copy", "export", "markdown"]))
+                    kind: .copyMarkdown, icon: "doc.on.doc", title: "复制当前 \(typeLabel) Markdown", subtitle: "导出可读记录",
+                    keywords: ["copy", "export", "markdown"]))
             result.append(
-                .init(kind: .exportJSON, icon: "square.and.arrow.up", title: "导出当前 \(typeLabel) JSON", subtitle: "导出完整结构化记录", keywords: ["export", "json"]))
+                .init(
+                    kind: .exportJSON, icon: "square.and.arrow.up", title: "导出当前 \(typeLabel) JSON", subtitle: "导出完整结构化记录",
+                    keywords: ["export", "json"]))
             result.append(
                 .init(
                     kind: .exportShellScript, icon: "terminal", title: "导出为 Shell 脚本", subtitle: "提取所有 shell 命令为可运行脚本",
@@ -198,11 +202,15 @@ struct CommandPaletteView: View {
                 .init(
                     kind: .exportWorkflowYAML, icon: "arrow.triangle.branch", title: "导出为工作流 YAML", subtitle: "将步骤转为可重放工作流",
                     keywords: ["export", "workflow", "yaml"]))
-            result.append(.init(kind: .archiveThread, icon: "archivebox", title: "归档当前 \(typeLabel)", subtitle: "从侧栏隐藏", keywords: ["archive", "hide"]))
+            result.append(
+                .init(
+                    kind: .archiveThread, icon: "archivebox", title: "归档当前 \(typeLabel)", subtitle: "从侧栏隐藏", keywords: ["archive", "hide"]))
         }
         if store.state.selectedThread?.canContinue == true {
             result.append(
-                .init(kind: .copyEvidence, icon: "checklist", title: "复制证据清单", subtitle: "导出已读文件、工具和验证状态", keywords: ["evidence", "verify", "proof"]))
+                .init(
+                    kind: .copyEvidence, icon: "checklist", title: "复制证据清单", subtitle: "导出已读文件、工具和验证状态",
+                    keywords: ["evidence", "verify", "proof"]))
         }
         if store.state.activeConnector != nil {
             result.append(
@@ -251,7 +259,7 @@ struct CommandPaletteView: View {
             (.experimentDesign, "实验设计"),
             (.retrospective, "项目复盘"),
             (.persona, "用户画像"),
-            (.okrWriter, "写 OKR")
+            (.okrWriter, "写 OKR"),
         ]
         for (skill, title) in pmSkills {
             result.append(

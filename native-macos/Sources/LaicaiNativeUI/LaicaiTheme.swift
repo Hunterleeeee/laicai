@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 // ═══════════════════════════════════════════════════════════════
 //  来财 Design System v14 — QUIET DESKTOP
@@ -13,15 +13,17 @@ import AppKit
 extension Color {
     /// Adaptive color that resolves per appearance. Both inputs are sRGB.
     init(light: Color, dark: Color) {
-        self.init(nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [
-                .darkAqua,
-                .vibrantDark,
-                .accessibilityHighContrastDarkAqua,
-                .accessibilityHighContrastVibrantDark
-            ]) != nil
-            return NSColor(isDark ? dark : light)
-        })
+        self.init(
+            nsColor: NSColor(name: nil) { appearance in
+                let isDark =
+                    appearance.bestMatch(from: [
+                        .darkAqua,
+                        .vibrantDark,
+                        .accessibilityHighContrastDarkAqua,
+                        .accessibilityHighContrastVibrantDark,
+                    ]) != nil
+                return NSColor(isDark ? dark : light)
+            })
     }
 }
 
@@ -93,7 +95,7 @@ struct Brand {
     static let subtleGradient = LinearGradient(
         colors: [
             Color(light: hex("FFFFFF"), dark: hex("15171C")).opacity(0.0),
-            Color(light: hex("F3F6FC"), dark: hex("1E2430")).opacity(0.42)
+            Color(light: hex("F3F6FC"), dark: hex("1E2430")).opacity(0.42),
         ],
         startPoint: .top,
         endPoint: .bottom
@@ -189,20 +191,23 @@ struct SurfaceGrade {
     }
     /// Translucent overlay — used for popovers and command palette.
     static var glass: Color {
-        Color(light: hex("FFFFFF").opacity(0.78),
-              dark: hex("222733").opacity(0.92))
+        Color(
+            light: hex("FFFFFF").opacity(0.78),
+            dark: hex("222733").opacity(0.92))
     }
 
     static var hover: Color {
-        Color(light: Color.black.opacity(0.04),
-              dark: Color.white.opacity(0.06))
+        Color(
+            light: Color.black.opacity(0.04),
+            dark: Color.white.opacity(0.06))
     }
     static var selected: Color {
         Color(light: hex("E9EDF6"), dark: hex("253149"))
     }
     static var pressed: Color {
-        Color(light: Color.black.opacity(0.07),
-              dark: Color.white.opacity(0.10))
+        Color(
+            light: Color.black.opacity(0.07),
+            dark: Color.white.opacity(0.10))
     }
     static var active: Color { Brand.primary.opacity(0.10) }
 
@@ -399,11 +404,12 @@ extension View {
                 .blur(radius: radius)
                 .mask(
                     RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                        .fill(LinearGradient(
-                            colors: [.black, .clear],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ))
+                        .fill(
+                            LinearGradient(
+                                colors: [.black, .clear],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ))
                 )
         )
     }

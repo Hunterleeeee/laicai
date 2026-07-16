@@ -1,8 +1,9 @@
 import XCTest
+
 @testable import LaicaiNativeFoundation
 
 #if canImport(SQLite3)
-import SQLite3
+    import SQLite3
 #endif
 
 @MainActor
@@ -90,13 +91,14 @@ final class UsageTrackerTests: LaicaiNativeFoundationTestCase {
         defer { sqlite3_close(database) }
 
         var stmt: OpaquePointer?
-        XCTAssertEqual(sqlite3_prepare_v2(
-            database,
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_usage_thread';",
-            -1,
-            &stmt,
-            nil
-        ), SQLITE_OK)
+        XCTAssertEqual(
+            sqlite3_prepare_v2(
+                database,
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_usage_thread';",
+                -1,
+                &stmt,
+                nil
+            ), SQLITE_OK)
         defer { sqlite3_finalize(stmt) }
         XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
     }

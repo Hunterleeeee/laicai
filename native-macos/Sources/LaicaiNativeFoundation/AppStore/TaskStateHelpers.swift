@@ -29,7 +29,8 @@ extension AppStore {
 
     static func agentLoopConfig(settings: AppSettings, connector: ConnectorProfile? = nil, decision: PlannerDecision) -> AgentLoop.Config {
         var config = agentLoopConfig(settings: settings, connector: connector)
-        let needsProjectDepth = decision.expectedCapabilities.contains("读取工作区")
+        let needsProjectDepth =
+            decision.expectedCapabilities.contains("读取工作区")
             || decision.expectedCapabilities.contains("提出文件修改")
             || decision.expectedCapabilities.contains("形成可验证结果")
             || decision.routeLabel == "会话 执行"
@@ -48,11 +49,14 @@ extension AppStore {
                 "code.search",
                 "workspace.index",
                 "web.search",
-                "web.fetch"
+                "web.fetch",
             ]
         }
-        let lowerReason = (decision.reason + " " + decision.routeLabel + " " + decision.expectedCapabilities.joined(separator: " ")).lowercased()
-        if lowerReason.contains("ui") || lowerReason.contains("页面") || lowerReason.contains("界面") || lowerReason.contains("按钮") || lowerReason.contains("窗口") {
+        let lowerReason = (decision.reason + " " + decision.routeLabel + " " + decision.expectedCapabilities.joined(separator: " "))
+            .lowercased()
+        if lowerReason.contains("ui") || lowerReason.contains("页面") || lowerReason.contains("界面") || lowerReason.contains("按钮")
+            || lowerReason.contains("窗口")
+        {
             if config.allowedTools == nil {
                 config.allowedTools = TaskPhase.execute.allowedTools
             }
@@ -69,7 +73,7 @@ extension AppStore {
         }
         let dangerousMarkers = [
             "删除", "清空", "重置", "reset --hard", "rm -rf", "覆盖", "发布", "部署", "密钥", "secret", "token",
-            "sudo", "系统安装", "安装到系统", "强制推送", "push --force", "git clean", "清理工作区", "覆盖掉", "覆盖文件"
+            "sudo", "系统安装", "安装到系统", "强制推送", "push --force", "git clean", "清理工作区", "覆盖掉", "覆盖文件",
         ]
         if dangerousMarkers.contains(where: { normalized.contains($0.lowercased()) }) {
             return .dangerous
@@ -177,7 +181,7 @@ extension AppStore {
     static func plannerStepText(for decision: PlannerDecision) -> String {
         var lines = [
             "规划：\(decision.routeLabel) · 置信度 \(Int((decision.confidence * 100).rounded()))%",
-            decision.reason
+            decision.reason,
         ]
         if !decision.expectedCapabilities.isEmpty {
             lines.append("预计使用：\(decision.expectedCapabilities.joined(separator: "、"))")
@@ -187,7 +191,8 @@ extension AppStore {
 
     static func workflowCompletionCheckStep(steps: [TaskStep], hasError: Bool) -> TaskStep {
         let toolFailures = steps.filter { $0.kind == .toolResult && $0.isFailure }.count
-        let text = hasError
+        let text =
+            hasError
             ? "完成检查：工作流发现 \(toolFailures) 个失败步骤，建议展开失败项后重试或调整目标。"
             : "完成检查：工作流已完成，未发现失败步骤。"
         return TaskStep(
@@ -251,7 +256,8 @@ extension AppStore {
 
     nonisolated static func fallbackAgentGoal(for thread: Thread) -> String? {
         if let firstUser = thread.steps.first(where: { $0.kind == .userInput })?.text.trimmingCharacters(in: .whitespacesAndNewlines),
-           !firstUser.isEmpty {
+            !firstUser.isEmpty
+        {
             return firstUser
         }
         let title = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -318,7 +324,8 @@ extension AppStore {
     static func directHistory(for steps: [TaskStep], message: String) -> [TaskStep] {
         // Always carry history in chat sessions — losing context is the #1 complaint.
         // The runtime layer (compactHistory) will handle truncation if history is too long.
-        return steps
+        return
+            steps
             .filter { step in
                 !step.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     && step.kind != .aiThinking
@@ -344,7 +351,8 @@ extension AppStore {
         state.threads.sort { $0.updatedAt > $1.updatedAt }
 
         if let selectedID = state.selectedThreadID,
-           !state.threads.contains(where: { $0.id == selectedID }) {
+            !state.threads.contains(where: { $0.id == selectedID })
+        {
             state.selectThread(id: nil)
         }
     }
