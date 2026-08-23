@@ -176,7 +176,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .userInput }.map(\.text), ["旧问题", "请继续旧会话"])
         XCTAssertTrue(runtime.requests.first?.messages?.contains { $0.role == "assistant" && ($0.content ?? "").contains("旧回答") } == true)
     }
-    func testRetrySelectedTaskCreatesReplacementThread() {
+    func testRetrySelectedTaskStaysInSelectedConversation() {
         let connector = ConnectorProfile(
             name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let failedTask = AgentTask(
@@ -225,6 +225,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         store.retryLastMessage()
 
         XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(store.state.threads.first?.id, thread.id)
         XCTAssertEqual(store.state.threads.first?.steps.first?.text, "重新整理今天的 AI 新闻")
         XCTAssertEqual(store.state.selectedThreadID, store.state.threads.first?.id)
         XCTAssertTrue(store.state.isGenerating)
@@ -313,7 +314,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.selectedThreadID, task.id)
         XCTAssertEqual(store.state.selectedThread?.steps.filter { $0.kind == .userInput }.map(\.text), ["帮我生成 README", "这个呢"])
     }
-    func testReplyOnIdleRunningTaskContinuesSameTask() async throws {
+    func testReplyOnIdleRunningTaskKeepsSelectedTaskWithoutSilentCancellation() async throws {
         let connector = ConnectorProfile(
             name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
@@ -371,7 +372,7 @@ final class AppStoreTaskLifecycleTests: LaicaiNativeFoundationTestCase {
 
         XCTAssertEqual(store.state.selectedThreadID, task.id)
         XCTAssertEqual(store.state.threads.count, 1)
-        XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.text.contains("上次执行没有正常结束") } == true)
+        XCTAssertFalse(store.state.selectedThread?.steps.contains { $0.text.contains("上次执行没有正常结束") } == true)
         XCTAssertTrue(store.state.selectedThread?.steps.contains { $0.kind == .userInput && $0.text.contains("继续刚才这个任务") } == true)
     }
 

@@ -152,7 +152,7 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
                 $0.name == "通用测试技能" && $0.category == "general"
             })
     }
-    func testBootstrapSelectsLatestThreadAcrossSessionsAndTasks() {
+    func testBootstrapDoesNotSelectLatestThreadBehindUser() {
         let olderSession = ChatSession(
             title: "旧线程",
             preview: "",
@@ -175,8 +175,7 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
 
         let state = AppState.bootstrap(environment: environment)
 
-        XCTAssertEqual(state.selectedThreadID, newerTask.id)
-        XCTAssertEqual(state.selectedThreadID, newerTask.id)
+        XCTAssertNil(state.selectedThreadID)
     }
     func testBootstrapRestoresPersistedThreadSnapshotAsAuthoritativeSource() {
         let staleSession = ChatSession(
@@ -210,9 +209,9 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(state.threads.count, 1)
         XCTAssertEqual(state.threads.first?.id, restoredTask.id)
         XCTAssertEqual(state.threads.first?.title, "已升级任务")
-        XCTAssertEqual(state.selectedThreadID, restoredTask.id)
+        XCTAssertNil(state.selectedThreadID)
     }
-    func testBootstrapCancelsStaleRunningTasks() {
+    func testBootstrapDoesNotCancelStaleRunningTasksWithoutUserChoice() {
         let staleTask = AgentTask(
             title: "旧任务",
             status: .running,
@@ -229,8 +228,8 @@ final class WorkflowWikiTests: LaicaiNativeFoundationTestCase {
             )
         )
 
-        XCTAssertEqual(store.state.threads.first?.status, .cancelled)
-        XCTAssertTrue(store.state.threads.first?.steps.contains { $0.text.contains("上次运行被中断") } == true)
+        XCTAssertEqual(store.state.threads.first?.status, .running)
+        XCTAssertTrue(store.state.threads.first?.steps.contains { $0.text.contains("上次运行可能已中断") } == true)
         XCTAssertEqual(store.state.threads.count, 1)
         XCTAssertEqual(store.state.selectedThreadID, staleTask.id)
     }

@@ -65,7 +65,7 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         XCTAssertEqual(store.state.selectedThread?.steps.map(\.kind), [.userInput, .aiThinking, .textOutput])
         XCTAssertEqual(store.state.modeLabel, "会话 问答")
     }
-    func testKnowledgeQuestionOnSelectedTaskCreatesPlainSession() async throws {
+    func testKnowledgeQuestionOnSelectedTaskStaysInSelectedConversation() async throws {
         let connector = makeConnector()
         let task = AgentTask(
             title: "修复 UI 白屏",
@@ -93,9 +93,12 @@ final class AppStoreChatSessionTests: LaicaiNativeFoundationTestCase {
         store.sendDraft()
         try await waitUntilIdle(store)
 
-        XCTAssertEqual(store.state.threads.count, 2)
-        XCTAssertEqual(store.state.selectedThread?.steps.map(\.kind), [.userInput, .aiThinking, .textOutput])
-        XCTAssertEqual(store.state.selectedThread?.steps.first?.text, "你了解易经吗")
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(
+            store.state.selectedThread?.steps.map(\.kind),
+            [.userInput, .aiThinking, .toolCall, .toolResult, .textOutput, .userInput, .textOutput]
+        )
+        XCTAssertEqual(store.state.selectedThread?.steps.dropLast().last?.text, "你了解易经吗")
         XCTAssertEqual(store.state.modeLabel, "会话 问答")
     }
     func testDirectShortQuestionsDoNotCarryUnrelatedHistory() async throws {

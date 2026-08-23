@@ -5,6 +5,48 @@ import XCTest
 
 @MainActor
 final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
+    func testGenerationPresentationIsolatedLifecycle() {
+        let presentation = GenerationPresentationStore()
+        let threadID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 123)
+        XCTAssertFalse(presentation.snapshot(for: threadID).isGenerating)
+        let initialRevision = presentation.revision
+
+        presentation.markStarted(threadID: threadID, activity: "读取项目", startedAt: startedAt)
+        XCTAssertTrue(presentation.snapshot(for: threadID).isGenerating)
+        XCTAssertEqual(presentation.snapshot(for: threadID).activity, "读取项目")
+        XCTAssertEqual(presentation.snapshot(for: threadID).startedAt, startedAt)
+        XCTAssertGreaterThan(presentation.revision, initialRevision)
+
+        let runningRevision = presentation.revision
+        presentation.updateActivity(threadID: threadID, activity: "生成回复")
+        XCTAssertEqual(presentation.snapshot(for: threadID).activity, "生成回复")
+        XCTAssertGreaterThan(presentation.revision, runningRevision)
+
+        presentation.finish(threadID: threadID)
+        XCTAssertFalse(presentation.snapshot(for: threadID).isGenerating)
+        XCTAssertEqual(presentation.snapshot(for: threadID).activity, "")
+    }
+
+    func testSidebarPresentationOwnsOnlyLowFrequencyProjection() {
+        let presentation = SidebarPresentationStore()
+        let thread = Thread(title: "可见会话", preview: "摘要")
+        let record = ThreadRecord(thread: thread, includeEvents: false)
+        let selectedID = thread.id
+
+        presentation.update(
+            records: [record],
+            selectedThreadID: selectedID,
+            searchText: "可见",
+            debouncedSearchText: "可见"
+        )
+
+        XCTAssertEqual(presentation.records, [record])
+        XCTAssertEqual(presentation.selectedThreadID, selectedID)
+        XCTAssertEqual(presentation.searchText, "可见")
+        XCTAssertEqual(presentation.debouncedSearchText, "可见")
+    }
+
     func testAppStateDerivedPropertiesStayConsistentAfterSplit() {
         let connector = ConnectorProfile(
             name: "Test",
@@ -55,7 +97,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(state.filteredThreadRecordSummaries.first?.events.isEmpty ?? true)
     }
 
-    func testFilteredThreadRecordSummariesDoesNotScanDeepStepHistory() {
+    func testFilteredThreadRecordSummariesSearchesDeepStepHistory() {
         let oldNeedleStep = TaskStep(kind: .toolResult, text: "发现 OldDeepNeedle")
         let recentStep = TaskStep(kind: .textOutput, text: "普通收尾")
         let task = AgentTask(title: "任务", steps: [oldNeedleStep, recentStep])
@@ -63,7 +105,8 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
 
         state.searchText = "OldDeepNeedle"
 
-        XCTAssertEqual(state.filteredThreadRecordSummaries.map(\.id), [])
+        XCTAssertEqual(state.filteredThreadRecordSummaries.map(\.id), [task.id])
+        XCTAssertTrue(state.filteredThreadRecordSummaries.first?.events.isEmpty ?? true)
     }
 
     func testThreadRecordsHideQueuedEmptyPlaceholdersEvenWithTypedTitle() {
@@ -424,9 +467,9 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         store.newThread()
 
         XCTAssertEqual(store.state.searchText, "")
-        XCTAssertEqual(store.state.draftMessage, "")
-        XCTAssertEqual(store.state.draftAttachments, [])
-        XCTAssertEqual(store.state.draftImages, [])
+        XCTAssertEqual(store.state.draftMessage, "旧草稿")
+        XCTAssertEqual(store.state.draftAttachments, ["/tmp/a.swift"])
+        XCTAssertEqual(store.state.draftImages.count, 1)
         XCTAssertNil(store.state.pendingFollowUp)
         XCTAssertEqual(store.state.selectedAgent?.title, "新对话")
         XCTAssertTrue(store.state.threadRecordSummaries.contains { $0.id == store.state.selectedThreadID })
@@ -933,7 +976,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(AppStore.enrichVagueMessage("重试", thread: thread).contains("注意避免之前的失败原因"))
     }
 
-    func testBootstrapPromotesHistoricalSessionWithToolCallsToTask() {
+    func testBootstrapDoesNotSelectHistoricalSessionBehindUser() {
         let historical = Thread(
             title: "生成一个雪碧的介绍图",
             preview: "Request failed",
@@ -947,7 +990,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
 
         let state = AppState.bootstrap(environment: environment)
 
-        XCTAssertEqual(state.selectedThreadID, historical.id)
+        XCTAssertNil(state.selectedThreadID)
     }
 
     func testBootstrapClearsProjectFromPlainHistoricalSession() {
@@ -967,7 +1010,37 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         let state = AppState.bootstrap(environment: environment)
 
         XCTAssertNil(state.threads.first?.projectID)
-        XCTAssertEqual(state.selectedThreadID, plain.id)
+        XCTAssertNil(state.selectedThreadID)
+    }
+
+    func testNewThreadDoesNotPrefillDraftAndRequestsComposerFocus() {
+        let store = AppStore(state: testState())
+        let epochBefore = store.composerFocusEpoch
+
+        store.newThread()
+
+        XCTAssertEqual(store.state.draftMessage, "")
+        XCTAssertGreaterThan(store.composerFocusEpoch, epochBefore)
+    }
+
+    func testNewThreadInProjectDoesNotPrefillDraft() {
+        let projectID = UUID()
+        let store = AppStore(state: testState())
+        let epochBefore = store.composerFocusEpoch
+
+        store.newThreadInProject(projectID)
+
+        XCTAssertEqual(store.state.draftMessage, "")
+        XCTAssertGreaterThan(store.composerFocusEpoch, epochBefore)
+    }
+
+    func testAppearanceSettingPersistsThroughUpdate() {
+        let store = AppStore(state: testState())
+        XCTAssertEqual(store.state.settings.appearance, .light)
+
+        store.updateAppearance(.dark)
+
+        XCTAssertEqual(store.state.settings.appearance, .dark)
     }
 
     func testPlainNewSessionNeverInheritsActiveProject() {
@@ -981,7 +1054,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
         XCTAssertNil(store.state.selectedThread?.projectID)
     }
 
-    func testTaskStartedBesideRunningProjectThreadKeepsProjectScope() throws {
+    func testTaskOnSelectedRunningProjectThreadKeepsSelectedConversationAndScope() throws {
         let projectID = UUID()
         let runningProjectThread = Thread(
             title: "项目里正在执行",
@@ -1011,7 +1084,7 @@ final class AppStoreSplitRegressionTests: LaicaiNativeFoundationTestCase {
 
         store.sendTaskDraft(message: "整理 README", decision: decision)
 
-        XCTAssertNotEqual(store.state.selectedThreadID, runningProjectThread.id)
+        XCTAssertEqual(store.state.selectedThreadID, runningProjectThread.id)
         XCTAssertEqual(store.state.selectedThread?.projectID, projectID)
         store.stopGenerating()
     }

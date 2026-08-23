@@ -87,7 +87,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(store.state.selectedThread?.steps.last?.text.contains("受控的项目索引") == true)
         XCTAssertEqual(store.state.modeLabel, "会话")
     }
-    func testUnrelatedQuestionOnSelectedTaskStaysPlainChat() async throws {
+    func testUnrelatedQuestionOnSelectedTaskStaysInSameConversation() async throws {
         let connector = ConnectorProfile(
             name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
@@ -134,11 +134,11 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         try await waitUntilIdle(store)
 
         XCTAssertNotNil(store.state.selectedThreadID)
-        XCTAssertEqual(store.state.threads.count, 2)
-        XCTAssertEqual(store.state.threads.first?.steps.filter { $0.kind == .userInput }.count, 1)
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertEqual(store.state.threads.first?.steps.filter { $0.kind == .userInput }.count, 2)
         XCTAssertEqual(store.state.modeLabel, "会话 问答")
     }
-    func testRecentBadDomainQuestionsDoNotContinueSelectedToolTask() async throws {
+    func testRecentBadDomainQuestionsStayInSelectedConversation() async throws {
         let connector = ConnectorProfile(
             name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let prompts = ["大小六壬 梅花易数呢", "这个skill都能干嘛呢"]
@@ -190,8 +190,12 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
             try await waitUntilIdle(store)
 
             XCTAssertNotNil(store.state.selectedThreadID, prompt)
-            XCTAssertEqual(store.state.threads.count, 2, prompt)
-            XCTAssertNotNil(store.state.selectedThread?.steps.first(where: { $0.kind == .userInput }), prompt)
+            XCTAssertEqual(store.state.threads.count, 1, prompt)
+            XCTAssertGreaterThanOrEqual(
+                store.state.selectedThread?.steps.filter { $0.kind == .userInput }.count ?? 0,
+                2,
+                prompt
+            )
         }
     }
 
@@ -345,7 +349,7 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(runtime.requests.isEmpty)
     }
 
-    func testPlainChatDoesNotReuseToolTaskJustBecauseItHadToolHistory() async throws {
+    func testPlainChatReusesSelectedConversationWithToolHistory() async throws {
         let connector = ConnectorProfile(
             name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
@@ -394,10 +398,10 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         try await waitUntilIdle(store)
 
         XCTAssertNotNil(store.state.selectedThreadID)
-        XCTAssertEqual(store.state.threads.count, 2)
-        XCTAssertNotNil(store.state.selectedThread?.steps.first(where: { $0.kind == .userInput }))
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertGreaterThanOrEqual(store.state.selectedThread?.steps.filter { $0.kind == .userInput }.count ?? 0, 2)
     }
-    func testStandaloneCapabilityQuestionDoesNotContinueSelectedTask() async throws {
+    func testStandaloneCapabilityQuestionStaysInSelectedConversation() async throws {
         let connector = ConnectorProfile(
             name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready)
         let task = AgentTask(
@@ -444,8 +448,8 @@ final class AppStoreTaskQuestionRoutingTests: LaicaiNativeFoundationTestCase {
         try await waitUntilIdle(store)
 
         XCTAssertNotNil(store.state.selectedThreadID)
-        XCTAssertEqual(store.state.threads.count, 2)
-        XCTAssertNotNil(store.state.selectedThread?.steps.first(where: { $0.kind == .userInput }))
+        XCTAssertEqual(store.state.threads.count, 1)
+        XCTAssertGreaterThanOrEqual(store.state.selectedThread?.steps.filter { $0.kind == .userInput }.count ?? 0, 2)
         XCTAssertEqual(store.state.modeLabel, "会话 问答")
     }
 }
