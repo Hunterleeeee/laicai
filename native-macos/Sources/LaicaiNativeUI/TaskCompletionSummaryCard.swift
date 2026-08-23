@@ -33,6 +33,38 @@ struct TaskCompletionSummaryCard: View {
         thread.steps.filter { $0.kind == .toolResult && $0.toolName == "verify.build" }.count
     }
 
+    private var statusTitle: String {
+        switch thread.status {
+        case .completed: return "会话完成"
+        case .cancelled: return "会话已暂停"
+        case .waitingReview: return "等待审查"
+        case .queued: return "排队中"
+        case .running: return "处理中"
+        case .failed: return "会话失败"
+        }
+    }
+
+    private var statusIcon: String {
+        switch thread.status {
+        case .completed: return "checkmark.seal.fill"
+        case .cancelled: return "pause.circle.fill"
+        case .waitingReview: return "eye.circle.fill"
+        case .queued: return "clock.fill"
+        case .running: return "progress.indicator"
+        case .failed: return "xmark.seal.fill"
+        }
+    }
+
+    private var statusColor: Color {
+        switch thread.status {
+        case .completed: return Semantic.success
+        case .cancelled, .queued: return TextGrade.muted
+        case .waitingReview: return Semantic.warning
+        case .running: return Brand.primary
+        case .failed: return Semantic.error
+        }
+    }
+
     private var duration: String? {
         let interval = thread.updatedAt.timeIntervalSince(thread.createdAt)
         guard interval > 1 else { return nil }
@@ -45,12 +77,12 @@ struct TaskCompletionSummaryCard: View {
         VStack(alignment: .leading, spacing: AppSpace.medium) {
             // Header
             HStack(spacing: AppSpace.small) {
-                Image(systemName: thread.status == .completed ? "checkmark.seal.fill" : "xmark.seal.fill")
+                Image(systemName: statusIcon)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(thread.status == .completed ? Semantic.success : Semantic.error)
-                Text(thread.executionState == .completed || thread.status == .completed ? "会话完成" : "会话失败")
+                    .foregroundStyle(statusColor)
+                Text(statusTitle)
                     .font(AppFont.subheadline)
-                    .foregroundStyle(thread.status == .completed ? Semantic.success : Semantic.error)
+                    .foregroundStyle(statusColor)
                 if let dur = duration {
                     Text("· \(dur)")
                         .font(AppFont.caption)

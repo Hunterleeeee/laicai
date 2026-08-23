@@ -10,6 +10,8 @@ struct TaskStepCard: View {
     let step: TaskStep
     let taskID: UUID
     let isRunning: Bool
+    /// Non-nil only while rendering a live streaming placeholder step.
+    var live: LiveStreamSource? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -40,14 +42,18 @@ struct TaskStepCard: View {
             // Collapsed aiThinking = orchestration audit / internal label that the user
             // should never see (continuation strategy, agent switch, completion check etc).
             // True model reasoning surfaces through non-collapsed steps with reasoningContent.
-            if step.isCollapsed {
+            if step.isCollapsed && (step.reasoningContent?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
                 if store.state.settings.showDebugPanels {
                     OrchestrationDebugCard(text: step.text, label: "编排")
                 } else {
                     EmptyView()
                 }
             } else {
-                ThinkingCard(text: step.text, reasoningContent: step.reasoningContent, isRunning: isRunning)
+                ThinkingCard(
+                    text: step.text,
+                    reasoningContent: step.reasoningContent,
+                    isRunning: isRunning,
+                    live: step.toolCallId == AppStore.thinkingStreamID ? live : nil)
             }
         case .toolCall:
             if isRecoveryStep(step) {
@@ -68,9 +74,14 @@ struct TaskStepCard: View {
             } else {
                 ToolResultCard(step: step, taskID: taskID)
             }
-        case .textOutput: TextOutputCard(text: step.text, metrics: step.metrics, isRunning: isRunning && step.metrics == nil)
+        case .textOutput:
+            TextOutputCard(
+                text: step.text,
+                metrics: step.metrics,
+                isRunning: isRunning && step.metrics == nil,
+                live: step.toolCallId == AppStore.streamingOutputID ? live : nil)
         case .error:
-            if step.recoverable || !step.isFailure {
+            if !step.isFailure {
                 PausedCard(step: step, taskID: taskID)
             } else {
                 FailedCard(step: step, taskID: taskID)
@@ -202,10 +213,11 @@ struct ThinkingCard: View {
     let text: String
     let reasoningContent: String?
     let isRunning: Bool
+    /// Present while rendering the transient "__thinking_stream__" placeholder;
+    /// reasoning then streams from StreamTextStore without touching AppState.
+    var live: LiveStreamSource? = nil
 
     @State private var showReasoning = false
-    private let reasoningPreviewLimit = 800
-
     var body: some View {
         HStack(alignment: .top, spacing: AppSpace.small) {
             ProgressGlyph(icon: "brain", color: Brand.purple, isActive: isRunning)
@@ -222,7 +234,9 @@ struct ThinkingCard: View {
                             .scaleEffect(0.7)
                     }
 
-                    if hasReasoning {
+                    if let live {
+                        LiveReasoningToggle(live: live, showReasoning: $showReasoning)
+                    } else if hasReasoning {
                         Button {
                             showReasoning.toggle()
                         } label: {
@@ -254,17 +268,24 @@ struct ThinkingCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if showReasoning, let reasoning = reasoningContent, !reasoning.isEmpty {
-                    VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
+                if showReasoning {
+                    if let live {
+                        LiveReasoningBody(live: live)
+                    } else if let reasoning = reasoningContent, !reasoning.isEmpty {
+                        VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                         Divider()
                             .background(Brand.purple.opacity(0.15))
 
-                        Text(reasoningDisplayText(reasoning))
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(TextGrade.secondary.opacity(0.8))
-                            .lineLimit(16)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(AppSpace.small)
+                        ScrollView(.vertical, showsIndicators: true) {
+                            Text(reasoningDisplayText(reasoning))
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(TextGrade.secondary.opacity(0.8))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 320)
+                        .padding(AppSpace.small)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(
                                 RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
@@ -274,6 +295,7 @@ struct ThinkingCard: View {
                                 RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
                                     .strokeBorder(Brand.purple.opacity(0.10), lineWidth: 0.5)
                             )
+                        }
                     }
                 }
             }
@@ -296,9 +318,7 @@ struct ThinkingCard: View {
     }
 
     private func reasoningDisplayText(_ reasoning: String) -> String {
-        let trimmed = reasoning.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count > reasoningPreviewLimit else { return trimmed }
-        return String(trimmed.suffix(reasoningPreviewLimit)) + "\n\n… 共 \(trimmed.count) 字，已保留最近推理"
+        reasoning.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -476,258 +496,6 @@ struct ToolCallCard: View {
     }
 }
 
-struct ToolResultCard: View {
-    @EnvironmentObject private var store: AppStore
-    let step: TaskStep
-    let taskID: UUID
-
-    var body: some View {
-        if step.isFailure && !isTerminalOutput {
-            FailedCard(step: step, taskID: taskID)
-        } else {
-            HStack(alignment: .top, spacing: AppSpace.small) {
-                ProgressGlyph(icon: step.isFailure ? "xmark" : "checkmark", color: step.isFailure ? Semantic.error : Semantic.success)
-
-                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
-                    if isTerminalOutput {
-                        TerminalOutputCard(text: step.text, isFailure: step.isFailure)
-                    } else if let imagePath {
-                        GeneratedImagePreviewCard(path: imagePath, caption: displayText)
-                    } else if !step.isCollapsed {
-                        toolTextView
-                    } else {
-                        Text("已完成")
-                            .font(AppFont.tiny)
-                            .foregroundStyle(TextGrade.ghost)
-                            .lineLimit(1)
-                    }
-
-                    if step.isFailure {
-                        Button {
-                            store.retryLastMessage()
-                        } label: {
-                            Label("重试", systemImage: "arrow.clockwise")
-                                .font(AppFont.tiny)
-                                .foregroundStyle(Brand.primary)
-                                .padding(.horizontal, AppSpace.small)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Brand.primary.opacity(0.12)))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-
-                Spacer()
-            }
-            .padding(.vertical, 2)
-        }
-    }
-
-    private var isTerminalOutput: Bool {
-        ["shell.exec", "verify.build"].contains(step.toolName ?? "")
-    }
-
-    private var imagePath: String? {
-        guard step.toolName == "image.generate", !step.isFailure else { return nil }
-        if let path = step.toolParams?["imagePath"], FileManager.default.fileExists(atPath: path) {
-            return path
-        }
-        return Self.firstImagePath(in: step.text)
-    }
-
-    private static func firstImagePath(in text: String) -> String? {
-        let pattern = #"(/[^\n\r\t]+?\.(?:png|jpg|jpeg|webp|heic))"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-            return nil
-        }
-        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
-        guard let match = regex.firstMatch(in: text, options: [], range: nsRange),
-            let range = Range(match.range(at: 1), in: text)
-        else {
-            return nil
-        }
-        let raw = String(text[range]).trimmingCharacters(in: CharacterSet(charactersIn: "。.,，)）]】\"'"))
-        return FileManager.default.fileExists(atPath: raw) ? raw : nil
-    }
-
-    private var displayText: String {
-        let maxLen = 2000
-        if step.text.count <= maxLen { return step.text }
-        return String(step.text.prefix(maxLen)) + "\n\n… 共 \(step.text.count) 字，已截断显示"
-    }
-
-    private var toolTextView: some View {
-        Text(displayText)
-            .font(AppFont.codeSmall)
-            .foregroundStyle(step.isFailure ? Semantic.error : TextGrade.muted)
-            .lineLimit(step.isFailure ? 6 : 4)
-            .padding(.horizontal, AppSpace.small)
-            .padding(.vertical, AppSpace.extraSmall)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: AppRadius.small, style: .continuous)
-                    .fill(SurfaceGrade.sunken.opacity(0.34))
-            )
-    }
-}
-
-struct GeneratedImagePreviewCard: View {
-    @EnvironmentObject private var store: AppStore
-    let path: String
-    let caption: String
-
-    private var url: URL {
-        URL(fileURLWithPath: path)
-    }
-
-    private var filename: String {
-        url.lastPathComponent
-    }
-
-    private var fileSizeLabel: String {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-            let size = attrs[.size] as? NSNumber
-        else { return "" }
-        let value = size.doubleValue
-        if value >= 1_048_576 { return String(format: "%.1f MB", value / 1_048_576) }
-        if value >= 1024 { return String(format: "%.0f KB", value / 1024) }
-        return "\(Int(value)) B"
-    }
-
-    private var imageDimensionsLabel: String {
-        guard let image = NSImage(contentsOfFile: path) else { return "" }
-        return "\(Int(image.size.width)) x \(Int(image.size.height))"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpace.medium) {
-            HStack(spacing: AppSpace.small) {
-                Image(systemName: "photo.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Semantic.success)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("图片已生成")
-                        .font(AppFont.captionMedium)
-                        .foregroundStyle(TextGrade.primary)
-                    HStack(spacing: AppSpace.small) {
-                        Text(filename)
-                            .font(AppFont.codeSmall)
-                            .foregroundStyle(TextGrade.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        if !imageDimensionsLabel.isEmpty {
-                            Text(imageDimensionsLabel)
-                        }
-                        if !fileSizeLabel.isEmpty {
-                            Text(fileSizeLabel)
-                        }
-                    }
-                    .font(AppFont.tiny)
-                    .foregroundStyle(TextGrade.ghost)
-                }
-
-                Spacer(minLength: AppSpace.small)
-
-                imageAction(icon: "arrow.clockwise", label: "重新生成") {
-                    store.retryLastMessage()
-                }
-                imageAction(icon: "doc.on.doc", label: "复制路径") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(path, forType: .string)
-                    ToastCenter.shared.success("已复制图片路径")
-                }
-            }
-
-            if let image = NSImage(contentsOfFile: path) {
-                Button {
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: 640, maxHeight: 420)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                                .strokeBorder(SurfaceGrade.border.opacity(0.25), lineWidth: 0.5)
-                        )
-                }
-                .buttonStyle(.plain)
-                .help("打开图片")
-            } else {
-                VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
-                    Text("图片文件暂时无法预览")
-                        .font(AppFont.captionMedium)
-                        .foregroundStyle(Semantic.warning)
-                    Text(path)
-                        .font(AppFont.codeSmall)
-                        .foregroundStyle(TextGrade.ghost)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                }
-                .padding(AppSpace.medium)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous).fill(SurfaceGrade.sunken.opacity(0.42)))
-            }
-
-            HStack(spacing: AppSpace.small) {
-                imageAction(icon: "arrow.up.right.square", label: "打开") {
-                    NSWorkspace.shared.open(url)
-                }
-                imageAction(icon: "folder", label: "Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                }
-
-                Spacer(minLength: AppSpace.small)
-
-                Text(path)
-                    .font(AppFont.codeSmall)
-                    .foregroundStyle(TextGrade.ghost)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-            }
-
-            Text(caption)
-                .font(AppFont.tiny)
-                .foregroundStyle(TextGrade.ghost)
-                .lineLimit(3)
-                .textSelection(.enabled)
-        }
-        .padding(AppSpace.medium)
-        .frame(maxWidth: 680, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .fill(SurfaceGrade.card.opacity(0.68))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.large, style: .continuous)
-                .strokeBorder(Semantic.success.opacity(0.22), lineWidth: 0.8)
-        )
-    }
-
-    private func imageAction(icon: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
-                Text(label)
-                    .font(AppFont.tiny)
-            }
-            .foregroundStyle(TextGrade.secondary)
-            .padding(.horizontal, AppSpace.small)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(SurfaceGrade.elevated.opacity(0.72)))
-            .overlay(Capsule().strokeBorder(SurfaceGrade.border.opacity(0.28), lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .help(label)
-    }
-}
-
 // MARK: - Recovery Card (auto-recovery visualization)
 
 struct RecoveryCard: View {
@@ -890,250 +658,3 @@ struct ProgressGlyph: View {
     }
 }
 
-struct TextOutputCard: View {
-    @EnvironmentObject private var store: AppStore
-    let text: String
-    let metrics: ResponseMetrics?
-    var isRunning: Bool = false
-    @State private var showFullRunningOutput = false
-    @State private var showFullCompletedOutput = false
-    private let runningPreviewLimit = 2_400
-    private let completedPreviewLimit = 2_200
-
-    var body: some View {
-        HStack(alignment: .top, spacing: AppSpace.small) {
-            if isRunning || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                ProgressGlyph(icon: "sparkles", color: Brand.primary, isActive: true)
-            }
-
-            ZStack(alignment: .topTrailing) {
-                VStack(alignment: .leading, spacing: AppSpace.small) {
-                    if shouldShowHeader {
-                        HStack(spacing: AppSpace.extraSmall) {
-                            if isRunning || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text(statusText)
-                                    .font(AppFont.captionMedium)
-                                    .foregroundStyle(TextGrade.muted)
-                            }
-                            if let metrics {
-                                Text(metricsLine(metrics))
-                                    .font(AppFont.tiny)
-                                    .foregroundStyle(TextGrade.ghost)
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 0) {
-                        if isRunning {
-                            AdaptiveMarkdownText(
-                                markdown: runningDisplayText,
-                                fontSize: 14,
-                                enablesTextSelection: false,
-                                forceFast: true
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 4)
-
-                            if isRunningLong {
-                                Button {
-                                    showFullRunningOutput.toggle()
-                                } label: {
-                                    Text(showFullRunningOutput ? "收起流式预览" : "展开更多")
-                                        .font(AppFont.captionMedium)
-                                        .foregroundStyle(Brand.primary)
-                                }
-                                .buttonStyle(.plain)
-                                .padding(.top, AppSpace.extraSmall)
-                            }
-                        } else {
-                            AdaptiveMarkdownText(
-                                markdown: completedDisplayText,
-                                fontSize: 14,
-                                enablesTextSelection: true
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                            if isCompletedLong {
-                                HStack(spacing: AppSpace.small) {
-                                    Button {
-                                        showFullCompletedOutput.toggle()
-                                    } label: {
-                                        HStack(spacing: 5) {
-                                            Image(systemName: showFullCompletedOutput ? "rectangle.compress.vertical" : "text.alignleft")
-                                                .font(.system(size: 10, weight: .semibold))
-                                            Text(showFullCompletedOutput ? "收起全文" : "展开全文")
-                                                .font(AppFont.captionMedium)
-                                        }
-                                        .foregroundStyle(Brand.primary)
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    Text("\(trimmedText.count) 字")
-                                        .font(AppFont.tiny)
-                                        .foregroundStyle(TextGrade.ghost)
-
-                                    Spacer()
-                                }
-                                .padding(.top, AppSpace.small)
-                            }
-                        }
-
-                        if isRunning && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            RoundedRectangle(cornerRadius: 1)
-                                .fill(Brand.primary)
-                                .frame(width: 2, height: 16)
-                                .opacity(0.82)
-                                .padding(.top, 2)
-                        }
-                    }
-                }
-                .padding(.horizontal, AppSpace.large)
-                .padding(.vertical, AppSpace.medium)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                        .fill(SurfaceGrade.card)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                        .strokeBorder(SurfaceGrade.hairline, lineWidth: 0.6)
-                )
-                .shadow(color: Color.black.opacity(0.018), radius: 2, y: 1)
-
-            }
-            .contextMenu {
-                if !trimmedText.isEmpty {
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(text, forType: .string)
-                        ToastCenter.shared.success("已复制")
-                    } label: {
-                        Label("复制全文", systemImage: "doc.on.doc")
-                    }
-
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString("```\n\(text)\n```", forType: .string)
-                        ToastCenter.shared.success("已复制为代码块")
-                    } label: {
-                        Label("复制为代码块", systemImage: "chevron.left.forwardslash.chevron.right")
-                    }
-
-                    Divider()
-
-                    Button {
-                        let service =
-                            NSSharingService(named: .composeEmail)
-                            ?? NSSharingService(named: .composeMessage)
-                        if let service {
-                            service.perform(withItems: [text as NSString])
-                        } else {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(text, forType: .string)
-                            ToastCenter.shared.success("已复制，请粘贴分享")
-                        }
-                    } label: {
-                        Label("分享…", systemImage: "square.and.arrow.up")
-                    }
-
-                    Button {
-                        saveToWiki(text)
-                    } label: {
-                        Label("存入 Wiki", systemImage: "book.closed")
-                    }
-
-                    Divider()
-
-                    if let responseMetrics = metrics {
-                        Button {
-                        } label: {
-                            Label(metricsLine(responseMetrics), systemImage: "gauge.with.dots.needle.33percent")
-                        }
-                        .disabled(true)
-                    }
-                }
-            }
-        }
-    }
-
-    private var trimmedText: String {
-        text.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var isRunningLong: Bool {
-        trimmedText.count > runningPreviewLimit
-    }
-
-    private var isCompletedLong: Bool {
-        !isRunning && trimmedText.count > completedPreviewLimit
-    }
-
-    private var runningDisplayText: String {
-        guard isRunningLong, !showFullRunningOutput else { return trimmedText }
-        let headCount = 800
-        let tailCount = max(800, runningPreviewLimit - headCount)
-        return "\(trimmedText.prefix(headCount))\n\n... 正在生成，已折叠中间内容以保持滚动流畅 ...\n\n\(trimmedText.suffix(tailCount))"
-    }
-
-    private var completedDisplayText: String {
-        guard isCompletedLong, !showFullCompletedOutput else { return trimmedText }
-        return "\(trimmedText.prefix(completedPreviewLimit))\n\n... 已折叠长回复以保持滚动流畅，点击“展开全文”查看全部 ..."
-    }
-
-    @MainActor private func saveToWiki(_ content: String) {
-        let vaultSetting = store.state.settings.vaultPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        let workspace = store.state.settings.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        let vault = vaultSetting.isEmpty ? workspace : vaultSetting
-        guard !vault.isEmpty else {
-            ToastCenter.shared.error("请先在设置中配置工作区或 Vault 路径")
-            return
-        }
-        let dir = URL(fileURLWithPath: vault).appendingPathComponent("05 AI Outputs", isDirectory: true)
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd_HHmmss"
-        let fileName = "output-\(fmt.string(from: Date())).md"
-        let fileURL = dir.appendingPathComponent(fileName)
-        do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try content.write(to: fileURL, atomically: true, encoding: .utf8)
-            ToastCenter.shared.success("已保存到 Wiki：\(fileName)")
-        } catch {
-            ToastCenter.shared.error("保存失败：\(error.localizedDescription)")
-        }
-    }
-
-    private func metricsLine(_ metrics: ResponseMetrics) -> String {
-        var parts: [String] = []
-        if let thinking = metrics.thinkingDuration {
-            parts.append("思考 \(formatSeconds(thinking))")
-        }
-        if let input = metrics.inputTokens {
-            parts.append("入 \(input)")
-        }
-        if let output = metrics.outputTokens {
-            parts.append("出 \(output)")
-        }
-        if let speed = metrics.tokensPerSecond, speed.isFinite {
-            parts.append("\(String(format: "%.1f", speed)) 词元/秒")
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    private func formatSeconds(_ value: TimeInterval) -> String {
-        if value < 10 {
-            return "\(String(format: "%.1f", value))s"
-        }
-        return "\(Int(value.rounded()))s"
-    }
-
-    private var statusText: String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return "正在回复" }
-        return isRunning ? "正在生成" : ""
-    }
-
-    private var shouldShowHeader: Bool {
-        isRunning || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || metrics != nil
-    }
-}

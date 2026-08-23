@@ -5,6 +5,7 @@ struct AdaptiveMarkdownText: View {
     var fontSize: CGFloat = 14
     var enablesTextSelection: Bool = true
     var forceFast: Bool = false
+    var isStreaming: Bool = false
 
     private var shouldUseFastRenderer: Bool {
         forceFast || markdown.count > 9_000 || markdown.components(separatedBy: "\n").count > 220
@@ -12,7 +13,7 @@ struct AdaptiveMarkdownText: View {
 
     var body: some View {
         if shouldUseFastRenderer {
-            FastMarkdownText(markdown: markdown, fontSize: fontSize)
+            FastMarkdownText(markdown: markdown, fontSize: fontSize, isStreaming: isStreaming)
         } else {
             MarkdownText(
                 markdown,
@@ -584,7 +585,8 @@ private struct CodeBlockView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .opacity(isHovered || copied ? 1 : 0)
+                .help("复制代码")
+                .opacity(isHovered || copied ? 1 : 0.72)
             }
             .padding(.horizontal, AppSpace.medium)
             .padding(.vertical, AppSpace.small)

@@ -4,17 +4,74 @@ import SwiftUI
 
 struct GeneralSettingsTab: View {
     @EnvironmentObject private var store: AppStore
+    @State private var overviewTotals = UsageTotals()
+    @State private var overviewLoadTask: Task<Void, Never>?
+    @State private var workspacePathDraft = ""
+    @State private var vaultPathDraft = ""
+    @State private var pathCommitTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppSpace.large) {
                 aboutCard
+                appearanceCard
                 workspaceCard
                 defaultModelCard
                 dataCard
             }
             .padding(AppSpace.extraLarge)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .task { loadOverview() }
+        .onAppear {
+            // Sync drafts once so typing does not trigger engine re-init
+            // (which updateWorkspacePath would do) on every keystroke.
+            workspacePathDraft = store.state.settings.workspacePath
+            vaultPathDraft = store.state.settings.vaultPath
+        }
+    }
+
+    /// Commit path edits only after the user pauses typing. This keeps
+    /// `updateWorkspacePath` (which restarts workspace engines) from firing
+    /// on every keystroke.
+    private func schedulePathCommit(_ value: String, commit: @escaping (String) -> Void) {
+        pathCommitTask?.cancel()
+        pathCommitTask = Task {
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled else { return }
+            commit(value)
+        }
+    }
+
+    private func loadOverview() {
+        overviewLoadTask?.cancel()
+        let tracker = UsageTracker.shared
+        overviewLoadTask = Task {
+            let totals = await Task.detached(priority: .utility) { tracker.totals(days: 9999) }.value
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                overviewTotals = totals
+            }
+        }
+    }
+
+    private var appearanceCard: some View {
+        settingsCard(title: "外观") {
+            settingsRow(label: "主题") {
+                Picker(
+                    "",
+                    selection: Binding(
+                        get: { store.state.settings.appearance },
+                        set: { store.updateAppearance($0) }
+                    )
+                ) {
+                    Text("浅色").tag(ThemeAppearance.light)
+                    Text("深色").tag(ThemeAppearance.dark)
+                }
+                .labelsHidden()
+                .frame(maxWidth: 200, alignment: .leading)
+                .help("手动选择界面配色；色板本身已支持浅色/深色两套。")
+            }
         }
     }
 
@@ -23,26 +80,32 @@ struct GeneralSettingsTab: View {
             settingsRow(label: "路径") {
                 TextField(
                     "选择本地项目或资料目录",
-                    text: Binding(
-                        get: { store.state.settings.workspacePath },
-                        set: { store.updateWorkspacePath($0) }
-                    )
+                    text: $workspacePathDraft
                 )
                 .textFieldStyle(.roundedBorder)
-                Button("浏览") { chooseDirectory(store.updateWorkspacePath) }
+                .onChange(of: workspacePathDraft) { _, newValue in
+                    schedulePathCommit(newValue) { store.updateWorkspacePath($0) }
+                }
+                Button("浏览") { chooseDirectory { path in
+                    workspacePathDraft = path
+                    store.updateWorkspacePath(path)
+                } }
                     .buttonStyle(.bordered)
             }
 
             settingsRow(label: "知识库") {
                 TextField(
                     "Obsidian 知识库路径；留空则使用工作区",
-                    text: Binding(
-                        get: { store.state.settings.vaultPath },
-                        set: { store.updateVaultPath($0) }
-                    )
+                    text: $vaultPathDraft
                 )
                 .textFieldStyle(.roundedBorder)
-                Button("浏览") { chooseDirectory(store.updateVaultPath) }
+                .onChange(of: vaultPathDraft) { _, newValue in
+                    schedulePathCommit(newValue) { store.updateVaultPath($0) }
+                }
+                Button("浏览") { chooseDirectory { path in
+                    vaultPathDraft = path
+                    store.updateVaultPath(path)
+                } }
                     .buttonStyle(.bordered)
             }
         }
@@ -104,7 +167,7 @@ struct GeneralSettingsTab: View {
     }
 
     private var dataCard: some View {
-        let totals = UsageTracker.shared.totals(days: 9999)
+        let totals = overviewTotals
         let threadCount = store.state.threads.count
         let projectCount = ProjectManager.shared.projects.count
 

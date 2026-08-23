@@ -16,6 +16,7 @@ struct UsageStatsPanel: View {
     @State private var toolStats: [ToolStatsRow] = []
     @State private var threadRanking: [ThreadUsageRow] = []
     @State private var intentData: [IntentUsageRow] = []
+    @State private var refreshTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpace.large) {
@@ -588,16 +589,43 @@ struct UsageStatsPanel: View {
     // MARK: - Helpers
 
     private func refresh() {
+        refreshTask?.cancel()
         let days = period.days
-        dailyData = UsageTracker.shared.dailyUsage(days: days)
-        modelData = UsageTracker.shared.modelBreakdown(days: days)
-        projectData = UsageTracker.shared.projectBreakdown(days: days)
-        totals = UsageTracker.shared.totals(days: days)
-        hourlyData = UsageTracker.shared.hourlyToday()
-        taskStats = TaskOutcomeRecorder.shared.stats(days: days)
-        toolStats = TaskOutcomeRecorder.shared.toolStats(days: days)
-        threadRanking = UsageTracker.shared.topThreads(days: days, limit: 8)
-        intentData = UsageTracker.shared.intentBreakdown(days: days)
+        let tracker = UsageTracker.shared
+        let recorder = TaskOutcomeRecorder.shared
+        refreshTask = Task {
+            let snapshot = await Task.detached(priority: .utility) { () -> UsageSnapshot in
+                let started = Date()
+                let snapshot = UsageSnapshot(
+                    daily: tracker.dailyUsage(days: days),
+                    model: tracker.modelBreakdown(days: days),
+                    project: tracker.projectBreakdown(days: days),
+                    totals: tracker.totals(days: days),
+                    hourly: tracker.hourlyToday(),
+                    taskStats: recorder.stats(days: days),
+                    toolStats: recorder.toolStats(days: days),
+                    topThreads: tracker.topThreads(days: days, limit: 8),
+                    intent: tracker.intentBreakdown(days: days)
+                )
+                let elapsedMs = Int(Date().timeIntervalSince(started) * 1_000)
+                if elapsedMs > 50 {
+                    LaicaiLog.info("usage.refresh took \(elapsedMs)ms (days=\(days))")
+                }
+                return snapshot
+            }.value
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                dailyData = snapshot.daily
+                modelData = snapshot.model
+                projectData = snapshot.project
+                totals = snapshot.totals
+                hourlyData = snapshot.hourly
+                taskStats = snapshot.taskStats
+                toolStats = snapshot.toolStats
+                threadRanking = snapshot.topThreads
+                intentData = snapshot.intent
+            }
+        }
     }
 
     private func barHeight(_ value: Int, maxValue: Int) -> CGFloat {
@@ -635,6 +663,18 @@ struct UsageStatsPanel: View {
 }
 
 // MARK: - Stats Period
+
+private struct UsageSnapshot {
+    let daily: [DailyUsageRow]
+    let model: [ModelUsageRow]
+    let project: [ProjectUsageRow]
+    let totals: UsageTotals
+    let hourly: [HourlyUsageRow]
+    let taskStats: [OutcomeStatsRow]
+    let toolStats: [ToolStatsRow]
+    let topThreads: [ThreadUsageRow]
+    let intent: [IntentUsageRow]
+}
 
 // MARK: - Orchestration Health Section
 

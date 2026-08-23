@@ -8,6 +8,21 @@ import SwiftUI
 
 struct SidebarView: View {
     @EnvironmentObject private var store: AppStore
+    @ObservedObject private var presentation: SidebarPresentationStore
+
+    init(
+        showingSettings: Binding<Bool>,
+        showingCommandPalette: Binding<Bool>,
+        showWorkbench: Binding<Bool>,
+        isVisible: Binding<Bool>,
+        presentation: SidebarPresentationStore
+    ) {
+        self._showingSettings = showingSettings
+        self._showingCommandPalette = showingCommandPalette
+        self._showWorkbench = showWorkbench
+        self._isVisible = isVisible
+        self._presentation = ObservedObject(wrappedValue: presentation)
+    }
     @Binding var showingSettings: Bool
     @Binding var showingCommandPalette: Bool
     @Binding var showWorkbench: Bool
@@ -24,6 +39,7 @@ struct SidebarView: View {
     @State private var recentHistoryLimit = 8
     @State private var olderHistoryLimit = 16
     @State private var projectHistoryLimits: [UUID: Int] = [:]
+    @State private var showingArchivedThreads = false
     @ObservedObject private var projectManager = ProjectManager.shared
     private let compactRailHistoryLimit = 32
 
@@ -58,6 +74,17 @@ struct SidebarView: View {
         } message: {
             Text("确定要删除这条对话吗？")
         }
+        .onReceive(NotificationCenter.default.publisher(for: .laicaiUndoDeleteThread)) { _ in
+            store.undoDeleteThread()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .laicaiThreadDeleted)) { notification in
+            let title = notification.userInfo?["title"] as? String ?? "会话"
+            ToastCenter.shared.show("已删除「\(title)」", style: .info, action: .undoDelete)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .laicaiThreadRestored)) { notification in
+            let title = notification.userInfo?["title"] as? String ?? "会话"
+            ToastCenter.shared.success("已恢复「\(title)」")
+        }
         .alert(
             "重命名",
             isPresented: Binding(
@@ -73,6 +100,12 @@ struct SidebarView: View {
                 }
                 renamingThreadID = nil
             }
+        }
+        .sheet(isPresented: $showingArchivedThreads) {
+            ArchivedThreadsView(onRestore: { id in
+                store.archiveThread(id: id)
+            })
+            .environmentObject(store)
         }
         .sheet(isPresented: $showingAddConnector) {
             ConnectorEditSheet(mode: .add) { conn in
@@ -124,6 +157,10 @@ struct SidebarView: View {
 
                 PrimaryNavButton(icon: "magnifyingglass", title: "搜索", isSelected: false) {
                     showingCommandPalette = true
+                }
+
+                PrimaryNavButton(icon: "archivebox", title: "归档", isSelected: false) {
+                    showingArchivedThreads = true
                 }
 
                 PrimaryNavButton(icon: "sparkles", title: "技能", isSelected: store.state.workbenchTab == .skills && showWorkbench) {
@@ -238,9 +275,14 @@ struct SidebarView: View {
             LazyVStack(alignment: .leading, spacing: AppSpace.extraSmall) {
                 if sections.isEmpty {
                     VStack(alignment: .leading, spacing: AppSpace.extraSmall) {
+                        Image(systemName: "doc.badge.plus")
+                            .font(.system(size: 18, weight: .light))
+                            .foregroundStyle(TextGrade.ghost)
+                            .accessibilityHidden(true)
                         Text("暂无内容")
                             .font(AppFont.captionMedium)
                             .foregroundStyle(TextGrade.secondary)
+                            .accessibilityLabel("历史记录为空")
                         Text("从上方新建任务或会话开始。")
                             .font(AppFont.tiny)
                             .foregroundStyle(TextGrade.ghost)
@@ -302,8 +344,13 @@ struct SidebarView: View {
                         }
                         .padding(.top, AppSpace.extraSmall)
 
+                        let selectedProjectID = selectedProjectIDForDisplay
                         ForEach(projectManager.projects) { project in
-                            projectGroupView(project, projectThreads: sections.projectThreadsByID[project.id] ?? [])
+                            projectGroupView(
+                                project,
+                                projectThreads: sections.projectThreadsByID[project.id] ?? [],
+                                selectedProjectID: selectedProjectID
+                            )
                         }
                     }
                 }
@@ -348,6 +395,11 @@ struct SidebarView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Do not inherit workspace animations while the list is scrolling.
+        .transaction { transaction in
+            transaction.animation = nil
+            transaction.disablesAnimations = true
+        }
         .sheet(isPresented: $showingNewProjectSheet) {
             NewProjectSheet().environmentObject(store)
         }
@@ -373,8 +425,12 @@ struct SidebarView: View {
     // MARK: - Project Group (collapsible header + nested threads)
 
     @ViewBuilder
-    private func projectGroupView(_ project: Project, projectThreads: [ThreadRecord]) -> some View {
-        let isActive = project.id == selectedProjectIDForDisplay
+    private func projectGroupView(
+        _ project: Project,
+        projectThreads: [ThreadRecord],
+        selectedProjectID: UUID?
+    ) -> some View {
+        let isActive = project.id == selectedProjectID
         let isCollapsed = collapsedProjects.contains(project.id)
         let isShowingAll = expandedProjects.contains(project.id)
         let projectLimit = projectHistoryLimits[project.id, default: 8]
@@ -459,6 +515,7 @@ struct SidebarView: View {
             } label: {
                 ExpandedThreadRow(item: item, isSelected: isSelected(item))
                     .equatable()
+                    .frame(height: 34)
             }
             .buttonStyle(.plain)
             .contextMenu { threadMenu(for: item) }
@@ -653,13 +710,7 @@ struct SidebarView: View {
     // MARK: - Data Helpers
 
     private var filteredThreadItems: [ThreadRecord] {
-        let searchText =
-            store.state.debouncedSearchText.isEmpty
-            ? store.state.searchText
-            : store.state.debouncedSearchText
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let records = query.isEmpty ? store.cachedThreadRecordSummaries : store.state.filteredThreadSummaries
-        return records.filter { !$0.isArchived }
+        return presentation.records.filter { !$0.isArchived }
     }
 
     private var activeConnectorLabel: String {
@@ -677,7 +728,7 @@ struct SidebarView: View {
     }
 
     private var selectedProjectIDForDisplay: UUID? {
-        if let selectedID = store.state.selectedThreadID {
+        if let selectedID = presentation.selectedThreadID {
             return store.state.threads.first(where: { $0.id == selectedID })?.projectID
         }
         return projectManager.activeProjectID
@@ -688,7 +739,7 @@ struct SidebarView: View {
     }
 
     private func isSelected(_ item: ThreadRecord) -> Bool {
-        store.state.selectedThreadID == item.id
+        presentation.selectedThreadID == item.id
     }
 
     private func openWorkbench(_ tab: WorkbenchTab) {
@@ -702,7 +753,6 @@ struct SidebarView: View {
         } else {
             store.newThread()
         }
-        store.updateDraft("请直接处理这个目标：")
     }
 
     private var brandSubtitle: String {
@@ -781,6 +831,9 @@ private struct PrimaryNavButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint("切换到\(title)")
     }
 }
 
@@ -901,6 +954,7 @@ private struct SidebarNavButton: View {
 private struct ExpandedThreadRow: View, Equatable {
     let item: ThreadRecord
     let isSelected: Bool
+    @State private var relativeTimeTick = Date()
 
     static func == (lhs: ExpandedThreadRow, rhs: ExpandedThreadRow) -> Bool {
         lhs.isSelected == rhs.isSelected
@@ -955,6 +1009,7 @@ private struct ExpandedThreadRow: View, Equatable {
             Spacer(minLength: 0)
 
             Text(RelativeTimeFormatter.string(for: item.updatedAt))
+                .id(relativeTimeTick)
                 .font(.system(size: 10, weight: .regular))
                 .foregroundStyle(TextGrade.ghost)
         }
@@ -962,6 +1017,13 @@ private struct ExpandedThreadRow: View, Equatable {
         .padding(.vertical, AppSpace.extraSmall)
         .threadRailItem(isSelected: isSelected)
         .contentShape(Rectangle())
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled else { return }
+                relativeTimeTick = Date()
+            }
+        }
     }
 
     private var statusTint: Color {

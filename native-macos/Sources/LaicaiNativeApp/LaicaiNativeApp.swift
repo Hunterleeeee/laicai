@@ -24,7 +24,6 @@ struct LaicaiNativeApp: App {
         WindowGroup("来财", id: "main") {
             RootView()
                 .environmentObject(store)
-                .preferredColorScheme(.light)
                 .frame(minWidth: 900, minHeight: 600)
                 .task {
                     appDelegate.store = store
@@ -53,6 +52,11 @@ struct LaicaiNativeApp: App {
             }
 
             CommandMenu("会话") {
+                Button("新建窗口") {
+                    (NSApp.delegate as? LaicaiAppDelegate)?.openNewWindow()
+                }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+
                 Button("命令面板") {
                     NotificationCenter.default.post(name: .laicaiToggleCommandPalette, object: nil)
                 }
@@ -99,7 +103,6 @@ struct LaicaiNativeApp: App {
         } else {
             store.newThread()
         }
-        store.updateDraft("请直接处理这个目标：")
     }
 }
 
@@ -167,7 +170,6 @@ final class LaicaiAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         let visibleWindows = NSApp.windows.filter(isMainAppWindow(_:))
         if let visible = preferredMainWindow(from: visibleWindows) {
-            closeDuplicateMainWindows(keeping: visible, in: visibleWindows)
             closeHiddenAuxiliaryWindows(keeping: visible)
             visible.makeKeyAndOrderFront(nil)
             visible.orderFrontRegardless()
@@ -185,10 +187,19 @@ final class LaicaiAppDelegate: NSObject, NSApplicationDelegate {
         return
     }
 
+    /// Multi-window support: open an additional main window sharing the same store.
+    func openNewWindow() {
+        guard !HeadlessRunner.shared.isHeadless else { return }
+        let store = store ?? LaicaiAppRuntime.store
+        let window = makeFallbackMainWindow(store: store)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     private func makeFallbackMainWindow(store: AppStore) -> NSWindow {
         let root = RootView()
             .environmentObject(store)
-            .preferredColorScheme(.light)
             .frame(minWidth: 900, minHeight: 600)
             .task { [weak self] in
                 guard let self else { return }
@@ -211,12 +222,6 @@ final class LaicaiAppDelegate: NSObject, NSApplicationDelegate {
         windows.first(where: { $0.isKeyWindow })
             ?? windows.first(where: { $0.isMainWindow })
             ?? windows.first
-    }
-
-    private func closeDuplicateMainWindows(keeping keptWindow: NSWindow, in windows: [NSWindow]) {
-        for window in windows where window !== keptWindow {
-            window.close()
-        }
     }
 
     private func closeHiddenAuxiliaryWindows(keeping keptWindow: NSWindow) {

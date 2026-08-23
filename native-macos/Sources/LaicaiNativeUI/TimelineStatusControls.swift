@@ -8,10 +8,8 @@ import SwiftUI
 struct TypingIndicator: View {
     @EnvironmentObject private var store: AppStore
     let threadID: UUID
-    @State private var phase: Int = 0
-    @State private var tick: Int = 0  // drives 1-second refresh
-    @State private var pulseTimer: Timer?
-    @State private var tickTimer: Timer?
+    @State private var pulsing = false
+    @State private var now = Date()
 
     private var activityText: String {
         let text = store.liveActivity(for: threadID)
@@ -20,19 +18,20 @@ struct TypingIndicator: View {
 
     private var elapsed: Int {
         guard let start = store.generationStartedAt(for: threadID) else { return 0 }
-        _ = tick  // subscribe to tick so label updates every second
-        return max(0, Int(Date().timeIntervalSince(start)))
+        return max(0, Int(now.timeIntervalSince(start)))
     }
 
     var body: some View {
         HStack(spacing: AppSpace.small) {
             HStack(spacing: AppSpace.small) {
-                // Pulsing dot
+                // Pulsing dot — the repeatForever animation runs on the render
+                // server and never re-evaluates body, unlike the previous
+                // 0.8s Timer.
                 Circle()
                     .fill(Brand.primary)
                     .frame(width: 7, height: 7)
-                    .scaleEffect(phase == 0 ? 1.0 : 0.7)
-                    .opacity(phase == 0 ? 1.0 : 0.5)
+                    .scaleEffect(pulsing ? 0.7 : 1.0)
+                    .opacity(pulsing ? 0.5 : 1.0)
 
                 Text(activityText)
                     .font(AppFont.captionMedium)
@@ -62,31 +61,27 @@ struct TypingIndicator: View {
 
             Spacer()
         }
-        .onAppear { startTimers() }
-        .onDisappear { stopTimers() }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.4).repeatForever(autoreverses: true)) {
+                pulsing = true
+            }
+        }
+        // Single cancellable task replaces the two strongly-captured Timers;
+        // SwiftUI cancels it automatically when the view disappears (including
+        // LazyVStack recycling, where Timer-based cleanup was unreliable).
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { break }
+                now = Date()
+            }
+        }
     }
 
     private var elapsedLabel: String {
         let elapsedSeconds = elapsed
         if elapsedSeconds < 60 { return "\(elapsedSeconds)s" }
         return "\(elapsedSeconds / 60)m\(elapsedSeconds % 60)s"
-    }
-
-    private func startTimers() {
-        guard pulseTimer == nil else { return }
-        pulseTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { _ in
-            phase = phase == 0 ? 1 : 0
-        }
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            tick += 1
-        }
-    }
-
-    private func stopTimers() {
-        pulseTimer?.invalidate()
-        pulseTimer = nil
-        tickTimer?.invalidate()
-        tickTimer = nil
     }
 }
 

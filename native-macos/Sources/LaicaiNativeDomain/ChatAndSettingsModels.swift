@@ -430,6 +430,11 @@ public enum ContextMode: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
+public enum ThemeAppearance: String, Codable, Sendable, CaseIterable {
+    case light
+    case dark
+}
+
 public struct AppSettings: Equatable, Codable, Sendable {
     public var workspacePath: String
     public var vaultPath: String
@@ -441,6 +446,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
     public var comfyUIModelName: String
     // G16: Multi-workspace support — recent workspace paths for quick switching
     public var recentWorkspaces: [String]
+    public var appearance: ThemeAppearance
 
     public init(
         workspacePath: String,
@@ -451,7 +457,8 @@ public struct AppSettings: Equatable, Codable, Sendable {
         contextMode: ContextMode = .balanced,
         comfyUIServerURL: String = "http://127.0.0.1:8188",
         comfyUIModelName: String = "",
-        recentWorkspaces: [String] = []
+        recentWorkspaces: [String] = [],
+        appearance: ThemeAppearance = .light
     ) {
         self.workspacePath = workspacePath
         self.vaultPath = vaultPath
@@ -462,6 +469,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         self.comfyUIServerURL = comfyUIServerURL
         self.comfyUIModelName = comfyUIModelName
         self.recentWorkspaces = recentWorkspaces
+        self.appearance = appearance
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -474,6 +482,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         case comfyUIServerURL
         case comfyUIModelName
         case recentWorkspaces
+        case appearance
         case kernelMode
         case usePipeline
         case leanMode
@@ -490,6 +499,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         comfyUIServerURL = try container.decodeIfPresent(String.self, forKey: .comfyUIServerURL) ?? "http://127.0.0.1:8188"
         comfyUIModelName = try container.decodeIfPresent(String.self, forKey: .comfyUIModelName) ?? ""
         recentWorkspaces = try container.decodeIfPresent([String].self, forKey: .recentWorkspaces) ?? []
+        appearance = try container.decodeIfPresent(ThemeAppearance.self, forKey: .appearance) ?? .light
         // kernelMode is ignored — codexFull is the only runtime path
     }
 
@@ -504,6 +514,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         try container.encode(comfyUIServerURL, forKey: .comfyUIServerURL)
         try container.encode(comfyUIModelName, forKey: .comfyUIModelName)
         try container.encode(recentWorkspaces, forKey: .recentWorkspaces)
+        try container.encode(appearance, forKey: .appearance)
     }
 
     // G16: Switch active workspace and track in recents

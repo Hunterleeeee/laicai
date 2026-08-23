@@ -11,6 +11,7 @@ struct CommandPaletteView: View {
     @State private var query = ""
     @State private var selectedIndex = 0
     @State private var keyMonitor: Any?
+    @State private var monitorOwnerID = UUID()
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
@@ -67,15 +68,14 @@ struct CommandPaletteView: View {
 
                         ForEach(Array(filteredActions.enumerated()), id: \.element.id) { index, action in
                             Button {
+                                selectedIndex = index
                                 run(action)
                             } label: {
                                 CommandPaletteRow(action: action, isSelected: index == selectedIndex)
                             }
                             .buttonStyle(.plain)
-                            .onTapGesture {
-                                selectedIndex = index
-                                run(action)
-                            }
+                            .accessibilityLabel(action.title)
+                            .accessibilityAddTraits(index == selectedIndex ? .isSelected : [])
                         }
 
                         if filteredActions.isEmpty && matchingThreads.isEmpty {
@@ -111,34 +111,39 @@ struct CommandPaletteView: View {
         }
         .onAppear {
             isSearchFocused = true
-            if keyMonitor == nil {
-                keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                    guard self.isPresented else { return event }
-                    switch event.keyCode {
-                    case 125:  // down arrow
+            removeKeyMonitor()
+            let ownerID = monitorOwnerID
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard self.isPresented, self.monitorOwnerID == ownerID else { return event }
+                switch event.keyCode {
+                    case 125: // Down Arrow
                         self.selectedIndex = min(self.selectedIndex + 1, max(self.filteredActions.count - 1, 0))
                         return nil
-                    case 126:  // up arrow
+                    case 126: // Up Arrow
                         self.selectedIndex = max(self.selectedIndex - 1, 0)
                         return nil
-                    case 36:  // return
-                        guard !self.filteredActions.isEmpty else { return event }
-                        if self.selectedIndex < self.filteredActions.count {
-                            self.run(self.filteredActions[self.selectedIndex])
-                        }
+                    case 36: // Return
+                        guard !self.filteredActions.isEmpty,
+                            self.selectedIndex < self.filteredActions.count
+                        else { return event }
+                        self.run(self.filteredActions[self.selectedIndex])
                         return nil
                     default:
                         return event
                     }
                 }
-            }
         }
         .onDisappear {
-            if let monitor = keyMonitor {
-                NSEvent.removeMonitor(monitor)
-                keyMonitor = nil
-            }
+            removeKeyMonitor()
         }
+    }
+
+    private func removeKeyMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
+        monitorOwnerID = UUID()
     }
 
     private var filteredActions: [CommandPaletteAction] {
@@ -312,7 +317,6 @@ struct CommandPaletteView: View {
             } else {
                 store.newThread()
             }
-            store.updateDraft("请直接处理这个目标：")
         case .newThread:
             store.newThread()
         case .continueThread:

@@ -43,7 +43,6 @@ struct ChatDetailView: View {
         }
         .background(SurfaceGrade.base)
         .onAppear {
-            PasteImageMonitor.install(store: store)
             syncLocalDraftFromStore(force: true)
         }
         .onDisappear {
@@ -54,6 +53,9 @@ struct ChatDetailView: View {
         }
         .onChange(of: store.state.selectedThreadID) {
             syncLocalDraftFromStore(force: true)
+        }
+        .onChange(of: store.composerFocusEpoch) { _, _ in
+            composerFocused = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .laicaiNewThread)) { _ in
             store.newThread()
@@ -71,8 +73,20 @@ struct ChatDetailView: View {
     @ViewBuilder
     private var content: some View {
         if let thread = store.state.selectedThread, shouldShowTimeline(for: thread) {
-            ThreadTimelineView(thread: thread)
-                .id("\(thread.id)")
+            ThreadTimelineView(
+                thread: thread,
+                generationPresentation: store.generationPresentation,
+                streamPresentation: store.streamPresentation,
+                connectors: store.state.connectors,
+                activeConnectorID: store.state.activeConnectorID,
+                workspaceRoot: store.state.settings.workspacePath,
+                userRating: thread.userRating,
+                onPlanChange: { store.updateMultiAgentPlan($0, for: thread.id) },
+                onExecutePlan: { store.executeEditedPlan(threadID: thread.id) },
+                onCancelPlan: { store.cancelMultiAgentPlan(for: thread.id) },
+                onResumePlan: { store.resumeFailedPlan(threadID: thread.id) }
+            )
+            .id("\(thread.id)")
         } else {
             WelcomeView(showingSettings: $showingSettings)
         }
@@ -87,7 +101,10 @@ struct ChatDetailView: View {
         if thread.status == .running || thread.executionState == .running { return true }
         if selectedThreadIsGenerating, thread.id == store.state.selectedThreadID { return true }
         if thread.multiAgentPlan != nil { return true }
-        return false
+        // Keep the selected empty conversation in the stable timeline shell.
+        // The first send then updates the existing surface instead of swapping
+        // WelcomeView and timeline in the same frame, which caused a white flash.
+        return thread.id == store.state.selectedThreadID
     }
 
     // MARK: - Composer
@@ -128,8 +145,10 @@ struct ChatDetailView: View {
                 .frame(height: max(52, composerTextHeight), alignment: .topLeading)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .clipped()
-                .disabled(store.state.activeConnector == nil)
-                .opacity(store.state.activeConnector == nil ? 0.4 : 1)
+                // Typing stays enabled without a connector — the send path and
+                // the status bar below guide users to connect instead of
+                // blocking input outright.
+                .opacity(store.state.activeConnector == nil ? 0.75 : 1)
 
                 HStack(alignment: .center, spacing: AppSpace.small) {
                     attachImageButton
@@ -201,22 +220,30 @@ struct ChatDetailView: View {
             )
         )
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            var paths: [String] = []
+            var paths = Array<String?>(repeating: nil, count: providers.count)
+            let pathsLock = NSLock()
             let group = DispatchGroup()
-            for provider in providers {
+            for (index, provider) in providers.enumerated() {
                 group.enter()
                 provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { data, _ in
+                    defer { group.leave() }
+                    let path: String?
                     if let data = data as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
-                        paths.append(url.path)
+                        path = url.path
                     } else if let url = data as? URL {
-                        paths.append(url.path)
+                        path = url.path
+                    } else {
+                        path = nil
                     }
-                    group.leave()
+                    pathsLock.lock()
+                    paths[index] = path
+                    pathsLock.unlock()
                 }
             }
             group.notify(queue: .main) {
-                if !paths.isEmpty {
-                    store.addDraftAttachments(paths)
+                let resolvedPaths = paths.compactMap { $0 }
+                if !resolvedPaths.isEmpty {
+                    store.addDraftAttachments(resolvedPaths)
                     composerFocused = true
                 }
             }
@@ -425,34 +452,10 @@ struct ChatDetailView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: AppSpace.small) {
                 ForEach(store.state.draftImages) { img in
-                    ZStack(alignment: .topTrailing) {
-                        if let nsImage = NSImage(data: img.data) {
-                            SwiftUI.Image(nsImage: nsImage)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 52, height: 52)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        } else {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(width: 52, height: 52)
-                                .overlay(
-                                    Image(systemName: "photo")
-                                        .foregroundStyle(TextGrade.muted)
-                                )
-                        }
-
-                        Button {
-                            store.removeDraftImage(id: img.id)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.white)
-                                .background(Circle().fill(Color.black.opacity(0.6)).frame(width: 16, height: 16))
-                        }
-                        .buttonStyle(.plain)
-                        .offset(x: 4, y: -4)
-                    }
+                    DraftImageThumbnail(
+                        data: img.data,
+                        onRemove: { store.removeDraftImage(id: img.id) }
+                    )
                 }
             }
         }
@@ -533,6 +536,8 @@ struct ChatDetailView: View {
         }
         .buttonStyle(.plain)
         .disabled(selectedThreadIsGenerating ? !hasPendingFollowUp : !canSend)
+        .accessibilityLabel(selectedThreadIsGenerating ? "追加指令" : "发送")
+        .accessibilityHint(selectedThreadIsGenerating ? (hasPendingFollowUp ? "将指令加入当前运行会话" : "请输入要追加的内容") : (canSend ? "发送当前消息" : "请输入内容后发送"))
         .help(selectedThreadIsGenerating ? (hasPendingFollowUp ? "追加指令 (↵)" : "输入要追加的指令") : (canSend ? "发送 (↵)" : "输入内容后发送"))
     }
 
@@ -568,6 +573,8 @@ struct ChatDetailView: View {
         }
         .buttonStyle(.plain)
         .disabled(!hasPendingFollowUp)
+        .accessibilityLabel("追加指令")
+        .accessibilityHint(hasPendingFollowUp ? "将指令加入当前运行会话" : "请输入要追加的内容")
         .help(hasPendingFollowUp ? "追加指令 (↵)" : "输入要追加的指令")
     }
 
@@ -604,61 +611,14 @@ struct ChatDetailView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: AppSpace.small) {
                 ForEach(store.state.draftAttachments, id: \.self) { path in
-                    let isDir = isDirectory(path)
-                    HStack(spacing: AppSpace.extraSmall + 1) {
-                        Image(systemName: isDir ? "folder.fill" : "doc.fill")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(isDir ? Brand.primary : TextGrade.muted)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(URL(fileURLWithPath: path).lastPathComponent)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(TextGrade.primary)
-                                .lineLimit(1)
-                            if isDir {
-                                Text(directoryHint(path))
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(TextGrade.ghost)
-                                    .lineLimit(1)
-                            }
-                        }
-                        Button {
-                            store.removeDraftAttachment(path)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(TextGrade.ghost)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.leading, AppSpace.small)
-                    .padding(.trailing, AppSpace.extraSmall + 2)
-                    .padding(.vertical, AppSpace.extraSmall + 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                            .fill(SurfaceGrade.card.opacity(0.8))
+                    DraftAttachmentChip(
+                        path: path,
+                        onRemove: { store.removeDraftAttachment(path) }
                     )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
-                            .strokeBorder(isDir ? Brand.primary.opacity(0.2) : SurfaceGrade.border.opacity(0.3), lineWidth: 0.5)
-                    )
-                    .frame(maxWidth: 200)
                     .help(path)
                 }
             }
         }
-    }
-
-    private func isDirectory(_ path: String) -> Bool {
-        var isDir: ObjCBool = false
-        FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
-        return isDir.boolValue
-    }
-
-    private func directoryHint(_ path: String) -> String {
-        let url = URL(fileURLWithPath: path)
-        let count = (try? FileManager.default.contentsOfDirectory(atPath: path).count) ?? 0
-        let parent = url.deletingLastPathComponent().lastPathComponent
-        return count > 0 ? "\(count) 项 · \(parent)" : parent
     }
 
     private func updateLocalDraft(_ value: String) {
@@ -722,6 +682,121 @@ struct ChatDetailView: View {
         setLocalDraft(store.state.draftMessage, publishImmediately: false)
     }
 
+}
+
+/// Attachment chip with filesystem metadata resolved once per path in a
+/// cancellable task instead of on every body evaluation.
+private struct DraftAttachmentChip: View {
+    let path: String
+    let onRemove: () -> Void
+
+    @State private var isDir = false
+    @State private var hint = ""
+
+    var body: some View {
+        HStack(spacing: AppSpace.extraSmall + 1) {
+            Image(systemName: isDir ? "folder.fill" : "doc.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(isDir ? Brand.primary : TextGrade.muted)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(URL(fileURLWithPath: path).lastPathComponent)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(TextGrade.primary)
+                    .lineLimit(1)
+                if isDir && !hint.isEmpty {
+                    Text(hint)
+                        .font(.system(size: 9))
+                        .foregroundStyle(TextGrade.ghost)
+                        .lineLimit(1)
+                }
+            }
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(TextGrade.ghost)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.leading, AppSpace.small)
+        .padding(.trailing, AppSpace.extraSmall + 2)
+        .padding(.vertical, AppSpace.extraSmall + 1)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
+                .fill(SurfaceGrade.card.opacity(0.8))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.medium, style: .continuous)
+                .strokeBorder(isDir ? Brand.primary.opacity(0.2) : SurfaceGrade.border.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: 200)
+        .task(id: path) {
+            var isDirectoryObjC: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectoryObjC)
+            isDir = exists && isDirectoryObjC.boolValue
+            guard isDir else {
+                hint = ""
+                return
+            }
+            let url = URL(fileURLWithPath: path)
+            let count = (try? FileManager.default.contentsOfDirectory(atPath: path).count) ?? 0
+            let parent = url.deletingLastPathComponent().lastPathComponent
+            hint = count > 0 ? "\(count) 项 · \(parent)" : parent
+        }
+    }
+}
+
+/// Draft image thumbnail decoded once per attachment (off the main thread,
+/// downsampled via ImageIO) instead of a full NSImage decode per body eval.
+private struct DraftImageThumbnail: View {
+    let data: Data
+    let onRemove: () -> Void
+
+    @State private var thumbnail: NSImage?
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            if let nsImage = thumbnail {
+                SwiftUI.Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 52, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(width: 52, height: 52)
+                    .overlay(
+                        Image(systemName: "photo")
+                            .foregroundStyle(TextGrade.muted)
+                    )
+            }
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white)
+                    .background(Circle().fill(Color.black.opacity(0.6)).frame(width: 16, height: 16))
+            }
+            .buttonStyle(.plain)
+            .offset(x: 4, y: -4)
+        }
+        .task(id: data) {
+            let source = data
+            let image = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+                guard let imageSource = CGImageSourceCreateWithData(source as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+                    let cgImage = CGImageSourceCreateThumbnailAtIndex(
+                        imageSource, 0,
+                        [
+                            kCGImageSourceCreateThumbnailFromImageAlways: true,
+                            kCGImageSourceShouldCacheImmediately: true,
+                            kCGImageSourceThumbnailMaxPixelSize: 160,
+                        ] as CFDictionary)
+                else { return nil }
+                return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+            }.value
+            thumbnail = image
+        }
+    }
 }
 
 private enum ComposerChipTone {

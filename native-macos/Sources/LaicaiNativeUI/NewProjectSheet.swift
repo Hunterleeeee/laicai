@@ -40,11 +40,12 @@ struct NewProjectSheet: View {
             }
 
             // Mode toggle
-            Picker("", selection: $createNew) {
+            Picker("项目文件夹操作", selection: $createNew) {
                 Text("选择已有文件夹").tag(false)
                 Text("创建新文件夹").tag(true)
             }
             .pickerStyle(.segmented)
+            .accessibilityHint("选择使用已有文件夹或创建新文件夹")
 
             if createNew {
                 // Create new folder
@@ -115,6 +116,7 @@ struct NewProjectSheet: View {
             // Actions
             HStack {
                 Button("取消") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                     .buttonStyle(.plain)
                     .foregroundStyle(TextGrade.muted)
 
@@ -135,6 +137,8 @@ struct NewProjectSheet: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("创建项目")
+                .accessibilityHint(canCreate ? "创建并打开项目" : "请先填写项目名称和文件夹")
                 .disabled(!canCreate)
             }
         }

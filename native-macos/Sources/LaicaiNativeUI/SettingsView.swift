@@ -364,7 +364,10 @@ private struct ConnectorSettingsRow: View {
 private struct ToolsSettingsTab: View {
     @EnvironmentObject private var store: AppStore
     @State private var serverStatus: String = ""
+    @State private var isTestingServer = false
+    @State private var isUpdatingBridge = false
     @State private var bridgeStatus: GeminiOAuthBridgeStatus = .empty
+    @State private var bridgeTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
@@ -382,8 +385,11 @@ private struct ToolsSettingsTab: View {
                         )
                         .textFieldStyle(.roundedBorder)
 
-                        Button("测试连接") {
+                        Button {
+                            guard !isTestingServer else { return }
+                            isTestingServer = true
                             Task {
+                                defer { isTestingServer = false }
                                 let url =
                                     store.state.settings.comfyUIServerURL.isEmpty
                                     ? "http://127.0.0.1:8188" : store.state.settings.comfyUIServerURL
@@ -405,8 +411,14 @@ private struct ToolsSettingsTab: View {
                                     serverStatus = "❌ 无法连接"
                                 }
                             }
+                        } label: {
+                            HStack(spacing: AppSpace.extraSmall) {
+                                if isTestingServer { ProgressView().controlSize(.small) }
+                                Text("测试连接")
+                            }
                         }
                         .buttonStyle(.bordered)
+                        .disabled(isTestingServer)
                     }
 
                     if !serverStatus.isEmpty {
@@ -468,26 +480,44 @@ private struct ToolsSettingsTab: View {
                         refreshBridgeStatus()
                     }
                     .buttonStyle(.bordered)
+                    .disabled(isUpdatingBridge)
 
-                    Button(bridgePrimaryActionTitle) {
+                    Button {
+                        guard !isUpdatingBridge else { return }
+                        isUpdatingBridge = true
                         store.startGeminiOAuthBridge()
-                        Task { @MainActor in
+                        bridgeTask?.cancel()
+                        bridgeTask = Task { @MainActor in
+                            defer { isUpdatingBridge = false; bridgeTask = nil }
                             try? await Task.sleep(for: .seconds(2))
+                            guard !Task.isCancelled else { return }
                             refreshBridgeStatus()
+                        }
+                    } label: {
+                        HStack(spacing: AppSpace.extraSmall) {
+                            if isUpdatingBridge { ProgressView().controlSize(.small) }
+                            Text(bridgePrimaryActionTitle)
                         }
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(isUpdatingBridge)
                     .tint(bridgeStatus.socksAvailable ? Brand.primary : Semantic.warning)
 
                     if bridgeStatus.hasPartialState {
                         Button("清理") {
+                            guard !isUpdatingBridge else { return }
+                            isUpdatingBridge = true
                             store.stopGeminiOAuthBridge()
-                            Task { @MainActor in
+                            bridgeTask?.cancel()
+                            bridgeTask = Task { @MainActor in
+                                defer { isUpdatingBridge = false; bridgeTask = nil }
                                 try? await Task.sleep(for: .seconds(2))
+                                guard !Task.isCancelled else { return }
                                 refreshBridgeStatus()
                             }
                         }
                         .buttonStyle(.bordered)
+                        .disabled(isUpdatingBridge)
                         .tint(Semantic.error)
                     }
                 }
@@ -654,6 +684,7 @@ private struct GatewaySettingsTab: View {
     @ObservedObject private var gateway = MessagingGateway.shared
     @State private var showingAddChannel = false
     @State private var editingChannel: ChannelConfig?
+    @State private var isTogglingGateway = false
 
     var body: some View {
         ScrollView {
@@ -672,14 +703,26 @@ private struct GatewaySettingsTab: View {
                                 .font(AppFont.tiny)
                                 .foregroundStyle(TextGrade.ghost)
 
-                            Button(gateway.isRunning ? "停止" : "启动") {
+                            Button {
+                                guard !isTogglingGateway else { return }
+                                isTogglingGateway = true
                                 if gateway.isRunning {
                                     gateway.stop()
                                 } else {
                                     store.startGateway()
                                 }
+                                Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(250))
+                                    isTogglingGateway = false
+                                }
+                            } label: {
+                                HStack(spacing: AppSpace.extraSmall) {
+                                    if isTogglingGateway { ProgressView().controlSize(.small) }
+                                    Text(gateway.isRunning ? "停止" : "启动")
+                                }
                             }
                             .buttonStyle(.borderedProminent)
+                            .disabled(isTogglingGateway)
                             .tint(gateway.isRunning ? Semantic.error : Semantic.success)
                             .controlSize(.small)
                             .accessibilityLabel(gateway.isRunning ? "停止消息网关" : "启动消息网关")

@@ -239,13 +239,15 @@ struct WelcomeView: View {
         .padding(.bottom, narrow ? 0 : AppSpace.extraSmall)
     }
 
-    private func startTask(draft: String = "请直接处理这个目标：") {
+    private func startTask(draft: String? = nil) {
         if let projectID = projectManager.activeProjectID {
             store.newThreadInProject(projectID)
         } else {
             store.newThread()
         }
-        store.updateDraft(draft)
+        if let draft, !draft.isEmpty {
+            store.updateDraft(draft)
+        }
     }
 
     private var recentTask: Thread? {
@@ -361,6 +363,8 @@ struct PrimaryActionTile: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityHint(subtitle)
         .onHover { hovering in
             withAnimation(AppAnimation.quick) { isHovered = hovering }
         }

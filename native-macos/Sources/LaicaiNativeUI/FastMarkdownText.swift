@@ -5,15 +5,18 @@ struct FastMarkdownText: NSViewRepresentable {
     let markdown: String
     var fontSize: CGFloat = 14
     var maxWidth: CGFloat = LayoutConst.conversationMaxWidth
+    /// Streaming mode: append-only plain text with incremental layout. Skips the
+    /// full Markdown render + line-style pass so growing output stays cheap.
+    var isStreaming: Bool = false
 
     func makeNSView(context: Context) -> FastMarkdownTextView {
         let view = FastMarkdownTextView()
-        view.configure(markdown: markdown, fontSize: fontSize, maxWidth: maxWidth)
+        view.configure(markdown: markdown, fontSize: fontSize, maxWidth: maxWidth, isStreaming: isStreaming)
         return view
     }
 
     func updateNSView(_ view: FastMarkdownTextView, context: Context) {
-        view.configure(markdown: markdown, fontSize: fontSize, maxWidth: maxWidth)
+        view.configure(markdown: markdown, fontSize: fontSize, maxWidth: maxWidth, isStreaming: isStreaming)
     }
 }
 
@@ -24,6 +27,7 @@ final class FastMarkdownTextView: NSView {
     private var lastMarkdown = ""
     private var lastFontSize: CGFloat = 0
     private var lastWidth: CGFloat = 0
+    private var isStreamingMode = false
     private var measuredHeight: CGFloat = 1
     private var lastMeasureKey: String = ""
 
@@ -51,13 +55,47 @@ final class FastMarkdownTextView: NSView {
         measure(width: width)
     }
 
-    func configure(markdown: String, fontSize: CGFloat, maxWidth: CGFloat) {
+    func configure(markdown: String, fontSize: CGFloat, maxWidth: CGFloat, isStreaming: Bool) {
         let width = bounds.width > 1 ? bounds.width : maxWidth
-        guard markdown != lastMarkdown || abs(fontSize - lastFontSize) > 0.1 || abs(width - lastWidth) > 0.5 else { return }
+        let contentChanged = markdown != lastMarkdown
+        let styleChanged = abs(fontSize - lastFontSize) > 0.1 || abs(width - lastWidth) > 0.5 || isStreaming != isStreamingMode
+        let endingStream = isStreamingMode && !isStreaming
+        guard contentChanged || styleChanged || endingStream else { return }
+
+        // Always rebuild the final rich-text representation when streaming ends;
+        // the plain streaming buffer intentionally skips Markdown parsing.
+        if endingStream {
+            isStreamingMode = false
+            lastMarkdown = markdown
+            lastFontSize = fontSize
+            lastWidth = width
+            textStorage.setAttributedString(Self.attributed(markdown, fontSize: fontSize))
+            measure(width: width)
+            needsDisplay = true
+            return
+        }
+
+        // Streaming fast path: content only grows, so append the delta instead of
+        // re-parsing and re-laying-out the whole buffer every flush.
+        if isStreaming, !lastMarkdown.isEmpty, markdown.hasPrefix(lastMarkdown), !styleChanged {
+            let delta = String(markdown.dropFirst(lastMarkdown.count))
+            guard !delta.isEmpty else { return }
+            lastMarkdown = markdown
+            textStorage.append(Self.plainRun(delta, fontSize: fontSize))
+            measure(width: width)
+            needsDisplay = true
+            return
+        }
+
+        isStreamingMode = isStreaming
         lastMarkdown = markdown
         lastFontSize = fontSize
         lastWidth = width
-        textStorage.setAttributedString(Self.attributed(markdown, fontSize: fontSize))
+        let attributed =
+            isStreaming
+            ? Self.plainRun(markdown, fontSize: fontSize)
+            : Self.attributed(markdown, fontSize: fontSize)
+        textStorage.setAttributedString(attributed)
         measure(width: width)
         needsDisplay = true
     }
@@ -91,6 +129,20 @@ final class FastMarkdownTextView: NSView {
         guard abs(nextHeight - measuredHeight) > 0.5 else { return }
         measuredHeight = nextHeight
         invalidateIntrinsicContentSize()
+    }
+
+    private static func plainRun(_ text: String, fontSize: CGFloat) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 4
+        paragraph.paragraphSpacing = 7
+        return NSAttributedString(
+            string: text,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: fontSize),
+                .foregroundColor: NSColor.labelColor,
+                .paragraphStyle: paragraph,
+            ]
+        )
     }
 
     private static func attributed(_ markdown: String, fontSize: CGFloat) -> NSAttributedString {

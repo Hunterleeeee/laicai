@@ -513,7 +513,23 @@ struct WorkflowEditorView: View {
 
             // Tool type — custom button grid instead of segmented
             inspectorField("类型") {
-                nodeTypePicker(selection: $steps[index].toolType)
+                nodeTypePicker(
+                    selection: Binding(
+                        get: { steps[index].toolType },
+                        set: { newType in
+                            steps[index].toolType = newType
+                            switch newType {
+                            case .llm: steps[index].tool = "llm"
+                            case .humanInput: steps[index].tool = "human_input"
+                            case .condition: steps[index].tool = "condition"
+                            case .tool, .http, .code:
+                                if ["llm", "human_input", "condition"].contains(steps[index].tool) {
+                                    steps[index].tool = ""
+                                }
+                            }
+                        }
+                    )
+                )
             }
 
             // Tool name
@@ -523,12 +539,6 @@ struct WorkflowEditorView: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 12, design: .monospaced))
                 }
-            } else if steps[index].toolType == .llm {
-                Color.clear.frame(height: 0).onAppear { steps[index].tool = "llm" }
-            } else if steps[index].toolType == .humanInput {
-                Color.clear.frame(height: 0).onAppear { steps[index].tool = "human_input" }
-            } else if steps[index].toolType == .condition {
-                Color.clear.frame(height: 0).onAppear { steps[index].tool = "condition" }
             }
 
             // Prompt

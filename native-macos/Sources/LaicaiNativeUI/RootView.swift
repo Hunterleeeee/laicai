@@ -22,7 +22,8 @@ public struct RootView: View {
                     showingSettings: $showingSettings,
                     showingCommandPalette: $showingCommandPalette,
                     showWorkbench: $showWorkbench,
-                    isVisible: $showSidebar
+                    isVisible: $showSidebar,
+                    presentation: store.sidebarPresentation
                 )
                 .frame(width: sidebarExpanded ? LayoutConst.threadRailExpandedWidth : LayoutConst.threadRailWidth)
                 .background(SurfaceGrade.panel)
@@ -56,7 +57,7 @@ public struct RootView: View {
 
                     if showWorkbench {
                         workbenchDrawer
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .transition(.move(edge: .trailing))
                             .zIndex(5)
                     }
                 }
@@ -67,6 +68,12 @@ public struct RootView: View {
         .overlay(alignment: .top) {
             ToastOverlay()
                 .padding(.top, 6)
+        }
+        .overlay {
+            if store.isBootstrapping {
+                launchLoading
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
         }
         .overlay {
             if showingCommandPalette {
@@ -82,7 +89,7 @@ public struct RootView: View {
             SettingsView().environmentObject(store)
         }
         .onReceive(NotificationCenter.default.publisher(for: .laicaiToggleCommandPalette)) { _ in
-            withAnimation(AppAnimation.spring) { showingCommandPalette.toggle() }
+            withAnimation(AppAnimation.quick) { showingCommandPalette.toggle() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .laicaiOpenSettings)) { _ in
             showingSettings = true
@@ -91,7 +98,7 @@ public struct RootView: View {
             if let tab = note.object as? WorkbenchTab {
                 store.selectWorkbenchTab(tab)
             }
-            withAnimation(AppAnimation.spring) { showWorkbench = true }
+            withAnimation(AppAnimation.quick) { showWorkbench = true }
         }
         .onChange(of: store.state.notice?.id) { _, _ in
             guard let notice = store.state.notice else { return }
@@ -109,10 +116,20 @@ public struct RootView: View {
         }
         .onChange(of: showSidebar) { _, newVal in
             withAnimation(AppAnimation.spring) { sidebarExpanded = newVal }
-            NotificationCenter.default.post(name: .laicaiPanelToggled, object: nil)
         }
-        .onChange(of: showWorkbench) { _, _ in
-            NotificationCenter.default.post(name: .laicaiPanelToggled, object: nil)
+        .preferredColorScheme(store.state.settings.appearance == .dark ? .dark : .light)
+    }
+
+    private var launchLoading: some View {
+        ZStack {
+            SurfaceGrade.base.ignoresSafeArea()
+            VStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("正在加载工作区…")
+                    .font(AppFont.caption)
+                    .foregroundStyle(TextGrade.muted)
+            }
         }
     }
 
@@ -160,7 +177,7 @@ public struct RootView: View {
             SurfaceGrade.base
             LinearGradient(
                 colors: [
-                    Color.white.opacity(0.72),
+                    SurfaceGrade.panel.opacity(0.72),
                     SurfaceGrade.base.opacity(0.95),
                     SurfaceGrade.panel.opacity(0.44),
                 ],
@@ -253,7 +270,7 @@ private struct AppTopBar: View {
             }
 
             ToolbarButton(icon: showWorkbench ? "sidebar.trailing" : "sidebar.trailing", tooltip: showWorkbench ? "隐藏工具面板" : "显示工具面板") {
-                withAnimation(AppAnimation.spring) { showWorkbench.toggle() }
+                withAnimation(AppAnimation.quick) { showWorkbench.toggle() }
             }
 
             ToolbarButton(icon: "gearshape", tooltip: "设置") {
@@ -261,6 +278,8 @@ private struct AppTopBar: View {
             }
         }
         .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("会话操作")
     }
 
     private func startNewTask() {
@@ -269,7 +288,6 @@ private struct AppTopBar: View {
         } else {
             store.newThread()
         }
-        store.updateDraft("请直接处理这个目标：")
     }
 
     private var currentTitle: String {

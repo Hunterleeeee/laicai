@@ -35,8 +35,10 @@ struct ComposerTextView: NSViewRepresentable {
             height: CGFloat.greatestFiniteMagnitude
         )
         textView.isHorizontallyResizable = false
-        textView.isVerticallyResizable = false
-        textView.autoresizingMask = [.width, .height]
+        textView.isVerticallyResizable = true
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.autoresizingMask = [.width]
         textView.onFocusChange = { focused in
             context.coordinator.setFocused(focused)
         }
@@ -64,7 +66,7 @@ struct ComposerTextView: NSViewRepresentable {
                 && !text.isEmpty
                 && text.count < textView.string.count
                 && textView.window?.firstResponder === textView
-            if !looksLikeStaleEcho {
+            if !looksLikeStaleEcho, !textView.hasMarkedText() {
                 let selected = textView.selectedRanges
                 textView.string = text
                 if !selected.isEmpty {
@@ -81,6 +83,14 @@ struct ComposerTextView: NSViewRepresentable {
         context.coordinator.onImagePaste = onImagePaste
         if previousPlaceholder != placeholder {
             textView.needsDisplay = true
+        }
+        // Apply focus requests from SwiftUI (e.g. right after creating a new
+        // conversation). Guard against redundant first-responder churn.
+        if isFocused, textView.window?.firstResponder !== textView {
+            DispatchQueue.main.async { [weak textView] in
+                guard let textView, textView.window?.firstResponder !== textView else { return }
+                textView.window?.makeFirstResponder(textView)
+            }
         }
     }
 
@@ -151,7 +161,7 @@ struct ComposerTextView: NSViewRepresentable {
             )
             textView.layoutManager?.ensureLayout(for: textContainer)
             let used = textView.layoutManager?.usedRect(for: textContainer).height ?? 0
-            let height = min(84, max(28, ceil(used + textView.textContainerInset.height * 2)))
+            let height = min(220, max(28, ceil(used + textView.textContainerInset.height * 2)))
             DispatchQueue.main.async {
                 if abs(self.measuredHeight.wrappedValue - height) > 0.5 {
                     self.measuredHeight.wrappedValue = height
@@ -270,17 +280,27 @@ final class ComposerNSTextView: NSTextView {
             let urlData = pasteboard.data(forType: .fileURL),
             let url = URL(dataRepresentation: urlData, relativeTo: nil),
             let uti = try? url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier,
-            uti.hasPrefix("public.image"),
-            let data = try? Data(contentsOf: url)
+            uti.hasPrefix("public.image")
         {
-            let ext = url.pathExtension.lowercased()
-            let mediaType = ext == "jpg" || ext == "jpeg" ? "image/jpeg" : "image/png"
-            onImagePaste?(data, mediaType)
+            loadImageFileAsynchronously(url)
             return
         }
 
         // Fall back to default text paste
         super.paste(sender)
+    }
+
+    private func loadImageFileAsynchronously(_ url: URL) {
+        let callback = onImagePaste
+        let mediaType = url.pathExtension.lowercased() == "jpg" || url.pathExtension.lowercased() == "jpeg"
+            ? "image/jpeg"
+            : "image/png"
+        Task.detached(priority: .userInitiated) {
+            guard let data = try? Data(contentsOf: url), !data.isEmpty else { return }
+            await MainActor.run {
+                callback?(data, mediaType)
+            }
+        }
     }
 
     /// Extract PNG data from pasteboard, trying multiple strategies
@@ -330,12 +350,9 @@ final class ComposerNSTextView: NSTextView {
             let urlData = pasteboard.data(forType: .fileURL),
             let url = URL(dataRepresentation: urlData, relativeTo: nil),
             let uti = try? url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier,
-            uti.hasPrefix("public.image"),
-            let data = try? Data(contentsOf: url)
+            uti.hasPrefix("public.image")
         {
-            let ext = url.pathExtension.lowercased()
-            let mediaType = ext == "jpg" || ext == "jpeg" ? "image/jpeg" : "image/png"
-            onImagePaste?(data, mediaType)
+            loadImageFileAsynchronously(url)
             return true
         }
         return super.performDragOperation(sender)
@@ -362,7 +379,7 @@ final class ComposerNSTextView: NSTextView {
 
         let origin = textContainerOrigin
         let attrs: [NSAttributedString.Key: Any] = [
-            .foregroundColor: NSColor(red: 0.51, green: 0.48, blue: 0.46, alpha: 1),
+            .foregroundColor: NSColor.placeholderTextColor,
             .font: font ?? NSFont.systemFont(ofSize: 14),
         ]
         let drawRect = NSRect(
