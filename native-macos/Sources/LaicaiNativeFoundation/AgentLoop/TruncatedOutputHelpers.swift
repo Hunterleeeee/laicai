@@ -72,15 +72,14 @@ extension AgentLoop {
             ))
         let text = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !looksLikeProviderError(text) else { return nil }
-        let finalText =
-            response.finishReason == "length"
-            ? text + "\n\n（回复仍被截断，可以继续在当前会话 里发送“接着说”。）"
-            : text
+        let wasTruncated = response.finishReason == "length"
         return TaskStep(
             kind: .textOutput,
-            text: finalText,
+            text: text,
             isCollapsible: false,
             isCollapsed: false,
+            recoverable: wasTruncated,
+            retryAction: wasTruncated ? "接着说" : nil,
             metrics: response.metrics,
             continuationOf: request.originalStepID
         )

@@ -201,16 +201,38 @@ struct IterationEngine {
             return "- \(name)"
         }.joined(separator: "\n")
         if !workingSet.isEmpty {
-            state.messages.append(ChatMessage(role: "system", content: "已读文件摘要（可直接 file_edit，无需再 file_read）：\n\(workingSet)"))
+            let workingSetMessage = ChatMessage(role: "system", content: "已读文件摘要（可直接 file_edit，无需再 file_read）：\n\(workingSet)")
+            state.messages.append(workingSetMessage)
             state.didInjectWorkingSet = true
+            let tokenLimit = max(1, state.config.contextWindow)
+            let safeLimit = Int(Double(tokenLimit) * 0.8)
+            if estimateTokens(state.messages, includeReasoning: true) > safeLimit {
+                state.messages.removeLast()
+                state.didInjectWorkingSet = false
+            }
         }
     }
 
     // MARK: - Build Effective System Prompt
 
-    /// After initial iterations, strip verbose guidance to free context window.
-    static func effectiveSystemPrompt(basePrompt: String, iteration: Int) -> String {
-        guard iteration >= 3 else { return basePrompt }
+    /// Estimated token footprint of the current message stack (including
+    /// reasoning content). Exposed for callers that need to react to context
+    /// pressure before building the next request.
+    static func estimatedContextTokens(of messages: [ChatMessage]) -> Int {
+        estimateTokens(messages, includeReasoning: true)
+    }
+
+    /// Strip verbose guidance sections only when the context is actually under
+    /// pressure. Unconditionally stripping project memory / learned guidance at
+    /// iteration 3 degraded mid-task behavior on long-running first rounds even
+    /// when plenty of window remained.
+    static func effectiveSystemPrompt(
+        basePrompt: String,
+        iteration: Int,
+        preserveKnowledge: Bool = false,
+        tokenPressure: Bool = false
+    ) -> String {
+        guard iteration >= 3, !preserveKnowledge, tokenPressure else { return basePrompt }
         var sections = basePrompt.components(separatedBy: "\n## ")
         let stripPrefixes = ["历史经验", "工具效率", "已学技能", "工具使用提示", "项目记忆"]
         sections = sections.filter { section in
@@ -411,6 +433,11 @@ struct IterationEngine {
     // MARK: - Progress State Injection
 
     private static func injectProgressState(state: inout PipelineState, config: AgentLoop.Config) {
+        // Keep one live progress snapshot instead of accumulating stale copies
+        // every few iterations and silently consuming the context window.
+        state.messages.removeAll { message in
+            message.role == "system" && (message.content ?? "").hasPrefix("##会话状态（")
+        }
         var stateLines: [String] = []
 
         let readFiles = state.taskContext.memory.readFiles

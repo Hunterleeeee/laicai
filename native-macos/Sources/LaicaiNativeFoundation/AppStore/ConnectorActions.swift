@@ -11,15 +11,9 @@ extension AppStore {
         else {
             return state.activeConnector
         }
-        state.activeConnectorID = fallback.id
-        state.settings.defaultConnectorName = fallback.name
-        if let threadIndex = state.threads.firstIndex(where: { $0.id == state.selectedThreadID }), state.threads[threadIndex].isChatOnly {
-            state.threads[threadIndex].modelName = fallback.name
-        }
-        notify("当前模型\(active.health == .offline ? "离线" : "不可用")，已自动切换到 \(AgentLoop.displayConnectorName(fallback))。", style: .info)
-        persistSettings()
-        persistConnectors()
-        persistThreads()
+        // Request-time fallback only. Do not mutate activeConnectorID,
+        // defaultConnectorName, conversation metadata, or persistence.
+        notify("当前模型\(active.health == .offline ? "离线" : "不可用")，本次请求临时使用 \(AgentLoop.displayConnectorName(fallback))。", style: .info)
         return fallback
     }
 

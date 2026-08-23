@@ -55,7 +55,7 @@ extension AgentLoop {
         }
 
         // Skip persistent memory load for pure chat (reduces startup latency)
-        if intent != .chat || message.count > 100 {
+        if intent != .chat || message.count > 300 {
             let persisted = TaskMemoryStore.load(workspaceRoot: config.workspaceRoot)
             if !persisted.isEmpty {
                 taskContext.memory = TaskMemoryStore.merge(persisted, into: taskContext.memory)

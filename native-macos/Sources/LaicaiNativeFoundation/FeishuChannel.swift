@@ -50,6 +50,7 @@ public final class FeishuChannel: MessagingChannel, Sendable {
     // MARK: - Lifecycle
 
     public func connect() async throws {
+        if state.withValue({ $0.wsTask != nil || $0.receiveTask != nil }) { return }
         guard !appID.isEmpty, !appSecret.isEmpty else {
             throw GatewayError.missingConfig("飞书 app_id 或 app_secret 未配置")
         }
@@ -415,19 +416,22 @@ public final class FeishuChannel: MessagingChannel, Sendable {
         let body: [String: Any] = ["receive_id": recipient, "msg_type": msgType, "content": contentStr]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (respData, resp) = try await NetworkDefaults.ephemeralSession.data(for: request)
+        var (respData, resp) = try await NetworkDefaults.ephemeralSession.data(for: request)
         if let httpResp = resp as? HTTPURLResponse, httpResp.statusCode == 401 {
             try await refreshToken()
             token = state.withValue { $0.accessToken }
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            _ = try await NetworkDefaults.ephemeralSession.data(for: request)
-            return
+            (respData, resp) = try await NetworkDefaults.ephemeralSession.data(for: request)
         }
-        if let json = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
-            let code = json["code"] as? Int, code != 0
-        {
+        guard let json = try? JSONSerialization.jsonObject(with: respData) as? [String: Any],
+            let code = json["code"] as? Int
+        else {
+            throw GatewayError.connectionFailed("飞书发送消息返回格式无效")
+        }
+        guard (resp as? HTTPURLResponse)?.statusCode == 200, code == 0 else {
             let msg = json["msg"] as? String ?? "未知错误"
             LaicaiLog.error("Feishu 发送消息失败: code=\(code) msg=\(msg)")
+            throw GatewayError.connectionFailed("飞书发送消息失败：\(msg)")
         }
     }
 

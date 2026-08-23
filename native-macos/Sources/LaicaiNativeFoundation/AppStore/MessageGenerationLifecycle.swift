@@ -37,6 +37,8 @@ extension AppStore {
             state.threads[threadIndex].executionLedger?.pendingFollowUp = nil
             state.threads[threadIndex].executionLedger?.nextAction = "处理用户补充：\(followUp)"
             state.threads[threadIndex].executionLedger?.transition(to: .executing, reason: "运行结束后接续 pending follow-up")
+            state.threads[threadIndex].status = .running
+            state.threads[threadIndex].executionState = .running
             state.threads[threadIndex].updatedAt = .now
             persistThreadsNow()
         }
@@ -58,13 +60,31 @@ extension AppStore {
         streamLastFlushAt.removeValue(forKey: targetTaskID)
         thinkingBuffers.removeValue(forKey: targetTaskID)
         thinkingLastFlushAt.removeValue(forKey: targetTaskID)
+        streamPresentation.clearAll(threadID: targetTaskID)
         generationStartTimes.removeValue(forKey: targetTaskID)
         liveActivitiesByThread.removeValue(forKey: targetTaskID)
+        generationPresentation.finish(threadID: targetTaskID)
         generationRunIDs.removeValue(forKey: targetTaskID)
         if generationTasks.isEmpty {
             state.isGenerating = false
             state.generationStartedAt = nil
             state.liveActivity = ""
+            // The final merge happens while the generation task is still in
+            // the dictionary, so persistThreadsNow intentionally skips the
+            // expensive projections during streaming. Rebuild them once after
+            // the task is removed, otherwise ended sessions can show stale
+            // sidebar summaries/status until the next unrelated update.
+            if let threadIndex = state.threads.firstIndex(where: { $0.id == targetTaskID }) {
+                let status = state.threads[threadIndex].status
+                if status == .running {
+                    state.threads[threadIndex].status = .failed
+                    state.threads[threadIndex].executionState = .failed
+                }
+                state.threads[threadIndex].updatedAt = .now
+            }
+            updateSummaryCaches()
+            refreshSidebarPresentation()
+            persistThreads()
         } else {
             syncGeneratingStateForSelectedThread()
         }

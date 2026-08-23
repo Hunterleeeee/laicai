@@ -82,7 +82,7 @@ extension AppState {
             }
         }
 
-        state.selectThread(id: state.threads.sorted { $0.updatedAt > $1.updatedAt }.first?.id)
+        // Restore data without selecting a thread behind the user's back.
         startMCPServers()
         loadPluginsIfNeeded(workspaceRoot: state.settings.workspacePath)
         if !issues.isEmpty {
@@ -228,20 +228,6 @@ extension AppState {
                     if !title.isEmpty { state.threads[index].title = title }
                 }
                 state.threads[index].preview = normalizedSessionPreview(state.threads[index].preview)
-            } else if state.threads[index].status == .running {
-                state.threads[index].status = .cancelled
-                state.threads[index].executionState = .paused
-                if !state.threads[index].steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) {
-                    state.threads[index].steps.append(
-                        TaskStep(
-                            kind: .error,
-                            text: "上次运行被中断，已自动标记为已暂停。",
-                            isFailure: false,
-                            recoverable: true,
-                            retryAction: "继续执行"
-                        ))
-                }
-                normalizedThreads = true
             }
 
             let beforeAgentState = state.threads[index].executionState

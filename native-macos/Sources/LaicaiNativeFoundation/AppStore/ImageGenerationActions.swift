@@ -135,7 +135,11 @@ extension AppStore {
 
     private func imageGenerationThreadRouting(message: String, intent: UserIntent) -> ImageGenerationThreadRouting {
         let selectedThreadProjectID = projectIDForExistingThreadSelection(allowRunningThread: true)
-        let continuationTargetID = continuationTargetThreadID(message: message, intent: intent)
+        let selectedExistingThreadID = state.selectedThreadID.flatMap { selectedID in
+            state.threads.first(where: { $0.id == selectedID && !$0.isEmptyPlaceholder && !$0.steps.isEmpty })?.id
+        }
+        let continuationTargetID = selectedExistingThreadID
+            ?? continuationTargetThreadID(message: message, intent: intent)
         let selectedPlaceholderID = selectedImageGenerationPlaceholderID()
         let shouldPromotePlaceholder = continuationTargetID == nil && selectedPlaceholderID != nil
         let shouldStartBesideRunningProjectThread =

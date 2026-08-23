@@ -41,7 +41,7 @@ extension AppStore {
         if let reuseThreadID, let index = state.threads.firstIndex(where: { $0.id == reuseThreadID }) {
             state.threads[index].title = String(taskTitle.prefix(32))
             state.threads[index].status = .running
-            state.threads[index].steps = initialSteps
+            state.threads[index].steps.append(contentsOf: initialSteps)
             state.threads[index].connectorID = connector.id
             state.threads[index].workflowName = workflow.name
             state.threads[index].context = context

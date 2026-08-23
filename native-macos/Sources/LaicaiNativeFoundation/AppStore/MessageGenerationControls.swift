@@ -3,7 +3,11 @@ import LaicaiNativeDomain
 
 extension AppStore {
     @discardableResult
-    func cancelGenerationTask(for threadID: UUID, discardBuffers: Bool = true) -> Bool {
+    func cancelGenerationTask(
+        for threadID: UUID,
+        discardBuffers: Bool = true,
+        markCancelled: Bool = true
+    ) -> Bool {
         let wasGenerating = isThreadGenerating(threadID)
         generationTasks[threadID]?.cancel()
         generationTasks.removeValue(forKey: threadID)
@@ -13,10 +17,20 @@ extension AppStore {
             streamLastFlushAt.removeValue(forKey: threadID)
             thinkingBuffers.removeValue(forKey: threadID)
             thinkingLastFlushAt.removeValue(forKey: threadID)
+            streamPresentation.clearAll(threadID: threadID)
         }
         generationStartTimes.removeValue(forKey: threadID)
         liveActivitiesByThread.removeValue(forKey: threadID)
         generationRunIDs.removeValue(forKey: threadID)
+        if markCancelled,
+            let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }),
+            state.threads[threadIndex].status == .running
+        {
+            state.threads[threadIndex].status = .cancelled
+            state.threads[threadIndex].executionState = .paused
+            state.threads[threadIndex].updatedAt = .now
+            syncAgentSnapshot(at: threadIndex)
+        }
         syncGeneratingStateForSelectedThread()
         return wasGenerating
     }
@@ -40,14 +54,16 @@ extension AppStore {
         }
 
         for threadID in targetThreadIDs {
-            cancelGenerationTask(for: threadID, discardBuffers: false)
+            cancelGenerationTask(for: threadID, discardBuffers: false, markCancelled: false)
         }
 
         syncGeneratingStateForSelectedThread()
         for threadID in targetThreadIDs {
             guard let threadIndex = state.threads.firstIndex(where: { $0.id == threadID }) else { continue }
-            flushThinkingBuffer(for: threadID)
-            flushStreamBuffer(for: threadID)
+            // Terminal flush: fold live streaming text into the persisted
+            // placeholder steps so a cancelled run keeps its partial output.
+            flushThinkingBuffer(for: threadID, persist: true)
+            flushStreamBuffer(for: threadID, persist: true)
             let isExecution = state.threads[threadIndex].isExecution
             guard state.threads[threadIndex].status == .running else {
                 streamBuffers.removeValue(forKey: threadID)
@@ -95,8 +111,6 @@ extension AppStore {
                 state.threads[threadIndex].updatedAt = .now
             }
         }
-        chatStreamBuffers.removeAll()
-        chatStreamLastFlushAt.removeAll()
         persistThreads()
     }
 }

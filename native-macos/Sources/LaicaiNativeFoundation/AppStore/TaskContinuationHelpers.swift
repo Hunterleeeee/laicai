@@ -33,11 +33,13 @@ extension AppStore {
         }
         guard step.kind == .error else { return false }
         let text = step.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if step.recoverable && !step.isFailure { return true }
+        if step.recoverable && !step.isFailure {
+            // Keep the interruption/recovery explanation in the timeline;
+            // only remove transient generic pause cards.
+            return !text.contains("中断") && !text.contains("未正常结束")
+        }
         if text.contains("已达到最大迭代次数") { return true }
-        return text.contains("上次运行被中断")
-            || text.contains("已自动标记为已暂停")
-            || text.contains("已自动标记为已取消")
+        return false
     }
 
     private static func continuationSummary(for thread: Thread, checkpointText: String) -> String {
@@ -50,7 +52,7 @@ extension AppStore {
         let failedOps = thread.steps
             .filter { $0.isFailure }
             .prefix(5)
-            .map { "  - \($0.toolName ?? "?")：\(String($0.text.prefix(80)))" }
+            .map { "  - \($0.toolName ?? "?")：\(String($0.text.prefix(200)))" }
         var summary = "继续处理：沿用已有结果，从未完成处继续。\n\n"
         summary += "## 已完成操作\n"
         if !readFiles.isEmpty {
@@ -153,20 +155,20 @@ extension AppStore {
                 && state.threads[index].status == .waitingReview
                 && isStale
             guard shouldCancelRunning || shouldCancelStaleReview else { continue }
-            state.threads[index].status = .cancelled
-            state.threads[index].executionState = .paused
-            state.threads[index].updatedAt = now
+            // Startup must not silently cancel or rewrite a user's task.
+            // Surface a recoverable hint and let the user choose what to do.
             if state.threads[index].steps.contains(where: { $0.kind == .error && $0.text.contains("上次运行被中断") }) {
                 continue
             }
             state.threads[index].steps.append(
                 TaskStep(
                     kind: .error,
-                    text: "上次运行被中断，已自动标记为已暂停。可以从这个会话继续或重新发送。",
+                    text: "检测到上次运行可能已中断。请确认后继续或重新发送；任务状态未被自动修改。",
                     isFailure: false,
                     recoverable: true,
                     retryAction: "继续"
                 ))
+            state.threads[index].updatedAt = now
             if state.threads[index].isExecution {
                 ensureCheckpointIfNeeded(&state.threads[index])
             }

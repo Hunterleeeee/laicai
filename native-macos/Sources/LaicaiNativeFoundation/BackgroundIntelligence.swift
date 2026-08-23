@@ -110,11 +110,13 @@ extension Notification.Name {
     public static let laicaiToggleCommandPalette = Notification.Name("laicai.toggleCommandPalette")
     public static let laicaiToggleSearch = Notification.Name("laicai.toggleSearch")
     public static let laicaiGlobalSearch = Notification.Name("laicai.globalSearch")
-    public static let laicaiPanelToggled = Notification.Name("laicai.panelToggled")
     public static let laicaiOpenWorkbench = Notification.Name("laicai.openWorkbench")
     public static let laicaiScrollToBottom = Notification.Name("laicai.scrollToBottom")
     public static let laicaiOpenMainWindow = Notification.Name("laicai.openMainWindow")
     public static let laicaiOpenSettings = Notification.Name("laicai.openSettings")
+    public static let laicaiUndoDeleteThread = Notification.Name("laicai.undoDeleteThread")
+    public static let laicaiThreadDeleted = Notification.Name("laicai.threadDeleted")
+    public static let laicaiThreadRestored = Notification.Name("laicai.threadRestored")
 }
 
 // MARK: - Global Shortcut Manager
@@ -127,24 +129,28 @@ public final class GlobalShortcutManager {
     private init() {}
 
     public func install() {
-        // Global shortcut: ⌘+Shift+L to bring to front
+        guard eventMonitor == nil else { return }
+        // Global shortcuts are intentionally limited to explicit Cmd+Shift
+        // chords; ordinary keystrokes in other apps are never intercepted.
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard flags.contains(.command), flags.contains(.shift), !flags.contains(.option) else { return }
             // Cmd+Shift+L
-            if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) && event.keyCode == 37 {
+            if event.keyCode == 37 {
                 MenuBarAgent.shared.showMainWindow()
             }
             // Cmd+Shift+N: new thread
-            if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) && event.keyCode == 45 {
+            if event.keyCode == 45 {
                 MenuBarAgent.shared.showMainWindow()
                 NotificationCenter.default.post(name: .laicaiNewThread, object: nil)
             }
             // Cmd+Shift+Space: toggle command palette (Spotlight-style quick launch)
-            if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) && event.keyCode == 49 {
+            if event.keyCode == 49 {
                 MenuBarAgent.shared.showMainWindow()
                 NotificationCenter.default.post(name: .laicaiToggleCommandPalette, object: nil)
             }
             // Cmd+Shift+F: global search across conversations, wiki, skills
-            if event.modifierFlags.contains(.command) && event.modifierFlags.contains(.shift) && event.keyCode == 3 {
+            if event.keyCode == 3 {
                 MenuBarAgent.shared.showMainWindow()
                 NotificationCenter.default.post(name: .laicaiGlobalSearch, object: nil)
             }
@@ -179,6 +185,9 @@ public final class NotificationManager {
         threadID: String? = nil
     ) {
         guard Self.canUseUserNotifications else { return }
+        // The app already shows in-app activity/toasts while foregrounded;
+        // avoid duplicate macOS banners and sounds in that case.
+        guard !NSApp.isActive else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         if let subtitle {

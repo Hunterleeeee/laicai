@@ -105,6 +105,11 @@ extension AppStore {
         persistSettings()
     }
 
+    public func updateAppearance(_ appearance: ThemeAppearance) {
+        state.settings.appearance = appearance
+        persistSettings()
+    }
+
     static func enrichVagueMessage(_ message: String, thread: Thread?) -> String {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count <= 8 else { return message }
@@ -144,11 +149,8 @@ extension AppStore {
             }
         }
 
-        let affirmations = ["好", "行", "ok", "可以", "好的", "行吧", "嗯"]
-        if affirmations.contains(where: { lower == $0 }) && hasContext {
-            return "确认，请执行你建议的方案。"
-        }
-
+        // Ambiguous affirmations must remain literal user input. Never turn
+        // "好/可以/嗯" into an execution command without an explicit verb.
         return message
     }
 }

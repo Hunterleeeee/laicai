@@ -16,7 +16,8 @@ extension AppStore {
                 let hasResumeHint = state.threads[idx].steps.contains(where: {
                     $0.kind == .error && $0.text.contains("自动恢复")
                 })
-                state.selectThread(id: latest.id)
+                // Surface the recovery hint without stealing the user's
+                // current conversation selection.
                 if !hasResumeHint {
                     state.threads[idx].steps.append(
                         TaskStep(

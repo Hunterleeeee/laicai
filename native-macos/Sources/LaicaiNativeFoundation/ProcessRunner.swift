@@ -88,8 +88,9 @@ public enum ProcessRunner {
         if let timeout {
             waitResult = termination.wait(timeout: .now() + max(0, timeout))
         } else {
-            termination.wait()
-            waitResult = .success
+            // A child that ignores pipes/signals must not deadlock the main
+            // actor forever. Keep a generous ceiling even for "no timeout".
+            waitResult = termination.wait(timeout: .now() + 600)
         }
 
         let timedOut = waitResult == .timedOut && process.isRunning

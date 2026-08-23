@@ -610,16 +610,11 @@ extension LiveChatRuntime {
     static func finalAssistantText(fromVisible visible: String, reasoningContent: String?, fallbackForEmpty: Bool) -> String {
         let text = visible.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty { return text }
-        // Thinking model: content is empty but reasoning_content has substance.
-        // Extract a usable conclusion instead of discarding it.
-        if let reasoning = reasoningContent, !reasoning.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let extracted = extractConclusionFromReasoning(reasoning)
-            if !extracted.isEmpty { return extracted }
-            // Fallback: return the last portion of reasoning as the answer
-            let trimmed = reasoning.trimmingCharacters(in: .whitespacesAndNewlines)
-            let tail = String(trimmed.suffix(2000))
-            return tail
-        }
+        // Reasoning is metadata, not an assistant answer. Returning a slice of
+        // it here duplicated the thinking card and made the final response look
+        // like an unfinished chain of thought. The caller preserves the
+        // reasoningContent separately and can render an explicit empty-response
+        // recovery step when no visible answer exists.
         return fallbackForEmpty ? "模型没有返回可显示内容。请检查模型是否可用，或换一个模型重试。" : ""
     }
 

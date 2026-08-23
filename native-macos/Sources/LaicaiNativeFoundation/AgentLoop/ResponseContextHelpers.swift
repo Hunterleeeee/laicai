@@ -212,7 +212,7 @@ extension AgentLoop {
                         """
                 ))
             // Still include recent steps for precise context
-            let recentHistory = compactHistoryMessages(from: Array(priorSteps.suffix(14)), contextMode: context.contextMode)
+            let recentHistory = compactHistoryMessages(from: Array(priorSteps.suffix(20)), contextMode: context.contextMode)
             if !recentHistory.isEmpty {
                 messages.append(contentsOf: recentHistory)
             }
@@ -503,7 +503,7 @@ extension AgentLoop {
                     return false
                 }
             }
-            .suffix(14)
+            .suffix(20)
 
         // Budget-aware compression: allocate character budget per step kind
         let totalBudget: Int
@@ -732,13 +732,15 @@ extension AgentLoop {
         for index in 0..<result.count {
             guard totalChars > charBudget else { break }
             let msg = result[index]
-            guard let content = msg.content, content.count > 2000 else { continue }
-            // Tool results have role "tool" or contain tool result patterns
-            if msg.role == "tool" || msg.role == "assistant" && msg.toolCalls != nil && !msg.toolCalls!.isEmpty {
-                continue  // Don't truncate tool call messages
+            guard let content = msg.content, content.count > 800 else { continue }
+            // Tool results have role "tool" or contain tool result patterns.
+            // Assistant messages carrying function calls are protocol messages,
+            // not results, and must remain intact.
+            if msg.role == "assistant", msg.toolCalls?.isEmpty == false {
+                continue
             }
             if msg.role == "tool" || content.hasPrefix("[TOOL_RESULT]") || content.hasPrefix("工具结果") {
-                let truncated = String(content.prefix(800)) + "\n... [内容过长已截断，原始长度 \(content.count) 字符] ..."
+                let truncated = String(content.prefix(500)) + "\n... [内容过长已截断，原始长度 \(content.count) 字符] ..."
                 let saved = content.count - truncated.count
                 totalChars -= saved
                 result[index] = ChatMessage(

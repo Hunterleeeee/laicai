@@ -235,12 +235,14 @@ public final class MessagingGateway: ObservableObject {
     }
 
     public func stop() {
+        gatewayError = nil
         httpServer?.stop()
         for (id, channel) in activeChannels {
             Task { await channel.disconnect() }
             connectedChannels.remove(id)
         }
         activeChannels.removeAll()
+        httpServer = nil
         for channel in channels {
             connectionStates[channel.id] = channel.enabled ? .failed("网关已停止") : .disabled
         }
@@ -431,7 +433,18 @@ public final class MessagingGateway: ObservableObject {
             return  // Reject unauthorized sender
         }
 
-        messageLog.append(message)
+        // Keep the gateway log bounded and redact attachment/secrets before
+        // publishing it to UI-facing observers.
+        let loggedMessage = IncomingMessage(
+            channel: message.channel,
+            sender: message.sender,
+            senderName: message.senderName,
+            text: String(message.text.prefix(4000)),
+            timestamp: message.timestamp,
+            replyTo: message.replyTo,
+            metadata: message.metadata
+        )
+        messageLog.append(loggedMessage)
         if messageLog.count > 200 { messageLog.removeFirst(messageLog.count - 200) }
 
         // Process through agent

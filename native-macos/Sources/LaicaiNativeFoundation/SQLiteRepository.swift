@@ -46,6 +46,7 @@ public final class SQLiteRepository {
     /// H3: Track last-saved timestamps to enable incremental saves
     private var lastSavedTimestamps: [UUID: TimeInterval] = [:]
     private var lastSavedPayloads: [UUID: String] = [:]
+    private let cacheLock = NSLock()
 
     private struct DirtyThreadRecord {
         let thread: LaicaiThread
@@ -335,14 +336,18 @@ public final class SQLiteRepository {
     }
 
     private func refreshThreadSaveCache() {
+        cacheLock.lock()
         lastSavedTimestamps.removeAll()
         lastSavedPayloads.removeAll()
+        cacheLock.unlock()
         guard let stmt = prepare("SELECT id, updated_at, record_json FROM threads") else { return }
         while sqlite3_step(stmt) == SQLITE_ROW {
             let idText = String(cString: sqlite3_column_text(stmt, 0))
             guard let id = UUID(uuidString: idText) else { continue }
+            cacheLock.lock()
             lastSavedTimestamps[id] = sqlite3_column_double(stmt, 1)
             lastSavedPayloads[id] = String(cString: sqlite3_column_text(stmt, 2))
+            cacheLock.unlock()
         }
         sqlite3_finalize(stmt)
     }
@@ -367,8 +372,10 @@ extension SQLiteRepository: ThreadRepository {
             code = sqlite3_step(stmt)
         }
         try ensureReadCompleted(code, operation: "load threads")
+        cacheLock.lock()
         lastSavedTimestamps = lastSavedTimestamps.filter { decodedIDs.contains($0.key) }
         lastSavedPayloads = lastSavedPayloads.filter { decodedIDs.contains($0.key) }
+        cacheLock.unlock()
         // If no threads in unified table, try migrating from legacy session/task tables
         if threads.isEmpty {
             return try migrateLegacyToThreads()
@@ -384,18 +391,24 @@ extension SQLiteRepository: ThreadRepository {
         let currentIDs = Set(threads.map { $0.id })
 
         // H3: Incremental save — write threads whose timestamp or payload changed
-        var dirtyThreads: [DirtyThreadRecord] = []
-        for thread in threads {
+        // Encode outside the lock (encoding may throw; the lock must never be held across a throw).
+        let encoded: [(thread: Thread, timestamp: TimeInterval, json: String)] = try threads.map { thread in
             let timestamp = thread.updatedAt.timeIntervalSince1970
             let data = try encoder.encode(thread)
             let json = try Self.utf8String(from: data, operation: "encode thread")
-            if lastSavedTimestamps[thread.id] != timestamp || lastSavedPayloads[thread.id] != json {
-                dirtyThreads.append(DirtyThreadRecord(thread: thread, timestamp: timestamp, json: json))
+            return (thread, timestamp, json)
+        }
+        var dirtyThreads: [DirtyThreadRecord] = []
+        var deletedIDs: Set<UUID> = []
+        cacheLock.lock()
+        for entry in encoded {
+            if lastSavedTimestamps[entry.thread.id] != entry.timestamp || lastSavedPayloads[entry.thread.id] != entry.json {
+                dirtyThreads.append(DirtyThreadRecord(thread: entry.thread, timestamp: entry.timestamp, json: entry.json))
             }
         }
-
         // Detect deleted threads (present in DB but not in current list)
-        let deletedIDs = Set(lastSavedTimestamps.keys).subtracting(currentIDs)
+        deletedIDs = Set(lastSavedTimestamps.keys).subtracting(currentIDs)
+        cacheLock.unlock()
 
         guard !dirtyThreads.isEmpty || !deletedIDs.isEmpty else { return }
 
@@ -425,6 +438,7 @@ extension SQLiteRepository: ThreadRepository {
         }
 
         // Update the incremental cache only after the transaction commits.
+        cacheLock.lock()
         for id in deletedIDs {
             lastSavedTimestamps.removeValue(forKey: id)
             lastSavedPayloads.removeValue(forKey: id)
@@ -434,6 +448,7 @@ extension SQLiteRepository: ThreadRepository {
             lastSavedTimestamps[thread.id] = record.timestamp
             lastSavedPayloads[thread.id] = record.json
         }
+        cacheLock.unlock()
     }
 
     private func shouldSkipEmptyThreadSave(_ threads: [LaicaiThread]) -> Bool {

@@ -151,7 +151,7 @@ public struct AutoContextEngine {
         guard let entries = try? fileManager.contentsOfDirectory(atPath: workspaceRoot) else { return "" }
 
         var rules: [String] = []
-        for entry in entries.sorted().prefix(20) {
+        for entry in entries.sorted().prefix(100) {
             let subPath = (workspaceRoot as NSString).appendingPathComponent(entry)
             var isDir: ObjCBool = false
             guard fileManager.fileExists(atPath: subPath, isDirectory: &isDir), isDir.boolValue else { continue }

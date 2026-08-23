@@ -685,9 +685,11 @@ public enum WikiEngine {
         // Strip frontmatter from previous
         var prevBody = previous
         if prevBody.hasPrefix("---") {
-            let parts = prevBody.components(separatedBy: "---")
-            if parts.count >= 3 {
-                prevBody = parts.dropFirst(2).joined(separator: "---").trimmingCharacters(in: .whitespacesAndNewlines)
+            // Frontmatter ends at the next line-delimited marker. Splitting on
+            // every `---` corrupts legitimate horizontal rules in the body.
+            let marker = "\n---"
+            if let closing = prevBody.range(of: marker, range: prevBody.index(after: prevBody.startIndex)..<prevBody.endIndex) {
+                prevBody = String(prevBody[closing.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
 

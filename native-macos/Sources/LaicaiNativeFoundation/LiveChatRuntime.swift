@@ -818,6 +818,8 @@ public struct LiveChatRuntime: ChatRuntimeClient {
         }
 
         private mutating func appendVisible(_ nextVisible: String) -> String? {
+            // count and dropFirst both use grapheme clusters, keeping emoji
+            // and composed characters intact at chunk boundaries.
             guard nextVisible.count > visibleText.count else { return nil }
             let visibleDelta = String(nextVisible.dropFirst(visibleText.count))
             visibleText = nextVisible

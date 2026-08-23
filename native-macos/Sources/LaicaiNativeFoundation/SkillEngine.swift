@@ -113,11 +113,16 @@ public final class SkillRegistry: ObservableObject {
         let root = workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !root.isEmpty else { return true }
         let dir = (root as NSString).appendingPathComponent(".laicai/skills")
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        let url = URL(fileURLWithPath: dir).appendingPathComponent("\(skill.name).json")
-        guard let data = try? JSONEncoder().encode(skill) else { return false }
-        try? data.write(to: url, options: .atomic)
-        return true
+        do {
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            let url = URL(fileURLWithPath: dir).appendingPathComponent("\(skill.name).json")
+            let data = try JSONEncoder().encode(skill)
+            try data.write(to: url, options: .atomic)
+            return true
+        } catch {
+            LaicaiLog.error("技能发布失败：\(error.localizedDescription)")
+            return false
+        }
     }
 
     public func skill(named name: String) -> SkillDefinition? {

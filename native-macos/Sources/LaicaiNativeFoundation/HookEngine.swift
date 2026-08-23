@@ -145,11 +145,17 @@ public final class HookEngine: ObservableObject {
         let start = CFAbsoluteTimeGetCurrent()
 
         // Substitute variables in command
+        let shellQuote: (String) -> String = { value in
+            "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }
         var cmd = hook.command
-            .replacingOccurrences(of: "{{tool}}", with: toolName)
-            .replacingOccurrences(of: "{{workspace}}", with: context.workspaceRoot)
+            .replacingOccurrences(of: "{{tool}}", with: shellQuote(toolName))
+            .replacingOccurrences(of: "{{workspace}}", with: shellQuote(context.workspaceRoot))
         for (key, value) in params {
-            cmd = cmd.replacingOccurrences(of: "{{\(key)}}", with: value)
+            // Hook commands run through zsh -lc; quote substitutions so a tool
+            // parameter cannot terminate the command and inject shell syntax.
+            let escaped = "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+            cmd = cmd.replacingOccurrences(of: "{{\(key)}}", with: escaped)
         }
 
         do {

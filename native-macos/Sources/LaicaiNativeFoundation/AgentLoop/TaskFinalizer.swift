@@ -41,10 +41,13 @@ struct TaskFinalizer {
         }
 
         // ── Manual continuation offer ──
+        // This is an incomplete, recoverable result—not a hard failure. Keep
+        // the wording consistent with the terminal status and let the ledger
+        // expose the continuation action.
         if !state.didComplete && !state.hadFailure && !state.wasTruncated {
             let continueStep = TaskStep(
                 kind: .error,
-                text: "会话 尚未完成，可以点击「继续」接着处理。",
+                text: "会话尚未形成完整结果，可以点击「继续处理」接着执行。",
                 isFailure: false,
                 recoverable: true,
                 retryAction: "继续处理"
@@ -113,7 +116,7 @@ struct TaskFinalizer {
         }
 
         // ── Diff stat for review ──
-        captureDiffStat(state: &state, config: config, onStep: onStep)
+        await captureDiffStat(state: &state, config: config, onStep: onStep)
 
         // ── Cleanup ──
         WorkspaceSandbox.shared.clearAllowedPaths()
@@ -527,24 +530,12 @@ struct TaskFinalizer {
         state: inout PipelineState,
         config: AgentLoop.Config,
         onStep: @MainActor (TaskStep) -> Void
-    ) {
+    ) async {
         let workRoot = state.taskContext.metadata["worktreeOriginalRoot"] ?? config.workspaceRoot
         guard !workRoot.isEmpty, state.intent != .chat else { return }
 
-        let result: ProcessRunResult
-        do {
-            result = try ProcessRunner.run(
-                executableURL: URL(fileURLWithPath: "/usr/bin/git"),
-                arguments: ["diff", "--stat"],
-                currentDirectoryURL: URL(fileURLWithPath: workRoot),
-                timeout: 15
-            )
-        } catch {
-            return
-        }
-        guard result.exitCode == 0, !result.timedOut else { return }
-        let diffOutput = result.stdoutString
-        guard !diffOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // Run git off the main actor — a slow/hung repo must not freeze the UI.
+        guard let diffOutput = await computeDiffStat(workRoot: workRoot) else { return }
 
         let diffStep = TaskStep(
             kind: .toolResult,
@@ -555,6 +546,23 @@ struct TaskFinalizer {
         state.task.steps.append(diffStep)
         onStep(diffStep)
         state.task.context.metadata["diffStat"] = String(diffOutput.prefix(1000))
+    }
+
+    private static func computeDiffStat(workRoot: String) async -> String? {
+        await Task.detached(priority: .utility) { () -> String? in
+            guard
+                let result = try? ProcessRunner.run(
+                    executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+                    arguments: ["diff", "--stat"],
+                    currentDirectoryURL: URL(fileURLWithPath: workRoot),
+                    timeout: 15
+                ),
+                result.exitCode == 0,
+                !result.timedOut
+            else { return nil }
+            let output = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+            return output.isEmpty ? nil : output
+        }.value
     }
 
     // MARK: - Utility

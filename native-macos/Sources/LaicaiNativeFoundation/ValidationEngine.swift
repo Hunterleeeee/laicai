@@ -62,6 +62,9 @@ public struct ValidationEngine {
                 }
 
                 lastError = result.error ?? "工具结果验证失败"
+                if let errorCode = result.error, deterministicErrors.contains(errorCode) {
+                    return (result, ValidationResult(isValid: false, error: lastError, retryCount: attempt))
+                }
                 if attempt < maxRetries {
                     await exponentialBackoff(attempt: attempt)
                 }

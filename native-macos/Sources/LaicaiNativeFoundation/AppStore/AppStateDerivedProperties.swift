@@ -2,7 +2,6 @@ import Foundation
 import LaicaiNativeDomain
 
 extension AppState {
-    private static let summarySearchRecentStepLimit = 1
 
     private var visibleThreads: [Thread] {
         threads.filter { thread in
@@ -20,10 +19,12 @@ extension AppState {
             thread.executionState.title,
             thread.context.workspaceRoot,
         ]
-        let recentStepParts = thread.steps.suffix(summarySearchRecentStepLimit).flatMap { step in
-            [step.text, step.toolName ?? ""]
-        }
-        parts.append(contentsOf: recentStepParts)
+        // Search the complete local conversation, including older tool calls
+        // and assistant output. This is in-memory data already loaded from the
+        // local store; the UI still receives lightweight ThreadRecord values.
+        parts.append(contentsOf: thread.steps.flatMap { step in
+            [step.text, step.toolName ?? "", step.toolParams?.values.joined(separator: " ") ?? ""]
+        })
         return parts.joined(separator: " ").lowercased()
     }
 
@@ -117,23 +118,7 @@ extension AppState {
         guard !query.isEmpty else { return threadRecords }
         let lower = query.lowercased()
         return visibleThreads.compactMap { thread in
-            let metadata = [
-                thread.title,
-                thread.preview,
-                thread.goal ?? "",
-                thread.steps.last?.text ?? "",
-                thread.modelName,
-                thread.status.title,
-                thread.executionState.title,
-                thread.context.workspaceRoot,
-            ].joined(separator: " ").lowercased()
-            guard
-                metadata.contains(lower)
-                    || thread.steps.suffix(12).contains(where: { step in
-                        step.text.lowercased().contains(lower)
-                            || step.toolName?.lowercased().contains(lower) == true
-                    })
-            else {
+            guard Self.lightweightSearchIndex(for: thread).contains(lower) else {
                 return nil
             }
             return ThreadRecord(thread: thread, includeEvents: true)

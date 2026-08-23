@@ -57,7 +57,12 @@ extension AppStore {
         let workflowName: String? = { if case .workflow(let name) = intent { return name } else { return nil } }()
 
         let selectedThreadProjectID = projectIDForExistingThreadSelection(allowRunningThread: true)
-        let continuationTargetID = continuationTargetThreadID(message: message, intent: intent)
+        let selectedExistingThreadID = state.selectedThreadID.flatMap { selectedID in
+            state.threads.first(where: { $0.id == selectedID && !$0.isEmptyPlaceholder && !$0.steps.isEmpty })?.id
+        }
+        // Explicit session ownership wins over every intent/recovery heuristic.
+        // A selected non-empty conversation is always the target for this turn.
+        let continuationTargetID = selectedExistingThreadID ?? continuationTargetThreadID(message: message, intent: intent)
         let shouldContinueSelectedThread = continuationTargetID != nil
         let selectedPlaceholderID = state.selectedThreadID.flatMap { selectedID in
             state.threads.first { thread in
@@ -66,9 +71,11 @@ extension AppStore {
                     && Thread.isPlaceholderTitle(thread.title)
             }?.id
         }
+        // An explicitly opened empty conversation is still the user's chosen
+        // conversation. Its first message must populate it, regardless of turn
+        // intent, rather than silently creating another conversation.
         let shouldPromoteSelectedPlaceholder =
             continuationTargetID == nil
-            && decision.intent != .chat
             && selectedPlaceholderID != nil
         let shouldStartBesideRunningProjectThread =
             continuationTargetID == nil
@@ -120,7 +127,7 @@ extension AppStore {
                 message: message,
                 decision: decision,
                 projectID: newThreadProjectID,
-                reuseThreadID: selectedPlaceholderID
+                reuseThreadID: continuationTargetID ?? selectedPlaceholderID
             )
             return
         }
@@ -141,7 +148,7 @@ extension AppStore {
                 plan: plan,
                 decision: decision,
                 projectID: newThreadProjectID,
-                reuseThreadID: selectedPlaceholderID
+                reuseThreadID: continuationTargetID ?? selectedPlaceholderID
             )
             return
         }
@@ -176,7 +183,7 @@ extension AppStore {
         var shouldRemovePlaceholdersAfterResume = false
         if let selectedID = continuationTargetID,
             let threadIndex = state.threads.firstIndex(where: { $0.id == selectedID }),
-            state.threads[threadIndex].status != .running,
+            (state.threads[threadIndex].status != .running || !isThreadGenerating(selectedID)),
             shouldContinueSelectedThread
         {
             let isEmptyPlaceholder = state.threads[threadIndex].steps.isEmpty
@@ -439,8 +446,8 @@ extension AppStore {
 
                 guard self.shouldAcceptGenerationCallback(for: targetTaskID, runID: generationRunID) else { return }
 
-                self.flushThinkingBuffer(for: targetTaskID)
-                self.flushStreamBuffer(for: targetTaskID)
+                self.flushThinkingBuffer(for: targetTaskID, persist: true)
+                self.flushStreamBuffer(for: targetTaskID, persist: true)
                 self.mergeCompletedTask(completedTask, into: targetTaskID)
                 self.recordConnectorOutcome(completedTask, connectorID: connector.id, attemptedToolCalling: attemptedToolCalling)
                 MemoryEngine.shared.extractFromTask(completedTask)
@@ -453,8 +460,8 @@ extension AppStore {
                 self.handlePostRunSelfImprovement(completedTask: completedTask, targetTaskID: targetTaskID)
             } catch {
                 guard self.shouldAcceptGenerationCallback(for: targetTaskID, runID: generationRunID) else { return }
-                self.flushThinkingBuffer(for: targetTaskID)
-                self.flushStreamBuffer(for: targetTaskID)
+                self.flushThinkingBuffer(for: targetTaskID, persist: true)
+                self.flushStreamBuffer(for: targetTaskID, persist: true)
                 if let threadIndex = self.state.threads.firstIndex(where: { $0.id == targetTaskID }) {
                     let steps = self.state.threads[threadIndex].steps
                     let progressSummary = Self.errorProgressSummary(steps: steps)
@@ -507,47 +514,18 @@ extension AppStore {
         return thread.projectID
     }
 
+    /// A conversation is the user's explicit context boundary. Message intent
+    /// (chat, task, research, workflow) describes this turn only; it must never
+    /// silently create another conversation.
     func shouldContinueCurrentSelectedThread(message: String, intent: UserIntent) -> Bool {
         guard let selectedID = state.selectedThreadID,
-            let thread = state.threads.first(where: { $0.id == selectedID })
+            let thread = state.threads.first(where: { $0.id == selectedID }),
+            !thread.isEmptyPlaceholder,
+            !thread.steps.isEmpty
         else { return false }
-        if thread.status == .running && isThreadGenerating(selectedID) { return false }
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !thread.steps.isEmpty else {
-            return !Self.canRecoverRecentThread(for: trimmed, intent: intent)
-        }
-        let selectedSourceIsExecution =
-            !Self.isPureChatLikeThread(thread)
-            && (thread.isExecution || thread.steps.contains { $0.kind == .toolCall })
-        if !selectedSourceIsExecution {
-            if intent == .chat {
-                if Self.isContinuationCommand(trimmed) || Self.isContextualFollowUp(trimmed, thread: thread) {
-                    return true
-                }
-                return !Self.isStandaloneCapabilityOrConceptQuestion(trimmed)
-                    && !Self.isStandaloneInfoQuestion(trimmed)
-                    && !Self.isStandaloneGeneralQuestion(trimmed)
-                    && !Self.isTaskStatusQuestion(trimmed)
-            }
-            return true
-        }
-        if selectedSourceIsExecution, Self.taskHasTruncatedOutput(AgentTask(thread: thread)), Self.isTruncationContinuation(trimmed) {
-            return true
-        }
-        if selectedSourceIsExecution, intent == .chat, Self.isStandaloneGeneralQuestion(trimmed) {
-            return false
-        }
-        if Self.isContinuationCommand(trimmed)
-            || Self.isContextualFollowUp(trimmed, thread: thread)
-            || UserFrustrationDetector.shouldRecoverRecentTask(trimmed)
-        {
-            return true
-        }
-        if intent == .chat {
-            return !selectedSourceIsExecution
-        }
-        let hasExplicitThreadReference = Self.isContextualTaskReference(trimmed)
-        return selectedSourceIsExecution && (hasExplicitThreadReference || Self.isContextualFollowUp(trimmed, thread: thread))
+        // A running thread is handled earlier by sendDraft's follow-up path.
+        // Once it is idle, every new message continues the selected context.
+        return true
     }
 
     func continuationTargetThreadID(message: String, intent: UserIntent) -> UUID? {
@@ -555,6 +533,8 @@ extension AppStore {
             return state.selectedThreadID
         }
 
+        // No selected, non-empty conversation: recovery may target a recent
+        // task. This is the only automatic cross-conversation recovery path.
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.canRecoverRecentThread(for: trimmed, intent: intent) else { return nil }
 
@@ -634,11 +614,6 @@ extension AppStore {
         if taskHasTruncatedOutput(AgentTask(thread: thread)), isTruncationContinuation(normalized) {
             return true
         }
-        if isStandaloneCapabilityOrConceptQuestion(normalized) || isStandaloneInfoQuestion(normalized)
-            || isStandaloneGeneralQuestion(normalized)
-        {
-            return false
-        }
         let contextualMarkers = [
             "刚才", "上面", "前面", "这个", "那个", "这里", "它", "这些", "那些",
             "还有", "还要", "继续", "接着", "为什么", "为啥",
@@ -646,7 +621,15 @@ extension AppStore {
             "这个逻辑", "这个页面", "这个按钮", "这个会话", "这个agent", "这个任务", "当前",
             "窗口", "页面", "按钮", "bug", "Bug", "卡顿", "历史任务", "左边", "右边", "追问", "新会话",
         ]
+        // Check contextual language first. Broad classifiers often label
+        // short follow-ups such as "为什么会这样？" as standalone questions,
+        // even though they clearly refer to the selected conversation.
         if contextualMarkers.contains(where: { normalized.contains($0) }) { return true }
+        if isStandaloneCapabilityOrConceptQuestion(normalized) || isStandaloneInfoQuestion(normalized)
+            || isStandaloneGeneralQuestion(normalized)
+        {
+            return false
+        }
 
         let lastUserInput = thread.steps.reversed().first { $0.kind == .userInput }?.text ?? thread.title
         let sharedKeywords = semanticOverlapKeywords(in: normalized).intersection(semanticOverlapKeywords(in: lastUserInput))

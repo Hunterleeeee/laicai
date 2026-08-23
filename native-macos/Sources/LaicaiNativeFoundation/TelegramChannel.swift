@@ -34,6 +34,9 @@ public final class TelegramChannel: MessagingChannel, Sendable {
     }
 
     public func connect() async throws {
+        // Avoid creating duplicate long-polling tasks when settings refresh or
+        // reconnect notifications call connect more than once.
+        if state.withValue({ $0.pollingTask != nil }) { return }
         guard !botToken.isEmpty else {
             throw GatewayError.missingConfig("Telegram bot_token 未配置")
         }

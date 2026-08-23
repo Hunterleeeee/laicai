@@ -209,10 +209,15 @@ extension AgentLoop {
                 // Emit any new steps from iteration prep
                 emitNewSteps(from: &state, into: &task, onStep: onStep)
 
-                // Build effective system prompt (trim after iteration 3)
+                // Build effective system prompt (trim knowledge sections only
+                // when the context window is actually under pressure)
+                let tokenPressure = IterationEngine.estimatedContextTokens(of: state.messages)
+                    > Int(Double(config.contextWindow) * 0.6)
                 let effectivePrompt = IterationEngine.effectiveSystemPrompt(
                     basePrompt: state.systemPrompt,
-                    iteration: state.iteration
+                    iteration: state.iteration,
+                    preserveKnowledge: state.autoRound > 0 || !tokenPressure,
+                    tokenPressure: tokenPressure
                 )
 
                 let intentModeLabel: String = {
@@ -517,16 +522,32 @@ extension AgentLoop {
                 state.autoRound += 1
                 state.iteration = 0
 
-                // Compress context before continuing — keep system prompt + last 6 messages + progress summary
+                // Compress context before continuing: curate a clean system stack
+                // (one live snapshot per category, stale nudges dropped) plus the
+                // latest conversational window. Keeping every accumulated system
+                // message sent contradictory guidance ("立即执行工具" vs "不要再调
+                // 工具") and silently consumed the context window each round.
                 let progressSummary = Self.compactProgressSummary(task: state.task)
-                let systemMsgs = state.messages.filter { $0.role == "system" }
-                let recentMsgs = state.messages.suffix(6)
-                state.messages = Array(systemMsgs.prefix(2)) + Array(recentMsgs)
-                state.messages.append(
-                    ChatMessage(role: "system", content: "自动继续中（已压缩上下文）。\n当前进展：\n\(progressSummary)\n请继续完成剩余工作，不要重复已成功的操作。"))
+                let recentWindow = state.messages.suffix(8)
+                state.messages = Self.curatedContinuationMessages(
+                    from: state.messages,
+                    recentWindow: Array(recentWindow),
+                    continuationMessage: "自动继续中（已压缩上下文）。\n当前进展：\n\(progressSummary)\n请继续完成剩余工作，不要重复已成功的操作。")
+
+                // Restore the tool catalog unless the connector itself proved
+                // incompatible with function calling. The consecutive-empty-response
+                // degradation strips tools as a one-off workaround; leaking that
+                // into a fresh round left execution tasks permanently tool-less.
+                if !state.usedToolCompatibilityFallback {
+                    state.toolDefs = ContextBuilder.filterToolDefinitions(
+                        AgentLoop.toolDefinitions(for: state.intent, phase: state.currentPhase, registry: toolRegistry),
+                        allowedTools: config.allowedTools
+                    )
+                }
 
                 state.consecutiveEmptyResponses = 0
                 state.transientRetryCount = 0
+                state.nudgeCount = 0
                 state.didInjectWorkingSet = false
                 let roundStep = TaskStep(
                     kind: .aiThinking, text: "自动继续处理中（第 \(state.autoRound) 轮）…", isCollapsible: true, isCollapsed: false)
@@ -573,9 +594,63 @@ extension AgentLoop {
 
     // MARK: - Helpers
 
+    /// One-shot orchestration guidance: superseded every round, so keeping old
+    /// copies only bloats the context and contradicts the fresh continuation
+    /// instruction.
+    private static let transientSystemMarkers = [
+        "编排层提示：", "会话目标已完成", "即将结束本轮处理", "自动继续中",
+        "上一轮模型没有返回任何可见内容", "禁止只说不做", "不要裸答",
+        "完成质量门", "已临时移除工具 schema", "用户要求整理到 Wiki",
+        "你刚才只输出了计划", "你已经读取了资料但停了下来",
+        "⚠️ 循环检测", "🔴 熔断",
+    ]
+
+    /// Snapshot-style system messages where only the newest copy matters.
+    private static let snapshotSystemPrefixes = ["已读文件摘要", "##会话状态（", "[工具可用性更新]"]
+
+    /// Build a clean message stack for a new auto-round:
+    /// base system prompt + unique standing system messages + latest snapshot
+    /// per category + recent non-system window + continuation instruction.
+    static func curatedContinuationMessages(
+        from messages: [ChatMessage],
+        recentWindow: [ChatMessage],
+        continuationMessage: String
+    ) -> [ChatMessage] {
+        var curated: [ChatMessage] = []
+        var seenContent = Set<String>()
+        var latestSnapshot: [String: ChatMessage] = [:]
+
+        for (index, message) in messages.enumerated() {
+            guard message.role == "system", index > 0 else { continue }  // index 0 = base system prompt
+            guard let content = message.content, !content.isEmpty else { continue }
+            if transientSystemMarkers.contains(where: content.contains) { continue }
+            if let prefix = snapshotSystemPrefixes.first(where: content.hasPrefix) {
+                latestSnapshot[prefix] = message
+                continue
+            }
+            if seenContent.insert(content).inserted { curated.append(message) }
+        }
+
+        var result: [ChatMessage] = []
+        if let base = messages.first, base.role == "system" { result.append(base) }
+        result.append(contentsOf: curated)
+        result.append(contentsOf: snapshotSystemPrefixes.compactMap { latestSnapshot[$0] })
+
+        let systemContents = Set(result.compactMap(\.content))
+        for message in recentWindow {
+            guard message.role != "system" else { continue }
+            if let content = message.content, systemContents.contains(content) { continue }
+            result.append(message)
+        }
+        result.append(ChatMessage(role: "system", content: continuationMessage))
+        return result
+    }
+
     private func emitNewSteps(from state: inout PipelineState, into task: inout AgentTask, onStep: @MainActor (TaskStep) -> Void) {
-        for step in state.task.steps where !task.steps.contains(where: { $0.id == step.id }) {
+        var emitted = Set(task.steps.map(\.id))
+        for step in state.task.steps where !emitted.contains(step.id) {
             task.steps.append(step)
+            emitted.insert(step.id)
             onStep(step)
         }
         task = state.task

@@ -3,7 +3,6 @@ import LaicaiNativeDomain
 
 extension AppStore {
     public func sendDraft() {
-        reconcileSelectedRunningTaskIfIdle()
         let message = composedDraftMessage()
         guard !message.isEmpty else { return }
         if selectedThreadIsGenerating {

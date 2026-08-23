@@ -23,6 +23,8 @@ extension AppStore {
         {
             streamBuffers.removeValue(forKey: taskID)
             streamLastFlushAt.removeValue(forKey: taskID)
+            // The final step supersedes everything streamed so far.
+            streamPresentation.clearText(threadID: taskID)
             var finalStep = step
             finalStep.toolCallId = nil
             state.threads[threadIndex].steps[streamingIndex] = finalStep
@@ -76,7 +78,7 @@ extension AppStore {
         flushStreamBuffer(for: taskID)
     }
 
-    private static let thinkingStreamID = "__thinking_stream__"
+    public static let thinkingStreamID = "__thinking_stream__"
 
     func appendThinkingDelta(_ delta: String, to taskID: UUID) {
         guard !delta.isEmpty else { return }
@@ -90,16 +92,45 @@ extension AppStore {
         flushThinkingBuffer(for: taskID)
     }
 
-    func flushThinkingBuffer(for taskID: UUID) {
-        guard let pending = thinkingBuffers[taskID], !pending.isEmpty else { return }
-        thinkingBuffers[taskID] = ""
-        thinkingLastFlushAt[taskID] = Date()
-        guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
+    /// Live flushes (persist: false) keep AppState untouched: the placeholder
+    /// step is created once with empty text and all live content lives in
+    /// streamPresentation. Terminal flushes (persist: true) fold buffered plus
+    /// already-streamed text back into the persisted placeholder so it survives
+    /// after the run ends, even when the raw buffer happens to be empty.
+    func flushThinkingBuffer(for taskID: UUID, persist: Bool = false) {
+        var pending = thinkingBuffers[taskID] ?? ""
+        if !pending.isEmpty {
+            thinkingBuffers[taskID] = ""
+            thinkingLastFlushAt[taskID] = Date()
+        }
+        // Live flushes need fresh content; terminal flushes must also run with
+        // an empty raw buffer to fold already-streamed store text back in.
+        guard persist || !pending.isEmpty else { return }
+        if persist {
+            // Store content streamed earlier, so it precedes the raw buffer.
+            let liveReasoning = streamPresentation.reasoning(forThread: taskID)
+            if liveReasoning.isEmpty && pending.isEmpty {
+                streamPresentation.clearAll(threadID: taskID)
+                return
+            }
+            pending = liveReasoning + pending
+        }
+        guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else {
+            streamPresentation.clearAll(threadID: taskID)
+            return
+        }
         setLiveActivity("正在思考…", for: taskID)
         if let idx = state.threads[threadIndex].steps.lastIndex(where: { $0.kind == .aiThinking && $0.toolCallId == Self.thinkingStreamID })
         {
-            state.threads[threadIndex].steps[idx].reasoningContent =
-                (state.threads[threadIndex].steps[idx].reasoningContent ?? "") + pending
+            if persist {
+                let combined = (state.threads[threadIndex].steps[idx].reasoningContent ?? "") + pending
+                if combined != state.threads[threadIndex].steps[idx].reasoningContent {
+                    state.threads[threadIndex].steps[idx].reasoningContent = combined
+                }
+                streamPresentation.clearAll(threadID: taskID)
+            } else {
+                streamPresentation.append(reasoning: pending, threadID: taskID)
+            }
         } else {
             state.threads[threadIndex].steps.append(
                 TaskStep(
@@ -108,39 +139,84 @@ extension AppStore {
                     toolCallId: Self.thinkingStreamID,
                     isCollapsible: true,
                     isCollapsed: false,
-                    reasoningContent: pending
-                ))
+                    reasoningContent: persist ? pending : ""))
+            if !persist {
+                streamPresentation.append(reasoning: pending, threadID: taskID)
+            }
         }
     }
 
-    func flushStreamBuffer(for taskID: UUID) {
-        guard let pending = streamBuffers[taskID], !pending.isEmpty else { return }
-        streamBuffers[taskID] = ""
-        streamLastFlushAt[taskID] = Date()
-        guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
+    /// See flushThinkingBuffer for the live vs. terminal flush contract.
+    func flushStreamBuffer(for taskID: UUID, persist: Bool = false) {
+        var pending = streamBuffers[taskID] ?? ""
+        if !pending.isEmpty {
+            streamBuffers[taskID] = ""
+            streamLastFlushAt[taskID] = Date()
+        }
+        guard persist || !pending.isEmpty else { return }
+        if persist {
+            // Store content streamed earlier, so it precedes the raw buffer.
+            let liveText = streamPresentation.text(forThread: taskID)
+            if liveText.isEmpty && pending.isEmpty {
+                streamPresentation.clearAll(threadID: taskID)
+                return
+            }
+            pending = liveText + pending
+        }
+        guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else {
+            streamPresentation.clearAll(threadID: taskID)
+            return
+        }
         setLiveActivity("正在生成回复…", for: taskID)
         if let streamIndex = state.threads[threadIndex].steps.lastIndex(where: {
             $0.kind == .textOutput && $0.toolCallId == Self.streamingOutputID
         }) {
-            state.threads[threadIndex].steps[streamIndex].text += pending
+            if persist {
+                let combined = state.threads[threadIndex].steps[streamIndex].text + pending
+                if combined != state.threads[threadIndex].steps[streamIndex].text {
+                    state.threads[threadIndex].steps[streamIndex].text = combined
+                }
+                streamPresentation.clearAll(threadID: taskID)
+            } else {
+                streamPresentation.append(text: pending, threadID: taskID)
+            }
         } else {
             state.threads[threadIndex].steps.append(
                 TaskStep(
                     kind: .textOutput,
-                    text: pending,
+                    text: persist ? pending : "",
                     toolCallId: Self.streamingOutputID,
                     isCollapsible: false,
-                    isCollapsed: false
-                ))
+                    isCollapsed: false))
+            if !persist {
+                streamPresentation.append(text: pending, threadID: taskID)
+            }
         }
     }
 
     func mergeCompletedTask(_ completedTask: AgentTask, into taskID: UUID) {
         guard let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }) else { return }
         for step in completedTask.steps {
-            if shouldCollapseDuplicateStep(step, in: state.threads[threadIndex].steps) { continue }
-            let alreadyExists = state.threads[threadIndex].steps.contains {
-                $0.id == step.id || ($0.kind == step.kind && $0.text == step.text)
+            let existingSteps = state.threads[threadIndex].steps
+            let temporaryID: String? = {
+                switch step.kind {
+                case .textOutput: return Self.streamingOutputID
+                case .aiThinking: return Self.thinkingStreamID
+                default: return nil
+                }
+            }()
+            if let temporaryID,
+                let temporaryIndex = existingSteps.lastIndex(where: { $0.kind == step.kind && $0.toolCallId == temporaryID })
+            {
+                var finalStep = step
+                finalStep.toolCallId = nil
+                state.threads[threadIndex].steps[temporaryIndex] = finalStep
+                updateLiveActivity(from: finalStep, for: taskID)
+                continue
+            }
+            if shouldCollapseDuplicateStep(step, in: existingSteps) { continue }
+            let alreadyExists = existingSteps.contains {
+                $0.id == step.id || ($0.kind == step.kind && $0.text == step.text && $0.reasoningContent == step.reasoningContent)
             }
             if !alreadyExists {
                 state.threads[threadIndex].steps.append(step)
@@ -161,13 +237,17 @@ extension AppStore {
         // Phase-based routing may temporarily switch connectors during execution.
         // Do NOT persist the task's connector back to the thread or global state —
         // the thread keeps the connector the user originally selected.
-        state.threads[threadIndex].updatedAt = completedTask.updatedAt
+        // Completion is the latest activity, so keep the conversation at the top
+        // of the recency-sorted sidebar instead of reusing a stale task timestamp.
+        state.threads[threadIndex].updatedAt = .now
         Self.ensureCheckpointIfNeeded(&state.threads[threadIndex])
         if !Self.isPureChatLikeThread(state.threads[threadIndex]) {
             Self.rebuildExecutionLedger(&state.threads[threadIndex])
         }
-        state.selectThread(id: taskID)
-
+        // Completion from a background task must not change the conversation
+        // currently shown by the user.
+        // Final steps replaced the placeholders; drop any live stream residue.
+        streamPresentation.clearAll(threadID: taskID)
         notifyCompletedTaskIfNeeded(completedTask, threadIndex: threadIndex, taskID: taskID)
     }
 
@@ -190,8 +270,15 @@ extension AppStore {
 
     func shouldCollapseDuplicateStep(_ step: TaskStep, in steps: [TaskStep]) -> Bool {
         switch step.kind {
-        case .userInput, .aiThinking:
+        case .userInput:
             return steps.contains { $0.kind == step.kind && $0.text == step.text }
+        case .aiThinking:
+            return steps.contains {
+                $0.kind == .aiThinking
+                    && $0.text == step.text
+                    && $0.reasoningContent == step.reasoningContent
+                    && $0.toolCallId == step.toolCallId
+            }
         default:
             return false
         }

@@ -19,10 +19,30 @@ extension AppStore {
 
     func persistThreadsNow() {
         lastPersistedAt = Date()
-        updateSummaryCaches()
+        persistDebounceTask?.cancel()
+        persistDebounceTask = nil
+        // During streaming, skip O(all threads × all steps) summary projection.
+        // The final persist after generation finishes rebuilds summaries and the
+        // sidebar once, preventing periodic UI stalls while text/reasoning grows.
+        if generationTasks.isEmpty {
+            updateSummaryCaches()
+            refreshSidebarPresentation()
+        }
         let persistableThreads = state.threads.filter { !$0.isEmptyPlaceholder }
-        do { try environment.agentRepository.saveAgents(persistableThreads) } catch {
-            recordToolActivity(name: "agents.save", summary: "Agent 持久化失败", statusLine: error.localizedDescription, isFailure: true)
+        let repository = environment.agentRepository
+        // Off the main thread: JSON encoding + SQLite transaction must not
+        // block the UI during streaming or step updates.
+        Task.detached(priority: .utility) { [repository, persistableThreads] in
+            let started = Date()
+            do {
+                try repository.saveAgents(persistableThreads)
+                let elapsedMs = Int(Date().timeIntervalSince(started) * 1_000)
+                if elapsedMs > 50 {
+                    LaicaiLog.info("agents.save took \(elapsedMs)ms (\(persistableThreads.count) threads)")
+                }
+            } catch {
+                LaicaiLog.error("Agent 持久化失败：\(error.localizedDescription)")
+            }
         }
     }
 
@@ -52,32 +72,38 @@ extension AppStore {
     }
 
     func persistConnectors() {
-        do {
-            try environment.connectorRepository.saveConnectors(
-                state.connectors,
-                activeConnectorID: state.activeConnectorID
-            )
-        } catch {
-            recordToolActivity(
-                name: "connectors.save",
-                summary: "连接器持久化失败",
-                statusLine: error.localizedDescription,
-                isFailure: true
-            )
+        connectorsPersistTask?.cancel()
+        let connectors = state.connectors
+        let activeConnectorID = state.activeConnectorID
+        let repository = environment.connectorRepository
+        connectorsPersistTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(self?.preferencePersistDebounceInterval ?? 0.25))
+            guard !Task.isCancelled else { return }
+            Task.detached(priority: .utility) {
+                do {
+                    try repository.saveConnectors(connectors, activeConnectorID: activeConnectorID)
+                } catch {
+                    LaicaiLog.error("连接器持久化失败：\(error.localizedDescription)")
+                }
+            }
+            self?.connectorsPersistTask = nil
         }
     }
 
     func persistSettings() {
-        do {
-            try AppSettingsStorage.save(state.settings)
-        } catch {
-            notify("应用设置保存失败：\(error.localizedDescription)", style: .error)
-            recordToolActivity(
-                name: "settings.save",
-                summary: "应用设置保存失败",
-                statusLine: error.localizedDescription,
-                isFailure: true
-            )
+        settingsPersistTask?.cancel()
+        let settings = state.settings
+        settingsPersistTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(self?.preferencePersistDebounceInterval ?? 0.25))
+            guard !Task.isCancelled else { return }
+            Task.detached(priority: .utility) {
+                do {
+                    try AppSettingsStorage.save(settings)
+                } catch {
+                    LaicaiLog.error("应用设置保存失败：\(error.localizedDescription)")
+                }
+            }
+            self?.settingsPersistTask = nil
         }
     }
 

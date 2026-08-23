@@ -68,7 +68,7 @@ extension AppStore {
         if let reuseThreadID, let index = state.threads.firstIndex(where: { $0.id == reuseThreadID }) {
             state.threads[index].title = String(message.prefix(32))
             state.threads[index].status = .waitingReview
-            state.threads[index].steps = initialSteps
+            state.threads[index].steps.append(contentsOf: initialSteps)
             state.threads[index].connectorID = connector.id
             state.threads[index].context = context
             state.threads[index].multiAgentPlan = editablePlan
@@ -125,7 +125,7 @@ extension AppStore {
         if let reuseThreadID, let index = state.threads.firstIndex(where: { $0.id == reuseThreadID }) {
             state.threads[index].title = String(message.prefix(32))
             state.threads[index].status = .running
-            state.threads[index].steps = initialSteps
+            state.threads[index].steps.append(contentsOf: initialSteps)
             state.threads[index].connectorID = connector.id
             state.threads[index].context = context
             state.threads[index].multiAgentPlan = plan
@@ -221,12 +221,12 @@ extension AppStore {
                 )
 
                 guard self.shouldAcceptGenerationCallback(for: maThreadID, runID: generationRunID) else { return }
-                self.flushStreamBuffer(for: maThreadID)
+                self.flushStreamBuffer(for: maThreadID, persist: true)
                 self.mergeCompletedTask(completedTask, into: maThreadID)
                 self.persistThreadsNow()
             } catch {
                 guard self.shouldAcceptGenerationCallback(for: maThreadID, runID: generationRunID) else { return }
-                self.flushStreamBuffer(for: maThreadID)
+                self.flushStreamBuffer(for: maThreadID, persist: true)
                 if let idx = self.state.threads.firstIndex(where: { $0.id == maThreadID }) {
                     self.state.threads[idx].steps.append(
                         TaskStep(kind: .error, text: "多会话执行失败：\(error.localizedDescription)", isFailure: true, recoverable: true)

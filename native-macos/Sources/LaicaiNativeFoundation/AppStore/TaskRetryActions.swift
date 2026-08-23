@@ -9,7 +9,13 @@ extension AppStore {
             guard thread.status != .running else { return }
             guard let lastUserStep = thread.steps.last(where: { $0.kind == .userInput }) else { return }
             BehaviorSignalTracker.record(signal: .retry, thread: thread)
-            state.selectThread(id: nil)
+            // Never replace text the user is currently composing. Retry can
+            // be invoked again after the draft is sent or discarded.
+            if !state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                notify("编辑框里还有未发送内容，已保留；请先发送或清空后再重试。", style: .info)
+                return
+            }
+            state.selectThread(id: thread.id)
             state.draftMessage = Self.retryMessage(for: thread, lastUserMessage: lastUserStep.text)
             sendDraft()
             return
@@ -17,10 +23,15 @@ extension AppStore {
 
         guard let thread = state.selectedThread, thread.isChatOnly else { return }
         guard let lastUserIndex = thread.steps.lastIndex(where: { $0.kind == .userInput }) else { return }
-        guard let threadIndex = state.threads.firstIndex(where: { $0.id == thread.id }) else { return }
+        guard state.threads.contains(where: { $0.id == thread.id }) else { return }
         let lastUserStep = thread.steps[lastUserIndex]
-        state.threads[threadIndex].steps = Array(thread.steps.prefix(lastUserIndex))
-        state.threads[threadIndex].preview = thread.steps.prefix(lastUserIndex).last?.text ?? ""
+        // Keep the existing turn in the conversation. Do not overwrite a
+        // message the user is already composing.
+        if !state.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            notify("编辑框里还有未发送内容，已保留；请先发送或清空后再重试。", style: .info)
+            return
+        }
+        state.selectThread(id: thread.id)
         state.draftMessage = lastUserStep.text
         persistThreads()
         sendDraft()

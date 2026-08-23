@@ -30,6 +30,22 @@ struct ResponseHandler {
 
         // ── Empty / thinking-only responses ──
         if rawText.isEmpty {
+            // Preserve provider reasoning even when no visible answer was
+            // returned. It belongs in the thinking timeline, never as a fake
+            // assistant answer and never only in an error string.
+            if let reasoning = request.response.reasoningContent?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !reasoning.isEmpty
+            {
+                let thinkingStep = TaskStep(
+                    kind: .aiThinking,
+                    text: "思考过程",
+                    isCollapsible: true,
+                    isCollapsed: false,
+                    reasoningContent: reasoning
+                )
+                state.task.steps.append(thinkingStep)
+                onStep(thinkingStep)
+            }
             return await handleEmptyResponse(
                 response: request.response,
                 state: &state,
@@ -135,6 +151,23 @@ struct ResponseHandler {
             return .breakLoop
         }
 
+        // ── Emit reasoning before final output ──
+        // Text-only responses used to drop reasoningContent entirely; preserve
+        // it as a separate expandable step just like tool-call responses.
+        if let reasoning = request.response.reasoningContent?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !reasoning.isEmpty
+        {
+            let thinkingStep = TaskStep(
+                kind: .aiThinking,
+                text: "思考过程",
+                isCollapsible: true,
+                isCollapsed: false,
+                reasoningContent: reasoning
+            )
+            state.task.steps.append(thinkingStep)
+            onStep(thinkingStep)
+        }
+
         // ── Emit output step ──
         let outputStep = TaskStep(
             kind: .textOutput,
@@ -173,14 +206,9 @@ struct ResponseHandler {
     }
 
     private static func resolvedAssistantText(_ response: SendMessageResponse) -> String {
-        let assistantText = response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard assistantText.isEmpty,
-            let reasoning = response.reasoningContent?.trimmingCharacters(in: .whitespacesAndNewlines),
-            reasoning.count > 50
-        else {
-            return assistantText
-        }
-        return reasoning
+        // Never promote hidden reasoning into the visible answer. Doing so
+        // duplicated the same content in the thinking card and answer card.
+        response.assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func emitToolSpamStepIfNeeded(
@@ -444,37 +472,32 @@ struct ResponseHandler {
         )
         state.task.steps.append(limitStep)
         onStep(limitStep)
-        await continueTruncatedResponse(request: request, state: &state, text: text, outputStep: outputStep, onStep: onStep)
-    }
-
-    private static func continueTruncatedResponse(
-        request: HandleRequest,
-        state: inout PipelineState,
-        text: String,
-        outputStep: TaskStep,
-        onStep: @MainActor (TaskStep) -> Void
-    ) async {
-        guard
-            let continuationStep = try? await AgentLoop.continueTruncatedOutput(
+        var previousText = text
+        var completed = false
+        for _ in 0..<3 {
+            guard let continuationStep = try? await AgentLoop.continueTruncatedOutput(
                 AgentLoop.TruncatedContinuationRequest(
                     taskID: state.task.id,
                     originalMessage: state.message,
-                    previousText: text,
+                    previousText: previousText,
                     messages: state.messages,
                     connector: state.connector,
                     runtime: request.runtime,
                     maxOutputTokens: request.config.maxTokensPerTurn,
                     originalStepID: outputStep.id
-                ))
-        else {
-            return
+                )) else { break }
+            state.task.steps.append(continuationStep)
+            onStep(continuationStep)
+            previousText = continuationStep.text
+            if !continuationStep.recoverable {
+                completed = true
+                break
+            }
         }
-        state.task.steps.append(continuationStep)
-        onStep(continuationStep)
-        if continuationStep.text.contains("回复仍被截断") {
-            emitStillTruncatedStep(state: &state, onStep: onStep)
-        } else {
+        if completed {
             state.wasTruncated = false
+        } else {
+            emitStillTruncatedStep(state: &state, onStep: onStep)
         }
     }
 

@@ -134,6 +134,7 @@ public struct PluginToolAdapter: LaicaiTool {
         }
         var request = URLRequest(url: url)
         request.httpMethod = manifest.httpMethod ?? "POST"
+        request.timeoutInterval = NetworkDefaults.remoteChat
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !params.isEmpty {
             request.httpBody = try? JSONSerialization.data(withJSONObject: params)

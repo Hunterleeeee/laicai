@@ -167,7 +167,7 @@ extension AppStore {
     }
 
     private func completeMultiAgentPlanExecution(_ completedTask: AgentTask, threadID: UUID) {
-        flushStreamBuffer(for: threadID)
+        flushStreamBuffer(for: threadID, persist: true)
         mergeCompletedTask(completedTask, into: threadID)
         persistThreadsNow()
     }
@@ -179,7 +179,7 @@ extension AppStore {
         error: Error
     ) {
         guard shouldAcceptGenerationCallback(for: threadID, runID: generationRunID) else { return }
-        flushStreamBuffer(for: threadID)
+        flushStreamBuffer(for: threadID, persist: true)
         if let idx = state.threads.firstIndex(where: { $0.id == threadID }) {
             state.threads[idx].steps.append(
                 TaskStep(kind: .error, text: "\(prefix)：\(error.localizedDescription)", isFailure: true, recoverable: true)

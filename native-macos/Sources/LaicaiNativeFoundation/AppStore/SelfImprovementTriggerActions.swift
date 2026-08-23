@@ -38,7 +38,8 @@ extension AppStore {
             ]
         )
         state.threads.insert(thread, at: 0)
-        state.selectThread(id: thread.id)
+        // Background self-improvement must not replace the user's current
+        // conversation in the UI.
         persistThreads()
 
         let generationRunID = markGenerationStarted(for: thread.id, activity: "正在执行自我改进…")
@@ -117,7 +118,7 @@ extension AppStore {
         targetID: UUID,
         diagnosis: SelfImprovementEngine.Diagnosis
     ) {
-        flushStreamBuffer(for: targetID)
+        flushStreamBuffer(for: targetID, persist: true)
         mergeCompletedTask(completedTask, into: targetID)
         persistThreadsNow()
         recordTriggeredSelfImprovementAttempt(completedTask, diagnosis: diagnosis)
@@ -151,7 +152,7 @@ extension AppStore {
 
     private func failTriggeredSelfImprovement(targetID: UUID, generationRunID: UUID, error: Error) {
         guard shouldAcceptGenerationCallback(for: targetID, runID: generationRunID) else { return }
-        flushStreamBuffer(for: targetID)
+        flushStreamBuffer(for: targetID, persist: true)
         if let threadIndex = state.threads.firstIndex(where: { $0.id == targetID }) {
             state.threads[threadIndex].steps.append(
                 TaskStep(kind: .error, text: "自我改进失败：\(error.localizedDescription)", isFailure: true, recoverable: false)

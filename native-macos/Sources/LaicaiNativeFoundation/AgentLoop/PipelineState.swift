@@ -57,7 +57,7 @@ struct PipelineConfig {
     let maxTransientRetries: Int
     let maxRepeatedFailures: Int = 2
     let maxAutoRounds: Int = 3
-    let absoluteMaxSteps: Int = 120
+    let absoluteMaxSteps: Int
 
     // ── Agent Config ──
     let maxIterations: Int
@@ -122,6 +122,7 @@ struct PipelineConfig {
             && !AgentLoop.explicitApprovalSideEffectTools.contains { isAllowed($0) }
 
         self.maxTransientRetries = isReadOnlyRun ? 1 : 3
+        self.absoluteMaxSteps = max(120, config.maxIterations * 3)
 
         self.intentString = {
             switch intent {

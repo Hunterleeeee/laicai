@@ -168,29 +168,6 @@ extension AppStore {
         return String(normalized.prefix(32))
     }
 
-    func reconcileSelectedRunningTaskIfIdle() {
-        guard let taskID = state.selectedThreadID,
-            !isThreadGenerating(taskID),
-            let threadIndex = state.threads.firstIndex(where: { $0.id == taskID }),
-            state.threads[threadIndex].status == .running
-        else { return }
-
-        state.threads[threadIndex].status = .cancelled
-        syncAgentSnapshot(at: threadIndex)
-        state.threads[threadIndex].updatedAt = .now
-        state.threads[threadIndex].steps.append(
-            TaskStep(
-                kind: .error,
-                text: "上次执行没有正常结束，已转为可继续状态。本轮会沿着这个会话继续。",
-                isCollapsible: true,
-                isCollapsed: true,
-                isFailure: false,
-                recoverable: true,
-                retryAction: "继续"
-            ))
-        persistThreads()
-    }
-
     func answerSelectedTaskStatusQuestion(_ message: String) -> Bool {
         guard let agentID = state.selectedAgentID,
             let threadIndex = state.threads.firstIndex(where: { $0.id == agentID }),

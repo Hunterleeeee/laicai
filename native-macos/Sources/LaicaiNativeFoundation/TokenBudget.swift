@@ -76,7 +76,15 @@ public struct TokenBudget: Sendable, Equatable {
     public static func estimate(text: String) -> Int {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return 0 }
-        return max(1, Int(ceil(Double(cleaned.count) / 4.0)))
+        // CJK characters generally consume about one token each; treating all
+        // Unicode as four characters/token badly undercounted Chinese prompts.
+        let cjkCount = cleaned.unicodeScalars.reduce(into: 0) { count, scalar in
+            if (0x2E80...0x9FFF).contains(scalar.value) || (0xF900...0xFAFF).contains(scalar.value) {
+                count += 1
+            }
+        }
+        let otherCount = max(0, cleaned.count - cjkCount)
+        return max(1, Int(ceil(Double(cjkCount) / 1.2 + Double(otherCount) / 4.0)))
     }
 
     public static func estimate(context: TaskContext, userInput: String = "", mode: ContextMode) -> TokenBudget {

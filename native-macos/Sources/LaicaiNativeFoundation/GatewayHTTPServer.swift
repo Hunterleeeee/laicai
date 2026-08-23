@@ -18,13 +18,13 @@ public final class GatewayHTTPServer: Sendable {
     }
 
     func start() -> Result<Void, GatewayError> {
+        if state.withValue({ $0.serverSocket >= 0 || $0.listenTask != nil }) {
+            return .success(())
+        }
         let socketFD = socket(AF_INET, SOCK_STREAM, 0)
         guard socketFD >= 0 else {
             return .failure(.connectionFailed("无法创建 webhook socket：\(Self.systemError())"))
         }
-
-        var yes: Int32 = 1
-        setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
 
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
@@ -41,7 +41,7 @@ public final class GatewayHTTPServer: Sendable {
             return .failure(.connectionFailed("端口 \(port) 绑定失败：\(Self.systemError())"))
         }
 
-        guard listen(socketFD, 5) == 0 else {
+        guard listen(socketFD, 16) == 0 else {
             close(socketFD)
             return .failure(.connectionFailed("端口 \(port) 监听失败：\(Self.systemError())"))
         }
@@ -59,7 +59,10 @@ public final class GatewayHTTPServer: Sendable {
                         accept(currentSocket, $0, &clientAddrLen)
                     }
                 }
-                guard clientSocket >= 0 else { continue }
+                guard clientSocket >= 0 else {
+                    if Task.isCancelled { break }
+                    continue
+                }
 
                 Task.detached { [weak self] in
                     await self?.handleConnection(clientSocket)
@@ -86,9 +89,9 @@ public final class GatewayHTTPServer: Sendable {
     private func handleConnection(_ socket: Int32) async {
         defer { close(socket) }
 
-        var buffer = [UInt8](repeating: 0, count: 8192)
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
         let bytesRead = recv(socket, &buffer, buffer.count, 0)
-        guard bytesRead > 0 else { return }
+        guard bytesRead > 0, bytesRead <= buffer.count else { return }
 
         let requestStr = String(bytes: buffer[0..<bytesRead], encoding: .utf8) ?? ""
 
@@ -117,10 +120,20 @@ public final class GatewayHTTPServer: Sendable {
     }
 
     static func parseWebhookRequest(_ request: String) throws -> IncomingMessage {
+        guard request.utf8.count <= 64 * 1024 else {
+            throw GatewayError.invalidRequest("HTTP 请求过大")
+        }
         guard let bodyStart = request.range(of: "\r\n\r\n") else {
             throw GatewayError.invalidRequest("缺少 HTTP body")
         }
+        let header = String(request[..<bodyStart.lowerBound])
         let body = String(request[bodyStart.upperBound...])
+        if let lengthLine = header.split(separator: "\r\n").first(where: { $0.lowercased().hasPrefix("content-length:") }),
+            let declaredLength = Int(lengthLine.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces) ?? ""),
+            declaredLength != body.utf8.count
+        {
+            throw GatewayError.invalidRequest("HTTP body 长度不完整")
+        }
         guard let data = body.data(using: .utf8),
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {

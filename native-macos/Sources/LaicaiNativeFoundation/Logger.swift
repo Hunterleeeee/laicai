@@ -130,7 +130,13 @@ public enum NetworkDefaults {
     public static let localChat: TimeInterval = 45
     public static let remoteChat: TimeInterval = 120
 
-    public static let ephemeralSession = URLSession(configuration: .ephemeral)
+    public static let ephemeralSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = shortRequest
+        configuration.timeoutIntervalForResource = remoteChat
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }()
 
     public static let imageSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -140,5 +146,11 @@ public enum NetworkDefaults {
         return URLSession(configuration: configuration)
     }()
 
-    public static let webSocketSession = URLSession(configuration: .default)
+    public static let webSocketSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = remoteChat
+        configuration.timeoutIntervalForResource = remoteChat
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }()
 }
