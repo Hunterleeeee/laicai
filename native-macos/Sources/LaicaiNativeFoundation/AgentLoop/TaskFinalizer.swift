@@ -23,7 +23,12 @@ struct TaskFinalizer {
         let hasFinalOutput = state.task.steps.contains {
             $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        if !state.didComplete && !state.hadFailure && !state.wasTruncated && !hasFinalOutput {
+        // Synthesize a closing answer whenever the loop ended without one —
+        // including after failures. "Silent fail" is the worst outcome: the
+        // user gets no result AND no explanation. Deliberately does NOT flip
+        // didComplete: the loop's own verdict (exhaustion, unrecovered
+        // failure) stands; the summary only ends the silence.
+        if !state.didComplete && !state.wasTruncated && !hasFinalOutput {
             if let summaryStep = try? await AgentLoop.finalizeFromCollectedEvidence(
                 AgentLoop.EvidenceFinalizationRequest(
                     task: state.task,
@@ -36,15 +41,16 @@ struct TaskFinalizer {
             {
                 state.task.steps.append(summaryStep)
                 onStep(summaryStep)
-                state.didComplete = true
             }
         }
 
         // ── Manual continuation offer ──
         // This is an incomplete, recoverable result—not a hard failure. Keep
         // the wording consistent with the terminal status and let the ledger
-        // expose the continuation action.
-        if !state.didComplete && !state.hadFailure && !state.wasTruncated {
+        // expose the continuation action. Fires whenever evidence-based
+        // finalization above did not produce a completed result, regardless
+        // of earlier tool failures.
+        if !state.didComplete && !state.wasTruncated {
             let continueStep = TaskStep(
                 kind: .error,
                 text: "会话尚未形成完整结果，可以点击「继续处理」接着执行。",

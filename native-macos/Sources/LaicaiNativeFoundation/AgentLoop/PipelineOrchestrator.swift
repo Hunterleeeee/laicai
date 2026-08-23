@@ -411,7 +411,14 @@ extension AgentLoop {
                         toolRegistry: toolRegistry,
                         onStep: onStep
                     )
-                    if execResult.hadFailure { state.hadFailure = true }
+                    // A failure stays "live" only while unrecovered: once any
+                    // later tool run succeeds, the loop has demonstrably routed
+                    // around it. Latching hadFailure forever let a single
+                    // security denial block auto-rounds, evidence finalization
+                    // and the completion gate even after full recovery.
+                    if execResult.hadFailure || state.hadFailure {
+                        state.hadFailure = !AgentLoop.hasRecoveryAfterLastFailure(state.task)
+                    }
                     // Post-tool analysis
                     IterationEngine.analyzeToolResults(
                         callSteps: execResult.callSteps,

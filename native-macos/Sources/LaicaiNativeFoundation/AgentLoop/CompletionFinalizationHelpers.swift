@@ -50,6 +50,9 @@ extension AgentLoop {
         } else if hasApprovedWrite && hasVerificationFailure {
             text = "完成检查：已批准写入但验证失败，建议根据错误信息生成修正 patch 并重新审查。"
             isFailure = true
+        } else if toolFailures > 0 && didComplete && hasOutput {
+            text = "完成检查：\(toolFailures) 个工具失败已被后续成功操作绕过，已形成最终回复。"
+            isFailure = false
         } else if (hadFailure || toolFailures > 0) && !(didComplete && hasRecoverySuccess) {
             text = "完成检查：发现 \(toolFailures) 个工具失败或模型错误，建议根据错误步骤重试或换一个执行路径。"
             isFailure = true

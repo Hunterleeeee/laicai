@@ -81,6 +81,7 @@ struct ChatDetailView: View {
                 activeConnectorID: store.state.activeConnectorID,
                 workspaceRoot: store.state.settings.workspacePath,
                 userRating: thread.userRating,
+                showsDebugPanels: store.state.settings.showDebugPanels,
                 onPlanChange: { store.updateMultiAgentPlan($0, for: thread.id) },
                 onExecutePlan: { store.executeEditedPlan(threadID: thread.id) },
                 onCancelPlan: { store.cancelMultiAgentPlan(for: thread.id) },

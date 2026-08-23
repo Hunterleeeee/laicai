@@ -519,3 +519,39 @@ final class CapturingOllamaRuntime: ChatRuntimeClient {
         return SendMessageResponse(assistantText: "README 内容是 hello。")
     }
 }
+
+/// Mirrors the field incident: the first tool read is policy-denied (.env),
+/// the model recovers with a successful read, then answers. The task must
+/// complete — a recovered denial must not poison the run into a silent fail.
+@MainActor
+final class DeniedReadThenRecoveryRuntime: ChatRuntimeClient {
+    var requests: [SendMessageRequest] = []
+
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendMessageResponse {
+        requests.append(request)
+        switch requests.count {
+        case 1:
+            return SendMessageResponse(
+                assistantText: "先确认数据库配置。",
+                toolCalls: [
+                    FunctionCallResponse(
+                        id: "call_env",
+                        function: FunctionCallDetail(name: "file.read", arguments: #"{"path":".env"}"#)
+                    )
+                ]
+            )
+        case 2:
+            return SendMessageResponse(
+                assistantText: "该文件被安全策略拒绝，改读 README。",
+                toolCalls: [
+                    FunctionCallResponse(
+                        id: "call_readme",
+                        function: FunctionCallDetail(name: "file.read", arguments: #"{"path":"README.md"}"#)
+                    )
+                ]
+            )
+        default:
+            return SendMessageResponse(assistantText: ".env 被安全策略拒绝；已改用 README 完成检查。")
+        }
+    }
+}

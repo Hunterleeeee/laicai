@@ -292,9 +292,16 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
                 "自动继续处理中（第 2 轮）…",
                 "自动继续处理中（第 3 轮）…",
             ])
-        XCTAssertEqual(runtime.requests.count, 4)
+        // 3 rounds + initial call + evidence-based closing summary: an
+        // exhausted task must still produce a user-facing wrap-up.
+        XCTAssertEqual(runtime.requests.count, 5)
         XCTAssertEqual(task.status, .failed)
         XCTAssertTrue(task.steps.contains { $0.kind == .error && $0.text.contains("已达到最大迭代次数") })
+        XCTAssertTrue(
+            task.steps.contains {
+                $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            },
+            "耗尽迭代的任务也不允许零输出——必须生成基于证据的收尾说明")
     }
 
     func testInlineCommandJSONIsHiddenFromVisibleOutput() async throws {
@@ -554,5 +561,31 @@ final class AgentLoopExecutionTests: LaicaiNativeFoundationTestCase {
         XCTAssertTrue(
             (runtime.requests[1].messages ?? []).contains { $0.role == "user" && ($0.content ?? "").contains("工具 file.read 执行结果") })
         XCTAssertFalse((runtime.requests[1].messages ?? []).contains { $0.role == "tool" })
+    }
+
+    func testRecoveredToolDenialCompletesInsteadOfSilentFail() async throws {
+        let workspace = try makeTemporaryWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        try "hello".write(to: workspace.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try "DB=local".write(to: workspace.appendingPathComponent(".env"), atomically: true, encoding: .utf8)
+
+        let loop = AgentLoop(
+            config: .init(maxIterations: 4, maxTokensPerTurn: 1024, workspaceRoot: workspace.path),
+            runtime: DeniedReadThenRecoveryRuntime()
+        )
+        let task = try await loop.run(
+            message: "读取项目配置并总结",
+            intent: .task,
+            connector: ConnectorProfile(
+                name: "Test", kind: "openai-compatible", endpoint: "https://example.com/v1", modelName: "test", note: "", health: .ready),
+            context: TaskContext(workspaceRoot: workspace.path)
+        )
+
+        XCTAssertTrue(task.steps.contains { $0.kind == .toolResult && $0.isFailure }, "前提：确实发生过工具拒绝")
+        XCTAssertTrue(task.steps.contains { $0.kind == .toolResult && !$0.isFailure }, "前提：拒绝之后有成功恢复")
+        XCTAssertEqual(task.status, .completed, "已恢复的工具拒绝不应把任务打成 failed")
+        XCTAssertTrue(
+            task.steps.contains { $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+            "用户必须拿到最终回复，不允许静默结束")
     }
 }

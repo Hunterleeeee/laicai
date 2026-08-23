@@ -50,6 +50,7 @@ struct PhaseGroupCard: View {
     let taskID: UUID
     let isRunning: Bool
     let isCollapsed: Bool
+    let showsDebugPanels: Bool
     let onToggle: () -> Void
 
     private var toolCallCount: Int {
@@ -106,8 +107,13 @@ struct PhaseGroupCard: View {
             if !isCollapsed {
                 VStack(alignment: .leading, spacing: AppSpace.small) {
                     ForEach(group.steps) { step in
-                        TaskStepCard(step: step, taskID: taskID, isRunning: isRunning)
-                            .id(step.id)
+                        TaskStepCard(
+                            step: step,
+                            taskID: taskID,
+                            isRunning: isRunning,
+                            showsDebugPanels: showsDebugPanels
+                        )
+                        .id(step.id)
                     }
                 }
                 .padding(.leading, AppSpace.extraLarge)

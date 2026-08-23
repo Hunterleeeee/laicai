@@ -10,6 +10,9 @@ struct TaskStepCard: View {
     let step: TaskStep
     let taskID: UUID
     let isRunning: Bool
+    /// Read once by the parent timeline so this card's body never touches
+    /// AppStore — otherwise every visible card re-renders on any state write.
+    let showsDebugPanels: Bool
     /// Non-nil only while rendering a live streaming placeholder step.
     var live: LiveStreamSource? = nil
 
@@ -43,7 +46,7 @@ struct TaskStepCard: View {
             // should never see (continuation strategy, agent switch, completion check etc).
             // True model reasoning surfaces through non-collapsed steps with reasoningContent.
             if step.isCollapsed && (step.reasoningContent?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
-                if store.state.settings.showDebugPanels {
+                if showsDebugPanels {
                     OrchestrationDebugCard(text: step.text, label: "编排")
                 } else {
                     EmptyView()
@@ -66,7 +69,7 @@ struct TaskStepCard: View {
                 // Recovery results shown inline in RecoveryCard, skip duplicate
                 EmptyView()
             } else if step.isCollapsed && !step.isFailure {
-                if store.state.settings.showDebugPanels {
+                if showsDebugPanels {
                     OrchestrationDebugCard(text: step.text, label: step.toolName ?? "工具结果")
                 } else {
                     EmptyView()

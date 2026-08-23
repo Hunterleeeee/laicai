@@ -92,6 +92,9 @@ struct ThreadTimelineView: View {
     let activeConnectorID: UUID?
     let workspaceRoot: String
     let userRating: Int
+    /// Read once by the owner (ChatDetailView) so step cards never observe
+    /// AppStore themselves.
+    let showsDebugPanels: Bool
     let onPlanChange: (MultiAgentPlan) -> Void
     let onExecutePlan: () -> Void
     let onCancelPlan: () -> Void
@@ -105,6 +108,7 @@ struct ThreadTimelineView: View {
         activeConnectorID: UUID?,
         workspaceRoot: String,
         userRating: Int,
+        showsDebugPanels: Bool,
         onPlanChange: @escaping (MultiAgentPlan) -> Void,
         onExecutePlan: @escaping () -> Void,
         onCancelPlan: @escaping () -> Void,
@@ -117,6 +121,7 @@ struct ThreadTimelineView: View {
         self.activeConnectorID = activeConnectorID
         self.workspaceRoot = workspaceRoot
         self.userRating = userRating
+        self.showsDebugPanels = showsDebugPanels
         self.onPlanChange = onPlanChange
         self.onExecutePlan = onExecutePlan
         self.onCancelPlan = onCancelPlan
@@ -207,6 +212,7 @@ struct ThreadTimelineView: View {
                                         taskID: thread.id,
                                         isRunning: thread.status == .running,
                                         isCollapsed: !expandedPhases.contains(group.id),
+                                        showsDebugPanels: showsDebugPanels,
                                         onToggle: {
                                             if expandedPhases.contains(group.id) {
                                                 expandedPhases.remove(group.id)
@@ -221,6 +227,7 @@ struct ThreadTimelineView: View {
                                             step: step,
                                             taskID: thread.id,
                                             isRunning: thread.status == .running,
+                                            showsDebugPanels: showsDebugPanels,
                                             live: liveStreamSource(for: step)
                                         )
                                         .id(step.id)
