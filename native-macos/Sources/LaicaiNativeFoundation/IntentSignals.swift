@@ -35,6 +35,21 @@ struct IntentSignals {
             || (input.count <= 15 && !hasDirectActionCue)
     }
 
+    /// 破坏性操作动词（删除/清空/重置…）。指令式表达才算执行意图；
+    /// "怎么删除…" 这类 how-to 问句不算。
+    var requestsDestructiveAction: Bool {
+        let verbs = [
+            "删除", "删掉", "删了", "清除", "清空", "清掉", "重置", "格式化", "抹掉",
+            "drop ", "truncate ", "delete ",
+        ]
+        guard verbs.contains(where: { input.contains($0) }) else { return false }
+        let questionMarkers = [
+            "怎么", "如何", "怎样", "能不能", "可不可以", "要不要", "该不该",
+            "是否", "什么", "吗", "？", "?", "how",
+        ]
+        return !questionMarkers.contains { input.contains($0) }
+    }
+
     private var hasDirectActionCue: Bool {
         containsExplicitURLAction
             || requestsFreshInformation
@@ -42,6 +57,7 @@ struct IntentSignals {
             || requestsShellExecution
             || requestsWikiPersistence
             || requestsMutation
+            || requestsDestructiveAction
             || rawRequestsWebResearch
             || requestsModelCurrentInfo
             || rawRequestedDeliverable
@@ -135,6 +151,7 @@ struct IntentSignals {
             || requestsShellExecution
             || requestsWikiPersistence
             || requestsMutation
+            || requestsDestructiveAction
             || requestsWebResearch
             || requestsModelCurrentInfo
             || requestsPMDocument
@@ -147,6 +164,7 @@ struct IntentSignals {
             || requestsShellExecution
             || requestsWikiPersistence
             || requestsMutation
+            || requestsDestructiveAction
             || requestsWebResearch
             || requestsModelCurrentInfo
             || requestedDeliverable

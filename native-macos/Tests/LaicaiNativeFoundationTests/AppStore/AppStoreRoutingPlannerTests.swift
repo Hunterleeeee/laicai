@@ -285,3 +285,31 @@ final class AppStoreRoutingPlannerTests: LaicaiNativeFoundationTestCase {
         XCTAssertFalse(UserFrustrationDetector.isFrustrated("请解释一下这个概念"))
     }
 }
+
+    func testDestructiveCommandWithoutTargetBecomesTask() {
+        XCTAssertEqual(IntentRouter.classify("删除测试数据"), .task)
+        XCTAssertEqual(IntentRouter.classify("清空数据库"), .task)
+        XCTAssertEqual(IntentRouter.classify("帮我删掉缓存"), .task)
+        XCTAssertEqual(IntentRouter.classify("重置一下配置"), .task)
+    }
+
+    func testDestructiveHowToQuestionStaysChat() {
+        XCTAssertEqual(IntentRouter.classify("怎么删除windows自带的edge？"), .chat)
+        XCTAssertEqual(IntentRouter.classify("如何清除浏览器缓存？"), .chat)
+        XCTAssertEqual(IntentRouter.classify("删除文件的命令是什么"), .chat)
+    }
+
+    func testDestructiveClarificationGate() {
+        XCTAssertTrue(IntentRouter.needsDestructiveTargetClarification("删除测试数据"))
+        XCTAssertTrue(IntentRouter.needsDestructiveTargetClarification("清空数据库"))
+        XCTAssertFalse(IntentRouter.needsDestructiveTargetClarification("删除watermall测试数据"))
+        XCTAssertFalse(IntentRouter.needsDestructiveTargetClarification("删除 /tmp/cache 目录"))
+        XCTAssertFalse(IntentRouter.needsDestructiveTargetClarification("删除「旧版」文件夹"))
+        XCTAssertFalse(IntentRouter.needsDestructiveTargetClarification("怎么删除测试数据"))
+    }
+
+    func testHallucinatedFileCreateToolAliasesToWrite() {
+        XCTAssertEqual(ToolNameCodec.canonicalName("file_create"), "file.write")
+        XCTAssertEqual(ToolNameCodec.canonicalName("create_file"), "file.write")
+        XCTAssertEqual(ToolNameCodec.canonicalName("read_file"), "file.read")
+    }

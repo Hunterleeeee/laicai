@@ -389,7 +389,7 @@ struct TaskFinalizer {
             TaskOutcomeRecord(
                 taskID: state.task.id.uuidString,
                 intent: state.intentString,
-                routeLabel: "会话 执行",
+                routeLabel: Self.outcomeRouteLabel(for: state.intent),
                 executionMode: executionModeLabel(state: state, config: config),
                 iterations: state.iteration,
                 status: finalStatus,
@@ -409,6 +409,17 @@ struct TaskFinalizer {
     static func executionModeLabel(state: PipelineState, config: AgentLoop.Config) -> String {
         if state.isReadOnlyRun { return "inspect" }
         return "codexFull"
+    }
+
+    /// 结果记录必须带真实路由标签；此前硬编码「会话 执行」让 chat/research
+    /// 的结果污染执行路由的漂移统计。
+    nonisolated static func outcomeRouteLabel(for intent: UserIntent) -> String {
+        switch intent {
+        case .chat: return "会话 问答"
+        case .research: return "会话 研究"
+        case .task: return "会话 执行"
+        case .workflow: return "会话 工作流"
+        }
     }
 
     private static func computeOutcomeScore(state: PipelineState, config: AgentLoop.Config, finalStatus: TaskStatus, duration: Double)

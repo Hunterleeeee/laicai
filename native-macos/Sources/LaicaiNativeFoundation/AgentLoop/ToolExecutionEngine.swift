@@ -212,7 +212,17 @@ struct ToolExecutionEngine {
             return ToolExecutionOutcome(result: repaired)
         }
         guard let tool = request.toolRegistry.tool(named: request.apiToolName) else {
-            return ToolExecutionOutcome(result: ToolResult(output: "未知工具：\(request.toolName)", success: false, error: "unknown_tool"))
+            // 附上可用清单：不给清单模型会连续幻觉出别的错误名字。
+            let available =
+                request.toolRegistry.allTools
+                .map { ToolNameCodec.apiName($0.name) }
+                .sorted()
+                .joined(separator: ", ")
+            return ToolExecutionOutcome(
+                result: ToolResult(
+                    output: "未知工具：\(request.toolName)。可用工具清单：\(available)。请从清单中选择正确的工具名重试。",
+                    success: false,
+                    error: "unknown_tool"))
         }
         guard !AgentLoop.requiresExplicitUserApprovalBeforeExecution(toolName: request.toolName, tool: tool) else {
             return ToolExecutionOutcome(result: AgentLoop.approvalRequiredToolResult(toolName: request.toolName))

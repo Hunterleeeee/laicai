@@ -299,6 +299,7 @@ extension AgentLoop {
                     switch recovery {
                     case .connectorFailover(let fallback):
                         state.didConnectorFailover = true
+                        state.iteration -= 1  // 切换不算真实工作迭代，退还预算
                         let failed = state.connector
                         state.connector = fallback
                         state.task.connectorID = fallback.id
@@ -311,6 +312,7 @@ extension AgentLoop {
                         continue
                     case .transientRetry(let delaySec):
                         state.transientRetryCount += 1
+                        state.iteration -= 1  // 重试不算真实工作迭代，退还预算
                         let retryStep = TaskStep(
                             kind: .aiThinking,
                             text: "模型请求失败（\(error.localizedDescription)），自动重试（\(state.transientRetryCount)/\(state.maxTransientRetries)）…",
@@ -355,6 +357,7 @@ extension AgentLoop {
                         onStep(fallbackStep)
                         state.toolDefs = []
                         state.usedToolCompatibilityFallback = true
+                        state.iteration -= 1  // 兼容性回退不算真实工作迭代，退还预算
                         Self.applyToolCompatibilityFallbackInstruction(to: &state.messages)
                         continue
                     }
@@ -507,8 +510,12 @@ extension AgentLoop {
                 }
             }
 
-            // Inner while exited — if all configured auto-rounds already fired and still not done, mark failure
-            if !state.didComplete && !state.hadFailure && !state.wasTruncated && state.autoRound >= state.maxAutoRounds {
+            // Inner while exited — explain why generation stopped. For chat the
+            // auto-round block below never fires (intent gate), so without this
+            // branch chat threads that burn all iterations on tool calls would
+            // exit with no terminal card at all.
+            if !state.didComplete && !state.hadFailure && !state.wasTruncated
+                && (state.intent == .chat || state.autoRound >= state.maxAutoRounds) {
                 state.hadFailure = true
                 state.didComplete = false
                 let maxIterStep = TaskStep(
@@ -580,8 +587,21 @@ extension AgentLoop {
             ) {
                 state.taskContext = taskContext
                 state.task = task
-                state.didComplete = fallbackSaved
-                state.hadFailure = !fallbackSaved
+                if fallbackSaved {
+                    state.didComplete = true
+                } else {
+                    // 只有模型没给出最终回答时才降级为失败。已有正文的会话里，
+                    // 兜底落盘失败只是次要信息，不应把成功答案改判为
+                    // didComplete=false + hadFailure=true（那会触发错误的
+                    // 「继续处理」提示和 failed 状态）。
+                    let hasFinalText = state.task.steps.contains {
+                        $0.kind == .textOutput && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    }
+                    if !hasFinalText {
+                        state.didComplete = false
+                        state.hadFailure = true
+                    }
+                }
             }
         }
 

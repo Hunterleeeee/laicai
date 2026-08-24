@@ -347,6 +347,33 @@ extension AppStore {
         state.modeLabel = decision.routeLabel
         persistThreads()
 
+        // 破坏性指令且未指明目标：先反问，不启动执行循环。
+        // 若用户这条消息本身就是对上一轮反问的回答（或含明确确认词），放行执行。
+        if IntentRouter.needsDestructiveTargetClarification(message),
+            !Self.isConfirmationAfterDestructiveClarification(message: message, priorSteps: loopPriorSteps)
+        {
+            let workspaceName = URL(fileURLWithPath: context.workspaceRoot).lastPathComponent
+            let question: String
+            if workspaceName.isEmpty {
+                question =
+                    "这是一个删除/清空类操作，但我还不确定你要操作哪个项目或哪份数据。"
+                    + "请告诉我具体目标（项目名、路径或文件），确认后我再执行。"
+            } else {
+                question =
+                    "这是一个删除/清空类操作。当前工作区是「\(workspaceName)」，"
+                    + "你要清理的是它的测试数据吗？还是其他项目？请确认目标后我再执行。"
+            }
+            if let threadIdx = state.threads.firstIndex(where: { $0.id == targetTaskID }) {
+                state.threads[threadIdx].steps.append(TaskStep(kind: .textOutput, text: question))
+                state.threads[threadIdx].status = .completed
+                state.threads[threadIdx].executionState = .idle
+                state.threads[threadIdx].preview = question
+                state.threads[threadIdx].updatedAt = .now
+            }
+            persistThreads()
+            return
+        }
+
         let capturedImages = state.draftImages
         let generationRunID = markGenerationStarted(
             for: targetTaskID,
@@ -654,6 +681,21 @@ extension AppStore {
             return firstUser
         }
         return trimmed
+    }
+
+    /// 用户这条消息是否是对上一轮「破坏性操作反问」的回答：
+    /// 上一条助手正文就是反问，或消息带明确确认词时，放行执行，避免反复追问。
+    nonisolated static func isConfirmationAfterDestructiveClarification(message: String, priorSteps: [TaskStep]) -> Bool {
+        if let lastAssistantText = priorSteps.last(where: { $0.kind == .textOutput })?.text,
+            lastAssistantText.contains("删除/清空类操作")
+        {
+            return true
+        }
+        let confirmations = [
+            "确认", "是的", "对的", "没错", "就是", "当前项目", "当前工作区",
+            "这个项目", "该项目", "清掉吧", "删吧", "删掉吧",
+        ]
+        return confirmations.contains { message.contains($0) }
     }
 
     static func agentPlanLines(for decision: PlannerDecision, message: String) -> [String] {

@@ -37,6 +37,17 @@ public struct IntentRouter {
         plan(input, includeRoutingDrift: true)
     }
 
+    /// 破坏性指令（删除/清空/重置…）但未指明目标（无路径、无引号名、无拉丁项目名）时，
+    /// 先反问确认范围再动手，避免误删当前工作区以外的数据。
+    public static func needsDestructiveTargetClarification(_ input: String) -> Bool {
+        let signals = IntentSignals(input: input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        guard signals.requestsDestructiveAction else { return false }
+        if input.contains("/") { return false }
+        if input.contains("「") || input.contains("」") || input.contains("\"") || input.contains("'") { return false }
+        if input.range(of: "[a-z0-9_-]{3,}", options: .regularExpression) != nil { return false }
+        return true
+    }
+
     private static func plan(_ input: String, includeRoutingDrift: Bool) -> PlannerDecision {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let signals = IntentSignals(input: trimmed)
